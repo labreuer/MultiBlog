@@ -265,14 +265,16 @@ by design, not by accident.
   var(--border-subtle);` — once repeated verbatim across home, author, and search listings,
   now written once in `components/PostListing.module.css` and rendered by every listing of
   posts (docs/BLOG.md §3).
-- **Avatar with a generic-standin fallback** (`ContributorCard.module.css` `.avatarFallback`,
-  PLAN.md §17e): when `User.image` is unset, a 40px circle filled with `User.color`
-  (already `#rrggbb`-validated on write) showing `User.adminInitials` — no separate
+- **Avatar with an initials fallback** (`components/Avatar.module.css` `.fallback`,
+  docs/BLOG.md §1, "The card"): with no image to show, neither an upload nor a remote
+  `User.image`, a circle filled with `User.color` (already `#rrggbb`-validated on write)
+  showing `User.adminInitials`, in black or white by `onAuthorColor` — no separate
   silhouette asset, since both columns already exist and are already treated as
-  general-purpose elsewhere (the admin table just calls the latter "Initials"). The `<img>`
-  branch reuses the `eslint-disable-next-line @next/next/no-img-element` precedent
-  `UsersTable.tsx`'s own Image column set first: arbitrary remote avatar URLs, not a fixed
-  asset set `next/image` could optimize without a `remotePatterns` entry per provider.
+  general-purpose elsewhere (the admin table just calls the latter "Initials"). Its size is
+  inline, since it varies: 40px on a contributor card, 64px on an author page. The `<img>`
+  branch is a plain `<img>` under an `eslint-disable-next-line @next/next/no-img-element`, not
+  `next/image`: a self-hosted avatar is already one fixed size behind an immutable URL
+  (PLAN.md §17n), and a remote one would need a `remotePatterns` entry per host.
 - **Vertical centering of small elements next to a heading** (e.g. the `(edit)`/
   `(edited)` badge beside a post title): prefer `display: flex; align-items: center`
   on the heading container over `vertical-align: middle`. The latter centers against

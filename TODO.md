@@ -958,14 +958,25 @@ in `src/app/search/page.tsx`.
 
 ---
 
-## No self-service profile page beyond the contributor panel (PLAN.md §17g/§17m)
+## A deleted user stays on bylines, linking to a 404 (docs/BLOG.md §9)
 
-`/dashboard`'s contributor panel (added with §17) edits the avatar upload (§17n) plus
-`contributorBlurb`/`contributorOrder`/`orcid`/`website` — but only for a user who is already
-`isListedContributor`, and only those fields. `name`, `slug`, `color`, and `role` all remain admin-only
-(`/users`), and a user who has never been listed as a contributor has no self-service surface
-at all — not even to change their own display name. Whether that's worth a general profile
-page, or whether it's fine as-is for a small trusted-author blog, is unresolved.
+Soft-deleting a user 404s their author page, but a byline loads its users through an
+`include`, which the soft-delete extension in `src/lib/prisma.ts` doesn't filter (PLAN.md §4).
+So the name stays on their posts and links to that 404. Undecided: whether a deleted account
+keeps its credit, and if so, where its name links: nowhere, or to an author page that still
+answers.
+
+---
+
+## Only a listed contributor can set a photo (docs/BLOG.md §9)
+
+The avatar upload (PLAN.md §17n) lives in `/dashboard`'s contributor panel, which only a user
+who is already `isListedContributor` sees (docs/BLOG.md §1, "Editing your own entry"). But
+every author page shows an avatar, so an author who isn't listed shows initials there with no
+way to change them, and an ADMIN can't upload on anyone's behalf either. Name, initials and
+color are already self-service in Settings (docs/DASHBOARD.md); `slug` and `role` stay
+ADMIN-only on `/users`. Whether the upload should move to Settings for every AUTHOR+, or
+whether that's fine as-is for a small trusted-author blog, is unresolved.
 
 ---
 

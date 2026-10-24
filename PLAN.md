@@ -274,24 +274,11 @@ toggle one level — it can't nest deeper).
   false-positive as "changed" on key order alone; it's also what makes "typed something, then
   undid it" a no-op save, without inspecting the live Yjs doc. See docs/TIPTAP.md for a ProseMirror
   JSON-shape gotcha this equality check is sensitive to.
-- **No `status` column**: draft/scheduled/published is derived at read time
-  (`derivePostStatus`, `src/lib/post-status.ts`) from `publish_revision_id`/`published_at`
-  alone, rather than stored as a separate field that could drift out of sync across
-  unpublish/republish/schedule cycles. Used both for display (editor status line, admin
-  table) and for real gating logic: `schedulePost`'s scheduling guard (below),
-  `unpublishPost`'s draft check and its `PostPublicationEvent` type choice, and
-  `submitComment`'s "this post isn't open for comments" check.
-- **Scheduling uses no separate column and no background sweep**: `schedulePost` sets
-  `publish_revision_id` **immediately** — exactly like an immediate publish — and just sets
-  `published_at` to a future date instead of `now()`. Visibility is purely
-  `publish_revision_id IS NOT NULL AND published_at <= now()`, expressed as a query-time
-  WHERE clause (`publishedPostWhere()` in `src/lib/post-status.ts`) for every public-facing
-  query, or the equivalent post-fetch check (`derivePostStatus(post) === "published"`) for
-  code that already has the row in hand, like the comment-eligibility check above —
-  centralized in those two helpers rather than either condition being repeated ad hoc, since
-  forgetting it at even one call site would leak a not-yet-due post early. Thread remapping
-  (`remapThreadsToRevision`) happens synchronously inside `schedulePost` itself, at the moment
-  `publish_revision_id` changes.
+- **No `status` column, and scheduling uses no separate column and no background sweep** —
+  which posts are public, `derivePostStatus` and `publishedPostWhere()`, and how a scheduled
+  post goes live by itself: [docs/BLOG.md](docs/BLOG.md) §5, "Public means published and
+  due". Thread remapping (`remapThreadsToRevision`) happens synchronously inside
+  `schedulePost` itself, at the moment `publish_revision_id` changes.
 - **Unpublish** (`unpublishPost`): sets `publish_revision_id` to `null` with no new revision;
   `published_at` is left untouched (inert whenever `publish_revision_id` is null — nothing
   reads it in that state, so there's nothing to clean up). Doubles as "cancel schedule" — a
@@ -528,15 +515,10 @@ comment          id, thread_id, parent_comment_id NULL,
 
 Notes:
 
-- **No `status` enum, no schedule column.** A post is actually visible iff
-  `publish_revision_id` is set **and** `published_at <= now()` — the latter
-  may hold a future date (a scheduled post), so visibility is a pure
-  query-time comparison (`src/lib/post-status.ts`'s `publishedPostWhere`),
-  not a stored flag or a background process that flips one. `derivePostStatus`
-  derives draft/scheduled/published for display from those same two columns.
-  See §10 item 12 for the fuller history (this replaced first a
-  `draft|published|archived` status column, then a separate `scheduled_for`
-  column backed by a sweep).
+- **No `status` enum, no schedule column.** Which posts are public is a comparison at query
+  time: [docs/BLOG.md](docs/BLOG.md) §5, "Public means published and due". It replaced first
+  a `draft|published|archived` status column, then a separate `scheduled_for` column backed
+  by a sweep (§10 item 12).
 - **Revisions are append-only.** Publishing creates a new row; nothing is overwritten.
   "Restore version N" = copy doc N into a new revision. Diff view between any two revisions
   via `prosemirror-changeset`. `editor_id` records who made the revision — separate from the
@@ -555,55 +537,34 @@ Notes:
 - **Soft delete** (`deleted_by_user_id`/`deleted_at`, both nullable): the same two-column
   pattern now covers `comment` (§10 item 15, first), `user` (§3b), and `post` (§3c). Rather
   than every read site having to remember its own filter, `src/lib/prisma.ts`'s `prisma`
-  export is a Prisma Client Extension that auto-excludes soft-deleted `Post`/`User` rows from
-  every read operation (`findMany`/`findFirst`/`findUnique`/`count`/`aggregate`/`groupBy`) —
-  a query site can't leak a deleted row just by forgetting a manual filter. Write operations
-  pass through untouched (restoring a row means writing to one the filter would otherwise
-  hide from a read). A second, unextended `prismaIncludingDeleted` export exists for the
-  handful of call sites that must see soft-deleted rows on purpose: the `/posts`/`/users`
-  admin tables (need to list a deleted row to restore it, §3c/§3b), the delete/restore
+  export is a Prisma Client Extension that auto-excludes soft-deleted `Post`, `User`, `Doc`,
+  `StoredFile` and `Tag` rows from every read operation
+  (`findMany`/`findFirst`/`findUnique`/`count`/`aggregate`/`groupBy`) — a query site can't
+  leak a deleted row just by forgetting a manual filter. Write operations pass through
+  untouched (restoring a row means writing to one the filter would otherwise hide from a
+  read).
+
+  **It rewrites only the `where` of a query made on one of those models.** A relation filter
+  inside another model's query (`postSlugHistory.findFirst({ where: { post: { … } } })`), a
+  row loaded through `include` or `select`, and raw SQL all reach soft-deleted rows, so each
+  spells out `deletedByUserId: null` (`deleted_by_user_id IS NULL`) itself where it matters:
+  the slug-history redirects do, `isPostPublic` does, and so did the contributor backfill in
+  migration `add_user_contributor_fields`. A byline's `include` doesn't, which is why a
+  deleted user stays on bylines (docs/BLOG.md §9).
+
+  A second, unextended `prismaIncludingDeleted` export exists for the handful of call sites
+  that must see soft-deleted rows on purpose: the `/posts`/`/users` admin tables (need to
+  list a deleted row to restore it, §3c/§3b), the delete/restore
   actions' own existence checks, and the slug/email uniqueness checks in `uniquePostSlug`/
   `uniqueUserSlug`/`signUp` (slug and email stay DB-unique even for a soft-deleted row, so
   silently treating one as free would just trade a friendly "already exists" error for a raw
   constraint violation at create time).
 
-### 4a. Mutable slugs
+### 4a. Mutable slugs — docs/BLOG.md §2, "Changing a slug" (posts) and §3, "The author pages" (users); a doc's is docs/DOCS.md, "Routes"
 
-**Decided:** both `post.slug` and `user.slug` (author-page slugs, `/authors/[slug]`) can be
-renamed after creation, with the old slug preserved as a redirect source rather than left to
-404.
-
-- **One history table per entity**, not a shared polymorphic one — `PostSlugHistory`/
-  `UserSlugHistory` (§4), each `{ slug @unique, <entity>Id, createdAt }`, `onDelete: Cascade`.
-  Prisma has no real polymorphic-relation support, so a shared table would trade referential
-  integrity for marginal duplication savings.
-- **Uniqueness spans live + historical slugs**: `uniquePostSlug`/`changePostSlug`
-  (`src/lib/post-slug.ts`) and `uniqueUserSlug`/`changeUserSlug` (`src/lib/user-slug.ts`)
-  reject a candidate that's any entity's current slug *or* sitting in its history — otherwise
-  a rename could steal a slug still redirecting an old link to someone else.
-- **Redirect fallback**: `[slug]/page.tsx` and `authors/[slug]/page.tsx` each fall back to
-  their history table on a live-slug miss and `permanentRedirect()` (308) to the entity's
-  current slug — only if it's still live (published post; non-soft-deleted user), so a
-  history entry for something since unpublished/deleted still 404s.
-- **Reserved top-level slugs** (`RESERVED_SLUGS`, `src/lib/slug.ts`) only apply to post
-  slugs — `/[slug]` is a top-level route; author slugs live under the nested `/authors/[slug]`,
-  with no sibling static routes to collide with.
-- **Management UI**: `/post/[id]/slug` and `/users/[id]/slug` (`SlugManager.tsx`, shared by
-  both entity types), linked from `PostSettingsPanel`'s "Url" row and `UsersTable`'s "url"
-  column. Saving commits immediately — no confirm/cancel gate; the safety net is a one-click
-  **Revert** button on the most recent past-slugs row instead (`revertPostSlug`/
-  `revertUserSlug`), matching the app's existing no-confirm-dialog-the-action-is-its-own-undo
-  convention (§3b/§3c). A revert consuming a history row younger than
-  `REVERT_DISCARD_WINDOW_MS` (60 min, `src/lib/slug.ts`) leaves no trace at all rather than
-  recording the abandoned slug.
-- **Auto-generated preview**: the management page also shows what `uniquePostSlug`/
-  `uniqueUserSlug` would produce today from the entity's title/name — an optional
-  `excludePostId`/`excludeUserId` param keeps the entity's own current reservation from
-  spuriously colliding with itself — noting a match or offering a one-click "Use this url"
-  button on mismatch.
-- **UI terminology**: every user-facing label/message says "url", not "slug" (users find it
-  more comprehensible) — schema columns, functions, files, and routes are still named `slug`
-  throughout; only display text changed.
+Built 2026-07-21: post and user slugs became renameable, each old slug kept as a redirect.
+**As built: [docs/BLOG.md](docs/BLOG.md).** The plan text is in the parent of the commit that
+introduced this stub.
 
 ---
 
@@ -721,7 +682,8 @@ Git history carries per-step detail.
    runs web + collab together.
 4. **Public rendering** — `/[slug]` with SSG/ISR (`revalidate = 60`), `generateMetadata`,
    reserved-slug guard so post slugs can't shadow app routes. Rendering uses
-   `@tiptap/static-renderer` (`generateHTML` needs a DOM and fails server-side).
+   `@tiptap/static-renderer` (`generateHTML` needs a DOM and fails server-side). *As built:
+   [docs/BLOG.md](docs/BLOG.md) §2.*
 5. **Tree comments** — Disqus-style identity (name+email or session), three-level moderation
    cascade + trust threshold per §6, moderation queue at `/post/[id]/comments`. Beyond
    plan: `comment` also records submitter IP and who/when last changed its status.
@@ -768,11 +730,13 @@ Git history carries per-step detail.
      justifies one. Search box lives in `SiteHeader`. *Superseded by Postgres full-text
      search over every kind: [docs/FULLTEXT.md](docs/FULLTEXT.md).*
    - **RSS** (`/rss.xml`, a literal-named route-handler folder): last 30 published posts,
-     RSS 2.0. Discovery `<link>` added via `layout.tsx`'s `metadata.alternates`.
+     RSS 2.0. Discovery `<link>` added via `layout.tsx`'s `metadata.alternates`. *As built:
+     [docs/BLOG.md](docs/BLOG.md) §3, "The feed".*
    - **Author pages** (`/authors/[slug]`): a user's name + their published posts, linked from
      every byline (home, search, and article pages now share one `AuthorByline` component
      instead of three copies of comma-joining logic). `authors`, `search`, and `rss.xml`
      added to the reserved-slug list (`src/lib/slug.ts`) so a post title can't shadow them.
+     *As built: [docs/BLOG.md](docs/BLOG.md) §3, "The author pages".*
 9. **Author attribution & live history** — beyond §8's original 8 steps; fulfills the
    "finer per-author edit credit" idea noted in §3a. Now documented in §3d, once the post
    editor warranted its own architecture section to match §3a-§3c.
@@ -3374,333 +3338,33 @@ posts when the viewport is too narrow to hold both.
 
 Three of those four are static content the whole world sees identically. The fourth —
 contributors — is the only one that needed schema, and it brought a self-service editing
-surface with it, which is the substance of this section.
+surface with it.
 
-**As built, the landing page itself is [docs/BLOG.md](docs/BLOG.md) §1**: the banner, the
-preamble, the latest posts and the layout, with what refreshes them in §8. Each subsection
-below that moved says where its content lives now. The contributors (§17e–§17i), the build
-order (§17k) and the avatars (§17n–§17o) stay here. The moved text is in the parent of the
-commit that introduced these stubs.
+**As built, the landing page is [docs/BLOG.md](docs/BLOG.md) §1**: the banner, the preamble,
+the latest posts, the contributors and the layout, with what refreshes them in §8 and the gaps
+in §9. Each subsection below that moved says where its content lives now. The avatars
+(§17n–§17o) stay here. The moved text is in the parent of the commit that introduced each
+stub.
 
-### 17a. Three constraints that exist before anything is designed
-
-The first two, that `/` reads no session and that a doc's prose carries marks the public
-renderer doesn't know, are docs/BLOG.md §1, "It reads no session" and "The preamble". The
-third is the contributors':
-
-**`src/lib/prisma.ts`'s soft-delete extension only rewrites a *top-level* `where`.** It
-does not reach a nested relation filter, and it does not exist at all in raw SQL. Neither
-of the queries this section adds joins through a relation, so the trap is dodged — but the
-one-time backfill in §17e is raw SQL and spells out both `deleted_by_user_id IS NULL`
-checks by hand for precisely this reason.
-
+### 17a. Three constraints that exist before anything is designed — docs/BLOG.md §1, "It reads no session" and "The preamble"; the third, the soft-delete extension's reach, is §4's soft-delete note
 ### 17b. The banner: env-configured, gitignored, and deliberately not `NEXT_PUBLIC_` — docs/BLOG.md §1, "The banner"
 ### 17c. The preamble: a doc found by title — docs/BLOG.md §1, "The preamble"
 ### 17d. The latest posts — docs/BLOG.md §1, "The latest posts", and §5–§6
-
-### 17e. Contributors: three new `User` columns, and what they replace
-
-```prisma
-isListedContributor Boolean @default(false) @map("is_listed_contributor")
-contributorBlurb    Json?   @map("contributor_blurb")
-contributorOrder    Int?    @map("contributor_order")
-orcid               String? @map("orcid")
-website             String? @map("website")
-```
-
-All five in one migration. `isListedContributor` is non-nullable *with* a default, so it
-does not need the two-step nullable-then-backfill dance CLAUDE.md documents for
-`adminInitials` — that is only required for a non-nullable column with no default.
-
-**`isListedContributor` is the membership switch, and it replaces a derived one.** The
-first draft of this section computed the contributor list as "anyone with at least one live
-published post". An explicit column is better on three counts: the query stops joining
-through a relation (and therefore stops needing the manual `deletedByUserId: null` that
-§17a's third constraint would otherwise demand); appearing on the public front page becomes
-a deliberate editorial act rather than a side effect of publishing; and it gives the
-opt-out in §17h something to write to. The cost is real and worth stating: a newly
-published author does **not** appear automatically, and an admin has to flip the flag.
-
-So that the list is not empty on day one, the migration backfills it — raw SQL, in the same
-migration file, after the `ALTER TABLE`:
-
-```sql
-UPDATE "user" u SET is_listed_contributor = true
-WHERE u.deleted_by_user_id IS NULL
-  AND EXISTS (SELECT 1 FROM post_author pa JOIN post p ON p.id = pa.post_id
-              WHERE pa.user_id = u.id AND p.deleted_by_user_id IS NULL
-                AND p.publish_event_id IS NOT NULL AND p.published_at <= now());
-```
-
-Both `deleted_by_user_id IS NULL` checks are written out because raw SQL is outside the
-Prisma extension entirely — the one place in this section where forgetting them would
-silently put a deleted author on the public front page.
-
-**`contributorOrder` is a nullable `Int`, not `@default(0)`.** "Unset" needs to be
-expressible and needs to sort to the tail, which `{ contributorOrder: { sort: "asc",
-nulls: "last" } }` gives directly; a zero default would make everyone tie at the front and
-the column would carry no information until someone edited every row.
-
-The query, then, is flat:
-
-```ts
-where:   { isListedContributor: true, name: { not: null } },
-orderBy: [{ contributorOrder: { sort: "asc", nulls: "last" } }, { name: "asc" }],
-```
-
-`name: { not: null }` mirrors `AuthorByline`, which already drops unnamed authors rather
-than rendering an empty link. Name is the secondary sort so equal `contributorOrder`
-values — including the whole unset tail — are stable rather than arbitrary.
-
-**One card component, two callers.** `ContributorCard` (`src/components/ContributorCard.tsx`)
-renders a single entry and is used by both the front page and the dashboard panel's live
-preview (§17g). This is `AuthorByline`'s argument applied again: a preview that renders
-something *resembling* the real thing is a preview that will eventually lie.
-
-**The avatar.** `User.image` when set, rendered as a plain `<img>` with the same
-`eslint-disable-next-line @next/next/no-img-element` precedent `UsersTable.tsx` already
-carries — these are arbitrary remote URLs, not a fixed asset set, and `next/image` would
-need an `images.remotePatterns` entry per provider. When null, the stand-in is a circle
-filled with `User.color` showing `adminInitials`, rather than a generic silhouette asset:
-both columns already exist, both are already treated as general-purpose (the admin table
-labels the latter simply "Initials", and `doc_metrics.byline` `string_agg`s it), and
-`color` is validated to `#rrggbb` on write, so it is safe in an inline style. Worth noting
-the mild misnomer being leaned on: `adminInitials` is not admin-only in practice and hasn't
-been since `doc_metrics`.
-
-**ORCID is stored bare** (`0000-0002-1825-0097`), not as a URL — one canonical form,
-validated against `^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$` plus the ISO 7064 mod-11-2 checksum
-(cheap, and catches transposed digits, which a regex alone does not). The
-`https://orcid.org/…` link is built at render. **Website** is parsed with `new URL()` and
-required to be `http:`/`https:` — that check, not an allowlist of hostnames, is what makes
-a stored `javascript:` href impossible. Both live in `src/lib/contributor-links.ts`
-alongside `orcidUrl()`.
-
-### 17f. `contributor_blurb` is TipTap JSON, and the schema *is* the validation
-
-A short rich-text line ("Historian of science; writes here about X") wants emphasis, so the
-column is `Json` holding a TipTap/ProseMirror document, rendered with
-`renderToReactElement` — the same call §17c's preamble, the post pages and the doc pages
-already make. There is no `dangerouslySetInnerHTML` anywhere in this section.
-
-**No ydoc, deliberately — this is the first editable content surface in the app that isn't
-backed by a `Y.Doc`.** Everything §11–§13 built exists for content with at least one of
-three properties: more than one simultaneous author, a history worth replaying, or anchors
-that must survive an edit. A contributor's blurb has none. It is one line, owned by exactly
-one person, edited on their own dashboard, and changed about twice a year.
-
-Wiring one up would not be reuse, it would be four new integration points: a
-`ydoc:contributor:<userId>` sub-namespace in `src/lib/ydoc-names.ts`; a third authz branch
-in `/api/ydoc/[id]/token` beside `doc-authz.ts` and `annotation-authz.ts`; a **third
-cache-flush path in the collab server** writing to `user` (`server/doc-cache.ts` writes
-docs, annotations have their own, neither touches that table); and client provider plus
-`attachIndexeddb` wiring under §11e's ref-counting rules. It would also *cost* something:
-a column written by the collab process joins §17j's can't-be-pushed bucket, because that
-process has no `revalidatePath`. A plain server action revalidates `/` inline and the edit
-is live immediately.
-
-What the plain path reuses instead is already load-bearing elsewhere: `getSchema` over a
-restricted extension set, `renderToReactElement`, and `toPlainJSON` — which exists in
-`tiptap-schema.ts` for precisely this hop, since `editor.getJSON()`'s null-prototype `attrs`
-objects are silently replaced by React's Server Action encoder unless they are round-tripped
-first. The editor is a plain `useEditor` with `content:` seeded from the column: no
-`Collaboration`, no provider, no IndexedDB, and one explicit Save for the whole panel rather
-than a per-keystroke debounce.
-
-**`blurbExtensions`, in `src/lib/tiptap-schema.ts` and nowhere else** — CLAUDE.md's rule
-that the schema has exactly one home, now with a fourth entry beside `contentExtensions`,
-`titleExtensions` and their mark-layered variants. It is the only one with no Yjs variant:
-
-```ts
-export const blurbExtensions = [Document.extend({ content: "paragraph" }), Paragraph, Text, Bold, Italic];
-export const pmBlurbSchema = getSchema(blurbExtensions);
-```
-
-`content: "paragraph"` (exactly one, not `block+`) is `titleExtensions`' trick and buys the
-same thing: neither Enter nor a multi-line paste can turn a one-line sidebar entry into a
-stack of paragraphs, structurally rather than by CSS clamp.
-
-**Built from individual extensions rather than `StarterKit.configure({ document: false })`,
-because that option does not exist.** Verified against `StarterKitOptions` in
-`@tiptap/starter-kit@3.29.0`: every node and mark can be switched off — `blockquote`,
-`heading`, `bulletList`, `codeBlock`, `horizontalRule`, and the rest — *except* `document`
-and `text`. So "exactly one paragraph" is unreachable through configuration, and the
-StarterKit-free shape `titleExtensions` already uses is the only way to get it.
-
-That means two new declared dependencies, `@tiptap/extension-bold` and
-`@tiptap/extension-italic`. Both are already physically present at 3.29.0 as transitive
-deps of StarterKit, so declaring them adds nothing to the install — but they must be pinned
-to `@tiptap/core`'s exact version per CLAUDE.md's install note, not `^3.28.0`.
-
-**This narrows CLAUDE.md's "never add `@tiptap/extension-link` separately" rather than
-breaking it.** That rule is about double-registering an extension StarterKit already bundles
-*within the same schema*; `titleExtensions` already imports Document/Paragraph/Text directly
-for a StarterKit-free schema, and CLAUDE.md explicitly calls that out as not a violation.
-The wording should be amended to "never alongside StarterKit" when this lands. Link and Code
-are left out of the blurb on their own merits: the card already has dedicated website and
-ORCID fields, so the one link a blurb would plausibly want is a field already. Either is one
-dependency and one array entry away if that turns out to be wrong.
-
-**`undoRedo` stays on.** CLAUDE.md's `undoRedo: false` rule applies when combining StarterKit
-with the `Collaboration` extension, which owns the history stack. There is no `Collaboration`
-extension here, so the rule inverts — worth stating, because it reads absolute and this is
-the one place in the codebase where it doesn't apply.
-
-**Validation is the schema, not an allowlist.** The server action runs
-`pmBlurbSchema.nodeFromJSON(json)`, which throws on any node or mark the schema doesn't
-define, and stores the re-serialized `.toJSON()`. Nothing unknown survives the round trip —
-a structural guarantee, and a strictly stronger one than sanitizing HTML, since there is no
-list to keep current and no parser to be differential against. A cap on extracted text
-length rides along, so nobody pastes an essay into a 280px column. The self-service action
-(§17g) and the admin action (§17i) call one shared validator, so the two write paths cannot
-diverge on what they accept.
-
-The alternative weighed and dropped was **HTML plus `sanitize-html`**: a new runtime
-dependency, an allowlist to keep current, and `dangerouslySetInnerHTML` on the public front
-page — all to reach a weaker guarantee than the schema gives for nothing.
-
-### 17g. The dashboard panel
-
-`ContributorPanel.tsx`, a client component mounted on `/dashboard` beside `SessionRefresh`,
-**rendered only when the signed-in user's `isListedContributor` is true.** That flag is read
-from the database in the dashboard's server component, not from the session: the JWT bakes
-in `id`/`role`/`color` at sign-in and never re-reads (`src/app/sign-in/NOTES.md`), so a
-freshly-listed contributor would otherwise not see their own panel until the token turned
-over.
-
-Fields: **image URL**, **blurb**, **order** — the three the panel was asked for — plus
-**ORCID** and **website**. Those last two are an addition to the brief, made because the
-preview underneath renders the real `ContributorCard`, which shows them: a panel that
-previews fields it cannot edit invites exactly one bug report. They are trivial to drop if
-that reads as scope creep.
-
-Below the form, the live preview renders `ContributorCard` from the *form state* rather
-than from the saved row, so it answers "what will this look like" and not "what did this
-look like before I started typing".
-
-**The actions are new, and separately guarded.** Every existing `updateUser*` in
-`src/app/actions/users.ts` is `requireAdmin()`; these are self-service and belong in
-`src/app/actions/contributor.ts` behind a `requireListedContributor()` that (a) resolves the
-user from the session, never from a client-supplied id, and (b) re-reads
-`isListedContributor` from the database rather than trusting that the panel was only
-rendered when it was true.
-
-**One asymmetry carries the entire security model of the panel: these actions can set
-`isListedContributor` to `false` and can never set it to `true`.** Setting it true stays in
-`actions/users.ts` behind `requireAdmin()`. Without that asymmetry the opt-out in §17h is
-theatre — anyone who had ever been listed could put themselves back on the public front
-page at will.
-
-**`contributorOrder` is a shared resource and self-service editing of it is a known
-compromise.** Nothing stops a contributor setting `0` and jumping the queue. Accepted
-deliberately at this scale — a handful of trusted authors, and the name-ascending secondary
-sort keeps the result stable rather than random. If it ever stops being fine, moving that
-one field to admin-only leaves the rest of the panel untouched.
-
-Each action calls `revalidatePath("/")` alongside its write (§17j).
-
-### 17h. Opting out, and why an admin has to undo it
-
-The panel offers "Remove me from the contributor list" as an **inline two-step confirm** —
-the button swaps in place for `Are you sure? [Yes] [Cancel]` — following
-`AnnotationNode.tsx` and `CommentNode.tsx`, which is the established pattern here. Not
-`window.confirm`: there is not one call to it anywhere in this codebase, and there is no
-reason for this to be the first.
-
-The confirmation text names the consequence rather than gesturing at it: **you will need an
-admin to put you back**. That is a true statement about §17g's asymmetry, not a scare
-message, and a contributor who understands it before clicking is the entire point of making
-this two steps instead of one.
-
-On success `router.refresh()` re-renders the dashboard, `isListedContributor` is now false,
-and the panel is simply gone — the same condition that gated it in the first place, with no
-separate "you have opted out" state to maintain.
-
-### 17i. `/users` gets the same five columns
-
-All five (`isListedContributor`, `contributorBlurb`, `contributorOrder`, `orcid`, `website`)
-join the users admin table as movable columns, all `defaultHidden: true` per §16m so no
-existing admin's table silently widens by five columns on deploy.
-
-Each is an entry in `ADMIN_TABLE_COLUMNS.users` (`src/lib/admin-table-columns.ts`) and a cell in
-`UsersTable.tsx`'s bodies, which the compiler holds together (§16m).
-
-**Four of the five sort; `contributorBlurb` does not, and that is the `image` column's
-precedent rather than a new exception.** `isListedContributor`, `contributorOrder`, `orcid`
-and `website` are plain scalar `User` columns, so Prisma's `orderBy` reaches them directly
-and each gets a `sortKey` plus a `case` arm in `src/app/users/page.tsx` — per CLAUDE.md
-every column on every admin table sorts, and none of these needs a view to do it. `orcid`
-and `website` also join that page's `q` OR-list.
-
-`contributorBlurb` is `Json`, which Prisma's `orderBy` cannot reach at all, and the
-documented escape hatch — a view keyed 1:1 on the table's primary key (§16e/§16l) — would
-need a SQL text-extraction function over TipTap JSON to sort by. That is the `doc_length`
-recursive CTE all over again, built for a default-hidden column on a table of a few dozen
-rows, to support an alphabetical ordering of one-line biographies that has no user. So the
-cell renders an `extractText` excerpt and carries no `sortKey`, exactly as `image` already
-does on this same table: shown, not sorted, not inline-editable. It is also left out of the
-`q` OR-list, since `contains` doesn't reach into `Json` either. If sorting or searching it
-ever matters, `Doc.proseJsonLength`'s trigger-maintained-column pattern is the answer, not
-a view.
-
-Editing the blurb therefore stays where §17g put it. The other four get admin actions in
-`actions/users.ts` behind the existing `requireAdmin()`, sharing `contributor-links.ts`'s
-validators with the self-service pair so the two paths cannot diverge on what they accept —
-and an admin blurb editor, if one is ever wanted, shares §17f's `pmBlurbSchema` validator
-for the same reason. `updateUserIsListedContributor` is the **only** code path that sets
-that flag true.
-
+### 17e. Contributors: three new `User` columns, and what they replace — docs/BLOG.md §1, "Who is listed" and "The card"
+### 17f. `contributor_blurb` is TipTap JSON, and the schema *is* the validation — docs/BLOG.md §1, "The blurb"
+### 17g. The dashboard panel — docs/BLOG.md §1, "Editing your own entry"
+### 17h. Opting out, and why an admin has to undo it — docs/BLOG.md §1, "Editing your own entry"
+### 17i. `/users` gets the same five columns — docs/BLOG.md §1, "In `/users`"
 ### 17j. Cache invalidation, and the one thing that can't be pushed — docs/BLOG.md §8
-
-### 17k. Build order
-
-1. **Schema.** Five columns, one migration, the backfill SQL in the same file. Stop
-   `dev:all`, `npx prisma migrate dev --name add_user_contributor_fields`, restart.
-2. **`blurbExtensions` + `contributor-links.ts`.** `npm i @tiptap/extension-bold@<core's
-   exact version> @tiptap/extension-italic@<same>`; the fourth schema and `pmBlurbSchema` in
-   `tiptap-schema.ts`; the ORCID/website validators and `orcidUrl()`. No UI yet, and no new
-   runtime dependency beyond two already-installed transitive ones.
-3. **`ContributorCard` + the contributor query.** Renderable in isolation before anything
-   links to it — `renderToReactElement` over `blurbExtensions` for the blurb.
-4. **The landing page.** `site-banner.ts`, `front-page.ts`, the grid, `take: 10`, and
-   `page.tsx`'s inline styles moved into `page.module.css` — it is one of the last inline-style
-   holdouts.
-5. **`scripts/seed-front-page.ts`**, so step 4 has something to render.
-6. **The dashboard panel** and `actions/contributor.ts`.
-7. **`/users` columns** and the admin actions, including the only set-to-true path.
-8. **`e2e/landing.spec.ts`**, docs (STYLE.md, DEPLOY.md §4, TODO.md, and CLAUDE.md — the
-   `.env` vars, the `FRONT PAGE` title convention, and §17f's narrowing of the
-   never-add-`extension-link`-separately rule to "never alongside StarterKit").
-
-Steps 1–5 are the landing page and stand alone; 6–7 are the editing surfaces and can land
-separately if the branch wants splitting.
-
+### 17k. Build order — deleted; the steps are in the commit messages
 ### 17l. Layout, and a third column width — docs/BLOG.md §1, "Layout"
-
-### 17m. Known gaps
-
-The landing page's own gaps are docs/BLOG.md's: the banner's missing admin surface is §9,
-the preamble under test §10, and the missing "older posts" link is closed by `/page/N` (§6).
-The contributors' stay here:
-
-- **A contributor blurb has no history and no concurrent editing.** That is §17f's decision
-  working as intended, not an oversight, but it does mean a mis-save is unrecoverable — no
-  `ydoc_update` log to replay, no revision to fall back to, and last-write-wins if a
-  contributor has their dashboard open in two tabs. Acceptable for one line owned by one
-  person; the moment a blurb wants either property, §11's stack is what it should move onto,
-  and the four integration points §17f lists are the actual cost of that move.
-- **No self-service profile page.** `/dashboard`'s panel edits the contributor-facing
-  fields only; name, slug, color and role remain admin-only, and a user who is not a listed
-  contributor has no self-service surface at all.
-- **Contributor membership does not follow publishing.** §17e's explicit flag means an
-  author's first published post does not add them to the front page. Whether that ought to
-  be a nudge on `/users` (a "published, not listed" hint) or left alone is unresolved.
+### 17m. Known gaps — docs/BLOG.md §9
 
 ### 17n. Avatars move off remote URLs and into Postgres
 
 `User.image` was a remote URL — originally the Auth.js adapter's field, and
-what §17e first rendered. That works, and for the seeded Wikimedia portraits it
-was defensible, but it has three costs that only grow:
+what the contributor card first rendered. That works, and for the seeded
+Wikimedia portraits it was defensible, but it has three costs that only grow:
 
 - **Every visitor's browser talks to a third party.** `next/font/google`
   self-hosts at build time, so contributor avatars were the *only* third-party
@@ -3720,12 +3384,13 @@ Avatars are now stored as bytes in Postgres and served from our own route.
 that are easy to weld together. Storing bytes is right here; inlining them as a
 data URI would have been wrong, and specifically wrong *because of this app*:
 
-`/` is an ISR-cached shared HTML artifact (`revalidate = 60`, §17a). A data URI
-becomes part of that payload — re-sent in full on every visit by every visitor,
-never separately cacheable, never eligible for an ETag, and re-serialized into
-the cache entry on every regeneration. With five contributors at ~5KB each
-that is ~25KB welded onto every page load, permanently, in exchange for saving
-some first-visit round trips that HTTP/2 multiplexing already made cheap.
+`/` is an ISR-cached shared HTML artifact (`revalidate = 60`, docs/BLOG.md §8).
+A data URI becomes part of that payload — re-sent in full on every visit by
+every visitor, never separately cacheable, never eligible for an ETag, and
+re-serialized into the cache entry on every regeneration. With five contributors
+at ~5KB each that is ~25KB welded onto every page load, permanently, in exchange
+for saving some first-visit round trips that HTTP/2 multiplexing already made
+cheap.
 
 The counterargument is real but narrow: below ~1–4KB, inlining does save a
 round trip, and a 40px avatar is in that range. It is a cold-first-visit win
@@ -3778,8 +3443,9 @@ business claiming immutability. Fresh hash and stale hash are the same lookup;
 only the header differs.
 
 The route is public and unauthenticated on purpose: the contributor list is
-public content, and `/` must not call `auth()` (§17a). Nothing there reads a
-session, so the response stays cacheable by any intermediary.
+public content, and `/` must not call `auth()` (docs/BLOG.md §1, "It reads no
+session"). Nothing there reads a session, so the response stays cacheable by
+any intermediary.
 
 #### Ingestion, and what it obliges
 
@@ -3828,12 +3494,12 @@ endpoints. The only URL fetch in this feature is
 
 The dashboard panel's "Image URL" text field becomes a file input plus a
 "Remove photo" control, with its own action rather than a field on the combined
-Save (§17g): it carries binary in a `FormData`, it should apply immediately
-rather than waiting for a Save the user might not press, and its failure modes
-are entirely its own. The action returns the new URL so the preview can
-repoint without a round trip through the server component. Both actions sit
-behind the same `requireListedContributor` as the rest of the panel, and both
-`revalidatePath("/")`.
+Save (docs/BLOG.md §1, "Editing your own entry"): it carries binary in a
+`FormData`, it should apply immediately rather than waiting for a Save the user
+might not press, and its failure modes are entirely its own. The action returns
+the new URL so the preview can repoint without a round trip through the server
+component. Both actions sit behind the same `requireListedContributor` as the
+rest of the panel, and both `revalidatePath("/")`.
 
 The panel says, in the UI and not only here, that the image is stored on this
 site and that location data is removed — a claim the user should be able to
@@ -5208,7 +4874,7 @@ this stub.
 ### 21b. Which date, and in which timezone — docs/BLOG.md §2, "The date is UTC"
 ### 21c. Slug uniqueness stays global (for now) — docs/BLOG.md §2, "Slugs are unique across the blog"
 ### 21d. What this deletes — docs/BLOG.md §2, "Slugs are unique across the blog" ("No slug is reserved")
-### 21e. Blast radius — what it decided is docs/BLOG.md §2 ("Redirects", the `SlugManager` prefix, "RSS"); its call-site counts are deleted, and are in the commit that built it
+### 21e. Blast radius — what it decided is docs/BLOG.md §2 ("Redirects", and the `SlugManager` prefix under "Changing a slug") and §3, "The feed"; its call-site counts are deleted, and are in the commit that built it
 ### 21f. Edge cases to settle before building — docs/BLOG.md §2, "Redirects: an old slug or a stale date" (21f.1, 21f.3) and "The route" (21f.2)
 ### 21g. Sizing — deleted; its one decision is docs/BLOG.md §2, "No stored path"
 ### 21h. Date archives: `/yyyy`, `/yyyy/mm`, `/yyyy/mm/dd` — docs/BLOG.md §3; its caching is §8, its e2e §10

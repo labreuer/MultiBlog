@@ -2,11 +2,11 @@
 
 The public side of the blog, as built:
 
-1. the landing page;
-2. a post's dated URL;
-3. the date archives;
+1. the landing page, with its contributor list;
+2. a post's page, at its dated URL;
+3. the date archives, the author pages and the feed;
 4. the links between a post's three pages;
-5. the one order every listing uses;
+5. which posts are public, and the one order every listing uses;
 6. the numbered pages after the landing page;
 7. each post's older and newer neighbours.
 
@@ -15,11 +15,10 @@ The public side of the blog, as built:
 Some of it lives elsewhere:
 
 - **PLAN.md §15** is what a post *is*, a snapshot of a doc, and §3d the post editor.
-- **PLAN.md §17e–§17i** is the contributor list on the landing page, and §17n–§17o its
-  avatars.
+- **PLAN.md §17n–§17o** is the avatars that contributor cards and author pages show.
 - **CACHING.md** has the caching findings, with their dates.
 
-PLAN.md §17, §21 and §25 point here.
+PLAN.md §3d, §4, §4a, §17, §21 and §25 point here.
 
 ---
 
@@ -42,7 +41,7 @@ its tree reads the viewer on the server. So there is **no `auth()`, `cookies()` 
 `headers()`** in the page, the banner, the preamble or the contributor list (CACHING.md,
 2026-07-20 and 2026-07-23). Anything that depends on the viewer is a client island that asks
 after hydration, as the site header does. A contributor edits their own entry on
-`/dashboard` (PLAN.md §17g), which is dynamic anyway.
+`/dashboard` ("Editing your own entry", below), which is dynamic anyway.
 
 ### The banner
 
@@ -113,10 +112,10 @@ case-insensitively by `getFrontPagePreamble` (`src/lib/front-page.ts`).
   ydoc, as `/doc/[slug]` would, which would cost a row read and a Yjs decode on a statically
   generated page. The case barely arises: every path that gives a doc the title `FRONT PAGE`
   writes its `proseJson` in the same step.
-- **"Preamble", not "blurb".** A contributor's blurb (PLAN.md §17f) is a plain `User` column,
-  written by a server action and live at once. The preamble is a doc, collaboratively edited,
-  that reaches the page through a debounced cache (§8). Two mechanisms get two words, and
-  "preamble" implies no brevity: it can be several paragraphs. The identifiers follow the
+- **"Preamble", not "blurb".** A contributor's blurb ("The blurb", below) is a plain `User`
+  column, written by a server action and live at once. The preamble is a doc, collaboratively
+  edited, that reaches the page through a debounced cache (§8). Two mechanisms get two words,
+  and "preamble" implies no brevity: it can be several paragraphs. The identifiers follow the
   word (`getFrontPagePreamble`, `.preamble`). The title stays `FRONT PAGE`, since that is a
   string an editor types.
 - **Seeding.** `scripts/seed-front-page.ts` creates the doc if none exists, and never clears
@@ -132,10 +131,145 @@ the pager that continues the list on `/page/2` (§6).
 
 ### Contributors
 
-`ContributorList` (`src/components/ContributorList.tsx`) renders the users an admin has listed
-as contributors, from `getContributors` (`src/lib/contributors.ts`), each as a
-`ContributorCard`. It reads no session either. Who is listed, what a card shows and how a
-contributor edits their own is PLAN.md §17e–§17i. Their avatars are §17n–§17o.
+`ContributorList` (`src/components/ContributorList.tsx`) is the right-hand column: a
+"Contributors" heading over one `ContributorCard` per listed user, from `getContributors`
+(`src/lib/contributors.ts`). It reads no session either, and renders nothing when nobody is
+listed. A contributor edits their own entry on `/dashboard`, and an ADMIN anyone's on
+`/users`. Their avatars are PLAN.md §17n–§17o.
+
+#### Who is listed
+
+Five `User` columns hold the list: `isListedContributor`, `contributorOrder`,
+`contributorBlurb`, `orcid` and `website`.
+
+- **`isListedContributor` is the switch, and an admin sets it.** The list is not "everyone
+  with a live post", for three reasons:
+  - the query then reads one table, and needs none of the hand-written `deletedByUserId`
+    checks a join through posts would (PLAN.md §4, the soft-delete note);
+  - being on the public front page is an editorial decision, not a side effect of
+    publishing;
+  - leaving the list needs a column to write to.
+
+  The cost is that an author's first post doesn't list them (§9).
+- **The query is flat**: `{ isListedContributor: true, name: { not: null } }`, ordered by
+  `contributorOrder` ascending with nulls last, then by name.
+  - A user with no name is left out, as `AuthorByline` leaves one out of a byline (§3).
+  - `contributorOrder` is nullable rather than defaulting to 0, so "never set" can be said,
+    and sorts to the end. A default of 0 would tie everyone at the front.
+  - The name breaks ties, so equal orders, the unset tail included, come out stable.
+
+#### The card
+
+`ContributorCard` (`src/components/ContributorCard.tsx`) shows the avatar, the name linking to
+the contributor's author page (§3), an "ORCID iD" and a "Website" link when they are set, and
+the blurb.
+
+- **One component, two callers.** The landing page renders it from saved rows, and the
+  dashboard's preview from unsaved form state. A preview that rendered something merely
+  resembling the card would sooner or later misrepresent it, which is `AuthorByline`'s
+  argument again.
+- **The avatar** is `Avatar` (`src/components/Avatar.tsx`) at 40px: the uploaded image, else
+  a remote `User.image`, else a circle of `User.color` holding `adminInitials`.
+  `resolveAvatarSrc` picks, and PLAN.md §17n says why an upload is bytes in Postgres. The
+  circle needs no image of its own: every user has both columns, and `color` is validated to
+  `#rrggbb` on write, so it is safe in an inline style.
+- **ORCID is stored bare** (`0000-0002-1825-0097`), one canonical form, checked against its
+  shape and its ISO 7064 mod-11-2 check digit, which catches a transposed digit the shape lets
+  through. A pasted `https://orcid.org/…` URL is reduced to the id, and the link is built at
+  render (`orcidUrl`).
+- **A website must be `http:` or `https:`**, parsed with `new URL()` and stored as its
+  normalized `href`. That check, not a list of allowed hosts, is what makes a stored
+  `javascript:` link impossible.
+- **Both checks are `src/lib/contributor-links.ts`**, which the self-service and the admin
+  actions share, so the two can't disagree about what they accept.
+
+#### The blurb
+
+A blurb is one short line of rich text ("Historian of science; writes here about X"): TipTap
+JSON in `contributorBlurb`, rendered with `renderToReactElement`, as the preamble and the posts
+are. Nothing on the page uses `dangerouslySetInnerHTML`.
+
+- **No ydoc.** The ydoc stack is for content with more than one author at a time, a history
+  worth replaying, or anchors that must survive an edit. A blurb has none of those: one line,
+  one owner, changed a few times a year. Putting it on a ydoc would add:
+  - a `ydoc:contributor:` namespace;
+  - a third authorization branch in `/api/ydoc/[id]/token`;
+  - a third cache-flush path in the collab server, writing to `user`;
+  - a provider and IndexedDB wiring on the dashboard.
+
+  It would also lose the inline refresh. A column the collab process writes can't be pushed
+  to `/` (§8, "Preamble edits can't be pushed"), while a server action's write is live at
+  once.
+- **`blurbExtensions`** (`src/lib/tiptap-schema.ts`) is a document of exactly one paragraph,
+  with bold and italic and no other marks. One paragraph is the title schema's trick: neither
+  Enter nor a multi-line paste can make a second, by structure rather than by a CSS clamp.
+  - It is assembled from single extensions, because StarterKit can't be cut down that far:
+    any node or mark in it can be switched off except `document` and `text`.
+  - It has no link mark. The card already has fields for the two links a blurb would want.
+  - Nothing in it registers an undo command, so the blurb editor has no undo
+    (docs/TIPTAP.md).
+- **The schema is the validation.** The action runs `pmBlurbSchema.nodeFromJSON`, which throws
+  on any node or mark the schema doesn't define, and stores the result re-serialized, so
+  nothing unknown survives the round trip. That guarantee is structural, and stronger than
+  sanitizing HTML: there is no list to keep current and no second parser to disagree with. A
+  cap of 500 characters of text rides along, for a 280px column.
+- **HTML through `sanitize-html` was weighed and rejected**: a new dependency, an allowlist to
+  maintain, and `dangerouslySetInnerHTML` on the front page, for a weaker guarantee.
+- **One writer.** Only the dashboard's Save writes a blurb. `/users` shows it and can't edit
+  it.
+
+#### Editing your own entry
+
+`ContributorPanel` (`src/components/ContributorPanel.tsx`) is `/dashboard`'s "Contributor
+profile" card (docs/DASHBOARD.md), shown only to a listed contributor.
+
+- **The flag is read from the database, not the session.** The session's JWT holds what was
+  read at sign-in (`src/app/sign-in/NOTES.md`), so a newly listed contributor wouldn't see the
+  panel until the token turned over.
+- **Its fields.** The photo is cropped and uploaded, or removed, at once, through actions of
+  its own (PLAN.md §17n–§17o). The blurb, the order, the ORCID iD and the website are written
+  together by one Save (`updateContributorProfile`). There is no autosave: nothing here has a
+  live session to debounce into.
+- **The preview** under the form is a real `ContributorCard`, drawn from the form's state
+  rather than the saved row, so it shows what the card will look like, not what it looked like
+  before the edit.
+- **The actions are self-service**, in `src/app/actions/contributor.ts`, behind
+  `requireListedContributor()`. That takes the user from the session, never from an id the
+  client sends, and re-reads `isListedContributor` rather than trusting that the panel was
+  only shown when it was true.
+- **They can clear `isListedContributor` and never set it.** Only the admin action
+  `updateUserIsListedContributor` sets it true. Otherwise anyone who was ever listed could put
+  themselves back on the front page, and leaving the list would mean nothing.
+- **Leaving the list** is "Remove me from the contributor list", then an inline confirm: "Are
+  you sure? You will need an admin to put you back."
+  - The confirm swaps in place, as a comment's and an annotation's delete do. Nothing here
+    calls `window.confirm`.
+  - It names the consequence, which the asymmetry above makes true.
+  - Afterwards the panel is gone, by the same condition that showed it. There is no separate
+    "opted out" state.
+- **`contributorOrder` is shared, and self-service anyway.** Nothing stops a contributor
+  setting 0 to go first. With a handful of trusted authors that is accepted, and the name
+  tie-break keeps the order stable. If it stops being fine, moving that one field to
+  admin-only leaves the rest of the panel as it is.
+- Every action here refreshes `/` (§8).
+
+#### In `/users`
+
+The five columns are on the users table too, all hidden by default (PLAN.md §16m), so no
+admin's table widens by five columns unasked.
+
+- **Four sort, and the blurb doesn't.** "Listed contributor", "Contributor order", "ORCID iD"
+  and "Website" are plain columns Prisma's `orderBy` reaches, and the last two are among the
+  fields the search box matches. "Contributor blurb" is JSON, which neither `orderBy` nor
+  `contains` reaches. So it shows an 80-character excerpt and, like the Image column, is
+  neither sorted, searched nor edited.
+  - Sorting it would take a view with a text-extraction function over TipTap JSON, for an
+    order nobody needs.
+  - If it ever matters, the answer is a trigger-maintained column like `Doc.proseJsonLength`,
+    not a view.
+- **The other four are edited in place**, through admin actions in `src/app/actions/users.ts`
+  behind `requireAdmin()`, which share `contributor-links.ts` with the self-service ones.
+  `updateUserIsListedContributor` is the only code that sets the flag true.
 
 ### Layout
 
@@ -153,13 +287,37 @@ contributor edits their own is PLAN.md §17e–§17i. Their avatars are §17n–
 
 ---
 
-## 2. A post's URL: `/yyyy/mm/dd/slug`
+## 2. A post's page: `/yyyy/mm/dd/slug`
 
 A published post lives at `/yyyy/mm/dd/slug`
 (`src/app/[year]/[month]/[day]/[slug]/page.tsx`), the date being its `publishedAt` in UTC.
 `src/lib/post-path.ts` is the one module that knows the shape: every link, revalidation and
 byline goes through `postPath` and its siblings. It is browser-safe, so `PostsTable`, a client
 component, can use it. Its server half is `src/lib/revalidate-post.ts`.
+
+### What the page shows
+
+Top to bottom: the title; the byline (`AuthorByline`, `PostDate` and the "configure post"
+link, §3 and §4); the body; the post's tag chips (docs/TAGS.md); its older and newer
+neighbours (§7); the comments (docs/COMMENTS.md); and "← Back to all posts". Above 1180px,
+the comments whose quotes are still in the text sit in a rail beside it
+(docs/MARGIN_NOTES.md).
+
+- **The body is the post's own copy.** Each publish or schedule writes `Post.proseJson` and
+  `Post.title` (PLAN.md §15), so the page reads two columns rather than joining a version or
+  decoding a ydoc.
+- **It renders twice.** The server renders `proseJson` with `renderToReactElement`
+  (`@tiptap/static-renderer`) over `contentExtensions`, inside `.prose`, rather than with
+  TipTap's `generateHTML`, which needs a DOM. After hydration, `AnnotatableArticle` builds a
+  read-only editor over the same JSON and swaps it in for the static copy. The editor is what
+  draws the quote highlights and turns a selection into a quoted comment (docs/COMMENTS.md).
+  Until it exists, and for anything that runs no scripts, the static copy is the page.
+- **It says nothing about its doc.** A post is a snapshot (PLAN.md §15). It shows no sign
+  that its doc has changed since, and no "updated" date after a republish, which keeps the
+  first go-live date ("The date is UTC", below). An updated date would be a decision of its
+  own (§9).
+- **Its metadata.** The tab reads `¶ <title>`, followed by the site's title, and the
+  description is the body's first 160 characters as plain text.
 
 ### The route
 
@@ -223,23 +381,47 @@ rare case, and per-date uniqueness can still come later. It would need:
 - no unique constraint on `PostSlugHistory.slug`;
 - a new meaning for a history row.
 
-That is a second change, not part of this one. With uniqueness global, a post's slug works as
-every other slug does:
-
-- `postSlugInUse`, `changePostSlug` and `revertPostSlug` (`src/lib/post-slug.ts`);
-- `PostSlugHistory`, and `SlugManager` (`src/components/SlugManager.tsx`);
-- `REVERT_DISCARD_WINDOW_MS` (`src/lib/slug.ts`).
+That would be a change of its own. With uniqueness global, a post's slug works as a user's and
+a doc's do ("Changing a slug", below).
 
 **No slug is reserved.** A post four segments deep can't be shadowed by a static route, and
 everything else with a slug (docs, files, tags, authors) sits one level down with no static
 sibling. So there is no reserved-slug list, and a post may be slugged `docs`.
 `src/lib/slug.ts` says why there is no list.
 
-**`SlugManager` shows the post's date path as its URL prefix** (`/post/[id]/slug`), from its
-`publishedAt`. A scheduled post already has one, so it shows the path it will have when it
-goes live, and unpublishing or cancelling a schedule leaves the date in place. A post that
-never had a date shows the literal `/yyyy/mm/dd`, since an empty prefix would show a URL the
-site doesn't serve.
+### Changing a slug
+
+A post's slug changes on `/post/[id]/slug`, from the editor's settings panel, for whoever may
+edit the post. A user's changes on `/users/[id]/slug`, from the users table, for an ADMIN (§3,
+"The author pages"). Both pages are `SlugManager` (`src/components/SlugManager.tsx`), which a
+doc's slug uses too (docs/DOCS.md, "Routes"). The page says "url", which users find clearer.
+The code, the columns and the routes say `slug`.
+
+- **The old slug is kept.** `changePostSlug` (`src/lib/post-slug.ts`) writes the old slug to
+  `PostSlugHistory` in the same transaction, so a link to it still lands, through the
+  redirect below.
+- **A slug in use includes the past ones.** `postSlugInUse` refuses a slug that is any post's
+  current one *or* sits in any post's history, soft-deleted posts included. Otherwise a rename
+  could take a slug that still redirects an old link to another post. A new post's slug gets
+  `-2`, `-3` and so on by the same test (`uniquePostSlug`).
+- **One history table per kind**: `PostSlugHistory`, `UserSlugHistory` and `DocSlugHistory`.
+  Prisma has no polymorphic relations, so one shared table would give up its foreign keys to
+  save very little.
+- **A save commits at once**, with no confirm step. The undo is **Revert** on the newest past
+  slug (`revertPostSlug`), in place of a dialog, as elsewhere in the app. A revert within an
+  hour of the change (`REVERT_DISCARD_WINDOW_MS`, `src/lib/slug.ts`) leaves no trace, since
+  nothing can plausibly have linked to a slug that lived under an hour. A later one keeps the
+  abandoned slug in the history.
+- **A past slug can be deleted**, after an inline confirm. Links to it then 404, and the slug
+  is free again.
+- **The page shows the slug the title would give today** (`uniquePostSlug` with
+  `excludePostId`, so the post doesn't collide with its own slugs), with a "Use this url"
+  button when it differs from the current one.
+- **The prefix it shows is the post's date path**, from its `publishedAt`. A scheduled post
+  already has one, so it shows the path the post will have when it goes live, and
+  unpublishing or cancelling a schedule leaves the date in place. A post that never had a date
+  shows the literal `/yyyy/mm/dd`, since an empty prefix would show a URL the site doesn't
+  serve.
 
 ### Redirects: an old slug or a stale date
 
@@ -268,14 +450,14 @@ The path is derived from `publishedAt` wherever it is needed, and never stored. 
 column would freeze the URL against a later change to `publishedAt`, at the cost of a second
 source of truth for what the publish actions already keep still.
 
-### RSS
-
-`/rss.xml` builds each item's `<link>` and `<guid>` with `postPath`, so an item's guid is the
-post's dated URL (§9).
-
 ---
 
-## 3. The date archives: `/yyyy`, `/yyyy/mm`, `/yyyy/mm/dd`
+## 3. The date archives, the author pages and the feed
+
+Beside the landing page and the pages after it (§6), three surfaces list posts: the date
+archives, an author's page and the RSS feed. Each lists only public posts, newest first (§5).
+
+### The date archives: `/yyyy`, `/yyyy/mm`, `/yyyy/mm/dd`
 
 The three prefixes of a post's URL are pages. Each lists the posts published in that UTC
 range, newest first (§5), under a breadcrumb of the levels above it: "All posts", the year,
@@ -322,6 +504,48 @@ day's archive, and the full timestamp as a native `title` tooltip.
   `/…/15` for a western reader. Its job is to explain the date shown, not contradict it. A
   local time, if one is ever wanted, is a second element (`LocalTime`), not a change to this
   one.
+
+### The author pages: `/authors/[slug]`
+
+An author's page (`src/app/authors/[slug]/page.tsx`) shows their avatar at 64px (PLAN.md
+§17n), their name, and every public post with them on its byline, in `PostListing`. Its tab
+title is `@<name>`. Every user who isn't deleted has one, whatever their role. Without public
+posts it says "No published posts yet."
+
+- **Every byline links here.** `AuthorByline` (`src/components/AuthorByline.tsx`) writes "By
+  A, B — ", each name a link to its page.
+  - The post page, every `PostListing`, search's results and a doc's reading view (without
+    the "By ") all render it, so the format and the links can't drift.
+  - It leaves out an author with no name, rather than render an empty link.
+  - A contributor's card links its name here too (§1).
+- **A byline names accounts, not free text** (PLAN.md §9), which is what gives every name on
+  one a page.
+- **The slug is the user's.** An ADMIN changes it on `/users/[id]/slug`, by the same rules and
+  with the same `SlugManager` as a post's (§2, "Changing a slug"). The history is
+  `UserSlugHistory`, and `changeUserSlug`, `revertUserSlug` and `uniqueUserSlug` are in
+  `src/lib/user-slug.ts`. A new user's slug comes from their name, or from their email's local
+  part when they have none.
+- **An old slug redirects.** When no user has the slug, the page looks it up in
+  `UserSlugHistory` and 308s to that user's current slug. It redirects only to a user who isn't
+  deleted, and its own query says so, since the soft-delete extension doesn't reach a relation
+  filter (PLAN.md §4).
+- **A deleted user's page 404s**, though their name stays on their posts' bylines (§9).
+- **Rendered on every request** (§8), and **not paginated** (§9).
+
+### The feed: `/rss.xml`
+
+`/rss.xml` (`src/app/rss.xml/route.ts`) is an RSS 2.0 feed of the 30 newest public posts, in
+§5's order. The root layout names it in every page's head (`metadata.alternates`), where feed
+readers look for it.
+
+- **An item** is the post's title; its URL from `postPath`, as both `<link>` and `<guid>`, so
+  the guid is the dated URL (§9); its `publishedAt`; and as its description, the body's first
+  300 characters as plain text (`extractText`).
+- **The links are absolute**, built on `APP_URL` (DEPLOY.md), as mailed links are. If it is
+  unset, they fall back to `http://localhost:3000`.
+- **The channel** takes the site's title (`NEXT_PUBLIC_SITE_TITLE`). Its description is a fixed
+  sentence (§9).
+- **Cached for 60 seconds**, and no action refreshes it (§8).
 
 ---
 
@@ -381,7 +605,44 @@ either, since the slug-history redirect keeps old links working (§2).
 
 ---
 
-## 5. One order for every listing
+## 5. Which posts are public, and in what order
+
+### Public means published and due
+
+A post is public when it has a published version and its time has come: `publishEventId` is
+set **and** `publishedAt <= now()`. `publishedPostWhere()` (`src/lib/post-status.ts`) is that
+test as a `where`, and every public query goes through it: `/` and `/page/N`, the post page
+and its redirects, the archives, the author pages, the feed and a post's neighbours.
+`isPostPublic` is the same test on a row already in hand, plus the deletion check that a row
+reached through a relation never had applied (PLAN.md §4).
+
+The test lives in those two helpers so that no call site writes it out. One that tested
+`publishEventId` alone, which a scheduled post already has, would show that post early.
+
+- **No status column, and no sweep.** `derivePostStatus` reads draft, scheduled or published
+  off the same two columns, for display and for the checks that need it, such as whether a
+  post takes comments. A stored status would have to be kept in step by every publish,
+  unpublish and schedule, and a job that flipped it would have to run on time. A comparison
+  at query time is right by construction.
+- **So a scheduled post goes live by itself.** Scheduling sets `publishEventId` at once, as a
+  publish does, with `publishedAt` in the future. The post appears when that time passes, with
+  no action run, which is why nothing revalidates for it (§8). Until then its title and text
+  are already on the row, and on no public page.
+- **"Now" is read on every call.** `publishedPostWhere()` builds its date each time it is
+  called. A constant built at import would freeze "now" in a long-lived server, which would
+  then never see a scheduled post go live (§10).
+- **Unpublishing clears `publishEventId`** and leaves `publishedAt`, which nothing reads while
+  `publishEventId` is null, and which keeps the URL if the post goes back up (§2, "The date is
+  UTC").
+- **A soft-deleted post is left out by the `prisma` client**, not by `publishedPostWhere()`:
+  its extension adds the condition to every top-level read of `Post` (PLAN.md §4).
+- **Combine it with another `publishedAt` condition through `AND`**, never by spreading it, or
+  the second condition replaces its "not in the future" (§3, "Only posts already live").
+- **`readablePostWhere` is a read rule, not a publication rule.** It adds the unpublished posts
+  a signed-in viewer may edit, for surfaces that are the viewer's own already, such as
+  `/tag/[slug]` and `/search`. Nothing public uses it (docs/PERMISSIONS.md).
+
+### One order for every listing
 
 **Newest first by `publishedAt`, ties broken by `id`**: `postListOrderBy`
 (`src/lib/post-pages.ts`).
@@ -521,9 +782,9 @@ finds the two whose links went stale. A slug change also refreshes the page at t
 - **A comment** refreshes only the post's own page among the public ones, since it changes
   nothing a listing shows. That is why `revalidatePostArchives` is not folded into
   `revalidatePostPage`.
-- **The contributor actions** (being listed, the order, the blurb, ORCID and website), both
-  self-service (`src/app/actions/contributor.ts`) and admin (`src/app/actions/users.ts`),
-  refresh `/` inline.
+- **The contributor actions** (being listed or leaving, the order, the blurb, ORCID, the
+  website and the photo), both self-service (`src/app/actions/contributor.ts`) and admin
+  (`src/app/actions/users.ts`), refresh `/` inline (§1, "Contributors").
 
 **What no action refreshes.** These wait out the 60 seconds:
 
@@ -562,14 +823,38 @@ it can be pushed, not what the content is.
 - **The banner has no admin surface.** It is environment and a file on disk, which is right
   for a self-hosted deployment and wrong once a non-technical editor wants to change it.
   `SiteSettings` is where it would go.
+- **The site's description is fixed.** The feed's channel description, and the meta
+  description of every page that sets none of its own, `/` among them, are one sentence in the
+  code: "A multi-author blog with revisions and quote-anchored comments." It is the same on
+  every deployment. `NEXT_PUBLIC_SITE_TITLE` has no counterpart for it.
 - **The date archives, author pages and tag pages are not paginated.** A year page lists every
   post in it (TODO.md, "Past hobby scale", item 1). `PostPager` takes a page and a count, and
   `postPagePath` is all of it that is tied to `/page/N`, so it could serve them.
 - **An RSS item's guid is its URL.** A slug change, or a reschedule that moves the date, makes
   subscribers' readers show the post again as new.
+- **No "updated" date on a post.** A republished post shows its first go-live date and nothing
+  else (§2, "What the page shows"). Showing when it was last republished would be a decision
+  of its own, separate from the snapshot staying silent about its doc.
 - **No site timezone, and no per-date slugs** (§2).
 - **No keyboard shortcuts** for older and newer.
 - **No series or per-tag neighbours.** Neighbours are chronological across the whole blog.
+- **A deleted user stays on bylines.** Soft-deleting a user takes them off the contributor
+  list and 404s their author page, but a byline loads its users through an `include`, which
+  the soft-delete extension doesn't filter (PLAN.md §4). So their name stays on their posts,
+  linking to a page that 404s. Whether a deleted account keeps its credit, and where its name
+  should then link, is undecided.
+- **Only a listed contributor can set a photo.** The upload is in the contributor panel (§1),
+  so an author who isn't listed shows initials on their author page with no way to change
+  them, and an ADMIN can't upload for anyone (PLAN.md §17n). Name, initials and colour are the
+  user's own to change on `/dashboard` (docs/DASHBOARD.md, "Settings"). The slug and the role
+  are ADMIN-only.
+- **A blurb has no history and no concurrent editing.** That is the decision in §1, "The
+  blurb", working as intended, but a mistaken save can't be recovered, and two open tabs are
+  last-write-wins. If a blurb ever needs either, the ydoc stack is where it goes, and the four
+  additions that section lists are the cost.
+- **Being listed doesn't follow publishing.** An author's first published post doesn't put
+  them on the front page (§1, "Who is listed"). Whether `/users` should hint at a published
+  author who isn't listed is unresolved.
 - **`scripts/seed-sample-data.ts` creates no `FRONT PAGE` doc.** `scripts/seed-front-page.ts`
   is how to get one. Adding one to `SAMPLE_DOCS` has a catch: the script's safety check
   compares the number of docs with `SAMPLE_DOCS.length`, and that count would move by one.
@@ -587,6 +872,9 @@ it can be pushed, not what the content is.
   - the archives' half-open ranges.
 - **`src/lib/post-pages.test.ts`** covers `parsePageParam`'s rejections, the page count's
   rounding and floor, and page 1's path.
+- **`src/lib/post-status.test.ts`** covers `derivePostStatus`'s three states,
+  `publishedPostWhere()` building a fresh date on every call (§5), and the clause
+  `readablePostWhere` gives each role.
 
 **E2e specs:**
 
@@ -596,8 +884,10 @@ it can be pushed, not what the content is.
     `FRONT PAGE` doc already there.
   - Production determinism was judged worth more than test convenience; newest-wins would
     swap which of the two is easy.
-  - The spec's other tests cover the contributor list, its move below the posts under 900px,
-    the dashboard panel's edits reaching `/`, and avatars.
+  - The spec's other tests cover the contributor list, which shows a listed contributor with
+    their ORCID iD and website and leaves out one who isn't; its move below the posts under
+    900px; the dashboard panel's edits reaching `/`, and leaving the list hiding the panel;
+    and the avatar upload.
   - The banner is untested, being environment the suite doesn't control.
 - **`e2e/date-archive.spec.ts`** uses a fixture post dated 2001-02-03, through
   `createTestPost`'s `publishedAt` option, which must be in the past. It finds its post by
@@ -623,5 +913,8 @@ it can be pushed, not what the content is.
 
   Its page checks retry, since another spec's post can move a boundary between two reads.
 
-**Not covered:** the revalidation itself. Fixtures write straight to the database, so the specs
-revalidate through `freshGoto` rather than through the actions.
+**Not covered:**
+
+- the revalidation itself. Fixtures write straight to the database, so the specs revalidate
+  through `freshGoto` rather than through the actions;
+- the author pages and the feed. No spec opens `/authors/…` or `/rss.xml`.

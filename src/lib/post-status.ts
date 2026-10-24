@@ -2,7 +2,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
 import { canEditAnyPost } from "@/lib/role-checks";
 
-// There is no stored status field — see PLAN.md §4/§10/§15. publishEventId is
+// There is no stored status field — see docs/BLOG.md §5. publishEventId is
 // set immediately by both an immediate publish and a scheduled one; whether
 // it's actually live depends purely on comparing publishedAt to now().
 export type PostStatus = "draft" | "scheduled" | "published";

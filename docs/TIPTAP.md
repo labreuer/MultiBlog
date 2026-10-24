@@ -266,7 +266,8 @@ then forgets.
 They are for schemas built **without** StarterKit at all, so nothing is double-registered:
 
 - **`titleExtensions`** (`CollabTitleField.tsx`) — the title editor.
-- **`blurbExtensions`** (`ContributorPanel.tsx`, PLAN.md §17f) — the contributor blurb.
+- **`blurbExtensions`** (`ContributorPanel.tsx`, docs/BLOG.md §1, "The blurb") — the
+  contributor blurb.
 
 Both are constrained to `content: "paragraph"` so a second block is structurally impossible.
 `blurbExtensions` also declares `@tiptap/extension-bold`/`-italic` directly for the same
