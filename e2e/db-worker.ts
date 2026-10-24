@@ -208,6 +208,13 @@ export async function deleteTestUser(email: string): Promise<void> {
     // cascade takes the anchor rows. deleted_by_user_id is SET NULL and
     // needs nothing.
     await prisma.anchoredLink.deleteMany({ where: { createdById: user.id } });
+    // post_author.user_id cascades and post_author.created_user_id is
+    // RESTRICT, and addTestPostAuthor points both at the same user. Which wins
+    // is the order Postgres fires their triggers in, which is the order the
+    // constraints were created in: a database built by the migrations
+    // cascades first, one restored from a dump checks first and refuses. The
+    // rows the cascade would take, deleted first, need neither.
+    await prisma.postAuthor.deleteMany({ where: { userId: user.id } });
   }
   await prisma.user.deleteMany({ where: { email } });
 }
