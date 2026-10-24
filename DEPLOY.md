@@ -396,20 +396,24 @@ a tracked one a `git pull` could revert. Leave it unset to keep the "MultiBlog" 
 Unlike `SITE_BANNER*`, it's `NEXT_PUBLIC_`, so — like `NEXT_PUBLIC_COLLAB_URL` — changing it
 later needs a rebuild (§5 step 7), not just a service restart.
 
-`SITE_BANNER`/`SITE_BANNER_ASPECT`/`SITE_BANNER_ALT` (`src/lib/site-banner.ts`, PLAN.md §17b)
+`SITE_BANNER`/`SITE_BANNER_ASPECT`/`SITE_BANNER_ALT` (`src/lib/site-banner.ts`, docs/BLOG.md §1)
 configure the landing page's banner image — deliberately **bare, not `NEXT_PUBLIC_`**, since
 they're read server-side only. Changing any of them needs a service restart, not a rebuild —
 the opposite of `NEXT_PUBLIC_SITE_TITLE` just above, worth noting since the two otherwise look
 like the same kind of setting. The image itself lives at `/srv/multiblog/public/banner.*`
 (gitignored, same reasoning as `.env`) — swap the file directly on the server; that needs
-neither a restart nor a rebuild, since `public/` is served straight off disk at runtime.
+neither a restart nor a rebuild, since `public/` is served straight off disk at runtime. But
+Next's image optimizer caches the banner by URL for up to four hours, on the server and in
+browsers, so a file swapped under the same name can show the old banner that long. For a
+prompt change, upload it under a new name and point `SITE_BANNER` at it, which is a restart
+(docs/BLOG.md §1).
 `SITE_BANNER_TEXT` sets the banner as words instead — the title in the reading serif, no file
 at all — and takes precedence over `SITE_BANNER` when both are set; `SITE_BANNER_TEXT_SIZE`
 sizes it. Same rule: a restart picks either up. Leave both `SITE_BANNER` and
 `SITE_BANNER_TEXT` unset to show no banner at all.
 
 The landing page's preamble paragraph(s) are separate from all of this — not an env var, but
-the body of whichever `Doc` is titled exactly `FRONT PAGE` (PLAN.md §17c). Seed one after the
+the body of whichever `Doc` is titled exactly `FRONT PAGE` (docs/BLOG.md §1). Seed one after the
 first deploy with `npx tsx scripts/seed-front-page.ts` (create-if-absent, safe to re-run).
 
 `RESEND_API_KEY`/`MAIL_FROM` (`src/lib/mail.ts`) wire real delivery through Resend — reset
@@ -825,7 +829,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 The tar covers whatever lives only on the box's filesystem:
 
 - `.env`
-- `public/banner.*` (the landing-page banner, PLAN.md §17b)
+- `public/banner.*` (the landing-page banner, docs/BLOG.md §1)
 - `site-icons/` (the icon master, docs/FAVICON.md)
 - `.file-storage/`, the uploaded PDFs (see "Uploaded files" below). If `FILE_STORAGE_DIR`
   points elsewhere, put that path in the list instead.

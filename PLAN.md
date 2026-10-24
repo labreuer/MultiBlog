@@ -3376,27 +3376,17 @@ Three of those four are static content the whole world sees identically. The fou
 contributors — is the only one that needed schema, and it brought a self-service editing
 surface with it, which is the substance of this section.
 
+**As built, the landing page itself is [docs/BLOG.md](docs/BLOG.md) §1**: the banner, the
+preamble, the latest posts and the layout, with what refreshes them in §8. Each subsection
+below that moved says where its content lives now. The contributors (§17e–§17i), the build
+order (§17k) and the avatars (§17n–§17o) stay here. The moved text is in the parent of the
+commit that introduced these stubs.
+
 ### 17a. Three constraints that exist before anything is designed
 
-**`/` is genuinely ISR-cached again, and must stay that way.** CACHING.md's 2026-07-20
-entry recorded that `PostEditBadge` forced `auth()` into the home page and silently turned
-a shared static page into a per-request render; §15 deleted that badge, so `page.tsx` now
-has `revalidate = 60` and no viewer-identity read anywhere in its tree. That is a real
-shared cache today, not a vestigial export. **Nothing added here may call `auth()`,
-`cookies()` or `headers()`** — not the contributor list, not the preamble, not the banner.
-
-This constraint is not just a performance note; it decides where the editing UI goes. A
-contributor cannot be offered an inline "edit my entry" affordance on the front page itself,
-because knowing whether to show it means knowing who is looking. The panel therefore lives
-on `/dashboard` (§17g), which already calls `auth()` and is already dynamic — the same
-split CACHING.md's 2026-07-23 entry prescribed and §15 finally made true of this route.
-
-**A doc's prose carries marks the public renderer doesn't know.** `docContentExtensions`
-includes `authorHighlight` and `annotation`; `contentExtensions`, which every public
-surface renders with, does not. The preamble is doc content on a public page, so it needs the
-same strip `postContentFromYdoc` (`src/lib/post-content.ts`, §15b) applies before a post's
-snapshot is written — for exactly the same reason, and it would fail exactly as loudly if
-skipped.
+The first two, that `/` reads no session and that a doc's prose carries marks the public
+renderer doesn't know, are docs/BLOG.md §1, "It reads no session" and "The preamble". The
+third is the contributors':
 
 **`src/lib/prisma.ts`'s soft-delete extension only rewrites a *top-level* `where`.** It
 does not reach a nested relation filter, and it does not exist at all in raw SQL. Neither
@@ -3404,134 +3394,9 @@ of the queries this section adds joins through a relation, so the trap is dodged
 one-time backfill in §17e is raw SQL and spells out both `deleted_by_user_id IS NULL`
 checks by hand for precisely this reason.
 
-### 17b. The banner: env-configured, gitignored, and deliberately not `NEXT_PUBLIC_`
-
-The image is deployment content, not repository content — the same argument
-`NEXT_PUBLIC_SITE_TITLE` already won (`src/lib/site-config.ts`): a real deployment's
-identity should live somewhere `git pull` cannot revert. So the *path* comes from the
-environment and the *file* is gitignored:
-
-```
-SITE_BANNER="/banner.png"
-SITE_BANNER_ASPECT="4724 / 1609"     # optional — defaults to 3 / 1
-SITE_BANNER_ALT=""                   # optional — empty is correct for a decorative banner
-```
-
-with `/public/banner.*` added to `.gitignore`.
-
-**A new module, `src/lib/site-banner.ts`, rather than three more lines in
-`site-config.ts`.** `SiteHeader.tsx` imports `site-config.ts` and is a `"use client"`
-component, which is the whole reason `SITE_TITLE` is `NEXT_PUBLIC_`-prefixed — only those
-are inlined into the browser bundle. A bare `process.env.SITE_BANNER` added to that module
-would read `undefined` in the browser and quietly resolve to the fallback, a footgun that
-only bites whoever next imports the constant from a client component. Keeping the
-server-only values in their own file makes "this is never readable from the client" a
-property of the module rather than a comment on a line.
-
-**Bare, not `NEXT_PUBLIC_`, is also the better operational answer.** DEPLOY.md §4 warns
-that every `NEXT_PUBLIC_` var is baked in at `npm run build` and changing one needs a
-rebuild. These are read server-side only, so changing them needs a service restart and
-nothing more — and swapping the *image file* needs neither, since `public/` is served from
-the project directory at runtime. Dropping a new `banner.png` on the server is a `scp` and
-a cache expiry.
-
-**`next/image`, not `<img>`.** The file this was built against is 4724 × 1609; serving that
-unresized to every visitor is indefensible when the optimizer is already there. `sharp@0.35.3`
-resolves under `next@16.2.11` without being a direct dependency, so production optimization
-works as-is. The image renders `fill` inside a wrapper carrying `aspect-ratio` as an inline
-style — a genuinely per-deployment value, which is STYLE.md's stated bar for inline over
-CSS Modules — with `object-fit: cover` and `priority` (it is the LCP element).
-
-**A text banner in lieu of the image.** `SITE_BANNER_TEXT` sets the banner as words — the
-title centred in the reading serif (STYLE.md's Typography), at `SITE_BANNER_TEXT_SIZE`
-(default `72px`) — for a deployment with no image to show. It is the page's `<h1>`, since
-unlike the decorative image it *is* the page's name. When both are set the text wins:
-switching an instance from image to text is then one added line, not an edit and a removal.
-The size reaches CSS as an inline custom property, the same per-deployment bar the aspect
-ratio meets, and `page.module.css` caps it at `10vw` with `text-wrap: balance`, so a title
-that fits a desktop row at 72px still fits a phone, wrapping into even lines once the cap
-bites.
-
-Unset `SITE_BANNER` and `SITE_BANNER_TEXT` render nothing at all and the page degrades to
-preamble + posts + contributors. A *set* variable pointing at a missing file is left to 404 rather than
-detected and hidden: that is a deployment error, and failing visibly is the point.
-
-### 17c. The preamble: a doc found by title
-
-The preamble is the body of the doc titled **`FRONT PAGE`**. `src/lib/front-page.ts` owns
-the lookup:
-
-```ts
-export const FRONT_PAGE_DOC_TITLE = "FRONT PAGE";
-// getFrontPagePreamble():
-// findFirst({ where: { title: { equals: FRONT_PAGE_DOC_TITLE, mode: "insensitive" } },
-//             orderBy: { createdAt: "asc" },
-//             select: { proseJson: true } })
-```
-
-**"Preamble", not "blurb", and the distinction is load-bearing.** §17f gives a contributor
-their own short rich-text field, and calling both of them a blurb would collapse two
-genuinely different mechanisms into one word: this one is a *doc* — ydoc-backed, collab-
-edited, multi-author, arriving through the debounce-written `prose_json` cache and therefore
-eventually consistent (§17j) — while `contributor_blurb` is a plain `User` column written by
-a server action in the web process and live immediately. Nearly every design difference
-between the two follows from that split, so the vocabulary should make it hard to conflate
-them rather than easy. "Preamble" also carries no implication of brevity, which "blurb"
-does and which is wrong here: this is a whole doc, and it can be several paragraphs.
-Identifiers follow the prose — `getFrontPagePreamble`, `.preamble` — with `FRONT PAGE`
-staying the doc's literal title, since that is a user-facing string an editor types.
-
-**Only `proseJson` is selected, which is what makes "don't show the title" structural
-rather than a rule someone has to remember.** The title is the *selector*; it never reaches
-the render because it is never read.
-
-**First-created wins.** `Doc.title` has no unique constraint and never will — it is a cache
-of the ydoc's title fragment (§12d), written by the collab server, and two docs can trivially
-end up with the same one. `orderBy: { createdAt: "asc" }` makes a second `FRONT PAGE` doc
-inert rather than letting the front page flip between two preambles depending on which row
-Postgres happened to return. The trade-off is that it also makes the preamble awkward to
-test in isolation — see §17m.
-
-**Visibility is deliberately not consulted.** The obvious instinct is to require
-`DocVisibility.SHARED`, and it is wrong: §12e defines `SHARED` as "anyone with
-`canViewDocs`", which is a role gate, not the public. Requiring it would attach a meaning to
-that enum value it does not have, and would leave a `SHARED` doc looking world-readable in
-the admin UI when it isn't. The title *is* the switch — one mechanism, stated once. A doc's
-`visibility` continues to govern `/doc/<slug>` exactly as before; what changes is that a
-doc named `FRONT PAGE` also has its body published anonymously, which is the section every
-future reader of this repo needs to have read.
-
-Rendering is `renderToReactElement({ content, extensions: contentExtensions })` inside
-`proseStyles.prose`, over content passed through
-`stripMarksFromDoc(json, ["authorHighlight", "annotation"])` — §17a's second constraint.
-
-`proseJson === null` (a doc created but never edited, so the store debounce has never
-fired) omits the preamble rather than falling back to decoding the ydoc the way
-`/doc/[slug]/page.tsx` does. That fallback costs a row read and a Yjs decode on a
-statically-generated page, to cover a state that resolves itself the moment anyone types a
-character.
-
-**Seeding.** `scripts/seed-front-page.ts` creates the doc if and only if one doesn't already
-exist, and never clears anything — deliberately *not* folded into
-`scripts/seed-sample-data.ts` as the primary path, because that script empties the content
-tables wholesale and is not something to point at a database with real content in it. It
-copies that script's mechanics rather than reinventing them: the ydoc row is created
-eagerly (§12b), and the title is seeded into the **title fragment** as well as the column,
-or `server/doc-cache.ts` writes an empty title straight over it on first flush. Adding the
-same doc to `SAMPLE_DOCS` for freshly rebuilt databases is a one-line follow-up, noting that
-its guard compares against `SAMPLE_DOCS.length` and that count shifts by one.
-
-### 17d. The latest posts
-
-Unchanged markup — the `padding: 1.5rem 0; border-bottom: 1px solid #eee` article block
-STYLE.md documents as repeated across home, author and search listings — plus `take: 10`,
-where the query is currently unbounded.
-
-That bound had no escape hatch when this was built: `/posts` is the admin table, and there
-was no public archive route, so the eleventh-newest post was reachable only by search, RSS,
-or a direct link. §21h's date archives (2026-09-15) are that route — every byline date links
-to its day, and the day to its month and year — though the landing page itself still links
-to no "older posts" (TODO.md).
+### 17b. The banner: env-configured, gitignored, and deliberately not `NEXT_PUBLIC_` — docs/BLOG.md §1, "The banner"
+### 17c. The preamble: a doc found by title — docs/BLOG.md §1, "The preamble"
+### 17d. The latest posts — docs/BLOG.md §1, "The latest posts", and §5–§6
 
 ### 17e. Contributors: three new `User` columns, and what they replace
 
@@ -3785,27 +3650,7 @@ and an admin blurb editor, if one is ever wanted, shares §17f's `pmBlurbSchema`
 for the same reason. `updateUserIsListedContributor` is the **only** code path that sets
 that flag true.
 
-### 17j. Cache invalidation, and the one thing that can't be pushed
-
-`revalidatePublicPaths` (CACHING.md, 2026-07-23) already revalidates `/` on publish and
-unpublish, so the post list is covered. Every action in §17g and §17i adds
-`revalidatePath("/")` to whatever it already revalidates, so contributor edits land
-immediately.
-
-**Preamble edits cannot be pushed.** `Doc.prose_json` is written by the collab server's
-debounce (`server/doc-cache.ts`) — a *different process*, with no access to Next's
-`revalidatePath`. An edit to the `FRONT PAGE` doc therefore reaches the public page after
-the store debounce plus up to 60s of ISR. A webhook from collab into the web app would close
-that, and is not worth a cross-process dependency for a preamble that changes a few times a
-year.
-
-The contrast with `contributor_blurb` is the whole of §17f's argument in one line, and the
-reason §17c insists the two have different names: same kind of content, same TipTap JSON,
-but written by a server action in *this* process, so it revalidates inline and is live
-immediately. Which process owns the write is what decides this, not what the content is.
-
-CACHING.md's 2026-07-24 finding — that `revalidatePath` reaches the server's Full Route
-Cache but not a browser's own `s-maxage` copy — applies here unchanged.
+### 17j. Cache invalidation, and the one thing that can't be pushed — docs/BLOG.md §8
 
 ### 17k. Build order
 
@@ -3830,24 +3675,13 @@ Cache but not a browser's own `s-maxage` copy — applies here unchanged.
 Steps 1–5 are the landing page and stand alone; 6–7 are the editing surfaces and can land
 separately if the branch wants splitting.
 
-### 17l. Layout, and a third column width
-
-```css
-.layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px;
-          gap: 2.5rem; max-width: 1040px; margin: 0 auto; }
-@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
-```
-
-Contributors are second in DOM order, so the narrow case needs no `order` juggling — the
-aside simply flows below the posts, which is the requested behaviour and also the correct
-reading order.
-
-1040px is a **third** centered-column width alongside the 680px (listings) and 800px
-(full-text) STYLE.md documents. It is not a drift: the main column inside it stays at
-roughly 680px and the extra width is the sidebar plus its gap. STYLE.md gets a line saying
-so, since the next person to add a page will otherwise read three widths as three accidents.
+### 17l. Layout, and a third column width — docs/BLOG.md §1, "Layout"
 
 ### 17m. Known gaps
+
+The landing page's own gaps are docs/BLOG.md's: the banner's missing admin surface is §9,
+the preamble under test §10, and the missing "older posts" link is closed by `/page/N` (§6).
+The contributors' stay here:
 
 - **A contributor blurb has no history and no concurrent editing.** That is §17f's decision
   working as intended, not an oversight, but it does mean a mis-save is unrecoverable — no
@@ -3855,24 +3689,12 @@ so, since the next person to add a page will otherwise read three widths as thre
   contributor has their dashboard open in two tabs. Acceptable for one line owned by one
   person; the moment a blurb wants either property, §11's stack is what it should move onto,
   and the four integration points §17f lists are the actual cost of that move.
-- **The preamble is awkward to assert on in isolation.** §17c's first-created-wins tie-break
-  means a spec that creates its own `FRONT PAGE` doc loses to any pre-existing one — the
-  same class of problem the column-order spec hit against the site-wide default. The spec
-  therefore asserts that *a* preamble renders and that the literal string `FRONT PAGE` does
-  **not** appear anywhere on the page, rather than asserting on specific preamble text.
-  Production determinism was judged worth more than test convenience; reversing the tie-break
-  to newest-wins would swap which of the two is easy.
-- **No "older posts" link.** §17d's `take: 10` still has nothing on the landing page to
-  link to, though §21h's date archives (2026-09-15) now exist for it to link to.
 - **No self-service profile page.** `/dashboard`'s panel edits the contributor-facing
   fields only; name, slug, color and role remain admin-only, and a user who is not a listed
   contributor has no self-service surface at all.
 - **Contributor membership does not follow publishing.** §17e's explicit flag means an
   author's first published post does not add them to the front page. Whether that ought to
   be a nudge on `/users` (a "published, not listed" hint) or left alone is unresolved.
-- **The banner has no admin surface.** It is env plus a file on disk, which is right for a
-  self-hosted single deployment and wrong the moment a non-technical editor wants to change
-  it. `SiteSettings` is where that would go if it ever matters.
 
 ### 17n. Avatars move off remote URLs and into Postgres
 
@@ -5376,321 +5198,21 @@ and its six steps are in the commit messages.
 
 ## 21. Dated post URLs (`/yyyy/mm/dd/slug`)
 
-A published post lives at `/[slug]` — a flat, top-level namespace. This section
-moves it to `/yyyy/mm/dd/slug`.
+Built 2026-09-15: a published post moved from `/[slug]` to `/yyyy/mm/dd/slug`, and the URL's
+three prefixes became date archives (§21h). The links between a post's pages (§21i) followed
+on 2026-09-16. **As built: [docs/BLOG.md](docs/BLOG.md) §2–§4.** Each subsection below says
+where its content lives now. The plan text is in the parent of the commit that introduced
+this stub.
 
-**Built 2026-09-15**, as designed, with these deviations from the sections below —
-each a place where the tree had moved on since this was drafted (2026-08-05, before §20
-landed), not a change of mind:
-
-- **`src/lib/post-path.ts`** is the one module (§21b), browser-safe so `PostsTable` can use
-  it; it also owns `postDateLabel` (the byline, `yyyy-mm-dd`, from the same UTC parts as the
-  URL) and `parsePostDateSegments` (§21a's shape gate, with a unit test for its rejection
-  surface — a real calendar date, zero-padded, or nothing). The server half is
-  `src/lib/revalidate-post.ts`: `revalidatePostPage` takes `{ slug, publishedAt }` and is a
-  no-op for a draft, so every action can call it without first asking whether the post has a
-  page. `postPath` itself throws on a null `publishedAt` rather than inventing a path.
-- **§21e undercounted.** URL construction was six sites, not three — `/authors/[slug]` and
-  the two §20 sites (`pathForTarget` in `actions/tags.ts`, `listPosts` in `tag-browse.ts`).
-  `revalidatePath` was seven — `updatePostSlug` and `revertPostSlug` each invalidate the old
-  and new slug's page too. And `toLocaleDateString()` on `publishedAt` was in four Server
-  Components (post page, landing, author page, search), so all four now render
-  `postDateLabel`; otherwise the landing list would say the 4th beside a link to `/…/05/…`.
-  The e2e change touched 18 `goto` sites across six specs, not ~13 across three.
-- **`revalidatePublicPaths` is handed the post-publish `publishedAt`**, not the pre-update
-  row: a first publish is the moment the path comes into existence, and the pre-update row
-  has no date to name it with.
-- **§21d: `RESERVED_SLUGS` is gone, not corrected.** `file-slug.ts` and `tag-slug.ts` imported
-  it too, and their own comments already said the reservation was about posts; with posts
-  four segments deep, no consumer had a reason left. The `-post`/`-doc`/`-file`/`-tag`
-  fallbacks and the four `changeXSlug` throws went with it; `slug.ts` keeps a note saying why
-  there is no list.
-- **§21f.1 resolved as "accept that the URL moves"** — nothing links in, and the canonical
-  redirect covers a stale tab. The redirect and the `PostSlugHistory` fallback are one code
-  path (§21f.3): match on slug alone, ignore the date the URL arrived with, redirect to
-  `postPath(post)`. `generateMetadata` runs the same shape gate and the same canonical check,
-  since it queries too.
-- **`/post/[id]/slug` gives `SlugManager` the date path as `urlPrefix`** — a scheduled post
-  shows the path it will have when it goes live; a draft gets the literal `/yyyy/mm/dd` as a
-  placeholder, since `""` would render a URL the site no longer serves.
-- **e2e:** `TestPost.path` (null for a draft) replaces hand-built URLs, and the published
-  fixtures are typed `PublishedTestPost` so `path` is a string there. `publish.spec.ts`'s
-  draft flows read the path back through a new `getPostPath(postId)` worker handler after the
-  browser publishes — never "today", which crosses midnight in UTC eventually.
-
-**Nothing needs preserving.** No URL from this app has been published anywhere,
-so there is no external link, bookmark, feed entry or search index to keep
-working. That removes what would normally be the expensive half of this change
-and is worth stating explicitly, because most of the design below would be
-different if it weren't true — in particular there is no need for the flat
-`/[slug]` route to survive as a redirect shim.
-
-### 21a. What actually moves
-
-```
-src/app/[slug]/            →  src/app/[year]/[month]/[day]/[slug]/
-  page.tsx                      the same file, reading four params
-  page.module.css               unchanged
-```
-
-`generateStaticParams` returns `{ year, month, day, slug }` instead of
-`{ slug }`. `revalidate = 60` carries over, and so does the constraint that
-makes it meaningful: this route must not call `auth()`/`cookies()`/`headers()`,
-or — because it *does* have `generateStaticParams` — it throws
-`DYNAMIC_SERVER_USAGE` at build rather than degrading to per-request rendering
-(CACHING.md's 2026-07-23 entry, which is the production crash that taught this).
-
-**No route collisions, and not by luck.** Next resolves a static segment ahead
-of a dynamic one at the same position, so every existing route still wins over
-`/[year]/…`: `/post/…`, `/posts/…`, `/api/…`, `/authors/…`, `/doc/…`. The deepest routes
-in the app are already four segments (`post/[id]/history/[eventId]`,
-`api/avatar/[userId]/[hash]`) and both lead with a static segment, so neither is
-shadowed.
-
-The corollary is that `/[year]/[month]/[day]/[slug]` matches **any** four-segment
-path that isn't claimed by something static — `/a/b/c/d` included. The handler
-therefore has to validate the shape (four digits, two digits, two digits) and
-404 before touching the database, or every garbage four-segment URL costs a
-query.
-
-### 21b. Which date, and in which timezone
-
-**The date is `Post.publishedAt`, and the hard half of keeping it stable is
-already built.** `publishPostFromDoc` (`src/app/actions/posts.ts`) pins it
-across an unpublish/republish:
-
-```ts
-const publishedAt = post.publishedAt && post.publishedAt <= now ? post.publishedAt : now;
-```
-
-and `schedulePostFromDoc` refuses to run while a post is actually live, so a
-live post's date cannot be pushed forward. `unpublishPost` leaves `publishedAt`
-untouched — the comment there already calls it inert. A post that goes live,
-comes down, and goes back up keeps its original URL without anything new being
-written for this section.
-
-**Timezone is the trap, and it is not cosmetic.** `publishedAt` is a
-`timestamp(3)` stored in UTC, but the byline currently renders it with
-`toLocaleDateString()` — *server* local time. If the URL derived from local time
-too, then:
-
-- deploying to a box in a different timezone silently moves the canonical URL of
-  every post published near midnight, with no migration and no error; and
-- `generateStaticParams` (build machine) could disagree with the request handler
-  (runtime) about what a post's path is, which presents as a 404 on a page that
-  demonstrably exists.
-
-So the URL is derived in **UTC, always**. That leaves one visible seam: a post
-published at 21:00 EDT is the 5th in UTC while the byline says the 4th. The fix
-is not to special-case the byline but to make both read from one helper, so they
-cannot disagree:
-
-```ts
-// src/lib/post-path.ts — the single place the post URL shape is written down,
-// the same "one module owns the URL" pattern as src/lib/avatar-url.ts (§17n).
-export function postDateParts(publishedAt: Date): { year: string; month: string; day: string };
-export function postPath(post: { slug: string; publishedAt: Date }): string;
-```
-
-The byline switches to `postDateParts` too. Displaying a UTC date under a UTC
-URL is a real (small) behavior change for readers in western timezones, and is
-the price of a URL that doesn't depend on where the server is.
-
-A **site timezone** setting was considered and rejected for now: it turns a
-derived value into configuration, and configuration that silently rewrites
-every canonical URL when changed is worse than a fixed rule. If it is ever
-wanted, `postDateParts` is the one function it has to reach.
-
-### 21c. Slug uniqueness stays global (for now)
-
-Dated paths make it *possible* to scope slug uniqueness per date, so
-`/2025/01/01/new-year` and `/2026/01/01/new-year` could both keep the clean
-slug. That is genuinely the appeal of dated permalinks — and it is deliberately
-**not** part of this change.
-
-Keeping `Post.slug @unique` global means every piece of existing slug machinery
-survives untouched: `postSlugInUse`, `changePostSlug`, `revertPostSlug`,
-`PostSlugHistory.slug @unique`, `SlugManager`, and the whole
-`REVERT_DISCARD_WINDOW_MS` rule. Going per-date means a composite unique
-constraint, a rewritten `postSlugInUse`, dropping the unique on the history
-table, and rethinking what a history row means when a slug is only unique within
-a day. That is a second change wearing the first one's clothes.
-
-The cost of deferring is that a repeated title still gets a `-2` suffix even
-though the dates would have disambiguated it. That is a cosmetic wart on a rare
-case, and the migration to per-date uniqueness stays available afterwards.
-
-### 21d. What this deletes
-
-`RESERVED_SLUGS` (`src/lib/slug.ts`) exists for exactly one reason: `/[slug]` is
-a top-level catch-all, so a post slugged `posts` or `api` would be shadowed by
-the static route and never resolve. Move posts four segments deep and **that
-entire class of constraint stops existing for posts** — the guard drops out of
-both `uniquePostSlug` and `changePostSlug`, and a post may legitimately be
-slugged `docs`.
-
-It does not become dead code, though, and the file's own comment is wrong about
-why. `src/lib/doc-slug.ts` also imports `RESERVED_SLUGS`, while `slug.ts`'s
-header claims it is "only relevant to post-slug.ts today". Docs live at
-`/doc/[slug]` — nested, with no sibling static routes — so that use looks
-already unnecessary, on the same reasoning the comment gives for author slugs.
-Resolving that (either drop it from `doc-slug.ts` as well, or correct the
-comment) belongs in this pass rather than being inherited as a contradiction
-nobody wants to be the one to touch.
-
-### 21e. Blast radius
-
-Every call site funnels through `postPath`, so the churn is mechanical rather
-than delicate. The list is exhaustive as of 2026-08-05, when this section was first drafted:
-
-- **URL construction — 3 sites.** `src/app/page.tsx` (landing list),
-  `src/app/search/page.tsx`, `src/components/PostsTable.tsx` (the published-date
-  cell links to the public page).
-- **`revalidatePath` — 5 sites.** `src/app/actions/posts.ts` ×3,
-  `src/app/actions/comments.ts` ×2. These are the ones that need more than a
-  find-and-replace: they currently have only `slug` in hand, so
-  `revalidatePublicPaths(postId, slug)` and both comment actions have to fetch
-  `publishedAt` as well.
-- **RSS.** `src/app/rss.xml/route.ts`'s `<link>` and `<guid>`. Changing a `guid`
-  normally re-shows every item in subscribers' readers; here there are no
-  subscribers, which is the whole reason this is cheap to do now rather than
-  later.
-- **`SlugManager` needs no change at all.** It already takes a `urlPrefix` prop
-  (`""` for posts, `/doc` for docs, `/authors` for users) — the prefix simply
-  becomes the post's date path, supplied by `src/app/post/[id]/slug/page.tsx`.
-- **The route handler** gains segment validation and a canonical redirect: right
-  slug, wrong date → `permanentRedirect` to the real path, reusing the shape of
-  the existing `resolveRedirectSlug` fallback rather than a second mechanism.
-- **e2e — ~13 `page.goto()` sites** across `moderation.spec.ts`,
-  `publish.spec.ts` and `quote-anchoring.spec.ts`. The clean fix is to expose
-  `path` on the `TestPost` fixture (`e2e/db-worker.ts`) so specs stop building
-  URLs by hand — after which most of the diff is `post.slug` → `post.path`.
-
-### 21f. Edge cases to settle before building
-
-1. **Unpublish, then schedule for a future date.** The one path that moves a
-   previously-live post's URL, since `publishedAt` is overwritten with the new
-   `scheduledFor`. Either forbid scheduling a post that has ever been live, or
-   accept that the URL moves. Accepting it is fine today (nothing links in) and
-   the canonical redirect in §21e covers a reader who kept the old tab open.
-2. **Drafts and scheduled posts have no `publishedAt`,** so they have no path at
-   all — which matches the current behavior of 404ing at `/[slug]`. It is not a
-   regression, but `publish.spec.ts` asserts against a draft's URL and therefore
-   needs reshaping rather than a mechanical rename.
-3. **`PostSlugHistory` narrows in meaning.** It records slug changes; a stale
-   *date* is a different kind of miss. Matching on slug alone and ignoring the
-   date segments handles both with one lookup, which is why the canonical
-   redirect and the history fallback should be the same code path.
-
-### 21g. Sizing
-
-Roughly half a day: one new lib module, one route directory move, ~10 mechanical
-call-site edits, the e2e fixture change, and the `RESERVED_SLUGS` cleanup.
-
-**No database migration.** The date is derived from `publishedAt`, which already
-exists and is already stabilized across republish (§21b); slug uniqueness is
-unchanged (§21c). A stored path column was considered and rejected — it would
-freeze the URL against a later edit of `publishedAt`, but it also introduces a
-second source of truth for something the existing publish logic already keeps
-still.
-
-### 21h. Date archives: `/yyyy`, `/yyyy/mm`, `/yyyy/mm/dd`
-
-**Built 2026-09-15.** The three prefixes of a post's URL are pages: each lists the posts
-published in that UTC range, newest first, in the same preview block as the landing page. "URL
-hacking" — trimming segments off a post's address — lands somewhere sensible, and the
-byline's date on every surface is a link to its day, so a reader can climb from any post
-to its day, month and year. That is also the public archive §17d and §17m recorded as
-missing: the landing page still shows ten posts and links to no "older", but every post
-now leads to the archives and the archives lead to every post.
-
-**Routing.** `src/app/[year]/page.tsx`, `[year]/[month]/page.tsx` and
-`[year]/[month]/[day]/page.tsx` are one-line wrappers over `src/app/[year]/post-archive.tsx`;
-each carries its own `revalidate = 60` because Next reads segment config from the page
-file, not from what it imports. A static segment still beats a dynamic one at every
-position, so nothing existing is shadowed — but `/[year]` now matches **every** one-segment
-path nothing static claims (`/tag` and `/doc` have no `page.tsx` of their own; a stray
-`/favicon.ico` request that misses `public/`), and its children every two- and
-three-segment one. So `parsePostDatePrefix` (`src/lib/post-path.ts`) runs before the first
-query, the same rule as §21a one level up, and its rejection surface has a unit test. It
-returns a half-open UTC range as well as the label and path, so the date arithmetic — a
-February prefix is `[Feb 1, Mar 1)`, December's `end` is next January — lives in one
-function rather than three route files. A well-formed date with nothing in it is a page
-(200, "No posts published in …"), never a 404; only a malformed one 404s.
-
-**Trailing slashes cost nothing.** `next.config.ts` sets neither `trailingSlash` nor
-`skipTrailingSlashRedirect`, so Next's default 308s `/2026/09/` to `/2026/09` before any
-route runs. Measured on the dev server before building, and asserted by the spec.
-
-**Caching.** ISR with no `generateStaticParams`: a prefix renders on first request and is
-served from the Full Route Cache for 60s after. `revalidatePostArchives`
-(`src/lib/revalidate-post.ts`) invalidates a post's three prefixes and is called from the
-same places that revalidate `/` — `revalidatePublicPaths` on publish and unpublish, and now
-the two slug-change actions, which previously revalidated only the two post pages and left
-every listing to `PostSlugHistory`'s 301. It is deliberately *not* folded into
-`revalidatePostPage`: a comment changes the post's page and nothing a listing shows.
-Same constraint as §21a — no `auth()`/`cookies()`/`headers()` in the render path.
-
-**The listing became a component.** `src/components/PostListing.tsx` is the preview block
-STYLE.md used to describe as "repeated verbatim across home, author, and search listings";
-the archive would have been the fourth copy. It exports `postListingInclude`, which the
-four `findMany`s spread into `include:` so the query and the component's props can't
-drift, and the author page — which had no byline before — now shows one, so a co-authored
-post names its other authors there too. `src/components/PostDate.tsx` is the byline's date:
-label, link to `/yyyy/mm/dd`, and the full timestamp as a native `title` tooltip.
-
-**The tooltip is UTC, and so is everything else on that line.** `postDateTimeLabel` slices
-the ISO string (`2026-09-15 21:03:47 UTC`), no `Intl`, rendered once on the server into ISR
-output. The reader's own zone was considered and not used: the label and the URL are UTC
-by §21b, so a local-time tooltip would say the 14th under a link to `/…/15/…` for a
-western reader — the tooltip's job is to explain the date shown, not to contradict it. If
-a local time is ever wanted it is a second element (`LocalTime`, client-side), not a
-change to this one.
-
-**e2e:** `e2e/date-archive.spec.ts`, over a fixture post dated 2001-02-03 — far enough back
-that no other spec's "published now" post shares the year. `createTestPost` grew a
-`publishedAt` option (ISO string, must be past) for it.
-
-### 21i. Getting between a post's pages
-
-**Built 2026-09-16.** A post has three pages — its doc (`/doc/[slug]`), its editor
-(`/post/[id]/edit`, §3d) and its public URL (§21). Three links tie them together, chosen so the
-public page still looks, to a logged-in author, like it does to everyone else:
-
-- **The public page carries one link.** `PostEditLink` renders `· configure post` after the byline's
-  date, linking to the editor, for a viewer who may edit the post — ADMIN/EDITOR, or an
-  AUTHOR on the byline, mirroring `canUserEditPost` as an affordance while the route keeps
-  the gate. It is a client island reading `useSession()` (the `TagStrip` shape), which is
-  what lets the page keep `generateStaticParams` and `revalidate` (§12f): SSR emits nothing,
-  so a signed-out reader's HTML is unchanged, and the link appears after hydration at the end
-  of the line where it reflows nothing. In the ordinary link color, not the byline's — it
-  is a control, and the one thing on that line that is. The byline's author ids ride along as a prop for the AUTHOR case; the
-  session has no slug to match on instead. Alternatives weighed and not built: the title as
-  the edit link (as `DocView` does — a whole `<h1>` island, and link styling on the title for
-  authors); a slot in `SiteHeader` (the header sits above the page in the root layout and has
-  no way to learn the post id short of a store); a keyboard shortcut alone (undiscoverable).
-- **The editor links out to the live post.** `PostPublisher`'s "Published <date>" is a link
-  to `postPath`, which is why the page passes it the slug, followed by "(publication
-  history)"; "From doc: <title>" links to the doc editor.
-- **The doc's byline names its posts.** `DocPostsLine` is the post line in `/doc/[slug]`'s
-  byline. With no post it *is* the "Publish as blog post" button (§15d); with posts it lists
-  them, `|`-separated: "Published on
-  <yyyy-mm-dd>" linking to the public URL plus "(configure)" to the editor; "Scheduled for
-  <UTC timestamp> (in N days, N hours, N minutes)" linking to the editor; and — a judgment
-  call beyond the ask — "Draft (configure)" for a post row that exists but was never
-  published, since a row the button would only duplicate needs somewhere to be found from.
-  "as <post title>" is added whenever `Post.title` has diverged from the doc's. Shown under
-  the same `canEdit` gate the button had: a schedule is not public information. Dates are
-  UTC by §21b's rule, sliced from the ISO string and rendered once on the server; the
-  countdown (`src/lib/duration.ts`) is computed at request time on this per-viewer dynamic
-  page and simply goes stale if a tab sits, which a reload fixes. The doc page's select
-  includes a `posts` relation, filtered on `deletedByUserId` by hand because `resolveDocParam`
-  reads through `prismaIncludingDeleted`. `e2e/publish.spec.ts` drives all three entry
-  kinds and both link surfaces.
-
-Not built: a bare `/post/[id]` page. §3d's rule stands — no `/post/[id]` page reads a post —
-and the slug-history redirect already keeps old public links alive. Every "configure" link
-above goes to `/post/[id]/edit`.
+### 21a. What actually moves — docs/BLOG.md §2, "The route"
+### 21b. Which date, and in which timezone — docs/BLOG.md §2, "The date is UTC"
+### 21c. Slug uniqueness stays global (for now) — docs/BLOG.md §2, "Slugs are unique across the blog"
+### 21d. What this deletes — docs/BLOG.md §2, "Slugs are unique across the blog" ("No slug is reserved")
+### 21e. Blast radius — what it decided is docs/BLOG.md §2 ("Redirects", the `SlugManager` prefix, "RSS"); its call-site counts are deleted, and are in the commit that built it
+### 21f. Edge cases to settle before building — docs/BLOG.md §2, "Redirects: an old slug or a stale date" (21f.1, 21f.3) and "The route" (21f.2)
+### 21g. Sizing — deleted; its one decision is docs/BLOG.md §2, "No stored path"
+### 21h. Date archives: `/yyyy`, `/yyyy/mm`, `/yyyy/mm/dd` — docs/BLOG.md §3; its caching is §8, its e2e §10
+### 21i. Getting between a post's pages — docs/BLOG.md §4; its e2e is §10
 
 ---
 
@@ -5753,3 +5275,11 @@ introduced this stub.
 ### 24b. Judgment calls — docs/TABLES.md, "Column widths" and "Testing"
 ### 24c. CSV in and out of an existing doc — docs/TABLES.md, "CSV in and out of an existing doc"
 ### 24d. "Auto-size columns" — docs/TABLES.md, "Auto-size columns"
+
+---
+
+## 25. Paginating the blog, and moving between posts
+
+Built 2026-10-23 on `paginate-blog`: `/page/N` beyond the landing page's ten posts, and each
+post linking to the posts published just before and after it. **As built:
+[docs/BLOG.md](docs/BLOG.md) §5–§8.**

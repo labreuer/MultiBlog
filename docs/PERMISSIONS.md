@@ -193,7 +193,7 @@ the honest self-service path (docs/EMAIL.md's deferred list).
 
 **Two gaps worth knowing, both deliberate.** The inline Edit control on a public post page is
 shown to the comment's author and to ADMIN/EDITOR, while the *action* also admits an AUTHOR
-moderating their own post: that page is statically generated (PLAN.md §21) and so cannot know
+moderating their own post: that page is statically generated (docs/BLOG.md §2) and so cannot know
 whether this viewer edits this post. A control that is absent is not a permission error, and
 `/comments` reaches every row. And a *silent* edit (PLAN.md §22b) is withheld from readers but
 never from moderators — `/comments` and `/annotations` show `editedAt` whatever the silence

@@ -29,6 +29,7 @@ to re-derive the decision from.
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
 | [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures. |
 | [docs/mobile/coordinates.html](docs/mobile/coordinates.html) | Fixed popovers vs. the iOS keyboard: the two coordinate spaces, and what changed on desktop. |
+| [docs/BLOG.md](docs/BLOG.md) | The public blog as built: the landing page (the banner, the `FRONT PAGE` preamble, the latest posts), a post's `/yyyy/mm/dd/slug` URL and why its date is UTC, the date archives, the links between a post's three pages, one order for every listing, `/page/N` continuing `/` (a path, not `?page=`, so `/` keeps its cache), a post's older and newer neighbours, which public pages are cached at all, and what each change revalidates. |
 | [docs/DASHBOARD.md](docs/DASHBOARD.md) | /dashboard: the section cards, Recent docs, the Settings tiers, the Connections card, and where an author color is cached. |
 | [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Who may do what, as tables over roles × visibility × byline. Tags have their own section: minting vs. applying vs. curating. So do API tokens: who connects, as whom, the rules for bots, and the tools each token lists. |
 | [docs/EMAIL.md](docs/EMAIL.md) | Resend, the `sendMail()` seam, invites, what's deferred. |
@@ -117,7 +118,7 @@ before changing the behavior it describes.
   renders only from inside a page that has already run its own gate and takes a resolved
   `AnchorTarget` rather than a slug, so it can't be mounted on an ungated surface; it
   deliberately adds no second check. It also reads **no session** — the post page
-  (`/yyyy/mm/dd/slug`, §21) is statically generated, and a dynamic API there throws at build (docs/DOCS.md, "Routes") — so everything viewer-shaped
+  (`/yyyy/mm/dd/slug`, docs/BLOG.md §2) is statically generated, and a dynamic API there either quietly costs every post page its cache or 500s a request — so everything viewer-shaped
   lives in a client island that asks the server on open. `/tag/[slug]` is three per-type
   queries wearing three existing predicates, never one UNION. **The exception is a surface
   showing one object's tags on *another* object's page** — `/post/[id]/edit`'s source-doc
@@ -258,7 +259,7 @@ before changing the behavior it describes.
 - **The landing page's preamble is the body of whichever `Doc` is titled exactly `FRONT PAGE`**
   (case-insensitive, first-created wins); its own title is never shown. Seed one with
   `npx tsx scripts/seed-front-page.ts`. No `DocVisibility` check — the title alone is what
-  makes its body public here. PLAN.md §17c.
+  makes its body public here. docs/BLOG.md §1, "The preamble".
 
 ## Running
 
@@ -529,7 +530,7 @@ working on.
   that tree runs `parsePostDatePrefix` (or `parsePostDateSegments` for the post page) and
   404s on null before touching Prisma, or every garbage URL costs a query. A well-formed
   date with nothing in it is a 200, not a 404. Trailing slashes are Next's default 308 and
-  need no handling. PLAN.md §21a, §21h.
+  need no handling. docs/BLOG.md §2 and §3.
 - **One document stack, one Hocuspocus process, two sub-namespaces within it.** Every
   `documentName` is `ydoc:`-prefixed; `onAuthenticate` rejects anything else outright. An
   `/admin/*` endpoint checks its token with `verifyAdminToken`, which refuses a read-only one;

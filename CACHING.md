@@ -388,7 +388,7 @@ slug, so every `revalidatePath` for a post page goes through `revalidatePostPage
 
 ## 2026-09-15 — the date archives are ISR without `generateStaticParams`
 
-`/yyyy`, `/yyyy/mm` and `/yyyy/mm/dd` (PLAN.md §21h) carry `revalidate = 60` and no
+`/yyyy`, `/yyyy/mm` and `/yyyy/mm/dd` (docs/BLOG.md §3) carry `revalidate = 60` and no
 `generateStaticParams`: a prefix is rendered on its first request and served from the Full
 Route Cache for the window after, and `next build` lists them as dynamic (ƒ) rather than
 prerendered, which is correct — there is no finite list of prefixes to prerender. Same
@@ -398,6 +398,9 @@ render path reads the request. Invalidation is `revalidatePostArchives`
 publish, unpublish and both slug-change actions. Comment actions don't call it, since a
 comment changes nothing a listing shows. In the e2e suite a fixture-dated post is invisible
 to a cached prefix until `freshGoto` posts to `/api/test/revalidate`, exactly as for `/`.
+
+**Corrected 2026-10-23:** the archives are not cached at all, so none of the above happens.
+See that entry, below.
 
 ## 2026-09-17 — what a reader *does* revalidates a post page; what an author *is* does not
 
@@ -454,3 +457,34 @@ is part of what those tests are for. Same shape as the Tags section above, and a
 archives' entry — this is the third time it has been written down, which is itself the
 argument for the rule being "a fixture write means `freshGoto`", not a judgement call each
 time.
+
+## 2026-10-23 — the archives, `/page/N` and the author pages are not cached at all
+
+Measured on a production build of this tree, `next@16.2.11`, served by `next start`:
+
+- **The route table.** `next build` gives a one-minute Revalidate to `/` (○), the post page
+  (●) and `/rss.xml` (○). It gives none to `/[year]`, `/[year]/[month]`,
+  `/[year]/[month]/[day]`, `/page/[n]` or `/authors/[slug]`, and lists all five as ƒ.
+- **The headers.** The first group answers `s-maxage=60, stale-while-revalidate=31535940`
+  with `x-nextjs-cache: HIT`. The second answers `private, no-cache, no-store, max-age=0,
+  must-revalidate`, with no `x-nextjs-cache`, on every request.
+
+So in this version of Next, a dynamic route with no `generateStaticParams` is rendered on every
+request, whatever its `revalidate` export says. The 2026-09-15 entry above is wrong about the
+archives, and the 2026-07-23 entry's "`/authors/[slug]` … static/ISR again" no longer holds.
+Their `revalidate = 60` exports, and the actions' calls that refresh them, change nothing.
+A `generateStaticParams` returning `[]` is the documented way to have such a route cached on
+its first request; not done, and not measured here. docs/BLOG.md §8 has the current list.
+
+**A dynamic API on the post page fails quietly or loudly, never at build.** Measured with a
+`headers()` call added to the post page, then removed:
+
+- **With the page's own `generateStaticParams`**, the build prerenders every post, reaches the
+  call and succeeds, listing the route as ƒ instead of ●. Every post page silently loses its
+  cache.
+- **With `generateStaticParams` returning `[]`**, so that no post is prerendered, the build
+  succeeds with the route as ●. Every request for a post then fails with
+  `DYNAMIC_SERVER_USAGE` and a 500, which is what the 2026-07-23 entry records happening in
+  production.
+
+Which one happens depends on whether the build or a request reaches the call first.

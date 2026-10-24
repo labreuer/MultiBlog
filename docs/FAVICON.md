@@ -3,9 +3,9 @@
 Favicon and manifest icons: why they're built the way they are, and how to change
 them. Originally PLAN.md §17o; moved here once it stopped being a landing-page
 design note (§17, "The landing page") and became its own standing reference —
-everything below still assumes the rest of PLAN.md §17's context (§17a's ISR
-constraints, §17b's env-configured-and-gitignored precedent for the banner, §17n's
-avatar pattern) without repeating it. CACHING.md's 2026-08-05 entry covers the
+everything below still assumes the landing page's context without repeating it: its ISR
+constraints and the env-configured, gitignored precedent of its banner (docs/BLOG.md §1),
+and PLAN.md §17n's avatar pattern. CACHING.md's 2026-08-05 entry covers the
 caching side of this design in more depth than the Verification section below.
 
 ## Site icons: build-time content hashing, no admin upload, nothing in git
@@ -55,7 +55,7 @@ files or handling the two things Next's convention doesn't cover.
 
 **Why these files are gitignored despite living where Next's build reads
 them.** `git pull` cannot revert what it never tracked — the same argument
-`SITE_BANNER`'s file made in PLAN.md §17b, now applied to files the *build*
+`SITE_BANNER`'s file made in docs/BLOG.md §1, now applied to files the *build*
 consumes instead of files the *runtime* serves. A fresh clone with none of
 them present builds and runs fine; Next simply emits no icon `<link>` tags,
 the same graceful-when-unset shape as `SITE_BANNER`. `.gitignore` lists
@@ -196,8 +196,8 @@ state, not a broken one.
 `site-icons/master.png` is `scp`'d to the box once (DEPLOY.md §5, alongside
 the first-admin seed step), then `npx tsx scripts/build-icons.ts` before the
 first `npm run build`. Changing the icon later is: replace the master, rerun
-the script, redeploy — the same "swap the file, rebuild" shape PLAN.md §17b
-already established for the banner, minus that shape's "no restart needed
+the script, redeploy — the same "swap the file, rebuild" shape docs/BLOG.md §1
+describes for the banner, minus that shape's "no restart needed
 either" property, because a rebuild is unavoidable here (the hash is
 computed at build time, not read at request time the way `SITE_BANNER`'s
 path is).

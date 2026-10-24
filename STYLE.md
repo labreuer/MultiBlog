@@ -57,9 +57,9 @@ lump every table-adjacent style into one file:
 |---|---|
 | `PostEditor.module.css` | `:hover` (toolbar/quote menu), `@media` (mobile toolbar) |
 | `styles/prose.module.css` | shared across editor + public rendering; `.quote-highlight.pulse` keyframe animation; reads the per-thread `--thread-color` custom property (see Color palette) |
-| `components/PostListing.module.css`, `components/PostDate.module.css` | `:hover`-only underline on post-title links and on the byline's date link (PLAN.md §21h). `PostListing` is the one post-preview block every listing surface renders — `app/page.module.css` and `app/authors/[slug]/page.module.css` used to carry their own copies of `.postHeading`/`.titleLink` and don't any more |
-| `components/DocPostsLine.module.css` | the doc byline's post line (PLAN.md §21i), whose one class also dresses a `<form>` as `inline` so the "Publish as blog post" button sits on the byline's line. The public post page's "configure post" link beside it in §21i deliberately has no module: it is a plain link in the default link color |
-| `app/[year]/post-archive.module.css` | the date archive pages (PLAN.md §21h): the 680px listing column, and the breadcrumb's `li + li::before` separator, which inline `style` can't express |
+| `components/PostListing.module.css`, `components/PostDate.module.css` | `:hover`-only underline on post-title links and on the byline's date link (docs/BLOG.md §3). `PostListing` is the one post-preview block every listing surface renders — `app/page.module.css` and `app/authors/[slug]/page.module.css` used to carry their own copies of `.postHeading`/`.titleLink` and don't any more |
+| `components/DocPostsLine.module.css` | the doc byline's post line (docs/BLOG.md §4), whose one class also dresses a `<form>` as `inline` so the "Publish as blog post" button sits on the byline's line. The public post page's "configure post" link beside it deliberately has no module: it is a plain link in the default link color |
+| `app/[year]/post-archive.module.css` | the date archive pages (docs/BLOG.md §3): the 680px listing column, and the breadcrumb's `li + li::before` separator, which inline `style` can't express |
 | `components/CommentSection.module.css`, `CommentNode.module.css`, `CommentForm.module.css` | none needed a pseudo-class directly, but were pulled into modules alongside `QuoteThreadHeader` for consistency when that pass happened (see git history 2026-07-20) |
 | `components/QuoteThreadHeader.module.css` | state-dependent color pairs (`.arrowActive`/`.arrowDetached` etc.) previously done as inline conditional values; `.arrowActive`/`.barActive` also read `--thread-color` |
 | `components/PostSettingsPanel.module.css` | same state-dependent-class rationale as `QuoteThreadHeader` — `.draggableRow`/`.dragOver` toggle on drag state, `.checkboxRow` conditionally combines them; no pseudo-class/media-query is used, but juggling three conditional classes per row as inline `style` objects would be worse than the module |
@@ -251,10 +251,11 @@ by design, not by accident.
   - `800px` on pages showing full post text — `[year]/[month]/[day]/[slug]/page.module.css` (public post
     display) and `PostEditor.module.css` (editor).
   - `680px` on listing/excerpt pages — `authors/[slug]/page.tsx`, `search/page.module.css`,
-    and the date archives (`[year]/post-archive.module.css`, PLAN.md §21h). These show post
+    the date archives (`[year]/post-archive.module.css`, docs/BLOG.md §3) and the pages after
+    the landing page (`page/[n]/page.module.css`, docs/BLOG.md §6). These show post
     previews or snippets, not full text, so they weren't widened alongside the two full-text
     surfaces above.
-  - `1040px` on the landing page (`page.module.css` `.layout`, PLAN.md §17l) — not a
+  - `1040px` on the landing page (`page.module.css` `.layout`, docs/BLOG.md §1) — not a
     fourth, drifted number: it's a two-column CSS grid (`minmax(0, 1fr) 280px`) built
     for the contributor sidebar, and the main column inside it still lands at roughly
     680px; the extra width is the 280px sidebar plus its `2.5rem` gap. Collapses to a
@@ -262,8 +263,8 @@ by design, not by accident.
     below the post list rather than needing an `order` override.
 - **Post-listing article block**: `padding: 1.5rem 0; border-bottom: 1px solid
   var(--border-subtle);` — once repeated verbatim across home, author, and search listings,
-  now written once in `components/PostListing.module.css` and rendered by all of them plus
-  the date archives (PLAN.md §21h).
+  now written once in `components/PostListing.module.css` and rendered by every listing of
+  posts (docs/BLOG.md §3).
 - **Avatar with a generic-standin fallback** (`ContributorCard.module.css` `.avatarFallback`,
   PLAN.md §17e): when `User.image` is unset, a 40px circle filled with `User.color`
   (already `#rrggbb`-validated on write) showing `User.adminInitials` — no separate
@@ -558,8 +559,8 @@ Four reflow breakpoints, each with one job:
 
 | Breakpoint | Reflows |
 | --- | --- |
-| `max-width: 480px` | Touch targets and padding (editor toolbar, `DocEditor`) |
-| `max-width: 900px` | `/side-by-side`'s two doc columns stack (PLAN.md §14f); the landing page's contributor rail drops below the posts (§17l) |
+| `max-width: 480px` | Touch targets and padding (editor toolbar, `DocEditor`); a post's older and newer links stack (docs/BLOG.md §7) |
+| `max-width: 900px` | `/side-by-side`'s two doc columns stack (PLAN.md §14f); the landing page's contributor rail drops below the posts (docs/BLOG.md §1) |
 | `min-width: 1180px` | Comments/annotations move from below the article into a margin rail (§18). Inside it the rail then grows with the window, 340px to 680px — one range, not a second breakpoint |
 | `(orientation: landscape) and (max-height: 500px)` | The doc editor drops every piece of stacked chrome, and its rail becomes a scrolling queue — marking the cards whose passage is on screen rather than aligning to them (§18c, §18f) |
 
@@ -626,10 +627,10 @@ later. Anything else keying JS off a breakpoint should do the same.
 Five centred-column widths now, and they are one decision rather than five:
 
 - **680px** — listings.
-- **800px** — full text (`/[slug]`, `/doc/[slug]`, `DocEditor`). This is *the* reading
+- **800px** — full text (the post page, `/doc/[slug]`, `DocEditor`). This is *the* reading
   measure and never changes; every wider number below is 800 plus something.
 - **1040px** — a listings-width main column plus the landing page's 280px contributor
-  rail and its gap (§17l).
+  rail and its gap (docs/BLOG.md §1).
 - **1180px** — 800 + 2.5rem + a 340px margin-notes rail (§18). Also the breakpoint it is
   applied inside, so the rail engages exactly when this width fits and the reading column
   is untouched at every narrower one. It was a 1200px threshold over a 1180px layout until
