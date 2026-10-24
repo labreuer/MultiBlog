@@ -18,6 +18,7 @@ import { MarginNotesProvider, MarginNotesRail } from "@/components/margin-notes/
 import { CommentQuoteProvider } from "@/components/comment-quote-context";
 import CommentQuoteSelectionPopover from "@/components/CommentQuoteSelectionPopover";
 import TagChips from "@/components/tags/TagChips";
+import PostNeighbours from "@/components/PostNeighbours";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
@@ -169,6 +170,9 @@ export default async function PublicPostPage({ params }: { params: Params }) {
                   which is what keeps this route's generateStaticParams and
                   `revalidate` intact (§12f). */}
               <TagChips target={{ kind: "post", id: post.id }} />
+              {/* docs/BLOG.md §7 — before the comments, so a long thread
+                  doesn't bury where to go next. */}
+              <PostNeighbours post={{ id: post.id, publishedAt: post.publishedAt! }} />
               <CommentSection postId={post.id} />
               <p>
                 <Link href="/">← Back to all posts</Link>

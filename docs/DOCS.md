@@ -109,7 +109,7 @@ Every table is documented column by column in `prisma/schema.prisma`; this is th
 with no shared catch-all, so `uniqueDocSlug` / `changeDocSlug` (`src/lib/doc-slug.ts`)
 check the `doc` table and `doc_slug_history` and nothing else — the same shape as
 `post-slug.ts`, one namespace over. There is no reserved-slug list anywhere: posts live at
-`/yyyy/mm/dd/slug` (PLAN.md §21) and every other slugged thing sits one level down with no
+`/yyyy/mm/dd/slug` (docs/BLOG.md §2) and every other slugged thing sits one level down with no
 sibling static route to collide with, so a doc may legitimately be slugged `docs`.
 
 **`src/lib/prisma.ts`'s soft-delete extension has a `doc` entry**, alongside `post` and
@@ -291,9 +291,10 @@ leading to Forbidden. EDITOR has no override.
 
 **`/doc/[slug]` is dynamic by design** — per-user gated, so no `generateStaticParams`, and
 cheap anyway because the steady-state cost is one row read of `prose_json`. CACHING.md,
-"`/doc/[slug]` is dynamic by design". A route eligible for static generation that also
-calls a dynamic API throws `DYNAMIC_SERVER_USAGE` at build; that is why the *post* page's
-`TagChips` reads no session (CLAUDE.md).
+"`/doc/[slug]` is dynamic by design". A route with `generateStaticParams` that also
+reaches a dynamic API either quietly loses its cache, if the build reaches the call, or
+answers a request with `DYNAMIC_SERVER_USAGE` and a 500, if only a request does (CACHING.md,
+2026-10-23). That is why the *post* page's `TagChips` reads no session (CLAUDE.md).
 
 **No per-doc annotations page** — `/annotations?doc=<id>` covers it — and **no reader-facing
 doc index**: `/docs` is management, and a reader with `canViewDocs` has no route that lists

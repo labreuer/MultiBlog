@@ -1,0 +1,15 @@
+/* docs/BLOG.md — `/page/N` is a listing surface, so the 680px column the date
+   archives, /search and /authors/[slug] use (STYLE.md). */
+.container {
+  max-width: 680px;
+  margin: 0 auto;
+  font-family: sans-serif;
+}
+
+.main {
+  padding: 1rem;
+}
+
+.title {
+  margin-bottom: 0.25rem;
+}

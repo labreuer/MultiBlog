@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { publishedPostWhere } from "@/lib/post-status";
+import { postListOrderBy } from "@/lib/post-pages";
 import { postPath } from "@/lib/post-path";
 import { SITE_TITLE } from "@/lib/site-config";
 
@@ -20,7 +21,7 @@ export async function GET() {
 
   const posts = await prisma.post.findMany({
     where: publishedPostWhere(),
-    orderBy: { publishedAt: "desc" },
+    orderBy: postListOrderBy,
     take: 30,
   });
 

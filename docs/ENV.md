@@ -167,7 +167,7 @@ inlined into server code.
 | variable | default | notes |
 |---|---|---|
 | `NEXT_PUBLIC_SITE_TITLE` | `"MultiBlog"` | `src/lib/site-config.ts`. Env-sourced rather than hardcoded so a real deployment's title survives `git pull` instead of living in a tracked file. |
-| `SITE_BANNER` | — | Landing-page banner image path. `src/lib/site-banner.ts`, PLAN.md §17b. |
+| `SITE_BANNER` | — | Landing-page banner image path. `src/lib/site-banner.ts`, docs/BLOG.md §1. |
 | `SITE_BANNER_ASPECT` | — | Its aspect ratio. |
 | `SITE_BANNER_ALT` | — | Its alt text. |
 | `SITE_BANNER_TEXT` | — | A text banner in lieu of the image: these words, centred in the reading serif, as the page's `<h1>`. Set, it wins over `SITE_BANNER`. |
@@ -176,7 +176,9 @@ inlined into server code.
 The `SITE_BANNER*` vars are bare, unlike `NEXT_PUBLIC_SITE_TITLE`, on purpose: they
 are read server-side only, so changing them needs a **restart, not a rebuild** — and the
 image file itself (`public/banner.*`, gitignored) needs neither, since `public/` is served
-straight from disk at runtime.
+straight from disk at runtime. Next's image optimizer still caches the banner by URL for up
+to four hours, so a file swapped under the same name shows late; a new name, with
+`SITE_BANNER` pointed at it, shows after a restart (docs/BLOG.md §1).
 
 ## Mail
 

@@ -3,10 +3,12 @@ import Image from "next/image";
 import { renderToReactElement } from "@tiptap/static-renderer";
 import { prisma } from "@/lib/prisma";
 import { publishedPostWhere } from "@/lib/post-status";
+import { POSTS_PER_PAGE, postListOrderBy, postPageCount } from "@/lib/post-pages";
 import { getFrontPagePreamble } from "@/lib/front-page";
 import { SITE_BANNER, SITE_BANNER_ASPECT, SITE_BANNER_ALT, SITE_BANNER_TEXT, SITE_BANNER_TEXT_SIZE } from "@/lib/site-banner";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import PostListing, { postListingInclude } from "@/components/PostListing";
+import PostPager from "@/components/PostPager";
 import ContributorList from "@/components/ContributorList";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
@@ -19,13 +21,15 @@ export const revalidate = 60;
 // rather than a no-op (CACHING.md's 2026-07-20/23 entries), and §15's
 // removal of PostEditBadge is what made that true again.
 export default async function Home() {
-  const [posts, preamble] = await Promise.all([
+  // Page 1 of the listing that `/page/N` continues (docs/BLOG.md).
+  const [posts, total, preamble] = await Promise.all([
     prisma.post.findMany({
       where: publishedPostWhere(),
-      orderBy: { publishedAt: "desc" },
-      take: 10,
+      orderBy: postListOrderBy,
+      take: POSTS_PER_PAGE,
       include: postListingInclude,
     }),
+    prisma.post.count({ where: publishedPostWhere() }),
     getFrontPagePreamble(),
   ]);
 
@@ -48,6 +52,7 @@ export default async function Home() {
             <div className={`${proseStyles.prose} ${styles.preamble}`}>{renderToReactElement({ content: preamble, extensions: contentExtensions })}</div>
           )}
           <PostListing posts={posts} emptyMessage="No posts published yet." />
+          <PostPager page={1} pageCount={postPageCount(total)} />
         </main>
         <ContributorList />
       </div>

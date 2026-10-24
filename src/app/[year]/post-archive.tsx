@@ -3,13 +3,14 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { publishedPostWhere } from "@/lib/post-status";
+import { postListOrderBy } from "@/lib/post-pages";
 import { parsePostDatePrefix, type PostDateRange } from "@/lib/post-path";
 import PostListing, { postListingInclude } from "@/components/PostListing";
 import styles from "./post-archive.module.css";
 
-// PLAN.md §21h — `/yyyy`, `/yyyy/mm` and `/yyyy/mm/dd` list the posts
+// docs/BLOG.md §3 — `/yyyy`, `/yyyy/mm` and `/yyyy/mm/dd` list the posts
 // published in that UTC range, newest first. The three page.tsx files under
-// src/app/[year]/ are one-line wrappers over this; each carries its own
+// src/app/[year]/ are thin wrappers over this; each carries its own
 // `revalidate = 60` because Next reads segment config from the page file,
 // not from anything it imports.
 //
@@ -21,7 +22,9 @@ import styles from "./post-archive.module.css";
 // in it is a real page — 200 and an empty list, never a 404.
 //
 // No auth()/cookies()/headers() anywhere below, same as the landing page and
-// the post page, so `revalidate = 60` stays a real shared cache (§17, CACHING.md).
+// the post page. With no generateStaticParams these pages are rendered on
+// every request all the same, and their `revalidate = 60` does nothing until
+// they gain one (docs/BLOG.md §8, CACHING.md 2026-10-23).
 
 export type ArchiveSegments = { year: string; month?: string; day?: string };
 
@@ -39,8 +42,11 @@ export function archiveMetadata(segments: ArchiveSegments): Metadata {
 export default async function PostArchivePage(segments: ArchiveSegments) {
   const range = rangeOrNotFound(segments);
   const posts = await prisma.post.findMany({
-    where: { ...publishedPostWhere(), publishedAt: { gte: range.start, lt: range.end } },
-    orderBy: { publishedAt: "desc" },
+    // AND, not a spread: publishedPostWhere()'s own `publishedAt` is the
+    // "not in the future" half, and a second `publishedAt` key would replace
+    // it, listing a scheduled post's title and excerpt before it goes live.
+    where: { AND: [publishedPostWhere(), { publishedAt: { gte: range.start, lt: range.end } }] },
+    orderBy: postListOrderBy,
     include: postListingInclude,
   });
 

@@ -2,6 +2,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { publishedPostWhere } from "@/lib/post-status";
+import { postListOrderBy } from "@/lib/post-pages";
 import { resolveAvatarSrc } from "@/lib/avatar-url";
 import Avatar from "@/components/Avatar";
 import PostListing, { postListingInclude } from "@/components/PostListing";
@@ -29,7 +30,7 @@ async function getAuthorWithPosts(slug: string) {
 
   const posts = await prisma.post.findMany({
     where: { ...publishedPostWhere(), authors: { some: { userId: user.id } } },
-    orderBy: { publishedAt: "desc" },
+    orderBy: postListOrderBy,
     // The shared listing shows a byline, so a co-authored post now names its
     // other authors here too (PLAN.md §21h) — before, this page had none.
     include: postListingInclude,
