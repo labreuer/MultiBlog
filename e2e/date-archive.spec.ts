@@ -4,11 +4,12 @@
 // full UTC timestamp as its tooltip; a malformed prefix 404s before any
 // query; a trailing slash lands on the bare URL.
 //
-// The fixture post is dated 2001-02-03 — far enough in the past that no
-// other spec's "published now" post can land in the same year, so the year
-// page's contents are exactly this file's. Fixture rows bypass the server
-// actions' revalidatePath, so every archive visit goes through freshGoto
-// (fixtures.ts) rather than a plain goto.
+// The fixture post is dated 2001-02-03, far enough in the past that no
+// other spec's "published now" post lands in the same year. search.spec.ts
+// dates a post the same day, so every check finds this file's post by its
+// title rather than counting what a page lists. Fixture rows bypass the
+// server actions' revalidatePath, so every archive visit goes through
+// freshGoto (fixtures.ts) rather than a plain goto.
 import { test, expect, freshGoto, gotoOk } from "./fixtures";
 import { ADMIN_EMAIL, createTestPost, deleteTestPost, type TestPost } from "./db";
 
@@ -71,6 +72,31 @@ test.describe("date archives", () => {
       expect(new URL(page.url()).pathname).toBe(path.slice(0, -1));
     }
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(post.title);
+  });
+
+  test("a scheduled post is not listed before it goes live", async ({ page }) => {
+    // An hour ahead, so its year, month and day archives are this hour's: the
+    // ones that would list it if they read only the date range.
+    const scheduledFor = new Date(Date.now() + 3_600_000);
+    const scheduled = await createTestPost({
+      authorEmail: ADMIN_EMAIL,
+      scheduledFor: scheduledFor.toISOString(),
+      bodyText: "A post about the Saxon shore that is not out yet.",
+    });
+    try {
+      const [year, month, day] = scheduledFor.toISOString().slice(0, 10).split("-");
+      for (const [path, label] of [
+        [`/${year}`, year],
+        [`/${year}/${month}`, `${year}-${month}`],
+        [`/${year}/${month}/${day}`, `${year}-${month}-${day}`],
+      ]) {
+        await freshGoto(page, path);
+        await expect(page.getByRole("heading", { level: 1 })).toHaveText(label);
+        await expect(page.locator("article").filter({ hasText: scheduled.title }), path).toHaveCount(0);
+      }
+    } finally {
+      await deleteTestPost(scheduled.id);
+    }
   });
 
   test("a malformed prefix 404s", async ({ page }) => {

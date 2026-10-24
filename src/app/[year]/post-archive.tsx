@@ -39,7 +39,10 @@ export function archiveMetadata(segments: ArchiveSegments): Metadata {
 export default async function PostArchivePage(segments: ArchiveSegments) {
   const range = rangeOrNotFound(segments);
   const posts = await prisma.post.findMany({
-    where: { ...publishedPostWhere(), publishedAt: { gte: range.start, lt: range.end } },
+    // AND, not a spread: publishedPostWhere()'s own `publishedAt` is the
+    // "not in the future" half, and a second `publishedAt` key would replace
+    // it, listing a scheduled post's title and excerpt before it goes live.
+    where: { AND: [publishedPostWhere(), { publishedAt: { gte: range.start, lt: range.end } }] },
     orderBy: { publishedAt: "desc" },
     include: postListingInclude,
   });
