@@ -242,6 +242,10 @@ An annotation card can be collapsed to its meta line and one line of body, remem
 browser (docs/ANNOTATIONS.md, "Collapsing a card"). The layout sees only a card whose height
 changed, which every rail's per-card `ResizeObserver` already re-packs; nothing about
 alignment, packing or the breakpoint knows a card can be collapsed. Comment cards cannot be.
+A long body, annotation or comment, is clamped to 12 lines until the reader opens it
+(docs/ANNOTATIONS.md, "Clamping a long body"), which reaches the layout the same way, as a
+height; it is what stops one essay-length card pushing every card below it away from its
+passage.
 
 ## Prepared, not built
 

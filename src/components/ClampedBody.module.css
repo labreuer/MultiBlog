@@ -1,0 +1,56 @@
+/* ClampedBody.tsx — a long body's box, cut to --clamp-lines lines until the
+   reader opens it.
+
+   A line is 1.5em: the body's own line-height, .prose's (prose.module.css),
+   at the body's own size, which is the box's, since both annotation and
+   comment bodies set `font-size: inherit`. Not `1lh`, which would be the
+   box's line-height rather than the body's, and not a line-height set here,
+   which the edit forms this box also holds would inherit.
+   ClampedBody.tsx's LINE_EM is the same 1.5. */
+.box {
+  --clamp-line: 1.5em;
+}
+
+/* A block formatting context, so the first and last blocks' margins stay
+   inside the height being measured whatever state the box is in. */
+.content {
+  display: flow-root;
+}
+
+/* Before the measure, every body is cut: a long one is then never drawn tall
+   and shortened, and a short one is unaffected by a max-height it doesn't
+   reach. Only where scripts run, since only a script can open it again: a
+   reader with no JS gets every body whole.
+   `hidden` rather than `clip` keeps the box a scroll container, which is how
+   ClampedBody.tsx learns that find in page went looking below the cut. And
+   no scroll anchoring, which could otherwise move a box nothing scrolls. */
+@media (scripting: enabled) {
+  .box[data-clamp="pending"],
+  .box[data-clamp="clamped"] {
+    max-height: calc(var(--clamp-lines) * var(--clamp-line));
+    overflow: hidden;
+    overflow-anchor: none;
+  }
+}
+
+/* The fade says there is more; only once the measure has said so. The mask
+   reads alpha alone, so the opaque stop can be any token —
+   EditorChrome.module.css's overflow fade does the same. */
+.box[data-clamp="clamped"] {
+  mask-image: linear-gradient(to bottom, var(--foreground) calc(100% - 3 * var(--clamp-line)), transparent);
+}
+
+/* Set like the card's other quiet text buttons (AnnotationNode.module.css's
+   .revisionButton), on a line of its own under the body. */
+.toggle {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.8rem;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-align: left;
+}

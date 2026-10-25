@@ -15,6 +15,7 @@ import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
 import { isAdmin as isAdminRole } from "@/lib/role-checks";
 import LocalTime from "../LocalTime";
 import EditHistory from "../EditHistory";
+import ClampedBody, { countWords } from "../ClampedBody";
 import AnnotationBodyReader, { type BodySelection } from "./AnnotationBodyReader";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
 import AnnotationEditSession from "./AnnotationEditSession";
@@ -277,6 +278,11 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   const holdsEditor = editing !== null || replyDraft !== null;
   const collapsed = isCollapsed(collapseState, annotation.id) && !holdsEditor;
   const excerpt = useMemo(() => (collapsed ? excerptOf(annotation.proseJson) : ""), [collapsed, annotation.proseJson]);
+  // The length a clamped body's button names (docs/ANNOTATIONS.md, "Clamping a long body").
+  const words = useMemo(
+    () => (annotation.proseJson ? countWords(extractText(annotation.proseJson)) : 0),
+    [annotation.proseJson],
+  );
 
 
   // Each direct reply that quotes part of this body, in its own author's
@@ -603,30 +609,40 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
             )
           ) : (
             <>
-              {editing ? (
-                <AnnotationEditSession
-                  annotationId={annotation.id}
-                  connection={editing.connection}
-                  onFinished={endEditing}
-                  onCancelled={endEditing}
-                />
-              ) : (
-                !historyShown && (
-                  <AnnotationBodyReader
-                    proseJson={annotation.proseJson}
-                    staticBody={annotation.body}
-                    replyAnchors={replyAnchors}
-                    pending={
-                      replyAnchor && viewerColor
-                        ? { from: replyAnchor.from, to: replyAnchor.to, color: viewerColor }
-                        : null
-                    }
-                    onSelect={handleBodySelect}
-                    onAnchorClick={jumpToReply}
-                    onResolvedAnchorsChange={setResolvedReplyIds}
+              {/* Never clamped over the edit session, which scrolls itself,
+                  nor over the history panel standing in for the body. The
+                  reader and the session share the one wrapper, so a body the
+                  reader opened is still open after Done. */}
+              <ClampedBody
+                words={words}
+                clamp={!editing && !historyShown}
+                quoteAttribute="data-annotation-ids"
+              >
+                {editing ? (
+                  <AnnotationEditSession
+                    annotationId={annotation.id}
+                    connection={editing.connection}
+                    onFinished={endEditing}
+                    onCancelled={endEditing}
                   />
-                )
-              )}
+                ) : (
+                  !historyShown && (
+                    <AnnotationBodyReader
+                      proseJson={annotation.proseJson}
+                      staticBody={annotation.body}
+                      replyAnchors={replyAnchors}
+                      pending={
+                        replyAnchor && viewerColor
+                          ? { from: replyAnchor.from, to: replyAnchor.to, color: viewerColor }
+                          : null
+                      }
+                      onSelect={handleBodySelect}
+                      onAnchorClick={jumpToReply}
+                      onResolvedAnchorsChange={setResolvedReplyIds}
+                    />
+                  )
+                )}
+              </ClampedBody>
               {quoteLost === true && (
                 <p className={styles.editStatus}>
                   <button

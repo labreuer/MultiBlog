@@ -555,6 +555,47 @@ either editor is a live connection with unsent words in it. Collapse all still r
 card, which closes when its editor does. The rails needed nothing (docs/MARGIN_NOTES.md,
 "Collapsed cards").
 
+## Clamping a long body
+
+A body more than 16 lines tall shows its first 12, faded at the cut, with a button under it
+naming its length: "Show all 2,300 words". When a reply's highlighted passage starts below the
+cut, the button says so too ("· 2 replies quote the hidden part"), since a reply card shows no
+quote of its own and that highlight is the only context it has. Opened, the button reads "Show
+less"; closing from far down, with the body's top above the screen, keeps the button under the
+pointer rather than leaving the reader below the card. Every card has it, a thread's first and
+each reply, on all four surfaces, and so does every comment card (docs/COMMENTS.md, "A long
+body is clamped"): `ClampedBody` (`src/components/ClampedBody.tsx`) wraps the body's slot in
+`AnnotationNode`.
+
+**Measured, not counted.** The length is the rendered height, because the same body is about
+twice as tall in a 340px rail as in the list below. A line is 1.5em of the body's own size,
+`.prose`'s line-height, and the four lines of slack between 12 and 16 are there because a
+button that reveals two lines costs more than they do. A `ResizeObserver` on the content
+re-measures as its size changes — the server's copy swapped for the editor's, a newly settled
+version pushed in, the rail's width — and a `MutationObserver` as the reply highlights
+change, which can move one across the cut without changing any size.
+
+**A default, not a preference.** Nothing is stored. A remount clamps again, and so does a card
+collapsed and reopened, since collapsing unmounts the body. Collapsing is the remembered
+choice and the two are independent: Collapse all and Expand all don't touch a clamp. The edit
+session and the history panel take the body's slot unclamped, inside the same wrapper, so a
+body opened before Edit is still open after Done.
+
+**From the first paint.** The max-height applies before the measure, so a long body is cut from
+the server render on rather than drawn tall and shortened after hydration; only the fade and
+the button wait for the measure. The one change a reader can see is a body between 12 and 16
+lines, cut at first paint and released once measured. The rule sits under `@media (scripting:
+enabled)`, since only a script can open the body again: a reader with no JS gets every body
+whole.
+
+**Find in page opens it.** The box clips with `overflow: hidden`, not `clip`, so it is still a
+scroll container, and a browser bringing hidden text into view scrolls it — find in page, Tab
+into a link below the cut, a `#:~:text=` link. Nothing else scrolls it, so any scroll opens the
+body and scrolls its scroller (the window, or the PDF panel) by the same distance, which leaves
+what the reader was looking for where the browser put it. `hidden="until-found"` would need the
+hidden part in an element of its own, and ProseMirror owns this DOM. The text is clipped, never
+removed, so a screen reader reads it all.
+
 ## Verification
 
 - **Integrity** (`scripts/integrity/README.md`): `check-annotation-anchors.ts` (the triple
