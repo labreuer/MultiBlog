@@ -31,6 +31,15 @@
   margin-bottom: 4px;
 }
 
+/* LiveAnnotationComposer's `bounded`: passes a limited height down to the
+   editor's frame (AnnotationBody.module.css's `.bounded`), the one child
+   that can shrink. */
+.bounded {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .buttonRow {
   display: flex;
   align-items: center;

@@ -8,6 +8,7 @@ import { isMouseDownOutside } from "./outside-mousedown";
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import {
   POPOVER_GAP,
+  fitHeight,
   fixedPlacementStyle,
   onViewportChange,
   popoverBoundsElement,
@@ -307,8 +308,9 @@ export function useEditorAnnotationWidget({
   // and by then it's a panel the reader deliberately opened rather than one
   // that appeared over their work. Re-bound whenever the marker moves (the
   // marker's own effect above tracks scroll), autoUpdate's ResizeObserver
-  // re-places as the composer grows, and computePosition's answer lands in
-  // a microtask, before the newly mounted panel first paints.
+  // re-places as the composer grows (to no taller than the viewport:
+  // fitHeight), and computePosition's answer lands in a microtask, before
+  // the newly mounted panel first paints.
   useLayoutEffect(() => {
     if (!expanded || !marker) return;
     const el = popoverRef.current;
@@ -327,6 +329,7 @@ export function useEditorAnnotationWidget({
           offset({ mainAxis: POPOVER_GAP, crossAxis: POPOVER_GAP }),
           flip({ crossAxis: false, boundary, fallbackStrategy: "initialPlacement" }),
           shift({ crossAxis: true, boundary }),
+          fitHeight(boundary),
         ],
       }).then(({ x, y }) => {
         Object.assign(el.style, { left: `${x}px`, top: `${y}px` });

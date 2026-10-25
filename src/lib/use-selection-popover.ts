@@ -6,7 +6,7 @@ import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/d
 import { setPendingAnnotation } from "./pending-annotation-extension";
 import { findQuoteOccurrences } from "./quote-occurrences";
 import { isMouseDownOutside } from "./outside-mousedown";
-import { POPOVER_GAP, popoverBoundsElement } from "./popover-placement";
+import { POPOVER_GAP, fitHeight, popoverBoundsElement } from "./popover-placement";
 
 export type PendingSelection = {
   from: number;
@@ -242,7 +242,9 @@ export function useSelectionPopover({
   // to the edge it left through, instead of leaving it thousands of pixels
   // off-screen. The bounds are the nearest [data-popover-bounds] ancestor —
   // on /side-by-side, the column pair — intersected with the viewport
-  // (popoverBoundsElement), or the viewport alone.
+  // (popoverBoundsElement), or the viewport alone. A box can be no taller
+  // than those bounds: fitHeight hands it that height, and the annotation
+  // composer's editor gives up the excess.
   //
   // useLayoutEffect plus computePosition's microtask lands the position
   // before the newly mounted popover first paints.
@@ -277,6 +279,7 @@ export function useSelectionPopover({
           offset({ mainAxis: POPOVER_GAP, crossAxis: POPOVER_GAP }),
           flip({ crossAxis: false, boundary, fallbackStrategy: "initialPlacement" }),
           shift({ crossAxis: true, boundary }),
+          fitHeight(boundary),
         ],
       }).then(({ x, y }) => {
         Object.assign(popoverEl.style, { left: `${x}px`, top: `${y}px` });

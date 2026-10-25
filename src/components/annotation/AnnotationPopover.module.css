@@ -20,6 +20,18 @@
      whatever it's wrapping instead of clipping it. min-width keeps the
      same default footprint the old fixed 280px gave. */
   min-width: 280px;
+  /* No taller than what is in view, keyboard included (fitHeight,
+     popover-placement.ts, writes the variable), with the composer's editor
+     taking whatever the quote and the buttons leave and scrolling inside
+     itself (LiveAnnotationComposer's `bounded`). A fixed box doesn't scroll
+     with the page, so one that grew with a long body would push the button
+     row — Post, Move to bottom, Cancel — off the screen for good. The box
+     scrolls itself only when even the editor's min-height doesn't fit: a
+     phone held sideways with its keyboard up. */
+  display: flex;
+  flex-direction: column;
+  max-height: var(--popover-available-height, none);
+  overflow-y: auto;
   background: var(--surface);
   color: var(--foreground);
   border: 1px solid var(--border);

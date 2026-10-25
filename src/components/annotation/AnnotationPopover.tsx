@@ -171,6 +171,7 @@ export default function AnnotationPopover({
           resolveAnchor={resolveAnchor}
           onPosted={onPosted}
           onCancel={onCancel}
+          bounded
           onMoveToBottom={
             allowMoveToBottom
               ? () => {

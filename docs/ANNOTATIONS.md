@@ -45,8 +45,10 @@ The row carries:
 ## Surfaces
 
 - **`/doc/[slug]`**, the reading view: selecting text opens a two-stage popover — a small
-  "Annotate / Move to bottom / Cancel" prompt over the selection, then the live composer —
-  and `AnnotationSection` below the article holds the bottom composer, the reader's own
+  "Annotate / Move to bottom / Cancel" prompt over the selection, then the live composer,
+  a box no taller than what is in view, keyboard included, whose editor scrolls inside
+  itself so a long body can't push the buttons off a box that doesn't scroll with the page
+  — and `AnnotationSection` below the article holds the bottom composer, the reader's own
   drafts (`OwnDraftsList`), a sort control, a presence line, and every card that has no
   live anchor. Above 1180px the anchored cards are portalled into the margin rail beside
   their passages (docs/MARGIN_NOTES.md). Highlights are painted in each author's colour.
@@ -570,7 +572,9 @@ card, which closes when its editor does. The rails needed nothing (docs/MARGIN_N
   browser doesn't share it, the "new" count, including a reply begun before the collapse and
   posted after it, the pill opening its card through a separately collapsed reply without
   writing that reveal, a permalink's reveal, Collapse all/Expand all), `annotation-length.spec.ts`
-  (a body of about 7,000 characters posts and is edited through `add_note`/`edit_note`).
+  (a body taller than the screen posts from the selection popover with its buttons and the box
+  on screen, in a desktop window and on a phone whose keyboard comes up, and through
+  `add_note`/`edit_note`).
 - **Unit**: `src/lib/collapsed-annotations.test.ts` — the stored map's parse and eviction, and
   the reply counts.
 - **Fixtures**: `createTestAnnotation()` seeds the body's ydoc, sets `postedAt` and writes

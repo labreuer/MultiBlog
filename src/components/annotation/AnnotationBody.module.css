@@ -21,6 +21,21 @@
   overflow-y: auto;
 }
 
+/* `bounded`: the frame sits in a box of limited height (the selection
+   popover, AnnotationPopover.module.css), and the editor is what gives. It
+   shrinks to its min-height and scrolls inside itself, so the toolbar above
+   it and the button row below stay in the box. */
+.bounded {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* A flex item stretches across the frame; this one keeps its own width. */
+.bounded .toolbarToggle {
+  align-self: flex-start;
+}
+
 /* .tiptap is the actual contenteditable ProseMirror node (see
    EditorChrome.module.css's identical fix) — without flex: 1 1 auto here,
    it's only as tall as its content, so an empty composer shows a 4em box

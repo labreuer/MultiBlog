@@ -15,7 +15,7 @@
 // and floating-ui's `strategy: "fixed"` computes against the viewport to
 // match.
 
-import type { Middleware } from "@floating-ui/dom";
+import { size, type Middleware } from "@floating-ui/dom";
 
 export type PopoverAnchor = { top: number; bottom: number; left: number };
 /**
@@ -65,6 +65,35 @@ export function sideForTallest(tallest: (floatingHeight: number) => number): Mid
  */
 export function popoverBoundsElement(descendant: Element | null): HTMLElement | undefined {
   return descendant?.closest<HTMLElement>("[data-popover-bounds]") ?? undefined;
+}
+
+/**
+ * Writes the tallest the floating element can be and still be entirely in
+ * view onto it, as `--popover-available-height`: the height of the visual
+ * viewport, intersected with `boundary` when there is one. The visual
+ * viewport, so a software keyboard counts, which `dvh` does not: with an
+ * iPad's keyboard up the band measured 299px while the layout viewport `dvh`
+ * is sized against stayed at 727 (docs/mobile/coordinates.html). `autoUpdate`
+ * re-places on the `visualViewport` resize the keyboard fires, so the value
+ * follows it.
+ *
+ * A custom property rather than `max-height`, so only a box that has
+ * somewhere to put the excess reads it (AnnotationPopover.module.css, whose
+ * editor scrolls inside itself). A box with nowhere to put it would spill its
+ * content past its own border instead.
+ *
+ * **Goes after `shift({ crossAxis: true })`.** floating-ui's `size` reads
+ * shift's data, and a crossAxis shift is what makes the answer the whole
+ * band rather than the room on the anchor's side: that shift already slides
+ * a box too tall for either side over its anchor.
+ */
+export function fitHeight(boundary: HTMLElement | undefined): Middleware {
+  return size({
+    boundary,
+    apply({ availableHeight, elements }) {
+      elements.floating.style.setProperty("--popover-available-height", `${Math.max(0, availableHeight)}px`);
+    },
+  });
 }
 
 /**
