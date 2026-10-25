@@ -935,11 +935,11 @@ export async function getAnnotationHistory(annotationId: string): Promise<Annota
 // **This is where §13q's version stamp finally earns its keep.** A reply
 // already records which update of its parent's log it was written against —
 // since §22e the mark of a settled version, so `materializeYdocAt` finds a
-// snapshot exactly there and replays nothing; even without one, an annotation
-// body is 100–5000 characters and the replay is a few milliseconds — the cost
-// that makes COLLAB.md §7's materialize half affordable here and not on the
-// doc side. The *diff* half stays unbuilt: this shows the reader the text that
-// was quoted, it does not try to repair the anchor.
+// snapshot exactly there and replays nothing; even without one, the replay is
+// one annotation body's log rather than a doc's — the cost that makes
+// COLLAB.md §7's materialize half affordable here and not on the doc side.
+// The *diff* half stays unbuilt: this shows the reader the text that was
+// quoted, it does not try to repair the anchor.
 export async function getQuotedParentVersion(
   replyAnnotationId: string,
 ): Promise<{ proseJson: unknown; quotedText: string } | null> {

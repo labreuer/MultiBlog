@@ -15,9 +15,6 @@ import { ydocStore, encodeYdocState } from "../../server/ydoc-store";
 // creates a LIVE annotation in one call. Never exported from a "use server"
 // file: every export of one is callable from any browser with any arguments.
 
-/** The longest an annotation body may be, in characters of text; long-form writing belongs in a doc. */
-export const MAX_BODY_LENGTH = 5000;
-
 export type SettledBody = {
   /** The drained tail of the body's own update log — what the snapshot is taken at. */
   mark: bigint;
@@ -42,9 +39,9 @@ export type SettledBody = {
  * lets `writeSettledBody` below make the cache and the newest snapshot agree
  * by construction rather than by a later check.
  *
- * Validated **before** anything is written: an emptied or over-long body
- * returns an error and touches no column, so a reader keeps seeing the last
- * settled text and the session stays open for the author to fix it.
+ * Validated **before** anything is written: an emptied body returns an error
+ * and touches no column, so a reader keeps seeing the last settled text and
+ * the session stays open for the author to fix it.
  *
  * The bounded retry is the same one posting has always had, for the same
  * reason: the collab server's Y.Doc only holds what has actually arrived over
@@ -115,9 +112,6 @@ export async function settleAnnotationBody(
 
   if (!settled!.bodyText.trim()) {
     return { error: "Annotation can't be empty." };
-  }
-  if (settled!.bodyText.length > MAX_BODY_LENGTH) {
-    return { error: `Annotation is too long (max ${MAX_BODY_LENGTH} characters).` };
   }
   return settled!;
 }

@@ -351,8 +351,8 @@ clears the row's rather than letting it stand in.
 (`settleAnnotationBody`): asks `/admin/annotation-flush` for the drained tail of the body's
 own log without a cache write, with a bounded retry (a keystroke immediately followed by a
 click can outrace the websocket), materialises the body at that mark and validates it as
-non-empty and at most 5,000 characters. Then it captures the anchor for the chosen mode and,
-in one transaction, writes **version 1** — a `ydoc_snapshot` at that mark — the cache columns
+non-empty; a body has no length limit, as a doc has none. Then it captures the anchor for the
+chosen mode and, in one transaction, writes **version 1** — a `ydoc_snapshot` at that mark — the cache columns
 from the same decoded document, `postedAt`, and the status. "Post" is `LIVE`; "Keep private" stays `DRAFT` (`saveDraftAnnotation`,
 reachable again through `OwnDraftsList`, as is a draft whose composer a reload took away);
 "Post & notify authors" is `RAISED` — one
@@ -444,7 +444,8 @@ stamped on every edit, silent or not, and `/annotations` shows it.
 
 **Replies under a moving parent.** A reply's stored triple is resolved against the settled
 `proseJson` at render — the three tiers run once per load — with tier 3's sticky detachment
-relaxed for bodies (`retryDetached`), since a full scan of 5,000 characters is nothing. A
+relaxed for bodies (`retryDetached`): a body's reader changes content only when a new settled
+version arrives, never per keystroke, so a full scan per change is nothing at any length. A
 reply whose quote no longer resolves shows a "quoting an earlier version" link:
 `getQuotedParentVersion` materializes the parent body at the reply's own stamp — a snapshot
 mark, so a snapshot load with zero deltas — which is docs/COLLAB.md §7's materialize half,
@@ -568,7 +569,8 @@ card, which closes when its editor does. The rails needed nothing (docs/MARGIN_N
   marker, including the 900px floor), `annotation-collapse.spec.ts` (a reload keeps it, another
   browser doesn't share it, the "new" count, including a reply begun before the collapse and
   posted after it, the pill opening its card through a separately collapsed reply without
-  writing that reveal, a permalink's reveal, Collapse all/Expand all).
+  writing that reveal, a permalink's reveal, Collapse all/Expand all), `annotation-length.spec.ts`
+  (a body of about 7,000 characters posts and is edited through `add_note`/`edit_note`).
 - **Unit**: `src/lib/collapsed-annotations.test.ts` — the stored map's parse and eviction, and
   the reply counts.
 - **Fixtures**: `createTestAnnotation()` seeds the body's ydoc, sets `postedAt` and writes
@@ -668,8 +670,8 @@ else. One entry per decision; the measurements are the plan's own.
   somewhere wrong.
 - **A version is a snapshot, not a row in a revision table.** A table holding a text copy per
   settled state was the obvious shape, and it was rejected because the copy is redundant and
-  the boundary is not. A body is 100–5,000 characters, `getQuotedParentVersion` already
-  materialises one at an arbitrary mark in a few milliseconds, and the update log is never
+  the boundary is not. `getQuotedParentVersion` already materialises a body at an arbitrary
+  mark in a few milliseconds, and the update log is never
   truncated — so the text is reconstructible, while *where an edit session ended* is the one
   thing the log cannot say: annotation readers see a step function of settled states, never
   keystrokes, so for a body the log is not what anyone saw, and every feature phrased in
