@@ -61,6 +61,10 @@ for (const screen of SCREENS) {
         return box.y + box.height;
       })
       .toBeLessThanOrEqual(page.viewportSize()!.height + 1);
+    // Nor wider: on a phone the button row wraps rather than running off the side.
+    const box = (await popover.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);
     const scrolls = (el: Element) => el.scrollHeight > el.clientHeight + 1;
     expect(await popover.evaluate(scrolls)).toBe(false);
     expect(await composer.locator("..").evaluate(scrolls)).toBe(true);
