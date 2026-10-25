@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_MARKDOWN_BYTES } from "@/lib/markdown-import";
 import { onceWithin } from "@/lib/api/idempotency";
 import { defineTool, listedName, objectRef, quoteFields, versionString } from "../tool";
 import { annotateFor, editAnnotationFor } from "../annotation-writes";
@@ -8,7 +9,7 @@ import { annotateFor, editAnnotationFor } from "../annotation-writes";
 // resolved (a person's act). Acting on a note means replying to it: what was
 // done, and a link to the passage or the doc it went into.
 
-const body = z.string().min(1).max(20_000).describe("Markdown; at most 5,000 characters of text.");
+const body = z.string().min(1).max(MAX_MARKDOWN_BYTES).describe("Markdown.");
 
 export const addNoteTool = defineTool({
   name: "add_note",

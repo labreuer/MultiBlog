@@ -135,10 +135,11 @@ export default function AnnotationBodyReader({
       ...annotationContentExtensions,
       PendingAnnotation,
       // PLAN.md §22e — `retryDetached` is true here and nowhere else: this is
-      // the one surface whose tracked document is an annotation body, small
-      // enough that re-searching a detached reply anchor on every content
-      // change is free. It is what lets a reply re-attach live as its parent
-      // is edited back toward the words it quoted.
+      // the one surface whose tracked document is an annotation body, whose
+      // content changes only when a new settled version arrives, so
+      // re-searching a detached reply anchor on every content change is free.
+      // It is what lets a reply re-attach live as its parent is edited back
+      // toward the words it quoted.
       AnnotationHighlight.configure({ anchors: initialAnchors, retryDetached: true }),
       // eslint-disable-next-line react-hooks/refs -- onHit is only ever invoked from the AnnotationClick plugin's handleClick, on a real DOM click, never during React's render
       AnnotationClick.configure({ onHit: (ids) => onAnchorClickRef.current?.(ids) }),

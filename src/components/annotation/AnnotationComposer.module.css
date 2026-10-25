@@ -31,8 +31,22 @@
   margin-bottom: 4px;
 }
 
+/* LiveAnnotationComposer's `bounded`: passes a limited height down to the
+   editor's frame (AnnotationBody.module.css's `.bounded`), the one child
+   that can shrink. */
+.bounded {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .buttonRow {
   display: flex;
+  /* A row too wide for its box moves whole buttons to a second line rather
+     than squeezing their labels or running off the side: on a phone the
+     composer's four controls don't fit across. Cancel's auto margin keeps it
+     at the right of whichever line it lands on. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }

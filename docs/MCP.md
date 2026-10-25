@@ -1437,8 +1437,9 @@ checks read access to the container. The UI checks that only when the draft is c
 - **Bodies in Markdown** need a `markdownToAnnotationContent`. It is a `MarkdownManager` over
   `annotationContentExtensions` (StarterKit and AuthorHighlight), with `decodeNodeEntities`,
   the soft-break collapse that comments use, and a schema check. That schema has no tables, so
-  a Markdown table needs a fallback. The 5,000-character limit (`MAX_BODY_LENGTH`) stays;
-  long-form writing belongs in a doc. Fragment links in a body are checked as a doc's are (§8).
+  a Markdown table needs a fallback. A body has no length limit, as a doc has none; the
+  Markdown a call sends is capped at a doc's 768 KB (`MAX_MARKDOWN_BYTES`). Fragment links in
+  a body are checked as a doc's are (§8).
 - **Always the column mechanism.** The MCP server has no editor surface, so it never asks for a mark
   (see §17, item 1).
 - **A quote is optional.** With none, a root is a note on the whole doc or PDF, as the

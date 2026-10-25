@@ -975,9 +975,10 @@ than require new code, but it would be exercising it for the first time.
 
 One refinement it would want. Tier 3's "one full scan, then leave the anchor detached, retry only
 on the next anchor push" exists because `findQuoteOccurrences` is O(document × quote) and a doc is
-large. An annotation body is 100–5000 characters, where a full scan is cheap enough to run
-continuously — so the detached-is-sticky rule should be *relaxed* for annotation bodies, letting a
-reply re-attach live as its parent is edited back toward what it quoted.
+large. An annotation body's reader changes content only when a new version settles, never per
+keystroke, which makes a full scan per change cheap at any length — so the detached-is-sticky
+rule should be *relaxed* for annotation bodies, letting a reply re-attach live as its parent is
+edited back toward what it quoted.
 
 ### Freezing the view is not freezing the anchor's coordinate system
 

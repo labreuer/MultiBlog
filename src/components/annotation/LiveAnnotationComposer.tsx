@@ -62,6 +62,10 @@ type Props = {
   // AnnotationMoveProvider and leaves the row untouched — no post, no
   // discard, just a different slot rendering the same connection next.
   onMoveToBottom?: () => void;
+  // True inside a box of limited height (the inline popover): the editor
+  // shrinks to what the buttons leave and scrolls inside itself. Absent
+  // where the page scrolls instead, and the editor grows with the body.
+  bounded?: boolean;
 };
 
 // PLAN.md §13d — DRAFT/LIVE/RAISED as a single choice rather than two
@@ -119,6 +123,7 @@ export default function LiveAnnotationComposer({
   onPosted,
   onCancel,
   onMoveToBottom,
+  bounded = false,
 }: Props) {
   const router = useRouter();
   const { data: session } = useSession();
@@ -226,7 +231,7 @@ export default function LiveAnnotationComposer({
             : "Post annotation";
 
   return (
-    <div>
+    <div className={bounded ? styles.bounded : undefined}>
       <AnnotationBody
         provider={provider}
         ydoc={ydoc}
@@ -234,6 +239,7 @@ export default function LiveAnnotationComposer({
         userName={displayNameOf(session.user)}
         userColor={session.user.color}
         editable={readOnly !== true}
+        bounded={bounded}
       />
       {error && <p className={styles.error}>{error}</p>}
       <div className={styles.buttonRow}>

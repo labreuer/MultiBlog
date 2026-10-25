@@ -201,12 +201,15 @@ function reresolve(
       //
       // The rule exists because `findQuoteOccurrences` is O(document × quote)
       // and a doc is large, so retrying a genuinely-gone quote per keystroke
-      // reintroduces exactly the cost tier 2 avoids. An annotation body is
-      // 100–5000 characters, where a full scan is cheap enough to run
-      // continuously — and where it buys something the doc side cannot have:
-      // a reply re-attaches live as its parent is edited back toward what it
-      // quoted, which is the ordinary case when someone is rewording their
-      // own annotation around a passage that was replied to.
+      // reintroduces exactly the cost tier 2 avoids. A body has no keystrokes
+      // here: AnnotationBodyReader is read-only, and its content changes only
+      // when a new settled version is pushed in, so a full scan runs once per
+      // edit of the parent, as one already runs on load and on every anchor
+      // push. That is cheap at any length (about 50ms for a detached quote in
+      // a 100,000-character body), and it buys something the doc side cannot
+      // have: a reply re-attaches live as its parent is edited back toward
+      // what it quoted, which is the ordinary case when someone is rewording
+      // their own annotation around a passage that was replied to.
       //
       // `null` stays null when the text really is gone; what changes is only
       // that the question is asked again.
@@ -250,9 +253,10 @@ export const AnnotationHighlight = Extension.create<{
   anchors: AnnotationAnchorInput[];
   /**
    * Whether a detached anchor is re-searched on every content change
-   * (PLAN.md §22e) — true only where the tracked document is small enough for
-   * that to be free, which means an annotation body and not a doc. See
-   * `reresolve`'s own comment for the measurement behind the split.
+   * (PLAN.md §22e) — true only where content changes are rare enough for
+   * that to be free, which means an annotation body (once per settled
+   * version) and not a doc (once per remote keystroke). See `reresolve`'s own
+   * comment for the measurement behind the split.
    */
   retryDetached: boolean;
 }>({

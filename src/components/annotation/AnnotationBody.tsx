@@ -27,6 +27,9 @@ type Props = {
   userName: string;
   userColor: string;
   editable?: boolean;
+  // LiveAnnotationComposer's `bounded`, passed down: this frame is in a box
+  // of limited height, and the editor is what shrinks.
+  bounded?: boolean;
   onEditorReady?: (editor: Editor | null) => void;
 };
 
@@ -40,7 +43,16 @@ type Props = {
 // localStorage, and offers ANNOTATION_TOOLS' reduced set rather than
 // CollabEditorBody's full one — a margin note doesn't need headings or
 // numbered lists.
-export default function AnnotationBody({ provider, ydoc, userId, userName, userColor, editable = true, onEditorReady }: Props) {
+export default function AnnotationBody({
+  provider,
+  ydoc,
+  userId,
+  userName,
+  userColor,
+  editable = true,
+  bounded = false,
+  onEditorReady,
+}: Props) {
   const [toolbarVisible, setToolbarVisible] = useState(false);
 
   useEffect(() => {
@@ -112,7 +124,7 @@ export default function AnnotationBody({ provider, ydoc, userId, userName, userC
   }
 
   return (
-    <div className={styles.frame}>
+    <div className={`${styles.frame} ${bounded ? styles.bounded : ""}`}>
       {toolbarVisible && <EditorToolbar editor={editor} disabled={!editable} tools={ANNOTATION_TOOLS} />}
       <EditorContent
         editor={editor}

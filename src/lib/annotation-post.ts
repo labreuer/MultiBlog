@@ -4,11 +4,11 @@ import { prisma } from "@/lib/prisma";
 import type { Actor } from "@/lib/actor";
 import { viewerOf } from "@/lib/actor";
 import { seedAnnotationYdocFromJson } from "@/lib/annotation-ydoc-seed";
-import { MAX_BODY_LENGTH, settleAnnotationBody, writeSettledBody } from "@/lib/annotation-settle";
+import { settleAnnotationBody, writeSettledBody } from "@/lib/annotation-settle";
 import { extractText } from "@/lib/diff";
 import type { PdfTarget } from "@/lib/pdf-anchor";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
-import { ApiError, invalid } from "@/lib/api/errors";
+import { invalid } from "@/lib/api/errors";
 import { ydocStore } from "../../server/ydoc-store";
 
 // docs/MCP.md §9 — one call that creates a LIVE annotation, root or reply,
@@ -51,9 +51,6 @@ export async function createPostedAnnotation(
 ): Promise<{ id: string; createdAt: Date; stamp: bigint | null }> {
   const text = extractText(opts.body);
   if (!text.trim()) throw invalid("An annotation can't be empty.");
-  if (text.length > MAX_BODY_LENGTH) {
-    throw new ApiError("too_large", `An annotation is at most ${MAX_BODY_LENGTH} characters; long-form writing belongs in a doc.`);
-  }
 
   const seed = seedAnnotationYdocFromJson(opts.body, actor.userId);
   const row = await prisma.annotation.create({
