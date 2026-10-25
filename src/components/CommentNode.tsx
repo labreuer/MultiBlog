@@ -10,6 +10,7 @@ import { canEditAnyPost, isAdmin as isAdminRole } from "@/lib/role-checks";
 import LocalTime from "./LocalTime";
 import CommentForm from "./CommentForm";
 import CommentBody from "./CommentBody";
+import ClampedBody, { countWords } from "./ClampedBody";
 import CommentBodyInput from "./CommentBodyInput";
 import EditHistory from "./EditHistory";
 import {
@@ -220,52 +221,58 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
               </>
             )}
           </div>
-          {editing ? (
-            <div className={styles.editForm}>
-              {draft ? (
-                <CommentBodyInput
-                  value={draft}
-                  onChange={setDraft}
-                  ariaLabel="Edit comment"
-                  disabled={editPending}
-                  rows={4}
-                  autoFocus
-                  composerKey={`edit:${comment.id}`}
-                />
-              ) : (
-                <p className={styles.editLoading}>Loading…</p>
-              )}
-              <span className={styles.editActions}>
-                <button
-                  type="button"
-                  onClick={handleSaveEdit}
-                  disabled={editPending || !draft || isCommentBodyValueEmpty(draft)}
-                  className={styles.confirmYes}
-                >
-                  {editPending ? "Saving…" : "Save"}
-                </button>{" "}
-                /{" "}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditing(false);
-                    setDraft(null);
-                    setEditError(null);
-                  }}
-                  disabled={editPending}
-                  className={styles.confirmNo}
-                >
-                  Cancel
-                </button>
-              </span>
-            </div>
-          ) : (
-            !historyShown && (
-              <div data-comment-body>
-                <CommentBody body={body} bodyText={bodyText} citations={comment.citations} />
+          {/* docs/COMMENTS.md, "A long body is clamped": never over the edit
+              box or the history panel standing in for the body, and one
+              wrapper for both, so a body the reader opened stays open after
+              Save. */}
+          <ClampedBody words={countWords(bodyText)} clamp={!editing && !historyShown}>
+            {editing ? (
+              <div className={styles.editForm}>
+                {draft ? (
+                  <CommentBodyInput
+                    value={draft}
+                    onChange={setDraft}
+                    ariaLabel="Edit comment"
+                    disabled={editPending}
+                    rows={4}
+                    autoFocus
+                    composerKey={`edit:${comment.id}`}
+                  />
+                ) : (
+                  <p className={styles.editLoading}>Loading…</p>
+                )}
+                <span className={styles.editActions}>
+                  <button
+                    type="button"
+                    onClick={handleSaveEdit}
+                    disabled={editPending || !draft || isCommentBodyValueEmpty(draft)}
+                    className={styles.confirmYes}
+                  >
+                    {editPending ? "Saving…" : "Save"}
+                  </button>{" "}
+                  /{" "}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditing(false);
+                      setDraft(null);
+                      setEditError(null);
+                    }}
+                    disabled={editPending}
+                    className={styles.confirmNo}
+                  >
+                    Cancel
+                  </button>
+                </span>
               </div>
-            )
-          )}
+            ) : (
+              !historyShown && (
+                <div data-comment-body>
+                  <CommentBody body={body} bodyText={bodyText} citations={comment.citations} />
+                </div>
+              )
+            )}
+          </ClampedBody>
           {!posted && !editing && (
             <button type="button" onClick={() => setReplying((r) => !r)} className={styles.replyButton}>
               {replying ? "Cancel" : "Reply"}

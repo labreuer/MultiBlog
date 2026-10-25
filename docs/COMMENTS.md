@@ -284,6 +284,18 @@ settled state — plus an `editingSince` guard on the store-debounce cache. Same
 substrate: docs/ANNOTATIONS.md, "Editing after posting", and docs/COLLAB.md's 2026-09-16
 entry for what it meant for anchoring.
 
+## A long body is clamped
+
+A comment more than 16 lines tall shows its first 12, faded, under a "Show all N words"
+button, exactly as an annotation does: one wrapper, `ClampedBody`, around `CommentNode`'s
+body slot, and docs/ANNOTATIONS.md, "Clamping a long body", for how it measures, why it is cut
+from the first paint, and why find in page opens it. Two things differ only by what a comment
+lacks: nothing quotes into a comment's body from a reply, so the button names no replies, and a
+comment card has no collapse to be independent of. The edit box and the history panel take the
+slot unclamped, inside the same wrapper, so a body opened before Edit is still open after Save.
+Selecting text to quote (§23h) reaches only what is shown; a reader quoting from below the cut
+opens it first.
+
 ## Quotation
 
 A comment may quote a passage of the post, of any comment on the page, of another published
