@@ -40,7 +40,8 @@ The row carries:
   under or after an edit. Its **versions** are `ydoc_snapshot` rows on its own ydoc, not a
   table ("Editing after posting"); `resolvedAt`, declared and never written.
 - Soft-delete columns. Deleting is the writer's, or an ADMIN's for a posted annotation, and
-  also removes the mark (`setAnnotationDeleted`, `src/lib/annotation-manage.ts`).
+  also removes the mark (`setAnnotationDeleted`, `src/lib/annotation-manage.ts`); a
+  reading view's annotation has none, so its highlight is dropped with its card instead.
 
 ## Surfaces
 
@@ -367,6 +368,12 @@ posted later, any `LIVE` raised later; a `RAISED` annotation re-notifies nobody 
 ADMIN's once the annotation is posted — a `DRAFT` is its writer's alone, here as when reading
 (`setAnnotationDeleted`, `src/lib/annotation-manage.ts`, which `deleteAnnotation` and the MCP
 server's `manage` share). Nothing is notified. Restoring is the reverse without a re-mark.
+
+An annotation written from a reading view has no mark to remove: its highlight is a decoration
+drawn from the thread list, and the deleted row is still in that list. So every surface that
+shows a thread filters it through one predicate, `entryHasVisibleContent`
+(`src/lib/annotation-visibility.ts`): the card and the doc's highlight, and on a PDF the page
+badge and the strip's tick as well. A deleted root whose replies survive keeps all of them.
 
 **`/annotations` excludes `DRAFT` rows outright** rather than scoping them, because "keep
 private" means private from an `ADMIN` too.

@@ -603,6 +603,89 @@ test.describe("annotations", () => {
     await expect(page.locator(`[data-thread-id="${annotation.id}"]`)).toBeVisible();
   });
 
+  // A reading view's annotation is anchored by stored offsets and drawn as a
+  // decoration, so deleting it has no mark to remove: the highlight goes only
+  // if the anchor list drops the soft-deleted row, by the rule the card goes
+  // by (entryHasVisibleContent). Both surfaces that draw one are covered.
+  for (const surface of ["reading view", "editor"] as const) {
+    test(`deleting a reading-view annotation takes its highlight with it, in the ${surface}`, async ({
+      page,
+      sharedDoc,
+    }) => {
+      const bodyText = `Doomed in the ${surface}.`;
+      const annotation = await createTestAnnotation({
+        docId: sharedDoc.id,
+        authorEmail: ADMIN_EMAIL,
+        bodyText,
+        anchor: { from: QUOTE_FROM, to: QUOTE_TO, quotedText: QUOTED_TEXT },
+      });
+      const highlight = page.locator(`[data-annotation-ids~="${annotation.id}"]`);
+      const open = async () => {
+        if (surface === "editor") {
+          await page.goto(`/doc/${sharedDoc.id}/edit`);
+          await waitForDocCollabReady(page);
+        } else {
+          await page.goto(`/doc/${sharedDoc.slug}`);
+          await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+        }
+        await expect(bodyEditor(page)).toContainText(QUOTED_TEXT);
+      };
+
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await open();
+      await expect(highlight.first()).toBeVisible({ timeout: 15_000 });
+
+      const card = page.locator(`[data-thread-id="${annotation.id}"]`);
+      await card.getByRole("button", { name: "Delete", exact: true }).click();
+      await card.getByRole("button", { name: "Yes", exact: true }).click();
+
+      await expect(highlight).toHaveCount(0, { timeout: 15_000 });
+      await expect(visibleText(page, bodyText)).toHaveCount(0);
+      expect((await getAnnotationStates(sharedDoc.id))[0].deletedAt).not.toBeNull();
+
+      // And across a reload, where the server's list is all there is.
+      await open();
+      await expect(highlight).toHaveCount(0);
+    });
+  }
+
+  test("a deleted annotation whose reply survives keeps its highlight", async ({ page, sharedDoc }) => {
+    // The other side of the same rule: a soft-deleted root with a live reply
+    // is still a conversation about that passage, so it keeps its card (as
+    // "[deleted]") and its highlight both.
+    const root = await createTestAnnotation({
+      docId: sharedDoc.id,
+      authorEmail: ADMIN_EMAIL,
+      bodyText: "Deleted, but answered.",
+      anchor: { from: QUOTE_FROM, to: QUOTE_TO, quotedText: QUOTED_TEXT },
+    });
+    await createTestAnnotation({
+      docId: sharedDoc.id,
+      authorEmail: ADMIN_EMAIL,
+      bodyText: "A reply that stays.",
+      parentAnnotationId: root.id,
+    });
+    const highlight = page.locator(`[data-annotation-ids~="${root.id}"]`);
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(`/doc/${sharedDoc.slug}`);
+    await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+    await expect(highlight.first()).toBeVisible({ timeout: 15_000 });
+
+    // The root's own Delete comes before its reply's.
+    const card = page.locator(`[data-thread-id="${root.id}"]`);
+    await card.getByRole("button", { name: "Delete", exact: true }).first().click();
+    await card.getByRole("button", { name: "Yes", exact: true }).click();
+
+    await expect(card.getByText("[deleted]")).toBeVisible({ timeout: 15_000 });
+    await expect(visibleText(page, "A reply that stays.")).toBeVisible();
+    await expect(highlight.first()).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+    await expect(highlight.first()).toBeVisible({ timeout: 15_000 });
+  });
+
   test("the doc editor's own widget still anchors with a mark, and stores no offsets", async ({
     page,
     sharedDoc,

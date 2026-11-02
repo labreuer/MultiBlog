@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import AnnotationNode, { hasNonDeletedDescendant, type AnnotationNodeData } from "@/components/annotation/AnnotationNode";
+import AnnotationNode, { type AnnotationNodeData } from "@/components/annotation/AnnotationNode";
+import { entryHasVisibleContent } from "@/lib/annotation-visibility";
 import QuoteThreadHeader from "@/components/QuoteThreadHeader";
 import CollapseAllControls from "@/components/annotation/CollapseAllControls";
 import { useRevealForFragment } from "@/components/annotation/use-reveal-for-fragment";
@@ -56,25 +57,6 @@ export type PdfAnnotationEntry = {
   target: PdfTarget | null;
   root: AnnotationNodeData;
 };
-
-/**
- * Whether a thread still has anything to show.
- *
- * Deletion is a *soft* delete, and a deleted root whose replies survive is
- * still a live conversation — so this is `hasNonDeletedDescendant`, not a plain
- * `deletedByUserId === null`. Exported because **four** surfaces have to agree
- * on it: the card, its page badge, the highlight drawn on the page, and the
- * tick on the right-hand strip. They did not, and the result was that deleting
- * an annotation removed its card while leaving its highlight, its tick and a
- * stray page badge behind — "I deleted it but it's still there".
- *
- * The doc side gets this for free: it has no highlight of its own to clean up
- * (a mark is content, so it goes when the mark does) and no rail ticks, so
- * AnnotationNode rendering nothing is the whole story there.
- */
-export function entryHasVisibleContent(entry: PdfAnnotationEntry): boolean {
-  return entry.root.deletedByUserId === null || hasNonDeletedDescendant(entry.root);
-}
 
 type Props = {
   fileId: string;
