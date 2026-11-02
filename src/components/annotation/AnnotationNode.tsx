@@ -1,6 +1,7 @@
 "use client";
 
 import type { AnnotationTarget } from "@/lib/annotation-container";
+import { hasNonDeletedDescendant } from "@/lib/annotation-visibility";
 import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -156,13 +157,6 @@ function flashNewReplies(replies: readonly AnnotationNodeData[]) {
 // ellipsis is CSS's to place.
 function excerptOf(proseJson: JSONContent | null): string {
   return proseJson ? extractText(proseJson).replace(/\s+/g, " ").slice(0, 300) : "";
-}
-
-// Whether any annotation anywhere below this one (not just direct replies)
-// is still live — a deleted annotation with no live descendants collapses
-// entirely rather than leaving a "[deleted]" placeholder with nothing under it.
-export function hasNonDeletedDescendant(annotation: AnnotationNodeData): boolean {
-  return annotation.replies.some((reply) => reply.deletedByUserId === null || hasNonDeletedDescendant(reply));
 }
 
 // The doc-side sibling of CommentNode (PLAN.md §13c) — un-shared from it now

@@ -18,6 +18,7 @@ import AnnotationSection from "@/components/annotation/AnnotationSection";
 import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
 import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
 import { annotationAnchorInputs, anchoredLinkAnchorInputs } from "@/lib/annotation-highlight-extension";
+import { entryHasVisibleContent } from "@/lib/annotation-visibility";
 import { anchoredLinkForViewer } from "@/lib/anchored-link-data";
 import AnchoredLinkBanner from "@/components/anchored-link/AnchoredLinkBanner";
 import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
@@ -174,8 +175,11 @@ export default async function PublicDocPage({
   // annotations ride: one list, one plugin state, one per-transaction
   // resolve pass — the `kind` field on each input keeps the two apart
   // downstream (annotation-highlight-extension.ts).
+  // A deleted annotation stays in `threads` (a soft delete; its replies may
+  // still be a conversation), so the highlight is filtered here by the rule
+  // its card is: a stored-offset anchor has no mark for the delete to remove.
   const annotationAnchors = [
-    ...annotationAnchorInputs(buildAnnotationEntries(threads)),
+    ...annotationAnchorInputs(buildAnnotationEntries(threads).filter(entryHasVisibleContent)),
     ...(linkGroupHere ? anchoredLinkAnchorInputs(linkGroupHere.parts) : []),
   ];
 

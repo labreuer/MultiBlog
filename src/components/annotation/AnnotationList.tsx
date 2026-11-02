@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/react";
-import AnnotationNode, { hasNonDeletedDescendant, type AnnotationNodeData } from "./AnnotationNode";
+import AnnotationNode, { type AnnotationNodeData } from "./AnnotationNode";
+import { entryHasVisibleContent } from "@/lib/annotation-visibility";
 import QuoteThreadHeader from "../QuoteThreadHeader";
 import CollapseAllControls from "./CollapseAllControls";
 import { useRevealForFragment } from "./use-reveal-for-fragment";
@@ -42,13 +43,7 @@ export default function AnnotationList({ entries, docId }: Props) {
   const collapseState = useCollapseState();
   // Every thread that draws a card — a fully deleted one draws nothing (see
   // renderEntry), so there is nothing for "Collapse all" to close.
-  const roots = useMemo(
-    () =>
-      entries
-        .map((entry) => entry.root)
-        .filter((root) => root.deletedByUserId === null || hasNonDeletedDescendant(root)),
-    [entries],
-  );
+  const roots = useMemo(() => entries.filter(entryHasVisibleContent).map((entry) => entry.root), [entries]);
   useRevealForFragment(roots);
   // Seeded from the server's snapshot answer — `quotedText` is non-empty
   // exactly when `Doc.proseJson` still carried the mark at the last store
@@ -138,8 +133,7 @@ export default function AnnotationList({ entries, docId }: Props) {
     // A deleted root with no live descendants renders nothing (see
     // AnnotationNode) — its quoted-text header would otherwise be left
     // dangling above empty space with no annotation underneath it.
-    const rootRendersNothing =
-      entry.root.deletedByUserId !== null && !hasNonDeletedDescendant(entry.root);
+    const rootRendersNothing = !entryHasVisibleContent(entry);
 
     return (
       <div

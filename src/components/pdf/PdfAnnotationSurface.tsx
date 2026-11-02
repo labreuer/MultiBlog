@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import PdfViewer, { type PdfPane, type PdfViewerHandle } from "./PdfViewer";
-import PdfAnnotationPanel, { entryHasVisibleContent, type PdfAnnotationEntry } from "./PdfAnnotationPanel";
+import PdfAnnotationPanel, { type PdfAnnotationEntry } from "./PdfAnnotationPanel";
+import { entryHasVisibleContent } from "@/lib/annotation-visibility";
 import PdfMetadataPanel from "./PdfMetadataPanel";
 import PdfOutlinePanel from "./PdfOutlinePanel";
 import PdfCollabPanel from "./PdfCollabPanel";

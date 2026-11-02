@@ -23,6 +23,7 @@ import { useDocPresence } from "./annotation/doc-presence-context";
 import { SignInAgainLink } from "./SignedOutNotice";
 import type { AnnotationEntry } from "./annotation/AnnotationList";
 import { annotationAnchorInputs } from "@/lib/annotation-highlight-extension";
+import { entryHasVisibleContent } from "@/lib/annotation-visibility";
 import { useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
 import { EDITOR_SCROLL_ATTRIBUTE } from "./editor-scroll";
 import type { DocVisibility } from "@/generated/prisma/enums";
@@ -271,8 +272,12 @@ export default function DocEditor({
   // PLAN.md §13o — derived from the entries this page already has rather than
   // taken as a second prop: the rail and the highlight are two views of one
   // list, and letting them arrive separately is how they would come to
-  // disagree.
-  const annotationAnchors = useMemo(() => annotationAnchorInputs(annotations), [annotations]);
+  // disagree. Filtered by the rule the card is, since a deleted annotation is
+  // still in the list and its stored-offset anchor has no mark to lose.
+  const annotationAnchors = useMemo(
+    () => annotationAnchorInputs(annotations.filter(entryHasVisibleContent)),
+    [annotations],
+  );
 
   return (
     // data-doc-editor-scroller names the box that becomes the horizontal
