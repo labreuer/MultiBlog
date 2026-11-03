@@ -9,10 +9,10 @@ import {
   IconH2,
   IconItalic,
   IconList,
-  IconListNumbers,
 } from "@tabler/icons-react";
 import { tightenLines } from "@/lib/tighten-lines";
 import LinkControls from "./LinkControls";
+import NumberedListControls from "./NumberedListControls";
 import QuoteControls from "./QuoteControls";
 import TableControls from "./TableControls";
 import styles from "./EditorChrome.module.css";
@@ -208,18 +208,7 @@ export default function EditorToolbar({
           <IconList size={18} />
         </button>
       )}
-      {tools.includes("numbered") && (
-        <button
-          type="button"
-          className={styles.toolbarButton}
-          disabled={disabled}
-          aria-label="Numbered list"
-          title="Numbered list (Ctrl+Shift+7 / ⌘⇧7)"
-          onClick={() => editor.chain().focus().toggleOrderedList().run()}
-        >
-          <IconListNumbers size={18} />
-        </button>
-      )}
+      {tools.includes("numbered") && <NumberedListControls editor={editor} disabled={disabled} />}
       {tools.includes("quote") && <QuoteControls editor={editor} disabled={disabled} />}
       {tools.includes("table") && (
         <TableControls editor={editor} disabled={disabled} onNotice={onNotice ?? alertNotice} />

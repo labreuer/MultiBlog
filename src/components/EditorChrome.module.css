@@ -330,8 +330,8 @@
 }
 
 /* position: fixed and portaled to <body>, placed by floating-ui — see
-   QuoteControls.tsx for why an absolute menu inside the toolbar no longer
-   works. z-index matches the other fixed popovers (AnnotationPopover). */
+   useToolbarMenu.ts for why an absolute menu inside the toolbar can't
+   work. z-index matches the other fixed popovers (AnnotationPopover). */
 .quoteMenu {
   position: fixed;
   z-index: 20;
@@ -368,6 +368,15 @@
   opacity: 0.45;
   cursor: default;
   background: none;
+}
+
+/* A radio menu's check column (NumberedListControls): the same width
+   whether or not the item is the checked one, so the labels line up. */
+.menuItemCheck {
+  display: inline-flex;
+  width: 14px;
+  margin-right: 8px;
+  vertical-align: -2px;
 }
 
 /* The rule between a menu's groups (TableControls: rows / columns /

@@ -301,8 +301,8 @@ marks, nothing else".
 ## Every toolbar button has a tooltip
 
 Every button in the editor toolbar has a `title`: `EditorToolbar.tsx`'s own, and those that
-`LinkControls`, `QuoteControls` and `TableControls` put in the toolbar, including a split
-button's ▾. Most of them are icons only, and the tooltip is the only place a sighted reader
+`LinkControls`, `QuoteControls`, `NumberedListControls` and `TableControls` put in the
+toolbar, including a split button's ▾. Most of them are icons only, and the tooltip is the only place a sighted reader
 learns what one does. A new tool gets one in the same commit.
 
 - **The name, then the shortcut when one is bound:** `Bold (Ctrl+B / ⌘B)`. Read the
@@ -379,6 +379,36 @@ Two keymap notes ride along:
   key). TipTap's own shifted-punctuation defaults (Superscript's `Mod-.`) carry the same
   trade. The dropdown stays the layout-independent path — a reason it doesn't retire in favor
   of the shortcut.
+
+## A numbered list's style is its `type`
+
+TipTap's `orderedList` carries the HTML `type` attribute — `1`, `a`, `A`, `i`, `I` — and renders
+it on the `<ol>`, so the browser draws the markers and every surface that renders through the
+schema (the editor, both reading views, the post page, comments) shows them with no CSS of ours.
+Nothing in `prose.module.css` or `globals.css` sets `list-style-type` on an `<ol>`, and
+nothing may: a rule there would override the attribute everywhere. The package reads `type`
+from pasted HTML, Google Docs' `list-style-type` included, but has no command to set it.
+
+`NumberedListControls` is the numbered-list tool as a split button, in `QuoteControls`' shape:
+the main button is the plain toggle, the ▾ lists the five styles with the current one checked.
+Inside a numbered list a pick restyles it; anywhere else it makes one first (converting a
+bullet list) and styles that. Plain numbers are stored as no `type` at all, which is what a
+list made by the toggle or parsed from `1.` already has. The commands are
+`src/lib/ordered-list-style.ts`'s, which act on the **innermost** list around the selection's
+start, not TipTap's `updateAttributes`: with a bare caret that one updates every node of the type
+around it, so in a nested list it would restyle the outer list too.
+
+Markdown round-trips every style and start, nested lists included: the export writes `a)`,
+`C)`, `iv)` and so on, and the marker rule reads them back (docs/DOC_IMPORT.md §12, which says
+why `)` and not `a.`). So the MCP read, the comment edit box and an MCP edit keep it, with
+the two gaps §12 lists. A one-item list starting at a value both a letter and a numeral can name
+reads back in Pandoc's reading: Roman 5 as letters from 22, letters from 9 as Roman 1. The
+dropdown never sets a `start`, so only a pasted or imported list can hit it. And two adjacent
+plain-numbered lists read back as one, as CommonMark reads them.
+
+The three split buttons share `useToolbarMenu` (`src/components/useToolbarMenu.ts`): the open
+state, closing on an outside mousedown or Escape, and the floating-ui placement of a menu
+portaled to `<body>`, with the reason it is portaled.
 
 ## The iPad's B/I/U buttons are `beforeinput` events, not keys
 
