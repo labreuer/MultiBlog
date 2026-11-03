@@ -142,6 +142,29 @@ viewer may not read shows "You don't have permission to read this doc." in the b
 (the route renders Forbidden there rather than a 404, so the bubble reveals nothing following
 the link wouldn't), and a doc that doesn't exist adds nothing.
 
+### A link ends where its text ends
+
+Text typed at either edge of a link is plain; text typed inside one is part of it. TipTap's
+Link makes its mark `inclusive` whenever `autolink` is on (`inclusive() { return
+this.options.autolink }`), and an inclusive mark spreads over whatever is typed at its end — so
+after Save in the link popover, a `[[` pick, or a click that lands the caret behind any link,
+the rest of the sentence became part of the link. `tiptap-schema.ts` exports `Link` as the
+package's with `inclusive: false`, ProseMirror's own choice for links; its `StarterKit` carries
+that `Link` in the package's place (and rank), and the comment schema uses it directly.
+`eslint.config.mjs` refuses `@tiptap/extension-link` outside the schema file, as it does Code and
+StarterKit.
+
+Inclusivity lives on the mark *type*, so it is the same for every link, however made — nothing
+per-link is stored, and existing docs need no migration. It only decides what a new character
+inherits; y-prosemirror and every reading view ignore it.
+
+What it costs is an autolinked URL edited at its end. Autolink only fires once a word is closed
+by whitespace, so the URL was already finished; but backspace into it and type, and the new
+characters are plain, and autolink then skips the word because part of it already carries a
+link — `https://example.co` + `m` + space leaves the `m` outside the link. (Inclusive, the `m`
+joined the link text but the href still said whatever autolink first wrote, so that edit was
+never fully right either.) Linking it again from the popover puts it right.
+
 ### Autolink passes `.md` filenames by
 
 linkify, which Link uses to find URLs in text, knows `.md` as Moldova's top-level domain, so
@@ -253,13 +276,9 @@ it. Suggestion's plugin is *prepended*, ahead of the keymaps,
 for the same reason `LinkControls`' Ctrl-K is: Enter must reach the menu before the base keymap
 splits the paragraph.
 
-What is typed right after a pick is kept out of the link: Link is inclusive while autolink is
-on, and the sentence the reference was dropped into continues right after it, so the next
-character would otherwise join the link. Clearing the stored marks on the pick is **not** enough
-here — ProseMirror drops stored marks on any step, and `AuthorHighlight`'s `appendTransaction`
-adds its steps in the same dispatch — so a second, tiny plugin remembers where the link ends
-(`plainAt`) and its own `appendTransaction` strips the link mark from whatever lands there next,
-then forgets.
+What is typed right after a pick stays out of the link, as the sentence the reference was
+dropped into continues: the link mark is not inclusive ("A link ends where its text ends", above), so
+the menu needs nothing of its own for it.
 
 ### Why `@tiptap/extension-document`/`-paragraph`/`-text` are still declared deps
 
@@ -278,6 +297,24 @@ marks, nothing else".
 > **Pin every one of these to the same exact version as `@tiptap/core`** when installing.
 > `^3.28.0` resolves to 3.29.0, whose peer dep is `@tiptap/core@3.29.0` exactly, and npm
 > fails the install.
+
+## Every toolbar button has a tooltip
+
+Every button in the editor toolbar has a `title`: `EditorToolbar.tsx`'s own, and those that
+`LinkControls`, `HeadingControls`, `NumberedListControls` and `TableControls` put in the
+toolbar, including a split button's ▾. Most of them are icons only, and the tooltip is the only place a sighted reader
+learns what one does. A new tool gets one in the same commit.
+
+- **The name, then the shortcut when one is bound:** `Bold (Ctrl+B / ⌘B)`. Read the
+  shortcut from the extension's `addKeyboardShortcuts` in the installed package, or ours,
+  rather than from memory. A tool with no binding gets the name alone.
+- **`aria-label` stays the bare name.** A screen reader announces the label, and a shortcut
+  read aloud on every focus is noise.
+- **A disabled button's tooltip can say why**, when the reason isn't obvious: the table
+  button inside a table says to use its menu instead.
+
+A button that shows its text, such as a dropdown menu item or the link popover's Save, needs
+no tooltip unless there is a shortcut to tell, as the heading levels do.
 
 ## Enter is two keys, decided by whether the virtual keyboard is docked
 
@@ -321,13 +358,35 @@ Two traps this arrangement depends on:
   `npm run e2e` runs the production build — a `NODE_ENV` gate would hide the hook from the one
   consumer it exists for.
 
-## Quote depth is `wrapIn`/`lift` — `toggleBlockquote` only toggles
+## Indent and outdent follow the caret
 
-Inside a blockquote, `toggleBlockquote` *unwraps* rather than nesting deeper, so a control
-that means "one level in / one level out" must use `wrapIn("blockquote")` and `lift`.
-`QuoteControls`' dropdown and `QuoteDepthShortcuts`
-(`src/lib/quote-depth-shortcuts-extension.ts`, Ctrl/⌘+Shift+. and ,) share that pair;
-StarterKit's own Mod-Shift-b keeps the plain toggle.
+The toolbar's Indent and Outdent buttons and Ctrl/⌘+Shift+. and , are one pair of commands,
+`indent` and `outdent` (`src/lib/indent-extension.ts`, registered in all three live editors),
+so the keys and the buttons can't disagree. What they act on is whichever of a list item or a
+quote is **nearest the caret**:
+
+- **In a list item**, the item nests under the one before it, or comes out a level —
+  `sinkListItem`/`liftListItem`. The first item of a list has nothing to nest under, so Indent
+  is disabled on it. **A new level under a numbered list starts as bullets**
+  (`sinkListItemBulletFirst`): `sinkListItem` makes the new level the parent's own type, and
+  a numbered list under a numbered list is rarely what an outline means. Only a level that
+  doesn't exist yet gets the default — an item joins a numbered level already under the one
+  above it, in that level's style, and joins a bullet level there too rather than starting a
+  second list beside it.
+- **Anywhere else**, a quote level is added or removed — `wrapIn("blockquote")`/`lift`.
+  `toggleBlockquote` can't do this: inside a blockquote it *unwraps* rather than nesting
+  deeper. The Quote button and StarterKit's own Mod-Shift-b keep the plain toggle.
+
+So a list inside a quote indents as a list, and a quote inside a list item as a quote.
+
+**Tab is bound to the list half**, at priority 101 so it runs ahead of ListItem's own Tab
+(the stock `sinkListItem`), and so indents the same way the button does; Shift-Tab is still
+ListItem's `liftListItem`, which is what Outdent runs. Tab declines outside a list item, and
+**anywhere in a table**: Table's Tab (next cell, or a new row from the last) is registered
+after StarterKit at the same priority, and TipTap runs the later extension's keymap first, so
+it always had Tab in a cell — a list in a cell indents from the button. The
+toolbar dry-runs both commands (`can().indent()`), so a button with no level to add or remove
+is disabled.
 
 Two keymap notes ride along:
 
@@ -340,8 +399,81 @@ Two keymap notes ride along:
 - **prosemirror-keymap resolves `Shift-.` through the physical key** — exact on US layouts,
   able to miss on layouts whose `<`/`>` live elsewhere (e.g. German's dedicated `<>`
   key). TipTap's own shifted-punctuation defaults (Superscript's `Mod-.`) carry the same
-  trade. The dropdown stays the layout-independent path — a reason it doesn't retire in favor
+  trade. The buttons stay the layout-independent path — a reason they don't retire in favor
   of the shortcut.
+
+## The heading tool remembers its level
+
+`HeadingControls` is the doc editor's heading tool (`"heading"` in `FULL_TOOLS`; comments have
+no headings in their schema, and an annotation's toolbar leaves them out) as a split button. The
+▾ lists Heading 1 to 4 with the current block's level checked, and a pick *sets* the block to
+that level (`setHeading`). The main button *toggles* the level picked last and wears that
+level's icon, so a run of H3s is one click each after the first, the way a highlighter colour
+stays picked. It starts at Heading 2 and remembers for as long as the editor is mounted: the
+memory is the toolbar's own state, not stored anywhere, so a reload starts at 2 again. Only a
+pick from the menu changes it; Ctrl/⌘+Alt+<level> applies a level without touching it.
+
+The menu stops at 4 because a doc's outline rarely goes deeper; 5 and 6 are still a shortcut
+away (Heading's own Mod-Alt-<level>, bound for every level in its `levels`, which StarterKit
+leaves at 1–6), and come in from imported Markdown or pasted HTML. So don't narrow `levels` to
+match the menu: that would take the two shortcuts away and fold an imported H5 into an H1. `prose.module.css` gives all six the same margins,
+which `globals.css`' reset would otherwise take away.
+
+## A numbered list's style is its `type`
+
+TipTap's `orderedList` carries the HTML `type` attribute — `1`, `a`, `A`, `i`, `I` — and renders
+it on the `<ol>`, so the browser draws the markers and every surface that renders through the
+schema (the editor, both reading views, the post page, comments) shows them with no CSS of ours.
+Nothing in `prose.module.css` or `globals.css` sets `list-style-type` on an `<ol>`, and
+nothing may: a rule there would override the attribute everywhere. The package reads `type`
+from pasted HTML, Google Docs' `list-style-type` included, but has no command to set it.
+
+`NumberedListControls` is the numbered-list tool as a split button, in `TableControls`' shape:
+the main button is the plain toggle, the ▾ lists the five styles with the current one checked.
+Inside a numbered list a pick restyles it; anywhere else it makes one first (converting a
+bullet list) and styles that. Plain numbers are stored as no `type` at all, which is what a
+list made by the toggle or parsed from `1.` already has. The commands are
+`src/lib/ordered-list-style.ts`'s, which act on the **innermost** list around the selection's
+start, not TipTap's `updateAttributes`: with a bare caret that one updates every node of the type
+around it, so in a nested list it would restyle the outer list too.
+
+Markdown round-trips every style and start, nested lists included: the export writes `a)`,
+`C)`, `iv)` and so on, and the marker rule reads them back (docs/DOC_IMPORT.md §12, which says
+why `)` and not `a.`). So the MCP read, the comment edit box and an MCP edit keep it, with
+the two gaps §12 lists. A one-item list starting at a value both a letter and a numeral can name
+reads back in Pandoc's reading: Roman 5 as letters from 22, letters from 9 as Roman 1. The
+dropdown never sets a `start`, but typing can (below). And two adjacent plain-numbered lists
+read back as one, as CommonMark reads them.
+
+## Typing a marker starts a lettered or Roman list
+
+The package's input rule turns `1. ` at a paragraph's start into a numbered list.
+`src/lib/ordered-list-input-rule.ts` adds one for the other four styles, on our `OrderedList`
+in `tiptap-schema.ts`, so every editor has it. It takes the marker rule the Markdown parse takes
+(docs/DOC_IMPORT.md §12): a letter or numeral, then `)` and a space or `.` and two. One space
+after a period is how "C. S. Lewis", "I. M. Pei" or "A. A. Milne" begins, so it stays text.
+
+Lists needn't be continuous. A list can't hold a paragraph between its items, so a marker typed
+below a paragraph of discussion starts a new list, numbered on from the earlier one it
+continues:
+
+| Typed at a paragraph's start | Makes |
+|---|---|
+| the next marker of the lettered or Roman list directly above | another item in that list |
+| the next marker of an earlier list at this level, the nearest such (`c) ` after `a)`, `b)` and a paragraph of discussion) | a list in that list's style, from that marker |
+| any other single letter or valid Roman numeral | a list read as the Markdown parse reads a first marker: `c` letters from 3, `i` Roman 1, `ii` Roman 2 |
+| anything else (`cf) `, `St.  `) | nothing: the spaces are typed |
+
+An earlier list decides between the two readings of a letter both a letter and a numeral can
+name: `v) ` after a list i–iv, however far below it, is Roman 5, where alone it is the letter v,
+and `i) ` after a list lettered `a`–`h` is the ninth letter. A one-item list at such a start is
+one of the Markdown gaps above. "At this level" is the paragraph's siblings: the top of the doc,
+or the inside of one list item or quote. Backspace straight after undoes the rule, as for any
+input rule.
+
+The three split buttons share `useToolbarMenu` (`src/components/useToolbarMenu.ts`): the open
+state, closing on an outside mousedown or Escape, and the floating-ui placement of a menu
+portaled to `<body>`, with the reason it is portaled.
 
 ## The iPad's B/I/U buttons are `beforeinput` events, not keys
 

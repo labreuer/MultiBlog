@@ -1,19 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import { createPortal } from "react-dom";
 import { useEditorState, type Editor } from "@tiptap/react";
 import { IconChevronDown, IconTable } from "@tabler/icons-react";
-import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
-import { popoverBoundsElement } from "@/lib/popover-placement";
 import { TABLE_CODECS, TABLE_FILE_ACCEPT, type TableCodec } from "@/lib/table-codecs";
 import { downloadTableNode, insertTableFromFile } from "@/lib/table-file-editor";
 import { tableAroundSelection } from "@/lib/table-selection";
 import { autoSizeTable, tableHasManualSizing } from "@/lib/table-sizing";
+import { useToolbarMenu } from "./useToolbarMenu";
 import styles from "./EditorChrome.module.css";
 
-// docs/TABLES.md — the toolbar's table tool, QuoteControls' split-button shape
-// reused verbatim: the main button inserts, the chevron opens a menu. The
+// docs/TABLES.md — the toolbar's table tool, a split button: the main button
+// inserts, the chevron opens a menu. The
 // editing commands are all the table extension's own (`insertTable`,
 // `addRowAfter`, … `deleteTable`); this component adds no editing logic,
 // only the enabled-ness and a place to click.
@@ -26,10 +25,8 @@ import styles from "./EditorChrome.module.css";
 // individually, so the menu reads the same in both places and only the
 // enabled set changes.
 //
-// The menu is position: fixed, placed by floating-ui and portaled to <body>
-// — QuoteControls.tsx says why an absolute menu inside the toolbar cannot
-// work on phones, and the same toolbar hosts this one.
-const MENU_GAP = 2;
+// The menu's open state, closing and placement are useToolbarMenu's, which
+// says why an absolute menu inside the toolbar cannot work on phones.
 
 // A fresh table's size. Three by three with a header row is what every
 // editor with this control defaults to, and the menu grows it from there.
@@ -105,9 +102,7 @@ export default function TableControls({
   // Null clears it, which a successful insert does.
   onNotice: (message: string | null) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const { open, close, toggle, containerRef, menuRef } = useToolbarMenu();
   const fileRef = useRef<HTMLInputElement>(null);
 
   // `inTable` gates the insert button and the file item: a cell is `block+`
@@ -146,49 +141,6 @@ export default function TableControls({
     }
   };
 
-  const close = useCallback(() => setOpen(false), []);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (containerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
-      close();
-    };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [open, close]);
-
-  // Placement: QuoteControls' arrangement, unchanged — see its comment.
-  useLayoutEffect(() => {
-    if (!open) return;
-    const menu = menuRef.current;
-    const reference = containerRef.current;
-    if (!menu || !reference) return;
-    const boundary = popoverBoundsElement(reference);
-    const update = () => {
-      void computePosition(reference, menu, {
-        strategy: "fixed",
-        placement: "bottom-start",
-        middleware: [
-          offset({ mainAxis: MENU_GAP, crossAxis: MENU_GAP }),
-          flip({ crossAxis: false, boundary, fallbackStrategy: "initialPlacement" }),
-          shift({ crossAxis: true, boundary }),
-        ],
-      }).then(({ x, y }) => {
-        Object.assign(menu.style, { left: `${x}px`, top: `${y}px` });
-      });
-    };
-    return autoUpdate(reference, menu, update);
-  }, [open]);
-
   function run(item: MenuItem) {
     close();
     if (item.kind === "command") {
@@ -221,7 +173,7 @@ export default function TableControls({
   }
 
   return (
-    <div className={styles.quoteGroup} ref={containerRef}>
+    <div className={styles.splitButton} ref={containerRef}>
       <button
         type="button"
         className={styles.toolbarButton}
@@ -234,13 +186,13 @@ export default function TableControls({
       </button>
       <button
         type="button"
-        className={styles.quoteDropdownTrigger}
+        className={styles.splitButtonTrigger}
         aria-label="Table options"
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={disabled}
         title="Table options"
-        onClick={() => (open ? close() : setOpen(true))}
+        onClick={toggle}
       >
         <IconChevronDown size={14} />
       </button>
@@ -258,13 +210,13 @@ export default function TableControls({
       {open &&
         !disabled &&
         createPortal(
-          <div ref={menuRef} className={styles.quoteMenu} role="menu">
+          <div ref={menuRef} className={styles.toolbarMenu} role="menu">
             {MENU_ITEMS.map((item) => (
               <button
                 key={itemKey(item)}
                 type="button"
                 role="menuitem"
-                className={`${styles.quoteMenuItem} ${item.separator ? styles.menuItemSeparated : ""}`}
+                className={`${styles.toolbarMenuItem} ${item.separator ? styles.menuItemSeparated : ""}`}
                 disabled={!enabled(item)}
                 onClick={() => run(item)}
               >

@@ -3,7 +3,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEditorState, type Editor } from "@tiptap/react";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { PluginKey } from "@tiptap/pm/state";
 import Suggestion, { type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import { searchLinkableDocs } from "@/app/actions/docs";
 import type { LinkableDocJson } from "@/lib/doc-authz";
@@ -36,14 +36,8 @@ import styles from "./EditorChrome.module.css";
 // (src/lib/popover-placement.ts) so the menu follows the same
 // tallest-height, pinned-edge rules as the link popover.
 //
-// What's typed right after a pick is kept out of the link. TipTap's Link is
-// inclusive while autolink is on, and a reference dropped mid-sentence is
-// always followed by more sentence — which would otherwise join the link.
-// Clearing the stored marks on the pick isn't enough: ProseMirror drops
-// stored marks on any step, and AuthorHighlight's appendTransaction adds
-// its steps in the same dispatch. So a second, tiny plugin remembers where
-// the link ends (`plainAt`), and its appendTransaction strips the link mark
-// from whatever lands there next, then forgets. The menu is portaled and
+// What's typed right after a pick stays out of the link because the schema's
+// link mark is not inclusive (tiptap-schema.ts). The menu is portaled and
 // position: fixed for LinkControls' reasons.
 const TRIGGER = "[[";
 const CLOSE = "]]";
@@ -55,7 +49,6 @@ const SEARCH_DEBOUNCE_MS = 150;
 const LIST_MAX_HEIGHT_REM = 17;
 
 const suggestionKey = new PluginKey("docRefSuggestion");
-const plainAfterKey = new PluginKey<number | null>("docRefPlainAfter");
 
 type Session = {
   range: { from: number; to: number };
@@ -69,40 +62,6 @@ type Session = {
   command: (doc: LinkableDocJson) => void;
   clientRect: (() => DOMRect | null) | null | undefined;
 };
-
-// Where a just-picked link ends, until something is typed there.
-function plainAfterPlugin(): Plugin<number | null> {
-  return new Plugin<number | null>({
-    key: plainAfterKey,
-    state: {
-      init: () => null,
-      apply(tr, prev, _old, newState) {
-        const meta = tr.getMeta(plainAfterKey) as number | null | undefined;
-        if (meta !== undefined) return meta;
-        if (prev === null) return null;
-        // Stays put under an insertion at itself (assoc -1), and is
-        // forgotten the moment the caret goes anywhere else.
-        const plainAt = tr.docChanged ? tr.mapping.map(prev, -1) : prev;
-        const caret = newState.selection.from;
-        if (caret < plainAt || (tr.selectionSet && !tr.docChanged && caret !== plainAt)) return null;
-        return plainAt;
-      },
-    },
-    // Text that just landed at plainAt came in wearing the link (Link is
-    // inclusive): take the mark off it. One character is enough — what
-    // follows inherits from that plain character.
-    appendTransaction(transactions, _old, newState) {
-      const plainAt = plainAfterKey.getState(newState) ?? null;
-      if (plainAt === null || !transactions.some((tr) => tr.docChanged)) return null;
-      const to = newState.selection.from;
-      if (to <= plainAt) return null;
-      const link = newState.schema.marks.link;
-      const tr = newState.tr.setMeta(plainAfterKey, null);
-      if (link && newState.doc.rangeHasMark(plainAt, to, link)) tr.removeMark(plainAt, to, link);
-      return tr;
-    },
-  });
-}
 
 export default function DocRefMenu({ editor, disabled }: { editor: Editor; disabled?: boolean }) {
   // The live suggestion, as its render callbacks last reported it; null
@@ -155,7 +114,7 @@ export default function DocRefMenu({ editor, disabled }: { editor: Editor; disab
     };
   });
 
-  // Both plugins, once per editor. Suggestion's is *prepended*, ahead of
+  // The plugin, once per editor. It is *prepended*, ahead of
   // the keymaps, so Enter reaches the menu before the base keymap splits
   // the paragraph — the same reason LinkControls prepends its Ctrl-K.
   useEffect(() => {
@@ -168,7 +127,6 @@ export default function DocRefMenu({ editor, disabled }: { editor: Editor; disab
       command: props.command,
       clientRect: props.clientRect,
     });
-    editor.registerPlugin(plainAfterPlugin());
     editor.registerPlugin(
       Suggestion<LinkableDocJson, LinkableDocJson>({
         pluginKey: suggestionKey,
@@ -195,10 +153,6 @@ export default function DocRefMenu({ editor, disabled }: { editor: Editor; disab
               type: "text",
               text: docTitleOrFallback(doc.title),
               marks: [{ type: "link", attrs: { href: `/doc/${doc.slug}` } }],
-            })
-            .command(({ tr }) => {
-              tr.setMeta(plainAfterKey, tr.selection.from);
-              return true;
             })
             .run();
         },
@@ -228,7 +182,6 @@ export default function DocRefMenu({ editor, disabled }: { editor: Editor; disab
     return () => {
       if (editor.isDestroyed) return;
       editor.unregisterPlugin(suggestionKey);
-      editor.unregisterPlugin(plainAfterKey);
     };
   }, [editor]);
 

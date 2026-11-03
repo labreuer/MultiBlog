@@ -3,7 +3,7 @@
    body frame, and remote-collaborator caret styling. Split out of what used
    to be PostEditor.module.css (deleted with PostEditor.tsx, PLAN.md §15):
    that file's name suggested it was post-specific, but CollabEditorBody/
-   EditorToolbar/QuoteControls always imported it directly regardless of
+   EditorToolbar always imported it directly regardless of
    which surface embedded them, so deleting it broke every doc-side editor
    too. This file is that shared half, under an honest name. */
 
@@ -114,7 +114,7 @@
   border-radius: 4px;
 }
 
-/* Same box as .quoteMenu, so the toolbar's two dropdowns read as one kind
+/* Same box as .toolbarMenu, so the toolbar's two dropdowns read as one kind
    of thing. */
 .linkResults {
   display: flex;
@@ -315,13 +315,13 @@
   background: var(--surface-hover);
 }
 
-/* Split button: .quoteGroup has no gap of its own, so the two buttons sit
+/* Split button: .splitButton has no gap of its own, so the two buttons sit
    pixel-adjacent instead of getting .toolbar's normal 4px inter-button gap. */
-.quoteGroup {
+.splitButton {
   display: inline-flex;
 }
 
-.quoteDropdownTrigger {
+.splitButtonTrigger {
   min-height: 36px;
   padding: 4px 6px;
   display: inline-flex;
@@ -330,9 +330,9 @@
 }
 
 /* position: fixed and portaled to <body>, placed by floating-ui — see
-   QuoteControls.tsx for why an absolute menu inside the toolbar no longer
-   works. z-index matches the other fixed popovers (AnnotationPopover). */
-.quoteMenu {
+   useToolbarMenu.ts for why an absolute menu inside the toolbar can't
+   work. z-index matches the other fixed popovers (AnnotationPopover). */
+.toolbarMenu {
   position: fixed;
   z-index: 20;
   display: flex;
@@ -346,7 +346,7 @@
   z-index: 10;
 }
 
-.quoteMenuItem {
+.toolbarMenuItem {
   padding: 8px 12px;
   text-align: left;
   white-space: nowrap;
@@ -356,7 +356,7 @@
   cursor: pointer;
 }
 
-.quoteMenuItem:hover {
+.toolbarMenuItem:hover {
   background: var(--surface-hover);
 }
 
@@ -364,10 +364,19 @@
    on an unmerged cell, "Merge cells" with one cell selected). Kept in the
    menu rather than hidden so the list never reshuffles under the pointer;
    the same opacity the admin tables use for a soft-deleted row. */
-.quoteMenuItem:disabled {
+.toolbarMenuItem:disabled {
   opacity: 0.45;
   cursor: default;
   background: none;
+}
+
+/* A radio menu's check column (NumberedListControls): the same width
+   whether or not the item is the checked one, so the labels line up. */
+.menuItemCheck {
+  display: inline-flex;
+  width: 14px;
+  margin-right: 8px;
+  vertical-align: -2px;
 }
 
 /* The rule between a menu's groups (TableControls: rows / columns /
@@ -523,7 +532,7 @@
      keeps the color-literal grep clean.
 
      The mask applies to every descendant, fixed ones included, which is
-     why QuoteControls' menu and LinkControls' popover are portaled to
+     why the split buttons' menus and LinkControls' popover are portaled to
      <body> rather than hanging inside the toolbar. */
   .toolbar {
     flex-wrap: nowrap;
@@ -549,7 +558,7 @@
     padding: 6px 12px;
   }
 
-  .quoteDropdownTrigger {
+  .splitButtonTrigger {
     min-height: 44px;
     padding: 6px 8px;
   }

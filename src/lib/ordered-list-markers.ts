@@ -87,7 +87,7 @@ function romanValue(marker: string): number | null {
 }
 
 /** Whether `marker` can open a list: digits, one letter, or a valid Roman numeral. */
-function opensList(marker: string): boolean {
+export function opensList(marker: string): boolean {
   return DIGITS.test(marker) || /^[A-Za-z]$/.test(marker) || romanValue(marker) !== null;
 }
 

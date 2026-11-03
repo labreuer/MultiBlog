@@ -34,19 +34,22 @@ const eslintConfig = defineConfig([
     },
   },
   {
-    // docs/TIPTAP.md "Inline code takes other marks": StarterKit and Code come
-    // from src/lib/tiptap-schema.ts, whose code mark lets code carry other
-    // marks. A surface built from either package would refuse them there and
-    // nowhere else, and nothing else would notice.
+    // docs/TIPTAP.md "Inline code takes other marks" and "A link ends where
+    // its text ends": StarterKit, Code and Link come from
+    // src/lib/tiptap-schema.ts, whose code mark lets code carry other marks
+    // and whose link mark stops at its end. A surface built from one of the
+    // packages would behave differently there and nowhere else, and nothing
+    // else would notice.
     ignores: ["src/lib/tiptap-schema.ts", "src/lib/tiptap-schema.test.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
         {
           paths: [
-            ...["@tiptap/starter-kit", "@tiptap/extension-code"].map((name) => ({
+            ...["@tiptap/starter-kit", "@tiptap/extension-code", "@tiptap/extension-link"].map((name) => ({
               name,
-              message: "Import StarterKit or Code from @/lib/tiptap-schema, whose code mark lets code carry other marks (docs/TIPTAP.md).",
+              message:
+                "Import StarterKit, Code or Link from @/lib/tiptap-schema, whose code mark lets code carry other marks and whose link mark stops at its end (docs/TIPTAP.md).",
             })),
             // docs/DOC_IMPORT.md §12: the package's pair reads "N. T. Wright"
             // at a paragraph's start as a list marker, and its tokenizer, once
