@@ -22,6 +22,7 @@ import {
   orderedListTokenizer,
   renderOrderedListItem,
 } from "./ordered-list-markers";
+import { typedOrderedListInputRule } from "./ordered-list-input-rule";
 import { Annotation } from "./annotation-extension";
 
 // docs/TIPTAP.md "Inline code takes other marks" — TipTap's code mark
@@ -47,6 +48,11 @@ export const OrderedList = BaseOrderedList.extend({
   markdownTokenizer: orderedListTokenizer,
   parseMarkdown: (token, helpers) => conformOrderedList(BaseOrderedList.config.parseMarkdown!(token, helpers), token),
   addProseMirrorPlugins: () => [orderedListPastePlugin()],
+  // "1. " as the package has it, and "a) ", "I.  " and the like by the same
+  // rule (ordered-list-input-rule.ts, docs/TIPTAP.md).
+  addInputRules() {
+    return [...(this.parent?.() ?? []), typedOrderedListInputRule(this.type)];
+  },
 });
 
 export const ListItem = BaseListItem.extend({

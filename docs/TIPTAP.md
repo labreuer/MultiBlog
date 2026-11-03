@@ -442,8 +442,34 @@ Markdown round-trips every style and start, nested lists included: the export wr
 why `)` and not `a.`). So the MCP read, the comment edit box and an MCP edit keep it, with
 the two gaps §12 lists. A one-item list starting at a value both a letter and a numeral can name
 reads back in Pandoc's reading: Roman 5 as letters from 22, letters from 9 as Roman 1. The
-dropdown never sets a `start`, so only a pasted or imported list can hit it. And two adjacent
-plain-numbered lists read back as one, as CommonMark reads them.
+dropdown never sets a `start`, but typing can (below). And two adjacent plain-numbered lists
+read back as one, as CommonMark reads them.
+
+## Typing a marker starts a lettered or Roman list
+
+The package's input rule turns `1. ` at a paragraph's start into a numbered list.
+`src/lib/ordered-list-input-rule.ts` adds one for the other four styles, on our `OrderedList`
+in `tiptap-schema.ts`, so every editor has it. It takes the marker rule the Markdown parse takes
+(docs/DOC_IMPORT.md §12): a letter or numeral, then `)` and a space or `.` and two. One space
+after a period is how "C. S. Lewis", "I. M. Pei" or "A. A. Milne" begins, so it stays text.
+
+Lists needn't be continuous. A list can't hold a paragraph between its items, so a marker typed
+below a paragraph of discussion starts a new list, numbered on from the earlier one it
+continues:
+
+| Typed at a paragraph's start | Makes |
+|---|---|
+| the next marker of the lettered or Roman list directly above | another item in that list |
+| the next marker of an earlier list at this level, the nearest such (`c) ` after `a)`, `b)` and a paragraph of discussion) | a list in that list's style, from that marker |
+| any other single letter or valid Roman numeral | a list read as the Markdown parse reads a first marker: `c` letters from 3, `i` Roman 1, `ii` Roman 2 |
+| anything else (`cf) `, `St.  `) | nothing: the spaces are typed |
+
+An earlier list decides between the two readings of a letter both a letter and a numeral can
+name: `v) ` after a list i–iv, however far below it, is Roman 5, where alone it is the letter v,
+and `i) ` after a list lettered `a`–`h` is the ninth letter. A one-item list at such a start is
+one of the Markdown gaps above. "At this level" is the paragraph's siblings: the top of the doc,
+or the inside of one list item or quote. Backspace straight after undoes the rule, as for any
+input rule.
 
 The three split buttons share `useToolbarMenu` (`src/components/useToolbarMenu.ts`): the open
 state, closing on an outside mousedown or Escape, and the floating-ui placement of a menu
