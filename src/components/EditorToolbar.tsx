@@ -7,13 +7,13 @@ import {
   IconBlockquote,
   IconBold,
   IconClearFormatting,
-  IconH2,
   IconIndentDecrease,
   IconIndentIncrease,
   IconItalic,
   IconList,
 } from "@tabler/icons-react";
 import { tightenLines } from "@/lib/tighten-lines";
+import HeadingControls from "./HeadingControls";
 import LinkControls from "./LinkControls";
 import NumberedListControls from "./NumberedListControls";
 import TableControls from "./TableControls";
@@ -25,7 +25,7 @@ export type ToolbarTool =
   | "bold"
   | "italic"
   | "link"
-  | "h2"
+  | "heading"
   | "bullets"
   | "numbered"
   | "quote"
@@ -50,7 +50,7 @@ export const FULL_TOOLS: ToolbarTool[] = [
   "bold",
   "italic",
   "link",
-  "h2",
+  "heading",
   "bullets",
   "numbered",
   "quote",
@@ -208,18 +208,7 @@ export default function EditorToolbar({
         </button>
       )}
       {tools.includes("link") && <LinkControls editor={editor} disabled={disabled} />}
-      {tools.includes("h2") && (
-        <button
-          type="button"
-          className={styles.toolbarButton}
-          disabled={disabled}
-          aria-label="Heading 2"
-          title="Heading 2 (Ctrl+Alt+2 / ⌘⌥2)"
-          onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-        >
-          <IconH2 size={18} />
-        </button>
-      )}
+      {tools.includes("heading") && <HeadingControls editor={editor} disabled={disabled} />}
       {tools.includes("bullets") && (
         <button
           type="button"

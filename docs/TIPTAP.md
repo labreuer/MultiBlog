@@ -301,8 +301,8 @@ marks, nothing else".
 ## Every toolbar button has a tooltip
 
 Every button in the editor toolbar has a `title`: `EditorToolbar.tsx`'s own, and those that
-`LinkControls`, `NumberedListControls` and `TableControls` put in the toolbar, including a
-split button's ▾. Most of them are icons only, and the tooltip is the only place a sighted reader
+`LinkControls`, `HeadingControls`, `NumberedListControls` and `TableControls` put in the
+toolbar, including a split button's ▾. Most of them are icons only, and the tooltip is the only place a sighted reader
 learns what one does. A new tool gets one in the same commit.
 
 - **The name, then the shortcut when one is bound:** `Bold (Ctrl+B / ⌘B)`. Read the
@@ -314,7 +314,7 @@ learns what one does. A new tool gets one in the same commit.
   button inside a table says to use its menu instead.
 
 A button that shows its text, such as a dropdown menu item or the link popover's Save, needs
-no tooltip unless there is a shortcut to tell.
+no tooltip unless there is a shortcut to tell, as the heading levels do.
 
 ## Enter is two keys, decided by whether the virtual keyboard is docked
 
@@ -402,6 +402,23 @@ Two keymap notes ride along:
   trade. The buttons stay the layout-independent path — a reason they don't retire in favor
   of the shortcut.
 
+## The heading tool remembers its level
+
+`HeadingControls` is the doc editor's heading tool (`"heading"` in `FULL_TOOLS`; comments have
+no headings in their schema, and an annotation's toolbar leaves them out) as a split button. The
+▾ lists Heading 1 to 4 with the current block's level checked, and a pick *sets* the block to
+that level (`setHeading`). The main button *toggles* the level picked last and wears that
+level's icon, so a run of H3s is one click each after the first, the way a highlighter colour
+stays picked. It starts at Heading 2 and remembers for as long as the editor is mounted: the
+memory is the toolbar's own state, not stored anywhere, so a reload starts at 2 again. Only a
+pick from the menu changes it; Ctrl/⌘+Alt+<level> applies a level without touching it.
+
+The menu stops at 4 because a doc's outline rarely goes deeper; 5 and 6 are still a shortcut
+away (Heading's own Mod-Alt-<level>, bound for every level in its `levels`, which StarterKit
+leaves at 1–6), and come in from imported Markdown or pasted HTML. So don't narrow `levels` to
+match the menu: that would take the two shortcuts away and fold an imported H5 into an H1. `prose.module.css` gives all six the same margins,
+which `globals.css`' reset would otherwise take away.
+
 ## A numbered list's style is its `type`
 
 TipTap's `orderedList` carries the HTML `type` attribute — `1`, `a`, `A`, `i`, `I` — and renders
@@ -428,7 +445,7 @@ reads back in Pandoc's reading: Roman 5 as letters from 22, letters from 9 as Ro
 dropdown never sets a `start`, so only a pasted or imported list can hit it. And two adjacent
 plain-numbered lists read back as one, as CommonMark reads them.
 
-The two split buttons share `useToolbarMenu` (`src/components/useToolbarMenu.ts`): the open
+The three split buttons share `useToolbarMenu` (`src/components/useToolbarMenu.ts`): the open
 state, closing on an outside mousedown or Escape, and the floating-ui placement of a menu
 portaled to `<body>`, with the reason it is portaled.
 
