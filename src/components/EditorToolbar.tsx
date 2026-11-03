@@ -141,7 +141,7 @@ export default function EditorToolbar({
           className={styles.toolbarButton}
           disabled={disabled || !canUndo}
           aria-label="Undo"
-          title="Undo"
+          title="Undo (Ctrl+Z / ⌘Z)"
           onClick={() => editor.chain().focus().undo().run()}
         >
           <IconArrowBackUp size={18} />
@@ -153,7 +153,7 @@ export default function EditorToolbar({
           className={styles.toolbarButton}
           disabled={disabled || !canRedo}
           aria-label="Redo"
-          title="Redo"
+          title="Redo (Ctrl+Y / ⌘⇧Z)"
           onClick={() => editor.chain().focus().redo().run()}
         >
           <IconArrowForwardUp size={18} />
@@ -165,7 +165,7 @@ export default function EditorToolbar({
           className={styles.toolbarButton}
           disabled={disabled}
           aria-label="Bold"
-          title="Bold"
+          title="Bold (Ctrl+B / ⌘B)"
           onClick={() => editor.chain().focus().toggleBold().run()}
         >
           <IconBold size={18} />
@@ -177,7 +177,7 @@ export default function EditorToolbar({
           className={styles.toolbarButton}
           disabled={disabled}
           aria-label="Italic"
-          title="Italic"
+          title="Italic (Ctrl+I / ⌘I)"
           onClick={() => editor.chain().focus().toggleItalic().run()}
         >
           <IconItalic size={18} />
@@ -190,7 +190,7 @@ export default function EditorToolbar({
           className={styles.toolbarButton}
           disabled={disabled}
           aria-label="Heading 2"
-          title="Heading 2"
+          title="Heading 2 (Ctrl+Alt+2 / ⌘⌥2)"
           onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
         >
           <IconH2 size={18} />
@@ -202,7 +202,7 @@ export default function EditorToolbar({
           className={styles.toolbarButton}
           disabled={disabled}
           aria-label="Bullet list"
-          title="Bullet list"
+          title="Bullet list (Ctrl+Shift+8 / ⌘⇧8)"
           onClick={() => editor.chain().focus().toggleBulletList().run()}
         >
           <IconList size={18} />
@@ -214,7 +214,7 @@ export default function EditorToolbar({
           className={styles.toolbarButton}
           disabled={disabled}
           aria-label="Numbered list"
-          title="Numbered list"
+          title="Numbered list (Ctrl+Shift+7 / ⌘⇧7)"
           onClick={() => editor.chain().focus().toggleOrderedList().run()}
         >
           <IconListNumbers size={18} />

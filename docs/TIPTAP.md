@@ -298,6 +298,24 @@ marks, nothing else".
 > `^3.28.0` resolves to 3.29.0, whose peer dep is `@tiptap/core@3.29.0` exactly, and npm
 > fails the install.
 
+## Every toolbar button has a tooltip
+
+Every button in the editor toolbar has a `title`: `EditorToolbar.tsx`'s own, and those that
+`LinkControls`, `QuoteControls` and `TableControls` put in the toolbar, including a split
+button's ▾. Most of them are icons only, and the tooltip is the only place a sighted reader
+learns what one does. A new tool gets one in the same commit.
+
+- **The name, then the shortcut when one is bound:** `Bold (Ctrl+B / ⌘B)`. Read the
+  shortcut from the extension's `addKeyboardShortcuts` in the installed package, or ours,
+  rather than from memory. A tool with no binding gets the name alone.
+- **`aria-label` stays the bare name.** A screen reader announces the label, and a shortcut
+  read aloud on every focus is noise.
+- **A disabled button's tooltip can say why**, when the reason isn't obvious: the table
+  button inside a table says to use its menu instead.
+
+A button that shows its text, such as a dropdown menu item or the link popover's Save, needs
+no tooltip unless there is a shortcut to tell, as the quote-depth items do.
+
 ## Enter is two keys, decided by whether the virtual keyboard is docked
 
 `VirtualKeyboardEnter` (`src/lib/virtual-keyboard-enter-extension.ts`), registered in both live

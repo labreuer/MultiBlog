@@ -96,6 +96,7 @@ export default function QuoteControls({ editor, disabled }: { editor: Editor; di
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={disabled}
+        title="Quote depth options"
         onClick={() => (open ? close() : setOpen(true))}
       >
         <IconChevronDown size={14} />
