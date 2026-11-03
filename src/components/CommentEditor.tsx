@@ -6,7 +6,7 @@ import { UndoRedo } from "@tiptap/extensions";
 import { ListKeymap } from "@tiptap/extension-list";
 import { commentContentExtensions } from "@/lib/tiptap-schema";
 import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
-import { QuoteDepthShortcuts } from "@/lib/quote-depth-shortcuts-extension";
+import { Indent } from "@/lib/indent-extension";
 import { FormatInputEvents } from "@/lib/format-input-extension";
 import EditorToolbar, { type ToolbarTool } from "./EditorToolbar";
 import proseStyles from "@/styles/prose.module.css";
@@ -16,7 +16,19 @@ import styles from "./CommentEditor.module.css";
 // PLAN.md §23h — the rich comment composer's reduced tool set. No headings
 // (not in the schema), no tighten (a comment is short); undo/redo come from
 // UndoRedo below rather than from Collaboration, since there is no ydoc here.
-export const COMMENT_TOOLS: ToolbarTool[] = ["undo", "redo", "bold", "italic", "link", "bullets", "numbered", "quote", "clear"];
+export const COMMENT_TOOLS: ToolbarTool[] = [
+  "undo",
+  "redo",
+  "bold",
+  "italic",
+  "link",
+  "bullets",
+  "numbered",
+  "quote",
+  "indent",
+  "outdent",
+  "clear",
+];
 
 type Props = {
   /** Mounted once with this; an external replacement remounts via `key`. */
@@ -52,7 +64,7 @@ export default function CommentEditor({
   }, [onChange]);
 
   const editor = useEditor({
-    extensions: [...commentContentExtensions, UndoRedo, ListKeymap, VirtualKeyboardEnter, QuoteDepthShortcuts, FormatInputEvents],
+    extensions: [...commentContentExtensions, UndoRedo, ListKeymap, VirtualKeyboardEnter, Indent, FormatInputEvents],
     content: initialContent ?? undefined,
     editable: !disabled,
     autofocus: autoFocus ? "end" : false,

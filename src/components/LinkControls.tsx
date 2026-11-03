@@ -38,7 +38,8 @@ import styles from "./EditorChrome.module.css";
 // scroller with an edge-fade mask (EditorChrome.module.css), and a mask
 // applies to every descendant — position: fixed included — so left in the
 // toolbar's subtree the popover would be faded out wherever it hangs past
-// the toolbar's box. Same reason QuoteControls' menu is portaled.
+// the toolbar's box. Same reason the split buttons' menus are
+// portaled (useToolbarMenu).
 const URL_LIKE = /^(https?:\/\/|\/)/i;
 
 // A search fires SEARCH_DEBOUNCE_MS after the last keystroke, or on every
@@ -244,7 +245,7 @@ export default function LinkControls({ editor, disabled }: { editor: Editor; dis
     };
   }, [editor]);
 
-  // Same dismissal pair as QuoteControls: click outside the container, or
+  // Same dismissal pair as useToolbarMenu: click outside the container, or
   // Escape anywhere.
   useEffect(() => {
     if (!open) return;

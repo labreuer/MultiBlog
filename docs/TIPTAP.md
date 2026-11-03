@@ -301,8 +301,8 @@ marks, nothing else".
 ## Every toolbar button has a tooltip
 
 Every button in the editor toolbar has a `title`: `EditorToolbar.tsx`'s own, and those that
-`LinkControls`, `QuoteControls`, `NumberedListControls` and `TableControls` put in the
-toolbar, including a split button's ▾. Most of them are icons only, and the tooltip is the only place a sighted reader
+`LinkControls`, `NumberedListControls` and `TableControls` put in the toolbar, including a
+split button's ▾. Most of them are icons only, and the tooltip is the only place a sighted reader
 learns what one does. A new tool gets one in the same commit.
 
 - **The name, then the shortcut when one is bound:** `Bold (Ctrl+B / ⌘B)`. Read the
@@ -314,7 +314,7 @@ learns what one does. A new tool gets one in the same commit.
   button inside a table says to use its menu instead.
 
 A button that shows its text, such as a dropdown menu item or the link popover's Save, needs
-no tooltip unless there is a shortcut to tell, as the quote-depth items do.
+no tooltip unless there is a shortcut to tell.
 
 ## Enter is two keys, decided by whether the virtual keyboard is docked
 
@@ -358,13 +358,23 @@ Two traps this arrangement depends on:
   `npm run e2e` runs the production build — a `NODE_ENV` gate would hide the hook from the one
   consumer it exists for.
 
-## Quote depth is `wrapIn`/`lift` — `toggleBlockquote` only toggles
+## Indent and outdent follow the caret
 
-Inside a blockquote, `toggleBlockquote` *unwraps* rather than nesting deeper, so a control
-that means "one level in / one level out" must use `wrapIn("blockquote")` and `lift`.
-`QuoteControls`' dropdown and `QuoteDepthShortcuts`
-(`src/lib/quote-depth-shortcuts-extension.ts`, Ctrl/⌘+Shift+. and ,) share that pair;
-StarterKit's own Mod-Shift-b keeps the plain toggle.
+The toolbar's Indent and Outdent buttons and Ctrl/⌘+Shift+. and , are one pair of commands,
+`indent` and `outdent` (`src/lib/indent-extension.ts`, registered in all three live editors),
+so the keys and the buttons can't disagree. What they act on is whichever of a list item or a
+quote is **nearest the caret**:
+
+- **In a list item**, the item nests under the one before it, or comes out a level —
+  `sinkListItem`/`liftListItem`, what Tab and Shift-Tab already do there. The first item of a
+  list has nothing to nest under, so Indent is disabled on it.
+- **Anywhere else**, a quote level is added or removed — `wrapIn("blockquote")`/`lift`.
+  `toggleBlockquote` can't do this: inside a blockquote it *unwraps* rather than nesting
+  deeper. The Quote button and StarterKit's own Mod-Shift-b keep the plain toggle.
+
+So a list inside a quote indents as a list, and a quote inside a list item as a quote. The
+toolbar dry-runs both commands (`can().indent()`), so a button with no level to add or remove
+is disabled.
 
 Two keymap notes ride along:
 
@@ -377,7 +387,7 @@ Two keymap notes ride along:
 - **prosemirror-keymap resolves `Shift-.` through the physical key** — exact on US layouts,
   able to miss on layouts whose `<`/`>` live elsewhere (e.g. German's dedicated `<>`
   key). TipTap's own shifted-punctuation defaults (Superscript's `Mod-.`) carry the same
-  trade. The dropdown stays the layout-independent path — a reason it doesn't retire in favor
+  trade. The buttons stay the layout-independent path — a reason they don't retire in favor
   of the shortcut.
 
 ## A numbered list's style is its `type`
@@ -389,7 +399,7 @@ Nothing in `prose.module.css` or `globals.css` sets `list-style-type` on an `<ol
 nothing may: a rule there would override the attribute everywhere. The package reads `type`
 from pasted HTML, Google Docs' `list-style-type` included, but has no command to set it.
 
-`NumberedListControls` is the numbered-list tool as a split button, in `QuoteControls`' shape:
+`NumberedListControls` is the numbered-list tool as a split button, in `TableControls`' shape:
 the main button is the plain toggle, the ▾ lists the five styles with the current one checked.
 Inside a numbered list a pick restyles it; anywhere else it makes one first (converting a
 bullet list) and styles that. Plain numbers are stored as no `type` at all, which is what a
@@ -406,7 +416,7 @@ reads back in Pandoc's reading: Roman 5 as letters from 22, letters from 9 as Ro
 dropdown never sets a `start`, so only a pasted or imported list can hit it. And two adjacent
 plain-numbered lists read back as one, as CommonMark reads them.
 
-The three split buttons share `useToolbarMenu` (`src/components/useToolbarMenu.ts`): the open
+The two split buttons share `useToolbarMenu` (`src/components/useToolbarMenu.ts`): the open
 state, closing on an outside mousedown or Escape, and the floating-ui placement of a menu
 portaled to `<body>`, with the reason it is portaled.
 

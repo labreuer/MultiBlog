@@ -4,8 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { popoverBoundsElement } from "@/lib/popover-placement";
 
-// The dropdown half of the toolbar's split buttons (QuoteControls,
-// TableControls, NumberedListControls): whether the menu is open, closing it
+// The dropdown half of the toolbar's split buttons (TableControls,
+// NumberedListControls): whether the menu is open, closing it
 // on a mousedown outside the group and the menu or on Escape, and placing it.
 // The caller renders the group (containerRef) and, while open, the menu
 // (menuRef) through createPortal to <body>.

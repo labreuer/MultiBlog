@@ -673,8 +673,9 @@ Git history carries per-step detail.
    [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md).
 2. **Posts & editor** — TipTap v3 editor, immutable append-only revisions, publish,
    diff + restore-as-new-revision. Editor is responsive and fills window height (300px floor).
-   Toolbar grew beyond plan: clear-formatting, and a split-button quote dropdown exposing
-   `wrapIn`/`lift` for multi-level blockquote nesting (toggleBlockquote can't nest).
+   Toolbar grew beyond plan: clear-formatting, and Indent/Outdent buttons that nest list items
+   or, outside a list, add and remove quote levels with `wrapIn`/`lift` (toggleBlockquote can't
+   nest) — docs/TIPTAP.md "Indent and outdent follow the caret".
 3. **Real-time collab** — Hocuspocus v4 server (`server/collab.ts`, port 1234, `npm run
    collab`); short-lived JWT minted by `/api/collab-token` gates connections using the same
    authz as post editing; live state persisted to `post_collab.ydoc`, seeded from the latest
@@ -1359,7 +1360,7 @@ observable rather than to ship a user-facing feature.
   `src/lib/ydoc-render.ts` rather than refactored out of `LiveHistoryViewer`, which is off-limits
   under the isolation constraint; deduplicating the two is part of the cutover.
 - A **"Switch to editing"** toggle that mounts a `HocuspocusProvider` plus the existing
-  `CollabEditorBody`, used unmodified (its toolbar and `QuoteControls` are purely editor-local,
+  `CollabEditorBody`, used unmodified (its toolbar and its controls are purely editor-local,
   with no post coupling).
 - A **Refresh** section showing the single `ydoc` row, the `ydoc_update` count and its last ten
   rows, and every `ydoc_snapshot` row — plus a **Snapshot** button that takes one and refreshes

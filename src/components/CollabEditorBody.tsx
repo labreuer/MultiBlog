@@ -11,7 +11,7 @@ import { Annotation } from "@/lib/annotation-extension";
 import { PendingAnnotation } from "@/lib/pending-annotation-extension";
 import { BlurredSelection } from "@/lib/blurred-selection-extension";
 import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
-import { QuoteDepthShortcuts } from "@/lib/quote-depth-shortcuts-extension";
+import { Indent } from "@/lib/indent-extension";
 import { FormatInputEvents } from "@/lib/format-input-extension";
 import {
   AnnotationHighlight,
@@ -190,9 +190,10 @@ export default function CollabEditorBody({
       // Enter inserts the hard break Shift-Enter does while the virtual
       // keyboard is up — the extension file says why, and how it is detected.
       VirtualKeyboardEnter,
-      // Ctrl/⌘+Shift+. and , — quote depth in and out; the extension file
-      // says why those keys and what they share with QuoteControls.
-      QuoteDepthShortcuts,
+      // The indent/outdent commands behind the toolbar's pair and
+      // Ctrl/⌘+Shift+. and , — list nesting or quote depth by where the caret
+      // is; the extension file says why those keys.
+      Indent,
       // The iPad keyboard's B/I/U buttons, which send no key — the
       // extension file says what they send instead.
       FormatInputEvents,

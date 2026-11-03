@@ -8,7 +8,7 @@ import { useToolbarMenu } from "./useToolbarMenu";
 import styles from "./EditorChrome.module.css";
 
 // docs/TIPTAP.md "A numbered list's style is its `type`". Split button, in
-// QuoteControls' shape: the main button is the plain numbered-list toggle it
+// TableControls' shape: the main button is the plain numbered-list toggle it
 // always was; the chevron opens the numbering styles. Inside a numbered list
 // a pick restyles the innermost one; anywhere else it makes a numbered list
 // first (from a bullet list, too: toggleOrderedList converts one) and styles
@@ -40,7 +40,7 @@ export default function NumberedListControls({ editor, disabled }: { editor: Edi
   };
 
   return (
-    <div className={styles.quoteGroup} ref={containerRef}>
+    <div className={styles.splitButton} ref={containerRef}>
       <button
         type="button"
         className={styles.toolbarButton}
@@ -53,7 +53,7 @@ export default function NumberedListControls({ editor, disabled }: { editor: Edi
       </button>
       <button
         type="button"
-        className={styles.quoteDropdownTrigger}
+        className={styles.splitButtonTrigger}
         aria-label="Numbering style"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -66,14 +66,14 @@ export default function NumberedListControls({ editor, disabled }: { editor: Edi
       {open &&
         !disabled &&
         createPortal(
-          <div ref={menuRef} className={styles.quoteMenu} role="menu">
+          <div ref={menuRef} className={styles.toolbarMenu} role="menu">
             {ORDERED_LIST_STYLES.map((style) => (
               <button
                 key={style.type ?? "1"}
                 type="button"
                 role="menuitemradio"
                 aria-checked={current === style.type}
-                className={styles.quoteMenuItem}
+                className={styles.toolbarMenuItem}
                 disabled={!inList && !canMakeList}
                 onClick={() => pick(style.type)}
               >

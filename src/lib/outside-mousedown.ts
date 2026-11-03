@@ -3,7 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 // "Outside the surface", for the popovers that close on a mousedown outside
 // one. Outside means outside the surface's React tree, not merely its DOM:
 // an editor inside a popover portals parts of itself to <body> (LinkBubble,
-// LinkControls' popover, QuoteControls, DocRefMenu — `position: fixed`, clear
+// LinkControls' popover, the toolbar's menus, DocRefMenu — `position: fixed`, clear
 // of every clipping ancestor), and a DOM `contains` test calls a click on one
 // of those outside, which closed an annotation composer the moment its own
 // link bubble's "Remove link" was clicked.

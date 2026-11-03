@@ -38,7 +38,7 @@ passes on an imported node. Nothing about CSV or xlsx changes that: a file becom
   headings and numbered lists for the same reason. Comments were never in question: §23b
   lists tables among what a stranger may not put in a comment, and that schema is stated,
   not derived.
-- **The toolbar** (`TableControls.tsx`): `QuoteControls`' split button. The main button
+- **The toolbar** (`TableControls.tsx`): a split button, as `NumberedListControls` is. The main button
   inserts a 3×3 table with a header row and is disabled while the caret is already in one
   (the schema would nest tables; nothing wants that). The chevron opens a menu — file, rows,
   columns, header toggles, merge and split, auto-size, download, delete — each item dry-run

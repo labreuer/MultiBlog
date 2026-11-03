@@ -11,8 +11,8 @@ import { autoSizeTable, tableHasManualSizing } from "@/lib/table-sizing";
 import { useToolbarMenu } from "./useToolbarMenu";
 import styles from "./EditorChrome.module.css";
 
-// docs/TABLES.md — the toolbar's table tool, QuoteControls' split-button shape
-// reused verbatim: the main button inserts, the chevron opens a menu. The
+// docs/TABLES.md — the toolbar's table tool, a split button: the main button
+// inserts, the chevron opens a menu. The
 // editing commands are all the table extension's own (`insertTable`,
 // `addRowAfter`, … `deleteTable`); this component adds no editing logic,
 // only the enabled-ness and a place to click.
@@ -173,7 +173,7 @@ export default function TableControls({
   }
 
   return (
-    <div className={styles.quoteGroup} ref={containerRef}>
+    <div className={styles.splitButton} ref={containerRef}>
       <button
         type="button"
         className={styles.toolbarButton}
@@ -186,7 +186,7 @@ export default function TableControls({
       </button>
       <button
         type="button"
-        className={styles.quoteDropdownTrigger}
+        className={styles.splitButtonTrigger}
         aria-label="Table options"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -210,13 +210,13 @@ export default function TableControls({
       {open &&
         !disabled &&
         createPortal(
-          <div ref={menuRef} className={styles.quoteMenu} role="menu">
+          <div ref={menuRef} className={styles.toolbarMenu} role="menu">
             {MENU_ITEMS.map((item) => (
               <button
                 key={itemKey(item)}
                 type="button"
                 role="menuitem"
-                className={`${styles.quoteMenuItem} ${item.separator ? styles.menuItemSeparated : ""}`}
+                className={`${styles.toolbarMenuItem} ${item.separator ? styles.menuItemSeparated : ""}`}
                 disabled={!enabled(item)}
                 onClick={() => run(item)}
               >

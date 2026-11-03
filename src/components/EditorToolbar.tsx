@@ -4,16 +4,18 @@ import { useEditorState, type Editor } from "@tiptap/react";
 import {
   IconArrowBackUp,
   IconArrowForwardUp,
+  IconBlockquote,
   IconBold,
   IconClearFormatting,
   IconH2,
+  IconIndentDecrease,
+  IconIndentIncrease,
   IconItalic,
   IconList,
 } from "@tabler/icons-react";
 import { tightenLines } from "@/lib/tighten-lines";
 import LinkControls from "./LinkControls";
 import NumberedListControls from "./NumberedListControls";
-import QuoteControls from "./QuoteControls";
 import TableControls from "./TableControls";
 import styles from "./EditorChrome.module.css";
 
@@ -27,6 +29,8 @@ export type ToolbarTool =
   | "bullets"
   | "numbered"
   | "quote"
+  | "indent"
+  | "outdent"
   | "table"
   | "tighten"
   | "clear";
@@ -35,7 +39,7 @@ export type ToolbarTool =
 // so extracting this component changes nothing about the doc/post body
 // editor. "tighten" (reduce space between lines, tighten-lines.ts) joined
 // later, in both lists; "table" (docs/TABLES.md, TableControls.tsx) later
-// still, in this one only.
+// still, in this one only; "indent"/"outdent" (indent-extension.ts) in both.
 //
 // Both editors disable StarterKit's undoRedo and get these commands from
 // `Collaboration` instead — its Yjs UndoManager undoes local changes only,
@@ -50,6 +54,8 @@ export const FULL_TOOLS: ToolbarTool[] = [
   "bullets",
   "numbered",
   "quote",
+  "indent",
+  "outdent",
   "table",
   "tighten",
   "clear",
@@ -61,7 +67,19 @@ export const FULL_TOOLS: ToolbarTool[] = [
 // the button would be as much a TypeError as undo on the blurb editor is
 // (the `can()` note below). "tighten" stays: cramped margin cards are where
 // tight spacing matters most.
-export const ANNOTATION_TOOLS: ToolbarTool[] = ["undo", "redo", "bold", "italic", "link", "bullets", "quote", "tighten", "clear"];
+export const ANNOTATION_TOOLS: ToolbarTool[] = [
+  "undo",
+  "redo",
+  "bold",
+  "italic",
+  "link",
+  "bullets",
+  "quote",
+  "indent",
+  "outdent",
+  "tighten",
+  "clear",
+];
 
 // match Tabler style
 function IconTightenLines({ size }: { size: number }) {
@@ -112,24 +130,30 @@ export default function EditorToolbar({
 }) {
   // The buttons whose enabled-ness depends on editor state: tightening
   // acts on the selection, so a caret alone leaves it inert (its chosen
-  // no-selection behavior — tighten-lines.ts), and undo/redo follow their
-  // stacks (`can().undo()` is a dry run of Collaboration's undo command,
+  // no-selection behavior — tighten-lines.ts), indent/outdent say whether
+  // there is a level to add or remove (the first item of a list can't nest,
+  // a paragraph in no quote can't come out of one), and undo/redo follow
+  // their stacks (`can().undo()` is a dry run of Collaboration's undo command,
   // which is a stack-length check — cheap enough for a per-transaction
   // selector). useEditorState deep-equals the selected object, so this
   // component re-renders only when a boolean flips, not per keystroke.
   //
   // The dry runs are gated on the tools list: on an editor that registers no
-  // undo command at all — the contributor blurb's (blurbExtensions) — there
-  // is no `can().undo` to call, and the resulting TypeError throws in render,
+  // undo command at all — the contributor blurb's (blurbExtensions), which
+  // has no Indent either — there is no `can().undo` to call, and the resulting TypeError throws in render,
   // taking down the whole page rather than one button (docs/TIPTAP.md).
   const showUndo = tools.includes("undo");
   const showRedo = tools.includes("redo");
-  const { selectionEmpty, canUndo, canRedo } = useEditorState({
+  const showIndent = tools.includes("indent");
+  const showOutdent = tools.includes("outdent");
+  const { selectionEmpty, canUndo, canRedo, canIndent, canOutdent } = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
       selectionEmpty: e.state.selection.empty,
       canUndo: showUndo && e.can().undo(),
       canRedo: showRedo && e.can().redo(),
+      canIndent: showIndent && e.can().indent(),
+      canOutdent: showOutdent && e.can().outdent(),
     }),
   });
 
@@ -209,7 +233,42 @@ export default function EditorToolbar({
         </button>
       )}
       {tools.includes("numbered") && <NumberedListControls editor={editor} disabled={disabled} />}
-      {tools.includes("quote") && <QuoteControls editor={editor} disabled={disabled} />}
+      {tools.includes("quote") && (
+        <button
+          type="button"
+          className={styles.toolbarButton}
+          disabled={disabled}
+          aria-label="Quote"
+          title="Quote (Ctrl+Shift+B / ⌘⇧B)"
+          onClick={() => editor.chain().focus().toggleBlockquote().run()}
+        >
+          <IconBlockquote size={18} />
+        </button>
+      )}
+      {showIndent && (
+        <button
+          type="button"
+          className={styles.toolbarButton}
+          disabled={disabled || !canIndent}
+          aria-label="Indent"
+          title="Indent (Ctrl+Shift+. / ⌘⇧.)"
+          onClick={() => editor.chain().focus().indent().run()}
+        >
+          <IconIndentIncrease size={18} />
+        </button>
+      )}
+      {showOutdent && (
+        <button
+          type="button"
+          className={styles.toolbarButton}
+          disabled={disabled || !canOutdent}
+          aria-label="Outdent"
+          title="Outdent (Ctrl+Shift+, / ⌘⇧,)"
+          onClick={() => editor.chain().focus().outdent().run()}
+        >
+          <IconIndentDecrease size={18} />
+        </button>
+      )}
       {tools.includes("table") && (
         <TableControls editor={editor} disabled={disabled} onNotice={onNotice ?? alertNotice} />
       )}
