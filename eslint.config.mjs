@@ -43,10 +43,21 @@ const eslintConfig = defineConfig([
       "no-restricted-imports": [
         "error",
         {
-          paths: ["@tiptap/starter-kit", "@tiptap/extension-code"].map((name) => ({
-            name,
-            message: "Import StarterKit or Code from @/lib/tiptap-schema, whose code mark lets code carry other marks (docs/TIPTAP.md).",
-          })),
+          paths: [
+            ...["@tiptap/starter-kit", "@tiptap/extension-code"].map((name) => ({
+              name,
+              message: "Import StarterKit or Code from @/lib/tiptap-schema, whose code mark lets code carry other marks (docs/TIPTAP.md).",
+            })),
+            // docs/DOC_IMPORT.md §12: the package's pair reads "N. T. Wright"
+            // at a paragraph's start as a list marker, and its tokenizer, once
+            // registered by any Markdown manager, reads every parse in the
+            // process, marked being one global instance.
+            {
+              name: "@tiptap/extension-list",
+              importNames: ["OrderedList", "ListItem", "ListKit"],
+              message: "Import OrderedList or ListItem from @/lib/tiptap-schema, whose marker rule keeps initials and abbreviations out of lists (docs/DOC_IMPORT.md §12).",
+            },
+          ],
         },
       ],
     },

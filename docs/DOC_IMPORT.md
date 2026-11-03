@@ -18,6 +18,7 @@ The pieces:
 | | |
 |---|---|
 | [`src/lib/markdown-import.ts`](../src/lib/markdown-import.ts) | Markdown → TipTap JSON, and the title rule |
+| [`src/lib/ordered-list-markers.ts`](../src/lib/ordered-list-markers.ts) | which line opens an ordered list, and what the export writes for one (§12) |
 | [`importMarkdownDocAction`](../src/app/actions/docs.ts) | validate → parse → create → redirect |
 | [`createDocWithContent`](../src/lib/doc-create.ts) | seed the ydoc → insert the row → cache the body |
 | [`src/components/DocImportButton.tsx`](../src/components/DocImportButton.tsx) | both controls, one `<form>` |
@@ -354,3 +355,160 @@ is the table that says so, case by case.
 The reverse, `commentContentToMarkdown`, serializes a stored body back for the edit box; there is
 deliberately no second stored form (§23m). It runs over the same manager, so a body parsed from
 Markdown and serialized again re-parses to itself — the last case in that test file.
+
+## 12. Which line opens an ordered list
+
+One rule decides which lines open an ordered list. It applies in every Markdown parse here: a
+doc import or the paste box, the Claude-chat importer, an MCP doc create or edit and an MCP
+note, a comment's Markdown box and an annotation's Markdown. It also applies to a plain-text
+paste into any editor. The rule is in
+[`src/lib/ordered-list-markers.ts`](../src/lib/ordered-list-markers.ts), and `OrderedList` and
+`ListItem` in `tiptap-schema.ts` carry it: TipTap's own nodes with the package's Markdown
+tokenizer, paste rule and item marker replaced. The nodes and the schema are unchanged.
+
+### The package's rule, and why it is replaced
+
+`@tiptap/extension-list` 3.29 gives `orderedList` a Markdown tokenizer of its own, ahead of
+marked's CommonMark list. It takes as a marker any digits, any run of the letters `ivxlcdm`,
+or any one or two letters, followed by `.` or `)` and whitespace. So on its own it reads the
+start of an ordinary paragraph as a list:
+
+| Paragraph opens with | The package reads |
+|---|---|
+| `N. T. Wright` | a list lettered from N (`<ol type="A" start="14">`) |
+| `C. S. Lewis` | a Roman list from C, 100 |
+| `cf. Barth` | a lettered list from "cf", 84 |
+| `St. Augustine`, `Dr. Jones`, `No. 5` | a list from 1, **with the word deleted** |
+| two of these, a blank line apart | one list of two items |
+
+A deleted word can't be recovered: the marker is not stored anywhere. And the MCP read hides
+the rest, because the export writes the marker back out, so a paragraph stored as a list
+reads as an ordinary "N. T. Wright, who says…". The package's paste rule does the same to a
+plain-text paste (a clipboard with no HTML on it) when every non-blank line is an item and
+the markers run in sequence. A single line of "C. S. Lewis wrote" passes that test.
+
+Upstream this is [tiptap#8395](https://github.com/ueberdosis/tiptap/issues/8395), still open.
+[tiptap#8377](https://github.com/ueberdosis/tiptap/pull/8377), merged to tiptap's main but in
+no 3.x release, refuses only mixed-case and invalid markers (`Ms.`, `Dr.`, `St.`). It still
+reads "N. T. Wright", "C. S. Lewis", "cf." and "v. 23" as lists, so it does not retire this
+rule. TODO.md says what to re-check when it ships.
+
+### The rule
+
+| Marker | Opens an item when followed by |
+|---|---|
+| digits, then `.` or `)` | whitespace: the package's rule, unchanged |
+| one letter or a valid Roman numeral, then `.` | two spaces, a tab, or the end of the line |
+| one letter or a valid Roman numeral, then `)` | a space, or the end of the line |
+| anything else: `St`, `cf`, `Dr`, `ok`, `Iv`, `iiii` | never |
+
+A valid Roman numeral is one in its canonical form, all in one case: `iv` and `IV`, not `Iv`
+or `iiii`. Two spaces after a period is what Pandoc asks of a capital initial, here asked of
+every letter, since "v. 23", "c. 1200", "n. 4", "p. 240" and "e. e. cummings" take one
+space. An intended lettered list has two plain ways in: `a)` with one space, or `A.` with
+two.
+
+Letters past `z` (`aa`, `ab`, …) are the one exception to "one letter". Such a marker is an
+item where the item before it at the same depth is the letter before it. As a list's first
+item, it is one where the next item at its depth is the letter after it. That is how a
+lettered list longer than 26, or one starting past `z`, is written, and no sentence opens
+that way.
+
+A line that fails the rule is ordinary text. Directly under an item, with no blank line
+between, it is lazy continuation text of that item, as any such line is. So `a. one` then
+`b. two`, with one space each, is one paragraph.
+
+### Where a list ends
+
+The package runs a list on through every item at its depth, of any style and across blank
+lines. So two lists with nothing between them read as one, in the first list's style: a
+lettered list directly above a Roman one loses the Roman list on the way back in. Here **a
+lettered or Roman list goes on only with its next marker**. Any other item at its depth, a
+restart at `a)` or a list in another style, opens a new list. A numbered list goes on with
+any number, as in CommonMark (`1.`, `1.`, `1.` is one list), and ends at a letter.
+
+The export writes every list's markers in sequence, so two adjacent lists it wrote read back
+as two, nested ones included. The exception is two adjacent *numbered* lists, which read back
+as one. CommonMark reads them as one too, unless the delimiter changes. A hand-written
+lettered list with a marker out of sequence (`a)`, `b)`, `d)`) splits at it.
+
+### Two readings of one letter
+
+`i`, `v`, `x`, `l`, `c`, `d` and `m` are letters and numerals both. A list's first marker
+reads as Pandoc's fancy_lists reads it (`anyOrderedListMarker` tries `romanOne`, then the
+letter, then the numeral). `i` or `I` is Roman 1. Any other single letter is a letter, so
+`c.` is 3, not 100. A longer valid numeral (`ii`, `xiv`, `cv`) is Roman.
+
+Pandoc then requires every later item to be in the first one's style, so its `v.` then
+`vi.` is two lists, a letter and then a numeral. Here **a second marker that continues the
+other reading decides instead**, and the two are one list:
+
+| Markers | Reads as |
+|---|---|
+| `i)`, `ii)` | Roman from 1 |
+| `i)`, `j)` | letters from 9 |
+| `v)`, `vi)` | Roman from 5 |
+| `v)`, `w)` | letters from 22 |
+| `c)`, `d)` | letters from 3 |
+| `c)`, `ci)` | Roman from 100 |
+| `cv)`, `cw)` | letters from 100 |
+| `v)` alone | letters from 22 (Pandoc's reading) |
+
+The two successors never coincide, so no pair is ambiguous. A **one-item list** has no second
+marker, so one starting at an ambiguous value reads back in Pandoc's style: Roman 5 as
+letters from 22, letters from 9 as Roman 1. Its one marker draws the same letter either way;
+the difference shows only when a second item is added. A one-item lettered list starting past
+`z` opens nothing and reads back as a paragraph, marker and all. These are the known gaps in
+the round trip, along with two adjacent numbered lists ("Where a list ends"), and
+`ordered-list-markers.test.ts` pins them.
+
+### Compared with Pandoc
+
+From Pandoc's source (`orderedListStart` in `src/Text/Pandoc/Readers/Markdown.hs`,
+`anyOrderedListMarker` in `src/Text/Pandoc/Parsing/Lists.hs`), read rather than run:
+
+| | Pandoc's fancy_lists | Here |
+|---|---|---|
+| a capital letter, then `.` | two spaces | two spaces |
+| a capital numeral that is one letter (`I`, `V`, `X`, `L`, `C`, `D`, `M`), then `.` | two spaces | two spaces |
+| a lower-case letter or numeral, then `.` | one space, except `p.` before a digit | two spaces |
+| a numeral of two or more letters, then `.` (`II.`, `iv.`) | one space | two spaces |
+| a letter or numeral, then `)` | one space | one space |
+| `(a)`, both parentheses | a marker | not a marker (nor is it to the package) |
+| two letters that aren't a numeral | never | only past `z`, in sequence |
+| `i` first | Roman 1 | Roman 1, unless the next marker is `j` |
+| another single letter first | a letter | a letter, unless the next marker continues the numeral |
+| a later item in another style | ends the list | ends the list; a lettered or Roman list also ends at any item out of sequence |
+
+### What the export writes
+
+`1.` for a numbered list, as the package writes it. For every other style it writes `a)`,
+`C)`, `iv)` and so on: the delimiter that needs one space. `a.` with two spaces would read
+back too, but two spaces don't survive being retyped, by a person or by a model editing a doc
+over MCP. Each such line would then be text, and turn the list into a paragraph. The schema
+stores no delimiter, so writing `)` loses nothing, and `)` is a lettered list to Pandoc as
+well. `start` is written as the first marker, `0` included (the package reads and writes
+`start: 0` as 1), and nested lists keep their own style. An item with nothing after its marker
+reads back as an item with an empty paragraph, which is what the schema requires of a list
+item. The package's tokenizer gives it no content at all, which is invalid.
+
+### Where it is, and the one way to break it
+
+- `ordered-list-markers.ts` holds the matcher, the reading of a first marker, the tokenizer,
+  the paste parser and the export's marker. The tokenizer is a port of the package's
+  (`collectOrderedListItems` and `buildNestedStructure`, which it does not export), with the
+  matcher in place of its regex, plus "Where a list ends" above. How lines group into
+  items and nest is the package's.
+- `tiptap-schema.ts` defines `OrderedList` and `ListItem`. `StarterKit` puts them in place of
+  the kit's own, at the same positions, and `commentContentExtensions` lists them. So the
+  three managers in `markdown-import.ts` and every editor have them.
+- **The three managers share marked's single global instance**, because `MarkdownManager`
+  uses it unless handed another. Each manager registers its extensions' tokenizers on that
+  instance, and marked tries the next one whenever one declines. So a manager built anywhere
+  in the process with the package's `OrderedList` would put its tokenizer beside ours (ahead
+  or behind, by which was built first), and either way it would take the lines ours refuses. `eslint.config.mjs` refuses the package's
+  `OrderedList`, `ListItem` and `ListKit` everywhere but `tiptap-schema.ts`.
+- `src/lib/ordered-list-markers.test.ts` holds the table of cases through all three parsers,
+  the round trips through all three exporters, the paste, and a check that each list and an
+  editor's StarterKit resolve to these nodes. `e2e/markdown-import.spec.ts` imports a file
+  with initials and lettered lists, and pastes plain text into the editor.
