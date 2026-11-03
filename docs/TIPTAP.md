@@ -142,6 +142,29 @@ viewer may not read shows "You don't have permission to read this doc." in the b
 (the route renders Forbidden there rather than a 404, so the bubble reveals nothing following
 the link wouldn't), and a doc that doesn't exist adds nothing.
 
+### A link ends where its text ends
+
+Text typed at either edge of a link is plain; text typed inside one is part of it. TipTap's
+Link makes its mark `inclusive` whenever `autolink` is on (`inclusive() { return
+this.options.autolink }`), and an inclusive mark spreads over whatever is typed at its end — so
+after Save in the link popover, a `[[` pick, or a click that lands the caret behind any link,
+the rest of the sentence became part of the link. `tiptap-schema.ts` exports `Link` as the
+package's with `inclusive: false`, ProseMirror's own choice for links; its `StarterKit` carries
+that `Link` in the package's place (and rank), and the comment schema uses it directly.
+`eslint.config.mjs` refuses `@tiptap/extension-link` outside the schema file, as it does Code and
+StarterKit.
+
+Inclusivity lives on the mark *type*, so it is the same for every link, however made — nothing
+per-link is stored, and existing docs need no migration. It only decides what a new character
+inherits; y-prosemirror and every reading view ignore it.
+
+What it costs is an autolinked URL edited at its end. Autolink only fires once a word is closed
+by whitespace, so the URL was already finished; but backspace into it and type, and the new
+characters are plain, and autolink then skips the word because part of it already carries a
+link — `https://example.co` + `m` + space leaves the `m` outside the link. (Inclusive, the `m`
+joined the link text but the href still said whatever autolink first wrote, so that edit was
+never fully right either.) Linking it again from the popover puts it right.
+
 ### Autolink passes `.md` filenames by
 
 linkify, which Link uses to find URLs in text, knows `.md` as Moldova's top-level domain, so
@@ -253,13 +276,9 @@ it. Suggestion's plugin is *prepended*, ahead of the keymaps,
 for the same reason `LinkControls`' Ctrl-K is: Enter must reach the menu before the base keymap
 splits the paragraph.
 
-What is typed right after a pick is kept out of the link: Link is inclusive while autolink is
-on, and the sentence the reference was dropped into continues right after it, so the next
-character would otherwise join the link. Clearing the stored marks on the pick is **not** enough
-here — ProseMirror drops stored marks on any step, and `AuthorHighlight`'s `appendTransaction`
-adds its steps in the same dispatch — so a second, tiny plugin remembers where the link ends
-(`plainAt`) and its own `appendTransaction` strips the link mark from whatever lands there next,
-then forgets.
+What is typed right after a pick stays out of the link, as the sentence the reference was
+dropped into continues: the link mark is not inclusive ("A link ends where its text ends", above), so
+the menu needs nothing of its own for it.
 
 ### Why `@tiptap/extension-document`/`-paragraph`/`-text` are still declared deps
 

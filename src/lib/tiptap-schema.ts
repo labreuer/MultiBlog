@@ -9,7 +9,7 @@ import BaseCode from "@tiptap/extension-code";
 import Blockquote from "@tiptap/extension-blockquote";
 import { BulletList, ListItem as BaseListItem, OrderedList as BaseOrderedList } from "@tiptap/extension-list";
 import HardBreak from "@tiptap/extension-hard-break";
-import Link from "@tiptap/extension-link";
+import BaseLink from "@tiptap/extension-link";
 import { Table, TableCell as BaseTableCell, TableHeader as BaseTableHeader, TableRow } from "@tiptap/extension-table";
 import { TableViewWithClearedWidths } from "./table-view";
 import { Quote } from "./quote-mark-extension";
@@ -56,8 +56,17 @@ export const ListItem = BaseListItem.extend({
       : BaseListItem.config.renderMarkdown!(node, helpers, ctx),
 });
 
+// docs/TIPTAP.md "A link ends where its text ends" — TipTap's link mark is
+// inclusive whenever autolink is on, so whatever is typed at a link's end
+// joins it: the rest of the sentence after a link made from the popover or
+// dropped by `[[`, or a word added after any link the caret lands behind.
+// This one never is, ProseMirror's own choice for links. Typing inside a
+// link still extends it; only its two edges stop.
+export const Link = BaseLink.extend({ inclusive: false });
+
 // StarterKit with the Code above in place of its own, moved to the end of its
-// list. A mark's position is its rank: the order a mark set is sorted in, and
+// list, and the Link above in place of its own, where it was. A mark's
+// position is its rank: the order a mark set is sorted in, and
 // the order the Markdown serializer nests delimiters in. So code is the
 // innermost of the marks with a Markdown form, and its backticks never close
 // around a `**` or a `*`, which Markdown would read as literal text
@@ -65,8 +74,8 @@ export const ListItem = BaseListItem.extend({
 // after it, being added after StarterKit in every list; they have no Markdown
 // form, so nothing depends on where. OrderedList and ListItem above replace
 // the kit's own where they stand. `configure` works as on the original: the
-// `code`, `orderedList` and `listItem` options reach these, and `code: false`
-// leaves Code out.
+// `code`, `link`, `orderedList` and `listItem` options reach these, and
+// `code: false` or `link: false` leaves one out.
 export const StarterKit = BaseStarterKit.extend({
   addExtensions() {
     const extensions = (this.parent?.() ?? []).map((extension) =>
@@ -74,7 +83,9 @@ export const StarterKit = BaseStarterKit.extend({
         ? OrderedList.configure(this.options.orderedList || {})
         : extension.name === "listItem"
           ? ListItem.configure(this.options.listItem || {})
-          : extension,
+          : extension.name === "link"
+            ? Link.configure(this.options.link || {})
+            : extension,
     );
     const others = extensions.filter((extension) => extension.name !== "code");
     return others.length < extensions.length ? [...others, Code.configure(this.options.code || {})] : extensions;
