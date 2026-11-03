@@ -475,6 +475,41 @@ The three split buttons share `useToolbarMenu` (`src/components/useToolbarMenu.t
 state, closing on an outside mousedown or Escape, and the floating-ui placement of a menu
 portaled to `<body>`, with the reason it is portaled.
 
+## A list starts at a line break
+
+A paragraph whose lines are joined by hard breaks (Shift+Enter, or plain Enter while the
+virtual keyboard is docked, above) reads as several lines, so starting a list on one of them
+makes a list of that line rather than of the whole paragraph. The hard break above the line
+becomes a paragraph boundary; the lines before it stay one paragraph, with their breaks. A
+selection across several lines splits at both ends and they become one item together, the
+same rule as for a paragraph: a toggle never makes an item per line. A selection ending at a
+line's very start leaves that line out.
+
+Both ways in do it, from `src/lib/list-from-line.ts`, on our `BulletList` and `OrderedList` in
+`tiptap-schema.ts` (so eslint refuses the package's `BulletList` too):
+
+- **The toggles.** `startingAtLine` wraps `toggleBulletList` and `toggleOrderedList`, so the
+  toolbar buttons, Mod-Shift-7/8 and the numbering picker all split first. It splits only when
+  dispatching, so `can()` answers for the unsplit doc, and only when the list can wrap there at
+  all, so a toggle that fails leaves no split behind it in a chain.
+- **A typed marker.** TipTap's input rules see a hard break as `\n`, and every list pattern is
+  anchored at `^`, so the package's rules fire only on a paragraph's first line and wrap every
+  line below it too. `atLine` replaces each list rule with one that matches after the last
+  `\n`, splits at the breaks either side of the marker's line, and hands the line's new
+  paragraph to the original handler — the numbering, the lettered rule's continuation and its
+  join are decided exactly as at a paragraph's start. So `1. ` typed on the empty line of
+  `a⏎b⏎⏎c` makes `a⏎b`, a one-item list, and `c`; whatever already follows the marker on its
+  line goes into the item. The handler takes a fresh chainable state over the same transaction:
+  a chainable state refreshes its `doc` only when its `tr` is next read, and the lettered rule
+  reads `state.doc` first. Inside a list item the package's rule runs unchanged.
+
+Inside a list nothing splits: a toggle there converts or lifts, and a hard break in an item is
+the item's own. One undo restores the paragraph, and Backspace straight after a typed marker
+undoes the rule, as for any input rule. Lifting the list again does not rejoin the paragraph.
+
+The split leaves an ordinary paragraph above an ordinary list, with prose's usual paragraph gap
+between them.
+
 ## The iPad's B/I/U buttons are `beforeinput` events, not keys
 
 The formatting buttons on the iPad's keyboard (and the Format item in iOS's selection callout)

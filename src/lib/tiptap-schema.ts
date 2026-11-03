@@ -7,7 +7,11 @@ import Italic from "@tiptap/extension-italic";
 import Strike from "@tiptap/extension-strike";
 import BaseCode from "@tiptap/extension-code";
 import Blockquote from "@tiptap/extension-blockquote";
-import { BulletList, ListItem as BaseListItem, OrderedList as BaseOrderedList } from "@tiptap/extension-list";
+import {
+  BulletList as BaseBulletList,
+  ListItem as BaseListItem,
+  OrderedList as BaseOrderedList,
+} from "@tiptap/extension-list";
 import HardBreak from "@tiptap/extension-hard-break";
 import BaseLink from "@tiptap/extension-link";
 import { Table, TableCell as BaseTableCell, TableHeader as BaseTableHeader, TableRow } from "@tiptap/extension-table";
@@ -23,6 +27,7 @@ import {
   renderOrderedListItem,
 } from "./ordered-list-markers";
 import { typedOrderedListInputRule } from "./ordered-list-input-rule";
+import { atLine, startingAtLine } from "./list-from-line";
 import { Annotation } from "./annotation-extension";
 
 // docs/TIPTAP.md "Inline code takes other marks" — TipTap's code mark
@@ -49,9 +54,30 @@ export const OrderedList = BaseOrderedList.extend({
   parseMarkdown: (token, helpers) => conformOrderedList(BaseOrderedList.config.parseMarkdown!(token, helpers), token),
   addProseMirrorPlugins: () => [orderedListPastePlugin()],
   // "1. " as the package has it, and "a) ", "I.  " and the like by the same
-  // rule (ordered-list-input-rule.ts, docs/TIPTAP.md).
+  // rule (ordered-list-input-rule.ts, docs/TIPTAP.md); each listing only the
+  // line it is typed on, as the toggle below does (list-from-line.ts,
+  // docs/TIPTAP.md "A list starts at a line break").
   addInputRules() {
-    return [...(this.parent?.() ?? []), typedOrderedListInputRule(this.type)];
+    return [...(this.parent?.() ?? []), typedOrderedListInputRule(this.type)].map(atLine);
+  },
+  addCommands() {
+    const parent = this.parent?.() ?? {};
+    return { ...parent, toggleOrderedList: startingAtLine(parent.toggleOrderedList!, () => this.type) };
+  },
+});
+
+// docs/TIPTAP.md "A list starts at a line break" — TipTap's bulletList, whose
+// toggle and "- " rule start a list at the caret's line rather than wrapping
+// a paragraph of hard-break-joined lines whole (list-from-line.ts), as
+// OrderedList's above do. Every surface takes it from here, StarterKit below
+// included, and eslint.config.mjs refuses the package's.
+export const BulletList = BaseBulletList.extend({
+  addInputRules() {
+    return (this.parent?.() ?? []).map(atLine);
+  },
+  addCommands() {
+    const parent = this.parent?.() ?? {};
+    return { ...parent, toggleBulletList: startingAtLine(parent.toggleBulletList!, () => this.type) };
   },
 });
 
@@ -78,20 +104,23 @@ export const Link = BaseLink.extend({ inclusive: false });
 // around a `**` or a `*`, which Markdown would read as literal text
 // (markdown-import.ts says the rest). The author and annotation marks come
 // after it, being added after StarterKit in every list; they have no Markdown
-// form, so nothing depends on where. OrderedList and ListItem above replace
-// the kit's own where they stand. `configure` works as on the original: the
-// `code`, `link`, `orderedList` and `listItem` options reach these, and
+// form, so nothing depends on where. OrderedList, BulletList and ListItem
+// above replace the kit's own where they stand. `configure` works as on the
+// original: the `code`, `link`, `orderedList`, `bulletList` and `listItem`
+// options reach these, and
 // `code: false` or `link: false` leaves one out.
 export const StarterKit = BaseStarterKit.extend({
   addExtensions() {
     const extensions = (this.parent?.() ?? []).map((extension) =>
       extension.name === "orderedList"
         ? OrderedList.configure(this.options.orderedList || {})
-        : extension.name === "listItem"
-          ? ListItem.configure(this.options.listItem || {})
-          : extension.name === "link"
-            ? Link.configure(this.options.link || {})
-            : extension,
+        : extension.name === "bulletList"
+          ? BulletList.configure(this.options.bulletList || {})
+          : extension.name === "listItem"
+            ? ListItem.configure(this.options.listItem || {})
+            : extension.name === "link"
+              ? Link.configure(this.options.link || {})
+              : extension,
     );
     const others = extensions.filter((extension) => extension.name !== "code");
     return others.length < extensions.length ? [...others, Code.configure(this.options.code || {})] : extensions;

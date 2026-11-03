@@ -54,11 +54,13 @@ const eslintConfig = defineConfig([
             // docs/DOC_IMPORT.md §12: the package's pair reads "N. T. Wright"
             // at a paragraph's start as a list marker, and its tokenizer, once
             // registered by any Markdown manager, reads every parse in the
-            // process, marked being one global instance.
+            // process, marked being one global instance. And its lists wrap a
+            // paragraph of hard-break-joined lines whole (docs/TIPTAP.md "A
+            // list starts at a line break").
             {
               name: "@tiptap/extension-list",
-              importNames: ["OrderedList", "ListItem", "ListKit"],
-              message: "Import OrderedList or ListItem from @/lib/tiptap-schema, whose marker rule keeps initials and abbreviations out of lists (docs/DOC_IMPORT.md §12).",
+              importNames: ["OrderedList", "BulletList", "ListItem", "ListKit"],
+              message: "Import OrderedList, BulletList or ListItem from @/lib/tiptap-schema, whose marker rule keeps initials and abbreviations out of lists (docs/DOC_IMPORT.md §12) and whose lists start at a line break (docs/TIPTAP.md).",
             },
           ],
         },
