@@ -1,9 +1,9 @@
 // /docs' Markdown import, both entry points, end to end. What each group of
 // tests is pinning down — the title rule, the seeding failure the reload
 // catches, and the two tests that need special handling — is in
-// docs/DOC_IMPORT.md (§4, §5, §10).
+// docs/DOC_IMPORT.md (§4, §5, §10, §12).
 import type { Page } from "@playwright/test";
-import { test, expect, grantClipboard, titleEditor, bodyEditor } from "./fixtures";
+import { test, expect, grantClipboard, titleEditor, bodyEditor, waitForDocCollabReady } from "./fixtures";
 import { deleteTestDoc } from "./db";
 import { E2E_TITLE_PREFIX } from "./naming";
 
@@ -141,6 +141,48 @@ test("HTML entities are decoded, except inside code", async ({ page }) => {
   // references inside a code span or a fence, so these are the real characters.
   await expect(body.locator("code").first()).toHaveText("code &lt; here");
   await expect(body.locator("pre")).toContainText("fenced &amp; untouched");
+});
+
+test("an initial opening a paragraph is text, in a file and in a plain-text paste; a lettered list is a list", async ({ page }) => {
+  // docs/DOC_IMPORT.md §12. TipTap's own rule reads "N. T. Wright" as a list
+  // lettered from N and "St. Augustine" as a list from 1 with "St." deleted,
+  // and its paste rule makes the same of a one-line plain-text paste.
+  const title = `${E2E_TITLE_PREFIX}List Markers ${Date.now()}`;
+  await importMarkdown(
+    page,
+    "list-markers.md",
+    `# ${title}\n\nN. T. Wright, who says it.\n\nSt. Augustine said it.\n\na) one\nb) two\n\nC.  three\nD.  four\n`,
+  );
+
+  const body = bodyEditor(page);
+  await expect(body.locator("p").filter({ hasText: /^N\. T\. Wright, who says it\.$/ })).toHaveCount(1);
+  await expect(body.locator("p").filter({ hasText: /^St\. Augustine said it\.$/ })).toHaveCount(1);
+  // Two lists, not one: a lettered list ends where the next item isn't its
+  // next letter. Told apart by toHaveAttribute, which compares exactly, since
+  // HTML matches `ol[type="a"]` case-insensitively and so finds both.
+  const lists = body.locator("ol");
+  await expect(lists).toHaveCount(2);
+  await expect(lists.nth(0)).toHaveAttribute("type", "a");
+  await expect(lists.nth(0).locator(":scope > li")).toHaveText(["one", "two"]);
+  await expect(lists.nth(1)).toHaveAttribute("type", "A");
+  await expect(lists.nth(1)).toHaveAttribute("start", "3");
+  await expect(lists.nth(1).locator(":scope > li")).toHaveText(["three", "four"]);
+
+  // A clipboard holding only text, as a terminal or a plain editor leaves it.
+  // Dispatched in the page, as table-sizing.spec.ts does and for its reasons.
+  await waitForDocCollabReady(page);
+  await body.getByText("St. Augustine said it.").click();
+  await body.evaluate((el, pasted) => {
+    const dt = new DataTransfer();
+    dt.setData("text/plain", pasted);
+    const event = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+    for (const type of dt.types) event.clipboardData?.setData(type, dt.getData(type));
+    el.dispatchEvent(event);
+  }, "C. S. Lewis wrote it.");
+  // Pasted as text, whole: the package's rule would have made a Roman list
+  // from 100 holding "S. Lewis wrote it."
+  await expect(body).toContainText("C. S. Lewis wrote it.");
+  await expect(body.locator("ol")).toHaveCount(2);
 });
 
 test("rejects a non-markdown file without creating a doc", async ({ page }) => {

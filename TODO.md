@@ -343,6 +343,36 @@ comments, annotations).
     `&copy;` making the round trip unchanged through all three managers, and for the Markdown
     each writes.
 
+## The ordered-list marker rule overrides upstream, and tiptap#8377 alone won't retire it (docs/DOC_IMPORT.md §12)
+
+`OrderedList` and `ListItem` in `src/lib/tiptap-schema.ts` replace `@tiptap/extension-list`
+3.29's Markdown tokenizer, plain-text paste rule and ordered item marker with
+`src/lib/ordered-list-markers.ts`'s. The upstream issue is
+[tiptap#8395](https://github.com/ueberdosis/tiptap/issues/8395) (open). Its fix on tiptap's
+main, [#8377](https://github.com/ueberdosis/tiptap/pull/8377), is in no 3.x release as of
+2026-11-02, and it only refuses mixed-case and invalid markers (`Ms.`, `Dr.`, `St.`). A
+release with #8377 still reads "N. T. Wright", "C. S. Lewis" (Roman 100), "cf. Barth", "ok."
+and "v. 23" as lists. So the release that ships it is the moment to re-check, not to delete.
+Bump every `@tiptap/*` package together, as always, then:
+
+- **Run the unit test on the package's pair.** Point `OrderedList`/`ListItem` in
+  `tiptap-schema.ts` at the package's `OrderedList`/`ListItem` and run
+  `src/lib/ordered-list-markers.test.ts`. Whatever still fails is what upstream still doesn't
+  do. As of #8377 that is: the two-space rule after a period, one letter only as a marker,
+  Pandoc's reading of `c`/`v`/`x`, the second-marker look-ahead, `start: 0` (#8395's second
+  half, `|| 1` in `parseMarkdown` and in `ListItem.renderMarkdown`), the empty item, a
+  lettered list ending at an item out of its sequence, and the `a)` the export writes. The paste tests call our functions directly, so check the package's
+  `parsePlainTextOrderedListPaste` by hand against `parsePlainTextOrderedList`'s cases.
+- **If the override stays, re-port.** Diff the package's `src/ordered-list/utils.ts` against
+  `collectItems`/`listToken`. From #8377 on, also diff `collectOrderedListItemsFromSource.ts`,
+  which reads the source through a scan window rather than splitting it whole. Compare the
+  package's `addProseMirrorPlugins` too: the override replaces the package's plugin list
+  whole, so a plugin added upstream would be dropped here without a word.
+- **Delete it only when the test passes on the package's pair.** That means removing
+  `ordered-list-markers.ts`, the two `extend`s and StarterKit's swap in `tiptap-schema.ts`,
+  and the `@tiptap/extension-list` entry in `eslint.config.mjs`. DOC_IMPORT.md §12 keeps the
+  rule and loses "Where it is".
+
 ## `edit_link` and `rename_file` can't be audited or undone (MCP.md §15, §21)
 
 **Status:** decided 2026-10-12 with the OAuth plan, and not yet built. Only a `claude-code`

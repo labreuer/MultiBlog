@@ -7,7 +7,7 @@ import Italic from "@tiptap/extension-italic";
 import Strike from "@tiptap/extension-strike";
 import BaseCode from "@tiptap/extension-code";
 import Blockquote from "@tiptap/extension-blockquote";
-import { BulletList, ListItem, OrderedList } from "@tiptap/extension-list";
+import { BulletList, ListItem as BaseListItem, OrderedList as BaseOrderedList } from "@tiptap/extension-list";
 import HardBreak from "@tiptap/extension-hard-break";
 import Link from "@tiptap/extension-link";
 import { Table, TableCell as BaseTableCell, TableHeader as BaseTableHeader, TableRow } from "@tiptap/extension-table";
@@ -16,6 +16,12 @@ import { Quote } from "./quote-mark-extension";
 import { getSchema, mergeAttributes, type JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { AuthorHighlight } from "./author-highlight-extension";
+import {
+  conformOrderedList,
+  orderedListPastePlugin,
+  orderedListTokenizer,
+  renderOrderedListItem,
+} from "./ordered-list-markers";
 import { Annotation } from "./annotation-extension";
 
 // docs/TIPTAP.md "Inline code takes other marks" — TipTap's code mark
@@ -27,6 +33,29 @@ import { Annotation } from "./annotation-extension";
 // included, and eslint.config.mjs refuses either package anywhere else.
 export const Code = BaseCode.extend({ excludes: "code" });
 
+// docs/DOC_IMPORT.md §12 — TipTap's orderedList and listItem, with the marker
+// rule in ordered-list-markers.ts in place of the package's: its Markdown
+// tokenizer and plain-text paste read "N. T. Wright" or "St. Augustine" at a
+// paragraph's start as a list marker. Same nodes, same schema; what changes is
+// which lines open a list, `start: 0` kept, and the marker the Markdown export
+// writes for a lettered or Roman list (`a)`). Every surface takes both from
+// here, StarterKit below included, and eslint.config.mjs refuses the package's
+// pair anywhere else: the managers in markdown-import.ts share marked's one
+// global instance, so the package's tokenizer registered by any one of them
+// would read every Markdown parse in the process again.
+export const OrderedList = BaseOrderedList.extend({
+  markdownTokenizer: orderedListTokenizer,
+  parseMarkdown: (token, helpers) => conformOrderedList(BaseOrderedList.config.parseMarkdown!(token, helpers), token),
+  addProseMirrorPlugins: () => [orderedListPastePlugin()],
+});
+
+export const ListItem = BaseListItem.extend({
+  renderMarkdown: (node, helpers, ctx) =>
+    ctx.parentType === "orderedList"
+      ? renderOrderedListItem(node, helpers, ctx)
+      : BaseListItem.config.renderMarkdown!(node, helpers, ctx),
+});
+
 // StarterKit with the Code above in place of its own, moved to the end of its
 // list. A mark's position is its rank: the order a mark set is sorted in, and
 // the order the Markdown serializer nests delimiters in. So code is the
@@ -34,11 +63,19 @@ export const Code = BaseCode.extend({ excludes: "code" });
 // around a `**` or a `*`, which Markdown would read as literal text
 // (markdown-import.ts says the rest). The author and annotation marks come
 // after it, being added after StarterKit in every list; they have no Markdown
-// form, so nothing depends on where. `configure` works as on the original:
-// `code`'s options reach this Code, and `code: false` leaves it out.
+// form, so nothing depends on where. OrderedList and ListItem above replace
+// the kit's own where they stand. `configure` works as on the original: the
+// `code`, `orderedList` and `listItem` options reach these, and `code: false`
+// leaves Code out.
 export const StarterKit = BaseStarterKit.extend({
   addExtensions() {
-    const extensions = this.parent?.() ?? [];
+    const extensions = (this.parent?.() ?? []).map((extension) =>
+      extension.name === "orderedList"
+        ? OrderedList.configure(this.options.orderedList || {})
+        : extension.name === "listItem"
+          ? ListItem.configure(this.options.listItem || {})
+          : extension,
+    );
     const others = extensions.filter((extension) => extension.name !== "code");
     return others.length < extensions.length ? [...others, Code.configure(this.options.code || {})] : extensions;
   },
