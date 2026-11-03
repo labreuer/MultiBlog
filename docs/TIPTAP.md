@@ -366,13 +366,25 @@ so the keys and the buttons can't disagree. What they act on is whichever of a l
 quote is **nearest the caret**:
 
 - **In a list item**, the item nests under the one before it, or comes out a level —
-  `sinkListItem`/`liftListItem`, what Tab and Shift-Tab already do there. The first item of a
-  list has nothing to nest under, so Indent is disabled on it.
+  `sinkListItem`/`liftListItem`. The first item of a list has nothing to nest under, so Indent
+  is disabled on it. **A new level under a numbered list starts as bullets**
+  (`sinkListItemBulletFirst`): `sinkListItem` makes the new level the parent's own type, and
+  a numbered list under a numbered list is rarely what an outline means. Only a level that
+  doesn't exist yet gets the default — an item joins a numbered level already under the one
+  above it, in that level's style, and joins a bullet level there too rather than starting a
+  second list beside it.
 - **Anywhere else**, a quote level is added or removed — `wrapIn("blockquote")`/`lift`.
   `toggleBlockquote` can't do this: inside a blockquote it *unwraps* rather than nesting
   deeper. The Quote button and StarterKit's own Mod-Shift-b keep the plain toggle.
 
-So a list inside a quote indents as a list, and a quote inside a list item as a quote. The
+So a list inside a quote indents as a list, and a quote inside a list item as a quote.
+
+**Tab is bound to the list half**, at priority 101 so it runs ahead of ListItem's own Tab
+(the stock `sinkListItem`), and so indents the same way the button does; Shift-Tab is still
+ListItem's `liftListItem`, which is what Outdent runs. Tab declines outside a list item, and
+**anywhere in a table**: Table's Tab (next cell, or a new row from the last) is registered
+after StarterKit at the same priority, and TipTap runs the later extension's keymap first, so
+it always had Tab in a cell — a list in a cell indents from the button. The
 toolbar dry-runs both commands (`can().indent()`), so a button with no level to add or remove
 is disabled.
 
