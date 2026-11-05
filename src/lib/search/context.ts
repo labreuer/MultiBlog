@@ -13,6 +13,12 @@ export type KindContext = {
   authorIds: string[];
   created: InstantRange | null;
   updated: InstantRange | null;
+  /**
+   * The people whose mentions to keep to (docs/MENTIONS.md, "Search"), as
+   * user ids; null for no mention filter. Empty is a filter that nothing
+   * passes: the handles asked for name nobody.
+   */
+  mentionIds: string[] | null;
   /** A post to leave out, with its comments: the quote picker's own host post (§8). */
   excludePostId: string | null;
   /**
@@ -39,6 +45,15 @@ export function taggedWhere(tagIds: string[]) {
   return tagIds.length > 0
     ? { tagAnchors: { some: { assignment: { tagId: { in: tagIds }, deletedAt: null, tag: { deletedAt: null } } } } }
     : {};
+}
+
+/**
+ * "Mentions any of these people" as a relation filter on a kind's `mentions`,
+ * the rows of the trigger-kept `mention` table (docs/ENTITY_CHIPS.md, step 1,
+ * item 12). By identity, so it finds a mention whatever its label says now.
+ */
+export function mentionedWhere(mentionIds: string[] | null) {
+  return mentionIds === null ? {} : { mentions: { some: { userId: { in: mentionIds } } } };
 }
 
 /** `load()` once per search, under `key`. */

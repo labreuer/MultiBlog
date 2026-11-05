@@ -76,7 +76,10 @@ export default function SearchForm({
         <input
           type="search"
           name="q"
-          defaultValue={params.q}
+          // A mention filter from the URL (`mentions=me`) is shown as the
+          // `@handle` words that mean the same in this box, so a resubmit
+          // keeps it and a reader can see, and delete, what narrows the page.
+          defaultValue={[...params.mentions.map((handle) => `@${handle}`), params.q].filter(Boolean).join(" ")}
           aria-label="Search"
           placeholder="Search…"
           autoFocus={!params.q}

@@ -42,6 +42,12 @@ const input = z.strictObject({
   kinds: z.array(z.enum(SEARCH_KINDS)).min(1).max(5).optional().describe("One kind pages 20 at a time; several give 5 each."),
   authors: z.array(slug).min(1).max(20).optional().describe("Author slugs: docs, posts and annotations by any of them."),
   tags: z.array(slug).min(1).max(20).optional().describe("Tag slugs: what carries any of them."),
+  mentions: z
+    .array(slug)
+    .min(1)
+    .max(20)
+    .optional()
+    .describe("Author slugs, or me for yourself: docs, posts and annotations that mention any of them."),
   created_from: day.optional(),
   created_to: day.optional(),
   updated_from: day.optional(),
@@ -90,6 +96,7 @@ export async function runSearch(
     q: (args.q ?? "").trim(),
     kinds: args.kinds ? SEARCH_KINDS.filter((kind) => args.kinds!.includes(kind)) : null,
     authors: args.authors ?? [],
+    mentions: args.mentions ?? [],
     created: { from: args.created_from ?? null, to: args.created_to ?? null },
     updated: { from: args.updated_from ?? null, to: args.updated_to ?? null },
     tz: args.tz ?? DEFAULT_TIME_ZONE,
@@ -110,7 +117,7 @@ export async function runSearch(
     throw new ApiError("unknown_author", "No author you can see has that slug.", { slugs: refused.slice(0, ERROR_LIST_CAP) });
   }
   if (result.status === "idle") {
-    throw invalid("Give q, or a filter (kinds, authors, tags or a date) to list by.");
+    throw invalid("Give q, or a filter (kinds, authors, tags, mentions or a date) to list by.");
   }
   return shapeSearch(result, (section) =>
     oneKind && cursor.offset + cursor.size < section.total

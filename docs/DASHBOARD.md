@@ -1,7 +1,7 @@
 # /dashboard — cards, Settings tiers, author-color plumbing
 
 The signed-in landing page (`src/app/dashboard/page.tsx`): a header stating who
-you are, up to four collapsible section cards, and Sign out. Everything on it is
+you are, up to five collapsible section cards, and Sign out. Everything on it is
 self-service — the page never edits anyone but the signed-in user, and every
 write re-derives its permission from the session server-side rather than
 trusting which fields the form rendered.
@@ -12,8 +12,8 @@ Each major section is a native `<details className={styles.card}>` with its
 `<h2>` inside the `<summary>` (`src/app/dashboard/page.module.css`). Native
 disclosure rather than a client component on purpose: the collapse works in
 server-rendered HTML with zero JS state, and a card's default comes down to
-whether `open` is present in the JSX — Recent docs starts open, Settings,
-Contributor profile and Connections start collapsed. The cards' visual identity (and the
+whether `open` is present in the JSX — Recent docs starts open, Mentions of you starts
+open when it has rows, and Settings, Contributor profile and Connections start collapsed. The cards' visual identity (and the
 house button the Save/Sign out buttons wear) is `src/styles/account.module.css`,
 shared with the auth pages; the dashboard module keeps only the
 `<details>`-specific rules, split so the two never set the same property.
@@ -50,6 +50,16 @@ more. The Edit link renders unconditionally because byline membership *is*
 `canUserEditDoc`'s own-doc rule, so no per-row authz query is needed; the
 Author(s) cell reads `doc_metrics.byline`, the same string_agg of
 `admin_initials` the `/docs` table shows.
+
+## Mentions of you
+
+Where the signed-in user has been mentioned (docs/MENTIONS.md), in what they can read: one
+line per doc, note or post, newest first by when the mention was first seen there
+(`mention.first_seen_at`), capped at 8. `mentionsOf` (`src/lib/mentions-of.ts`) runs one query
+per kind, each through that kind's read rule, so a mention in a doc this person can't open is
+neither listed nor counted. The heading links to `/search?mentions=me`, the same rows with the
+search's filters. The card shows for anyone a mention can name (AUTHOR and above) and for
+anyone else who has one; it starts open when it has rows.
 
 ## Settings
 

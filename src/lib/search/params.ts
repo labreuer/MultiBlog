@@ -24,6 +24,12 @@ export type SearchParams = {
   kinds: SearchKind[] | null;
   /** User slugs, well-formed but not yet checked against the picker. */
   authors: string[];
+  /**
+   * Whose mentions to keep to (docs/MENTIONS.md, "Search"): handles, or `me`
+   * for the searcher. Well-formed and nothing more; a handle nobody has
+   * narrows to nothing, as one whose mentions this viewer can't read does.
+   */
+  mentions: string[];
   created: DayRange;
   updated: DayRange;
   /** An IANA zone `Intl` accepts. The days above are days in it. */
@@ -60,6 +66,36 @@ const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 function parseAuthors(params: URLSearchParams): string[] {
   return [...new Set(listParam(params, "authors").filter((slug) => SLUG_RE.test(slug)))];
+}
+
+function parseMentions(params: URLSearchParams): string[] {
+  return [...new Set(listParam(params, "mentions").filter((slug) => SLUG_RE.test(slug)))];
+}
+
+/** The handle that means "the searcher" in a mention filter. No account can have it (user-slug.ts). */
+export const MENTIONS_ME = "me";
+
+// `@handle` as a word of its own: at the start or after a space, and ending
+// at a space or the end. So an email address names nobody, and neither does
+// "@" followed by anything a handle can't hold.
+const MENTION_TOKEN_RE = /(^|\s)@([a-z0-9][a-z0-9-]*)(?=\s|$)/gi;
+
+/**
+ * A search box's text, split into the mention filters typed into it and the
+ * rest: `@me budget` keeps to what mentions the searcher and searches it for
+ * "budget". Every well-formed `@handle` is a filter, whether or not anyone
+ * has that handle, so what the box does never depends on who exists.
+ */
+export function splitMentionTokens(q: string): { mentions: string[]; text: string } {
+  const mentions: string[] = [];
+  const text = q
+    .replace(MENTION_TOKEN_RE, (_match, lead: string, handle: string) => {
+      mentions.push(handle.toLowerCase());
+      return lead;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+  return { mentions: [...new Set(mentions)], text };
 }
 
 const DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -114,6 +150,7 @@ export function parseSearchParams(params: URLSearchParams): SearchParams {
     q: (params.get("q") ?? "").trim().slice(0, MAX_QUERY_LENGTH).trim(),
     kinds: parseKinds(params),
     authors: parseAuthors(params),
+    mentions: parseMentions(params),
     created: { from: parseDay(params.get("created_from")), to: parseDay(params.get("created_to")) },
     updated: { from: parseDay(params.get("updated_from")), to: parseDay(params.get("updated_to")) },
     tz: parseTimeZone(params.get("tz")),
@@ -127,6 +164,7 @@ export function hasFilters(params: SearchParams): boolean {
   return (
     params.kinds !== null ||
     params.authors.length > 0 ||
+    params.mentions.length > 0 ||
     params.created.from !== null ||
     params.created.to !== null ||
     params.updated.from !== null ||
@@ -148,6 +186,7 @@ export function searchQueryString(params: SearchParams, changes: Partial<SearchP
   if (next.q) out.set("q", next.q);
   if (next.kinds) out.set("kinds", next.kinds.join(","));
   if (next.authors.length > 0) out.set("authors", next.authors.join(","));
+  if (next.mentions.length > 0) out.set("mentions", next.mentions.join(","));
   const dates: [string, string | null][] = [
     ["created_from", next.created.from],
     ["created_to", next.created.to],

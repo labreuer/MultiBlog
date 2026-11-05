@@ -499,3 +499,61 @@ test("the doc editor annotates one mention by itself, though no mark can sit on 
     await deleteTestDoc(doc.id);
   }
 });
+
+// docs/MENTIONS.md, "Search" and "The dashboard" — finding what mentions a
+// person: by identity, through the `mention` table, inside what the searcher
+// may read.
+test("what mentions a person is found by @handle in the search box and by mentions=me, and listed on their dashboard", async ({
+  page,
+  secondUser,
+}) => {
+  const { user: author, page: authorPage } = await secondUser({ role: "AUTHOR" });
+  const word = `budgetword${Date.now()}`;
+  const shared = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: bodyOf(text(`The ${word} was reviewed by `), mention("s1", author.id), text(".")),
+  });
+  // The admin's own, which the mentioned person can't read.
+  const hidden = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "PRIVATE",
+    body: bodyOf(text(`A private ${word} note about `), mention("p1", author.id), text(".")),
+  });
+  // The same word, and no mention of anyone.
+  const plain = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: `Another ${word} altogether.` });
+  const link = (on: typeof page, title: string) => on.getByRole("link", { name: title }).first();
+  try {
+    // A handle typed into the box is a filter, and the rest is the text searched for.
+    await page.goto(`/search?q=${encodeURIComponent(`@${author.slug} ${word}`)}`);
+    await expect(page.getByText(`Only what mentions @${author.slug}`)).toBeVisible();
+    await expect(link(page, shared.title)).toBeVisible();
+    await expect(link(page, hidden.title)).toBeVisible();
+    await expect(link(page, plain.title)).toHaveCount(0);
+    // Without the handle, the word alone finds all three.
+    await page.goto(`/search?q=${word}`);
+    await expect(link(page, plain.title)).toBeVisible();
+    // A handle nobody has narrows to nothing, as a real person nobody mentioned would.
+    await page.goto(`/search?q=${encodeURIComponent(`@no-such-handle-e2e ${word}`)}`);
+    await expect(page.getByText("Only what mentions @no-such-handle-e2e")).toBeVisible();
+    await expect(link(page, shared.title)).toHaveCount(0);
+
+    // The person themselves: `me`, with no text, lists what mentions them, in what they can read.
+    await authorPage.goto("/search?mentions=me");
+    await expect(authorPage.getByRole("main").getByRole("searchbox", { name: "Search" })).toHaveValue("@me");
+    await expect(authorPage.getByText("Only what mentions you")).toBeVisible();
+    await expect(link(authorPage, shared.title)).toBeVisible();
+    await expect(link(authorPage, hidden.title)).toHaveCount(0);
+
+    // And their dashboard says so first, with the same rule.
+    await authorPage.goto("/dashboard");
+    const card = authorPage.locator("details").filter({ has: authorPage.getByRole("heading", { name: "Mentions of you" }) });
+    await expect(card.getByRole("link", { name: shared.title })).toBeVisible();
+    await expect(card.getByRole("link", { name: hidden.title })).toHaveCount(0);
+    await card.getByRole("link", { name: "Mentions of you" }).click();
+    await authorPage.waitForURL(/\/search\?mentions=me$/);
+  } finally {
+    await page.goto("about:blank");
+    for (const doc of [shared, hidden, plain]) await deleteTestDoc(doc.id);
+  }
+});

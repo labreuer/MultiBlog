@@ -160,7 +160,8 @@ still a plan.
   that sends that back is refused as `chip_as_text`), the pairing of a chip that continues
   another, link titles stripped on the way in, and styles in a read's header.
 - **Mentions:** the chip kind's fields, forms and labels, its context loader, the rule for who
-  may be mentioned, and the `@` menu in the doc editor and in a note's composer
+  may be mentioned, the `@` menu in the doc editor and in a note's composer, the `mentions=`
+  search filter with `@handle` in the search box, and the dashboard's "Mentions of you" card
   ([MENTIONS.md](MENTIONS.md)).
 
 `/docs`' Length counts a chip as no characters.

@@ -13,6 +13,9 @@ import LocalTime from "@/components/LocalTime";
 import ContributorPanel from "@/components/ContributorPanel";
 import AccountSettings from "@/components/AccountSettings";
 import ConnectionsCard from "@/components/ConnectionsCard";
+import { actorFromSessionUser } from "@/lib/actor";
+import { canInsertMentions } from "@/lib/entity-chips/kinds/mention";
+import { mentionsOf } from "@/lib/mentions-of";
 import { cardTokensOf } from "@/lib/api/token-card";
 import styles from "./page.module.css";
 import account from "@/styles/account.module.css";
@@ -21,6 +24,9 @@ import { signInPath } from "@/lib/sign-in-redirect";
 import { staffDisplayNameOf } from "@/lib/display-name";
 
 export const metadata: Metadata = { title: "Dashboard" };
+
+/** How many the card lists; its heading links to the rest. */
+const MENTIONS_SHOWN = 8;
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -86,6 +92,12 @@ export default async function DashboardPage() {
   // "Connections"). A COMMENTER can have no bot, so sees the card only for a
   // token of their own.
   const tokens = await cardTokensOf(session.user.id, new Date());
+
+  // Where this person has been mentioned, in what they can read
+  // (docs/DASHBOARD.md "Mentions of you"). The card is there for anyone a
+  // mention can name, and for anyone else who has one all the same.
+  const mentions = await mentionsOf(actorFromSessionUser(session.user), MENTIONS_SHOWN);
+  const showMentions = mentions.length > 0 || canInsertMentions(session.user.role);
   const showConnections = tokens.length > 0 || session.user.role !== "COMMENTER";
 
   return (
@@ -144,6 +156,35 @@ export default async function DashboardPage() {
         )}
         </div>
       </details>
+      {showMentions && (
+        <details className={`${account.card} ${styles.card}`} open={mentions.length > 0}>
+          {/* The search this card is the top of: everything that mentions
+              the viewer, with the search's filters to narrow it. */}
+          <summary>
+            <h2>
+              <Link href="/search?mentions=me">Mentions of you</Link>
+            </h2>
+          </summary>
+          <div className={styles.cardBody}>
+            {mentions.length === 0 ? (
+              <p style={{ color: "var(--text-secondary)" }}>Nobody has mentioned you yet.</p>
+            ) : (
+              <ul className={styles.mentions}>
+                {mentions.map((mention) => (
+                  <li key={mention.href}>
+                    <Link href={mention.href}>{mention.title}</Link>
+                    <span style={{ color: "var(--text-secondary)" }}>
+                      {mention.kind === "annotation" ? ` · a note by ${mention.by}` : mention.kind === "post" ? " · a post" : ""}
+                      {" · "}
+                      <LocalTime value={mention.at} />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
+      )}
       <details className={`${account.card} ${styles.card}`}>
         <summary>
           <h2>Settings</h2>

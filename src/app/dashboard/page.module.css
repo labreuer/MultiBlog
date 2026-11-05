@@ -23,3 +23,14 @@
 .cardBody {
   margin-top: 0.75rem;
 }
+
+/* "Mentions of you": one line per doc, note or post. globals.css strips a
+   list's own padding and markers, and a marker adds nothing to a list of
+   links. */
+.mentions {
+  list-style: none;
+}
+
+.mentions > li {
+  margin-top: 0.35rem;
+}

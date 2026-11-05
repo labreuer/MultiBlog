@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hasFilters, parseDay, parseSearchParams, searchQueryString, urlSearchParamsFrom, MAX_QUERY_LENGTH } from "./params";
+import {
+  hasFilters,
+  parseDay,
+  parseSearchParams,
+  searchQueryString,
+  splitMentionTokens,
+  urlSearchParamsFrom,
+  MAX_QUERY_LENGTH,
+} from "./params";
 
 // docs/FULLTEXT.md §6. The parser is the one reading of a search URL that
 // the page and the API share, so what is worth pinning is what it refuses:
@@ -13,6 +21,7 @@ test("an empty querystring is every default", () => {
     q: "",
     kinds: null,
     authors: [],
+    mentions: [],
     created: { from: null, to: null },
     updated: { from: null, to: null },
     tz: "UTC",
@@ -85,4 +94,30 @@ test("a page's resolved searchParams keep every value of a repeated name", () =>
   assert.deepEqual(params.getAll("kinds"), ["docs", "pdfs"]);
   assert.deepEqual(parseSearchParams(params).kinds, ["docs", "pdfs"]);
   assert.equal(params.has("page"), false);
+});
+
+// docs/MENTIONS.md, "Search" — the mention filter: `mentions=`, and `@handle`
+// typed into the box.
+
+test("mention handles must look like slugs, me among them, and a filter by one is a filter", () => {
+  assert.deepEqual(parse("mentions=me,ada-lovelace,me").mentions, ["me", "ada-lovelace"]);
+  assert.deepEqual(parse("mentions=Ada,../x,@me").mentions, []);
+  assert.equal(hasFilters(parse("mentions=me")), true);
+  assert.equal(searchQueryString(parse("q=budget&mentions=me,ada")), "?q=budget&mentions=me%2Cada");
+});
+
+test("an @handle word in the box is a mention filter, and the rest is the text", () => {
+  assert.deepEqual(splitMentionTokens("@me"), { mentions: ["me"], text: "" });
+  assert.deepEqual(splitMentionTokens("the budget @ada-lovelace  for @Me and @ada-lovelace"), {
+    mentions: ["ada-lovelace", "me"],
+    text: "the budget for and",
+  });
+  // Every well-formed one, whether or not anyone has the handle: the box can't be used to ask who exists.
+  assert.deepEqual(splitMentionTokens("@nobody-at-all").mentions, ["nobody-at-all"]);
+});
+
+test("an @ that isn't a word of its own names nobody", () => {
+  for (const q of ["ada@example.com", "meet @ 5pm", "@-x", "@ada's draft", "(@ada)", "@ada.", "a@b @"]) {
+    assert.deepEqual(splitMentionTokens(q), { mentions: [], text: q }, q);
+  }
 });

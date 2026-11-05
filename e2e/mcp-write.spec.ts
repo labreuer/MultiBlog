@@ -264,6 +264,13 @@ test("create_doc writes a mention from its Markdown, and refuses one that names 
     expect(read.result.markdown).toBe(`Reviewed by ${adaMd} last week.`);
     // Found by the name from the moment it exists: the cache was written with its label.
     expect(await getDocSearchText(String(made.result.id))).toBe(`Reviewed by @${ada.name} last week.`);
+
+    // And by who it mentions, whatever they are called (docs/MENTIONS.md, "Search").
+    const mentioning = await agent.call("search", { mentions: [ada.slug], kinds: ["docs"] });
+    expect(mentioning.isError, JSON.stringify(mentioning.error)).toBe(false);
+    expect(JSON.stringify(mentioning.result.sections)).toContain(String(made.result.url));
+    const nobody = await agent.call("search", { mentions: ["no-such-handle-e2e"], kinds: ["docs"] });
+    expect((nobody.result.sections as { total: number }[])[0].total).toBe(0);
   } finally {
     for (const id of created) await deleteTestDoc(id);
     await deleteTestUser(adaEmail);

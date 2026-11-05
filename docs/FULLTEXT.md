@@ -343,6 +343,7 @@ you mean" suggestions when a search did find something.
 | `q` | The text (§4) |
 | `kinds` | Any of `docs`, `posts`, `pdfs`, `annotations`, `comments`, comma-joined or repeated; by default every kind the viewer can read. A kind the viewer can't search is dropped |
 | `authors` | User slugs, comma-joined or repeated; a hit matches if any one of them is its author. A slug not on this viewer's picker is dropped |
+| `mentions` | User slugs, or `me` for the searcher, comma-joined or repeated; a hit matches if it mentions any one of them ([MENTIONS.md](MENTIONS.md), "Search"). An `@handle` word in `q` means the same. A handle nobody has narrows to nothing |
 | `created_from`, `created_to`, `updated_from`, `updated_to` | Dates as `YYYY-MM-DD`, inclusive |
 | `tz` | The IANA time zone those dates are in; UTC when absent or unknown |
 | `page` | Pagination, when exactly one kind is selected: 20 hits a page |
@@ -376,6 +377,18 @@ can read, or who wrote an annotation they can read, found through those kinds' r
   made, so filtering by an account would tie an old name to a renamed one. A PDF has owners
   rather than authors, and its page names none, so filtering by owner would disclose who owns
   which file. Neither contributes names to the picker, and the page says why they are left out.
+
+### Mentions
+
+A mention filter keeps a kind's readable ids to those with a row in the `mention` table for one
+of the people named ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), step 1, item 12), so it goes by who a
+mention stands for and not by what its label says. Docs, posts and annotations can hold one;
+PDFs and comments can't, and drop out while a filter is set (`withoutMentions`).
+
+The filter is not checked against a picker, as an author is, and doesn't need to be. It only
+narrows what the viewer may already read, a handle that names nobody gives the same empty
+answer as a person nobody has mentioned where the viewer can see, and the page echoes handles
+rather than names.
 
 ### Dates
 
