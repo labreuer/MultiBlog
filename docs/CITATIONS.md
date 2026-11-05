@@ -10,8 +10,8 @@ contract. The kit says how every chip is stored, rendered, quoted and searched. 
 ## Built so far
 
 The reference library (its data, its pages and its machine door), the citation chip
-itself, and its Markdown both ways. Everything below not listed here is still a plan: the
-chip's popover, the bibliography, the search filters, what a reference's page shows of who
+itself, its Markdown both ways, and a doc's bibliography. Everything below not listed here is
+still a plan: the chip's popover, the search filters, what a reference's page shows of who
 cites it, and of the Markdown, a quote written in it and the transcript importer's escape.
 
 - **The chip kind:** `src/lib/entity-chips/kinds/citation.ts` holds its fields and
@@ -46,6 +46,9 @@ cites it, and of the Markdown, a quote written in it and the transcript importer
   Markdown with a field changed keeps the chip and takes the field, and one that adds a work
   continues it. Not built: a quote written in the syntax (below), which still matches only as
   the label a text read shows, and so `chip_changed` (the kit's MCP, items 3 and 6).
+- **The bibliography** (below): `citation-bibliography.ts` computes it, `Bibliography.tsx`
+  and `LiveBibliography.tsx` (`src/components/bibliography/`) show it, and
+  `docJsonForPostSide` appends it to a post's text.
 
 - **Records:** the `reference` table (migration `reference_library`), its `csl` built field by
   field by `parseCslItem` (`src/lib/references/csl.ts`) on every way in and read back through
@@ -288,13 +291,44 @@ prefixes.
   - the form;
   - further works in the same citation.
 
-**The bibliography** is generated from the doc's citations in the doc's style. It is shown after
-the doc in the reading view, the editor and side-by-side. On a post it is appended as text at
-publish, alongside the post's labels, and refreshed on republish.
+**The bibliography** is the works a doc's citations name, in the doc's style, shown after the
+doc in the reading view, the editor and side-by-side. Like a label, it is computed wherever the
+doc is shown and never stored in the doc. A post gets it as text at publish, alongside the
+post's labels, and a republish refreshes both.
 
-- The house styles share one entry format, from the CSL-JSON fields: authors, year, title, and
-  the container or publisher, each entry linked to its reference page. A `numeric` doc lists
-  entries by number; the others list them alphabetically by first author.
+- **One function computes it.** `citationBibliography`
+  (`src/lib/entity-chips/kinds/citation-bibliography.ts`) takes the doc's chips in order, its
+  styles and the chip context, the same inputs the labels take. It reads the labels' doc-order
+  pass (`citationLabelling` in `citation.ts`), so a work's number in the list is the number its
+  citations show, and a shared abbreviation is told apart in the list as in the text.
+- **What it lists.** Each work once.
+  - A `numeric` doc lists works by number, which is their order of first citation. The other
+    styles list them alphabetically by first author, a work with no author by its title, then
+    by year.
+  - Each entry leads with what the doc's citations call the work: `[3]` in the `numeric` style,
+    and the abbreviation in the `short` style. A work with no abbreviation has no lead, since its
+    author-date label already finds it by author and year.
+  - A deleted reference is listed struck through and unlinked, as its citations show it. A work
+    the context doesn't hold is left out, as its citation shows "unknown work". A citation its
+    kind refuses numbers nothing, here or in the text.
+- **Each entry** is the house format (`src/lib/references/entry.ts`, split into runs by
+  `entryParts`): authors, year, title, then the container or publisher. A whole work's title is
+  in italics, a part's in quotation marks. The title links to the reference's page, which is
+  public, so a post's reader can follow it as a doc's can.
+- **Where it is shown.**
+  - The reading view and side-by-side render it on the server with their static first paint
+    (`StaticBibliography`).
+  - Every live surface follows its editor: `LiveBibliography` recomputes whenever the chip
+    plugin's renderings do (`node.ts`), when a citation comes, goes or changes, or the style or
+    context changes, and never for typing.
+  - In the doc editor the list sits inside the scrolling box, after the text, so it scrolls
+    with the doc rather than taking room under it. It isn't editable.
+- **On a post** `docJsonForPostSide` (`post-content.ts`) appends a "References" heading and a
+  paragraph per work, so the landing page's preamble gets one too. The lead is bold and a
+  deleted work is struck, in the marks a post's schema has. Being the post's text, it is
+  searched, quoted and commented on like the rest.
+- **Not in a doc's own text.** A doc's search text and its Markdown, an MCP read's included,
+  leave it out: it is generated, and an edit sent back with it would write it in as prose.
 - A CSL style's bibliography comes with citeproc (Later) and replaces this format for that doc.
 
 **Search.**
@@ -339,7 +373,8 @@ publish, alongside the post's labels, and refreshed on republish.
 - **Unit tests:**
   - each form with its delimiters, its narrative and author-suppressed shapes, a page range,
     numbering, the `short` disambiguation, and the fallback for a reference without `short`;
-  - the bibliography's entry format and its order in each form;
+  - the bibliography's entry format, its order and leads in each form, its numbers matching the
+    labels', and what it leaves out or strikes through;
   - a bare `@word`: a known key makes a chip, an unknown one is refused, and `\@`, an email address
     and code stay text;
   - the identity rule for a citation of several works, and an edit adding a work keeping the
@@ -351,4 +386,6 @@ publish, alongside the post's labels, and refreshed on republish.
   - `[@handle](https://x.com/handle)` staying a link.
 - **e2e:**
   - a duplicate refused, from an import and through `create_ref`;
-  - a post's citation linking to the reference page, and the page offering the PDF to a member.
+  - a post's citation linking to the reference page, and the page offering the PDF to a member;
+  - the bibliography in the editor, following a change of style, in the reading view, and in a
+    post's text.

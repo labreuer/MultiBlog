@@ -161,7 +161,7 @@ test("the library's page: pasted BibTeX is imported once, listed, and a second p
 
 // docs/CITATIONS.md — the citation chip: a work at a page, inserted from the
 // library by "[@", labelled from the reference's record wherever it is shown.
-test("[@ cites a work from the library: the chip is labelled, indexed, published as a link, and follows the reference", async ({
+test("[@ cites a work from the library: the chip is labelled, listed in the bibliography, indexed, published as a link, and follows the reference", async ({
   page,
   request,
 }) => {
@@ -194,12 +194,18 @@ test("[@ cites a work from the library: the chip is labelled, indexed, published
     // Labelled as it lands, in the doc's style: the abbreviation and the page.
     const chip = bodyEditor(page).locator(".entity-chip");
     await expect(chip).toHaveText([`(${short} p. 49)`]);
-    // The doc's own style changes every citation's label at once, delimiters and all.
+    // The bibliography follows the text, inside the editor's scrolling box, leading with what the label calls the work.
+    const entryOf = (lead: string) => `${lead}Barfield${prefix}, O. (1957). Saving the Appearances ${prefix}.`;
+    const bibliography = page.locator("[data-editor-scroll] [data-bibliography]").getByRole("listitem");
+    await expect(bibliography).toHaveText([entryOf(`${short} `)]);
+    // The doc's own style changes every citation's label at once, delimiters and all, and the bibliography with them.
     await page.locator("[data-doc-settings] > summary").click();
     await page.getByRole("combobox", { name: "How citations are shown" }).selectOption("numeric");
     await expect(chip).toHaveText(["[1, p. 49]"]);
+    await expect(bibliography).toHaveText([entryOf("[1] ")]);
     await page.getByRole("combobox", { name: "How citations are shown" }).selectOption("author-date");
     await expect(chip).toHaveText([`(Barfield${prefix} 1957, p. 49)`]);
+    await expect(bibliography).toHaveText([entryOf("")]);
     await page.getByRole("combobox", { name: "How citations are shown" }).selectOption("short");
     await expect(chip).toHaveText([`(${short} p. 49)`]);
     // What search reads, and where the work is now cited.
@@ -210,6 +216,9 @@ test("[@ cites a work from the library: the chip is labelled, indexed, published
     await page.goto(`/doc/${doc.slug}`);
     await expect(page.locator("a.entity-chip").filter({ visible: true })).toHaveText([`(${short} p. 49)`]);
     await expect(page.locator("a.entity-chip").filter({ visible: true })).toHaveAttribute("href", `/references/${key}`);
+    const shown = page.locator("[data-bibliography]").filter({ visible: true });
+    await expect(shown.getByRole("listitem")).toHaveText([entryOf(`${short} `)]);
+    await expect(shown.getByRole("link", { name: `Saving the Appearances ${prefix}` })).toHaveAttribute("href", `/references/${key}`);
 
     // A machine reader gets Pandoc's syntax, by key, and can write a passage over it back.
     const read = await agent.call("read", { url: `/doc/${doc.slug}` });
@@ -247,13 +256,18 @@ test("[@ cites a work from the library: the chip is labelled, indexed, published
         ],
       },
     });
-    expect(await getPostContentText(post.id)).toBe(`As argued (${short}X pp. 49–51).`);
+    // Its bibliography is text too, appended at publish.
+    expect(await getPostContentText(post.id)).toBe(`As argued (${short}X pp. 49–51).\n\nReferences\n\n${entryOf(`${short}X `)}`);
     await expect.poll(() => getCitationSources(key)).toEqual([`doc:${doc.id}`, `doc:${post!.docId}`, `post:${post!.id}`].sort());
     const response = await page.goto(post.path!);
     expect(response?.status()).toBe(200);
     await expect(page.getByRole("link", { name: `(${short}X pp. 49–51)`, exact: true }).filter({ visible: true })).toHaveAttribute(
       "href",
       `/references/${key}#p=49`,
+    );
+    await expect(page.getByRole("link", { name: `Saving the Appearances ${prefix}`, exact: true }).filter({ visible: true })).toHaveAttribute(
+      "href",
+      `/references/${key}`,
     );
   } finally {
     await page.goto("about:blank");

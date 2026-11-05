@@ -13,6 +13,7 @@ import { readYdocContent } from "@/lib/ydoc-render";
 import { chipInputsForBody } from "@/lib/entity-chips/context";
 import { parseChipStyles } from "@/lib/entity-chips/settings";
 import { renderWithChips } from "@/lib/entity-chips/static";
+import { StaticBibliography } from "@/components/bibliography/Bibliography";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { getDocLinkGroupsForPair, countOtherDocLinks } from "@/lib/doc-links-query";
 import { signInPath } from "@/lib/sign-in-redirect";
@@ -41,13 +42,21 @@ const DOC_SELECT = {
 
 type LoadedDoc = NonNullable<Awaited<ReturnType<typeof resolveDocParam<typeof DOC_SELECT>>>>;
 
+/** A body's first paint: its text with each chip labelled, and its bibliography after it. */
+async function staticBodyOf(bodyJSON: JSONContent, doc: LoadedDoc): Promise<ReactNode> {
+  const inputs = await chipInputsForBody(bodyJSON, parseChipStyles(doc.chipStyles));
+  return (
+    <>
+      {renderWithChips(bodyJSON, docContentExtensions, inputs)}
+      <StaticBibliography body={bodyJSON} inputs={inputs} />
+    </>
+  );
+}
+
 async function loadBody(doc: LoadedDoc): Promise<{ bodyJSON: JSONContent; staticBody: ReactNode }> {
   if (doc.proseJson) {
     const bodyJSON = doc.proseJson as JSONContent;
-    return {
-      bodyJSON,
-      staticBody: renderWithChips(bodyJSON, docContentExtensions, await chipInputsForBody(bodyJSON, parseChipStyles(doc.chipStyles))),
-    };
+    return { bodyJSON, staticBody: await staticBodyOf(bodyJSON, doc) };
   }
 
   // decode-from-ydoc fallback (§12d) — prose_json is still null because no
@@ -59,10 +68,7 @@ async function loadBody(doc: LoadedDoc): Promise<{ bodyJSON: JSONContent; static
   const result = readYdocContent(scratch);
   scratch.destroy();
   if (result.ok) {
-    return {
-      bodyJSON: result.bodyJSON,
-      staticBody: renderWithChips(result.bodyJSON, docContentExtensions, await chipInputsForBody(result.bodyJSON, parseChipStyles(doc.chipStyles))),
-    };
+    return { bodyJSON: result.bodyJSON, staticBody: await staticBodyOf(result.bodyJSON, doc) };
   }
   return { bodyJSON: EMPTY_DOC, staticBody: <p style={{ color: "var(--error)" }}>{result.error}</p> };
 }

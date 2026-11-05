@@ -1,3 +1,4 @@
+import type { ReferenceEntry } from "../../references/entry";
 import type { ChipKind, ChipRendering } from "../types";
 import { escapeCitationField, writeKey } from "./citation-markdown";
 
@@ -48,6 +49,8 @@ export type CitedWork = {
   deleted: boolean;
   /** The work's PDF, when /files holds one: its slug, and each sheet's printed label, for a link to the page cited. */
   file: { slug: string; pageLabels: string[] | null } | null;
+  /** The work as a bibliography lists it (references/entry.ts). */
+  entry: ReferenceEntry;
 };
 
 export type CitationContext = Record<string, CitedWork>;
@@ -132,7 +135,7 @@ function authorDate(work: CitedWork, suppressAuthor: boolean): string {
  * `short` label, and falls back to author-date, so a doc mixes `(BU p. 49)`
  * and `(Radner 2012, p. 49)` until the abbreviation is filled in.
  */
-function formFor(work: CitedWork, form: CitationForm): CitationForm {
+export function formFor(work: CitedWork, form: CitationForm): CitationForm {
   return form === "short" && !work.short?.trim() ? "author-date" : form;
 }
 
@@ -150,6 +153,46 @@ function pdfHref(work: CitedWork, locator: string | undefined): string | null {
   const labels = work.file.pageLabels;
   const sheet = labels ? labels.indexOf(first) + 1 : /^\d+$/.test(first) ? Number(first) : 0;
   return sheet > 0 ? `/pdf/${work.file.slug}#page=${sheet}` : null;
+}
+
+/** What every label in a doc reads from the doc's citations as a whole: each work's number and its told-apart short label. */
+export type CitationLabelling = {
+  /** Each work's number by first appearance, for the numeric form. */
+  numbers: Map<string, number>;
+  /** A work's `short` label as the doc shows it: a shared abbreviation gains the year, then the key. */
+  shortLabel(work: CitedWork): string;
+};
+
+/**
+ * The doc-order facts behind the labels, from every citation in the doc in
+ * order: the labels and the bibliography both read them, so the two can't
+ * number a work differently.
+ */
+export function citationLabelling(chips: readonly CitationData[], context: CitationContext): CitationLabelling {
+  const numbers = new Map<string, number>();
+  // Which works each `short` label stands for here: two that share one are told apart.
+  const wearers = new Map<string, Set<string>>();
+  for (const data of chips) {
+    for (const item of data.items) {
+      const work = context[item.refId];
+      if (!work) continue;
+      if (!numbers.has(work.id)) numbers.set(work.id, numbers.size + 1);
+      const base = shortBase(work);
+      let ids = wearers.get(base);
+      if (!ids) wearers.set(base, (ids = new Set()));
+      ids.add(work.id);
+    }
+  }
+  // A shared short label gains the year, then the key, as two same-named people gain a qualifier.
+  const shortLabel = (work: CitedWork): string => {
+    const base = shortBase(work);
+    const sharing = [...(wearers.get(base) ?? [])].map((id) => context[id]).filter(Boolean);
+    if (sharing.length < 2 || !work.short?.trim()) return base;
+    const withYear = `${base} ${work.year ?? "n.d."}`;
+    const sameYear = sharing.filter((other) => other.short?.trim() === work.short?.trim() && other.year === work.year);
+    return sameYear.length > 1 ? `${withYear} ${work.key}` : withYear;
+  };
+  return { numbers, shortLabel };
 }
 
 export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext> = {
@@ -193,31 +236,7 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
 
   render(chips, style, context) {
     const { form } = style;
-
-    // Numbered by first appearance in the doc, for the numeric form.
-    const numbers = new Map<string, number>();
-    // Which works each `short` label stands for here: two that share one are told apart.
-    const wearers = new Map<string, Set<string>>();
-    for (const data of chips) {
-      for (const item of data.items) {
-        const work = context[item.refId];
-        if (!work) continue;
-        if (!numbers.has(work.id)) numbers.set(work.id, numbers.size + 1);
-        const base = shortBase(work);
-        let ids = wearers.get(base);
-        if (!ids) wearers.set(base, (ids = new Set()));
-        ids.add(work.id);
-      }
-    }
-    // A shared short label gains the year, then the key, as two same-named people gain a qualifier.
-    const shortLabel = (work: CitedWork): string => {
-      const base = shortBase(work);
-      const sharing = [...(wearers.get(base) ?? [])].map((id) => context[id]).filter(Boolean);
-      if (sharing.length < 2 || !work.short?.trim()) return base;
-      const withYear = `${base} ${work.year ?? "n.d."}`;
-      const sameYear = sharing.filter((other) => other.short?.trim() === work.short?.trim() && other.year === work.year);
-      return sameYear.length > 1 ? `${withYear} ${work.key}` : withYear;
-    };
+    const { numbers, shortLabel } = citationLabelling(chips, context);
 
     return chips.map((data): ChipRendering => {
       const works = data.items.map((item) => context[item.refId]);

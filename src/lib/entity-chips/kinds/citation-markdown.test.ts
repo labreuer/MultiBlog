@@ -118,6 +118,7 @@ const work = (id: string, key: string, more: Partial<CitedWork> = {}): CitedWork
   title: "Origin",
   deleted: false,
   file: null,
+  entry: { authors: "Radner, D.", year: "2012", title: "Origin", titleIsContainer: true, source: "" },
   ...more,
 });
 const CONTEXT: CitationContext = {

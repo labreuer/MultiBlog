@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import TableDownloadButtons from "./TableDownloadButtons";
 import { EditorContent, type Editor, type JSONContent } from "@tiptap/react";
+import LiveBibliography from "@/components/bibliography/LiveBibliography";
 import { useLiveDocContent } from "@/lib/use-live-doc-content";
 import { useSelectionPopover } from "@/lib/use-selection-popover";
 import { markMouseDownInside } from "@/lib/outside-mousedown";
@@ -254,6 +255,7 @@ export default function DocReadingBody({
       <div className={proseStyles.prose} style={{ display: ready ? "block" : "none" }}>
         <EditorContent editor={editor} />
         <TableDownloadButtons editor={editor} ready={ready} />
+        <LiveBibliography editor={editor} />
       </div>
       {selection.pending && (
         <AnnotationPopover

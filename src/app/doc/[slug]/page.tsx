@@ -12,6 +12,7 @@ import { readYdocContent } from "@/lib/ydoc-render";
 import { chipInputsForBody } from "@/lib/entity-chips/context";
 import { parseChipStyles } from "@/lib/entity-chips/settings";
 import { renderWithChips } from "@/lib/entity-chips/static";
+import { StaticBibliography } from "@/components/bibliography/Bibliography";
 import { ChipSurfaceProvider } from "@/lib/entity-chips/chip-surface";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import DocView from "@/components/DocView";
@@ -218,7 +219,10 @@ export default async function PublicDocPage({
   const staticBody = bodyError ? (
     <p style={{ color: "var(--error)" }}>{bodyError}</p>
   ) : (
-    renderWithChips(bodyJSON, docContentExtensions, chipInputs)
+    <>
+      {renderWithChips(bodyJSON, docContentExtensions, chipInputs)}
+      <StaticBibliography body={bodyJSON} inputs={chipInputs} />
+    </>
   );
 
   return (
