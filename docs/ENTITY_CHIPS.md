@@ -130,7 +130,9 @@ not listed here is still a plan.
     thread and link reads go through `quoteWithChipLabels` or `shownQuote`. The cards beside
     a doc (the reading view's list and the editor's rail) hand it the labels that page's
     editor is drawing (`useLiveChipLabels`), which win over the stored ones, so a card and
-    the passage beside it agree before a rename's refresh has run.
+    the passage beside it agree before a rename's refresh has run. Except a doc-editor note's
+    quote line: the server builds it from `prose_json`'s labels (`markAnchoredQuote`), so it
+    lags by the seconds until the refresh or the doc's next store, which is tolerated.
   - **Identity checks:** `resolveAnchorInDoc` takes the records. A candidate counts only if
     its chips stand for the recorded entities in order, and several that pass are told apart
     by instance id. The highlight plugin, MCP's reads and the edit endpoint's "what it
