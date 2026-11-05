@@ -9,14 +9,18 @@ import {
   annotationContentExtensions,
   commentContentExtensions,
   contentExtensions,
+  Link,
   pmAnnotationContentSchema,
   pmSchema,
+  StarterKit,
   stripMarksFromDoc,
+  tableExtensions,
 } from "./tiptap-schema";
 import { blockText } from "./doc-text";
-import { MENTION_HREF_PREFIX } from "./entity-chips/kinds/mention";
+import { MENTION, MENTION_HREF_PREFIX } from "./entity-chips/kinds/mention";
 import { EntityChip } from "./entity-chips/node";
 import { isChip } from "./entity-chips/text";
+import { ENTITY_CHIP } from "./entity-chips/types";
 
 // contentExtensions, and specifically the same exported value the caller
 // encodes the ydoc with — a node type registered here but missing there is
@@ -213,6 +217,44 @@ const ChipMarkdown = EntityChip.extend({
 
 const docMarkdownManager = new MarkdownManager({ extensions: [...contentExtensions, ChipMarkdown] });
 
+// The other direction (MCP item 2): Markdown read with each chip kind's
+// syntax taken for a chip. Only the paths that ask for it parse this way (an
+// MCP edit, an MCP note); an import, a comment and a post never do, so a
+// pasted `[@x](/authors/x)` stays the link it says it is.
+//
+// The parse keys on the syntax, never on the label: a link to an author page
+// whose text opens with a literal `@`. marked tells that `@` from an escaped
+// one by the link's first token, `text` against `escape`, which is what makes
+// the writer's `[\@…]` a plain link on the way back.
+//
+// What comes out is a **placeholder**, a chip holding the slug the Markdown
+// named and no instance id. A slug is not an identity: the caller resolves
+// each to an account, under the chip kind's own rule for who may be named
+// (`resolveParsedChips`), before anything is stored.
+//
+// The link is replaced where StarterKit's own stands, since a mark's place in
+// the list is its rank (tiptap-schema.ts), and the first handler registered
+// for a token is the one the parser uses.
+const ChipParsingLink = Link.extend({
+  parseMarkdown: (token, helpers) => {
+    const href = typeof token.href === "string" ? token.href : "";
+    const first = token.tokens?.[0];
+    if (href.startsWith(MENTION_HREF_PREFIX) && first?.type === "text" && String(first.raw ?? "").startsWith("@")) {
+      const slug = href.slice(MENTION_HREF_PREFIX.length);
+      if (/^[^/?#\s]+$/.test(slug)) return { type: ENTITY_CHIP, attrs: { kind: MENTION, iid: "", data: { slug } } };
+    }
+    return helpers.applyMark("link", helpers.parseInline(token.tokens || []), { href: token.href, title: token.title || null });
+  },
+});
+
+const ChipParsingKit = StarterKit.extend({
+  addExtensions() {
+    return (this.parent?.() ?? []).map((extension) => (extension.name === "link" ? ChipParsingLink : extension));
+  },
+});
+
+const docChipParser = new MarkdownManager({ extensions: [ChipParsingKit, ...tableExtensions] });
+
 /** `json` with each chip carrying its Markdown as `md`, for `ChipMarkdown` to write. */
 function withChipMarkdown(json: JSONContent, chipMarkdown: ReadonlyMap<string, string>): JSONContent {
   if (isChip(json)) {
@@ -250,8 +292,10 @@ export function postContentToMarkdown(json: JSONContent): string {
  * where `## Results` means a heading in the body. Entities are decoded as for
  * an import; the caller validates against the schema.
  */
-export function markdownToBlocks(markdown: string): JSONContent[] {
-  const parsed = decodeNodeEntities(markdownManager.parse(markdown));
+export function markdownToBlocks(markdown: string, opts: { chips?: boolean } = {}): JSONContent[] {
+  // With `chips`, each chip kind's syntax becomes a chip placeholder (above),
+  // which the caller must resolve before storing anything.
+  const parsed = decodeNodeEntities((opts.chips ? docChipParser : markdownManager).parse(markdown));
   return Array.isArray(parsed.content) && parsed.content.length > 0 ? parsed.content : [{ type: "paragraph" }];
 }
 
@@ -421,6 +465,8 @@ const annotationMarkdownManager = new MarkdownManager({
   extensions: [...annotationContentExtensions, commentMarkdownShims[2]],
 });
 
+const annotationChipParser = new MarkdownManager({ extensions: [ChipParsingKit, commentMarkdownShims[2]] });
+
 // The writer: the same list with the doc writer's chip and its escape
 // (above), which a note's body shares with a doc's.
 const annotationMarkdownWriter = new MarkdownManager({
@@ -447,8 +493,10 @@ export function annotationContentToMarkdown(json: JSONContent, chipMarkdown?: Re
  * comment's are, and always a `doc` with at least one block. Throws when the
  * result isn't a valid body, which the caller answers as `invalid`.
  */
-export function markdownToAnnotationContent(markdown: string): JSONContent {
-  const parsed = collapseSoftBreaks(decodeNodeEntities(annotationMarkdownManager.parse(markdown)));
+export function markdownToAnnotationContent(markdown: string, opts: { chips?: boolean } = {}): JSONContent {
+  // With `chips`, as `markdownToBlocks`: placeholders the caller resolves.
+  const manager = opts.chips ? annotationChipParser : annotationMarkdownManager;
+  const parsed = collapseSoftBreaks(decodeNodeEntities(manager.parse(markdown)));
   const blocks = Array.isArray(parsed.content) && parsed.content.length > 0 ? parsed.content : [{ type: "paragraph" }];
   const json: JSONContent = { type: "doc", content: blocks };
   pmAnnotationContentSchema.nodeFromJSON(json).check();

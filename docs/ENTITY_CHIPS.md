@@ -108,15 +108,31 @@ still a plan.
   and thread passages, with a hand-written link of a mention's shape written `[\@…]`. A quote
   is matched against the doc's display text and verified against it (`flattenForMatch` with
   labels), and what is stored stays the anchor text; a quote ending inside a label is a miss
-  rather than widened. Not yet: parsing a chip's Markdown, the chip-aware merge and its
-  refusals, the identity-text retry, styles in a read's header, `create_doc` and `download`
-  round trips.
+  rather than widened.
+- **Item 14, MCP, the writing half:** `edit_doc`, `add_note` and `edit_note` read a chip kind's
+  syntax as a chip. The parse yields a placeholder holding what the Markdown named
+  (`markdownToBlocks` with `chips`), and `resolveParsedChips` makes it a chip under the kind's
+  insertion rule, or refuses `unknown_chip`; a chip the body already holds may always be
+  written back. The merge gives each chip identity one private-use character
+  (`ChipMerge`, doc-edit.ts), so a chip written back is the old node again, instance id and
+  all. A chip whose label came back as plain words is refused `chip_as_text`; one left out is
+  removed and reported (`mentionsRemoved`); the conflict check compares chip identities
+  (`expectChips`) beside the text. The collab server labels the live doc from the records the
+  client's read used (`chipInputs` in the edit request).
+
+  Not built of item 14: `create_doc` and `download` (a new doc's ydoc is seeded with a schema
+  that has no chip, so a mention in `create_doc`'s Markdown stays a link), the Markdown retry
+  against identity text (the retry matches the label a link's text gives, which is the same
+  for a mention), a quote edge inside a label widened for a note, `chip_changed` and
+  `unknown_kind` (a chip of a kind the server doesn't know reads as plain `[…]`, and an edit
+  that sends that back is refused as `chip_as_text`), the pairing of a chip that continues
+  another, link titles stripped on the way in, and styles in a read's header.
 - **Mentions:** the chip kind's fields, forms and labels, its context loader, the rule for who
   may be mentioned, and the `@` menu in the doc editor and in a note's composer
   ([MENTIONS.md](MENTIONS.md)).
 
-Until the rest of step 1 is built: an MCP edit can't write a chip, and one whose passage holds
-a chip removes it; and a stored quote shown outside a ydoc shows U+FFFC. `/docs`'
+Until the rest of step 1 is built, a stored quote shown outside a ydoc shows U+FFFC where a chip
+is, and `create_doc` can't write one. `/docs`'
 Length counts a chip as no characters.
 
 ## Terms

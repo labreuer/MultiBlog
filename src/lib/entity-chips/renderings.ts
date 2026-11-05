@@ -137,11 +137,24 @@ export function chipTargets(chips: readonly ChipOccurrence[]): Record<string, st
  * can't validate is told apart by its raw fields.
  */
 export function chipIdentities(doc: JSONContent): string[] {
-  return chipsInJSON(doc).map((chip) => {
-    const kind = chipKind(chip.kind);
-    const data = kind?.validate(chip.data) ?? null;
-    return `${chip.kind}:${kind && data !== null ? kind.identity(data) : JSON.stringify(chip.data)}`;
+  return chipsInJSON(doc).map(chipIdentity);
+}
+
+/** One chip's identity: its chip kind and what that kind says it points at. */
+export function chipIdentity(chip: Pick<ChipOccurrence, "kind" | "data">): string {
+  const kind = chipKind(chip.kind);
+  const data = kind?.validate(chip.data) ?? null;
+  return `${chip.kind}:${kind && data !== null ? kind.identity(data) : JSON.stringify(chip.data)}`;
+}
+
+/** The identities of the chips inside a range of `node`, in order: what a conflict check compares beside the text. */
+export function chipIdentitiesBetween(node: PMNode, from: number, to: number): string[] {
+  const found: string[] = [];
+  node.nodesBetween(from, to, (child, pos) => {
+    if (child.type.name === ENTITY_CHIP && pos >= from && pos < to) found.push(chipIdentity(attrsOf(child.attrs)));
+    return !child.isLeaf;
   });
+  return found;
 }
 
 /**

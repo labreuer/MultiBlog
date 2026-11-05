@@ -10,7 +10,7 @@ import { replaceAnnotationBody } from "@/lib/annotation-admin";
 import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
 import { canUserEditAnnotationBody } from "@/lib/annotation-authz";
 import { STALE_EDIT_SESSION_MS } from "@/lib/edit-grace";
-import { mergeDoc } from "@/lib/doc-edit";
+import { chipMergeFor, mergeDoc } from "@/lib/doc-edit";
 import { viewerOf } from "@/lib/actor";
 import * as Y from "yjs";
 import { captureAnchorInNode } from "@/lib/anchors/capture";
@@ -25,6 +25,7 @@ import { materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { ApiError, ERROR_LIST_CAP, forbidden, invalid, notFound } from "@/lib/api/errors";
 import { chipInputsForBody } from "@/lib/entity-chips/context";
+import { resolveParsedChips } from "@/lib/entity-chips/parsed-chips";
 import { chipLabels, displayTextBetween, type ChipLabels } from "@/lib/entity-chips/text";
 import type { McpContext, ToolResult } from "./tool";
 import { parse, readableContainer, readableDocByParam, readableFileBySlug, type ResolvedContainer } from "./resolve";
@@ -166,10 +167,12 @@ export async function annotateFor(ctx: McpContext, input: QuoteInput & { on: str
   const { container, parent } = await resolveOn(ctx, input.on);
   let body: JSONContent;
   try {
-    body = markdownToAnnotationContent(input.body);
+    body = markdownToAnnotationContent(input.body, { chips: true });
   } catch (err) {
     throw invalid(`That Markdown doesn't make a valid annotation body: ${err instanceof Error ? err.message : String(err)}`);
   }
+  // A mention written in the body is one, under the rule the composer's menu lists by.
+  body = await resolveParsedChips(body, ctx.actor, { docId: container.kind === "doc" ? container.doc.id : null, held: null });
   const warnings = await checkFragmentLinks(ctx.actor, [body]);
 
   const quoted = hasQuote(input);
@@ -263,11 +266,10 @@ export async function editAnnotationFor(ctx: McpContext, input: { id: string; bo
 
   let next: JSONContent;
   try {
-    next = markdownToAnnotationContent(input.body);
+    next = markdownToAnnotationContent(input.body, { chips: true });
   } catch (err) {
     throw invalid(`That Markdown doesn't make a valid annotation body: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const warnings = await checkFragmentLinks(ctx.actor, [next]);
 
   const ydocId = ydocIdForAnnotation(annotation.id);
   const [newest, row] = await Promise.all([
@@ -276,6 +278,9 @@ export async function editAnnotationFor(ctx: McpContext, input: { id: string; bo
   ]);
   if (!newest || !row) throw invalid("This annotation has no settled version to edit from.");
   const settledBody = await decodeAnnotationSnapshot(new Uint8Array(newest.ydoc));
+  // The body's own mentions may be written back whoever they name now.
+  next = await resolveParsedChips(next, ctx.actor, { docId: annotation.docId, held: settledBody.proseJson });
+  const warnings = await checkFragmentLinks(ctx.actor, [next]);
   const writers = new Set<string>([ctx.actor.userId]);
   const live = new Y.Doc();
   try {
@@ -285,11 +290,25 @@ export async function editAnnotationFor(ctx: McpContext, input: { id: string; bo
     live.destroy();
   }
   writers.add(annotation.userId);
-  const merged = mergeDoc(
-    pmAnnotationContentSchema.nodeFromJSON(settledBody.proseJson),
-    pmAnnotationContentSchema.nodeFromJSON(next),
-    { schema: pmAnnotationContentSchema, authorId: writers.size >= 2 ? ctx.actor.userId : null },
-  );
+  const oldNode = pmAnnotationContentSchema.nodeFromJSON(settledBody.proseJson);
+  const nextNode = pmAnnotationContentSchema.nodeFromJSON(next);
+  // The merge keeps a mention the new text still names, instance id and all,
+  // and says when one came back as its label in plain words.
+  const chipMerge = chipMergeFor(oldNode, nextNode, chipLabels(settledBody.proseJson, await chipInputsForBody(settledBody.proseJson)));
+  const merged = mergeDoc(oldNode, nextNode, {
+    schema: pmAnnotationContentSchema,
+    authorId: writers.size >= 2 ? ctx.actor.userId : null,
+    chipMerge,
+  });
+  if (chipMerge.asText.length > 0) {
+    const labels = [...new Set(chipMerge.asText)];
+    throw new ApiError(
+      "chip_as_text",
+      `The new body has ${labels.map((label) => `"${label}"`).join(", ")} as plain words where the note has a mention. ` +
+        "Write a mention as the Markdown read shows it, [@Name](/authors/handle), to keep it; leave the name out to remove it.",
+      { labels },
+    );
+  }
 
   const viewer = viewerOf(ctx.actor);
   const cancel = async () => {

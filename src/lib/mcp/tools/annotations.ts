@@ -9,7 +9,11 @@ import { annotateFor, editAnnotationFor } from "../annotation-writes";
 // resolved (a person's act). Acting on a note means replying to it: what was
 // done, and a link to the passage or the doc it went into.
 
-const body = z.string().min(1).max(MAX_MARKDOWN_BYTES).describe("Markdown.");
+const body = z
+  .string()
+  .min(1)
+  .max(MAX_MARKDOWN_BYTES)
+  .describe(`Markdown. A mention is [@Name](/authors/<slug>), the slug from ${listedName("find_users")}.`);
 
 export const addNoteTool = defineTool({
   name: "add_note",

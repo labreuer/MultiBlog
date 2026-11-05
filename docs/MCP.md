@@ -265,6 +265,10 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
   - `ambiguous` for a quote that occurs more than once, with up to five occurrences' context
     and how many there are, and `no_match` for one that occurs nowhere, with up to three near
     misses (§7), or for a fragment link whose passage isn't on its page (§8);
+  - `unknown_chip` for a mention written in Markdown whose handle names no account, or one the
+    actor may not mention there, with the handles; and `chip_as_text` for an edit whose new
+    text has a mention's name as plain words where the mention was, with the labels
+    ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), MCP item 6);
   - `read_only` for an edit to a record (§6);
   - `already_done` for a write that repeats one made within a day, with that one's time and
     result (below);

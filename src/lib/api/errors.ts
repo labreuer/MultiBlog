@@ -17,6 +17,8 @@ export type ApiErrorCode =
   | "conflict"
   | "ambiguous"
   | "no_match"
+  | "unknown_chip"
+  | "chip_as_text"
   | "read_only"
   | "already_done"
   | "too_large"
@@ -59,6 +61,8 @@ const HTTP_STATUS: Record<ApiErrorCode, number> = {
   conflict: 409,
   ambiguous: 409,
   no_match: 422,
+  unknown_chip: 422,
+  chip_as_text: 422,
   read_only: 409,
   already_done: 409,
   too_large: 413,

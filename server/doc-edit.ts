@@ -14,6 +14,8 @@ import {
   titleAuthorHighlightExtensions,
 } from "../src/lib/tiptap-schema";
 import { planEdits, planTitle, type EditPlan, type EditSpec } from "../src/lib/doc-edit";
+import { chipLabelsIn } from "../src/lib/entity-chips/text";
+import { NO_CHIP_INPUTS, type ChipInputs } from "../src/lib/entity-chips/types";
 import { writeBackDoc } from "../src/lib/doc-edit-yjs";
 import { markdownToText } from "../src/lib/markdown-import";
 import { resolveAnchorInDoc } from "../src/lib/anchors/resolve";
@@ -71,6 +73,8 @@ type EditRequest = {
   markAnnotations?: string[];
   /** The anchored-link parts into the doc the actor can see. */
   linkParts?: AnchorIn[];
+  /** What the doc's entity chips are labelled from, as the client read them (doc-edit-client.ts). */
+  chipInputs?: ChipInputs;
 };
 
 function decode(doc: Y.Doc): { body: PMNode; title: PMNode | null } {
@@ -86,6 +90,13 @@ function decode(doc: Y.Doc): { body: PMNode; title: PMNode | null } {
   return { body, title };
 }
 
+/** The request's chip inputs, or none: the shape is checked, since the body is whatever was posted. */
+function chipInputsOf(request: EditRequest): ChipInputs {
+  const given = request.chipInputs;
+  const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+  return record(given) && record(given.styles) && record(given.context) ? { styles: given.styles, context: given.context } : NO_CHIP_INPUTS;
+}
+
 type Planned = { body: PMNode; title: PMNode | null; plan: Extract<EditPlan, { ok: true }>; nextTitle: PMNode | null };
 
 function planOn(doc: Y.Doc, request: EditRequest, authorId: string): Planned | { refusal: Extract<EditPlan, { ok: false }>["refusal"] } {
@@ -95,6 +106,10 @@ function planOn(doc: Y.Doc, request: EditRequest, authorId: string): Planned | {
     authorId,
     keepMarks: request.keepMarks === true,
     asText: markdownToText,
+    // Labelled here, over the document as it is now, from the records the
+    // client's read used: a chip typed in since is labelled too, if its
+    // person was already among them.
+    labels: chipLabelsIn(body, chipInputsOf(request)),
   });
   if (!plan.ok) return { refusal: plan.refusal };
   const nextTitle =
@@ -223,6 +238,7 @@ export async function handleEditDoc(request: IncomingMessage, response: ServerRe
       applied: true,
       updateId: updateId?.toString() ?? null,
       changed: outcome.result!.plan.changed,
+      chips: outcome.result!.plan.chips,
       blocks: outcome.result!.plan.next.childCount,
       touched: outcome.touched,
     }),
