@@ -29,6 +29,9 @@ export type MentionUser = {
   botOf: string | null;
 };
 
+/** One row of a mention menu: who, and whether they could read the doc they'd be mentioned in. */
+export type MentionCandidate = { user: MentionUser; canRead: boolean };
+
 /** The mention context: the users a doc's mentions name, by id, deleted ones included. */
 export type MentionContext = Record<string, MentionUser>;
 

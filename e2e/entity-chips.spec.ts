@@ -15,7 +15,7 @@ import {
 // Entity chips (docs/ENTITY_CHIPS.md): an inline node that holds only which
 // person it stands for, its label computed wherever it is shown. Nothing in
 // the UI inserts one yet, so each test seeds its doc with the node and checks
-// what every surface then draws.
+// what every surface then draws, but the last, which types "@".
 
 const mention = (iid: string, userId: string): JSONContent => ({
   type: "entityChip",
@@ -135,4 +135,49 @@ test("publishing turns each chip into its label as linked text, and the post pag
     await page.goto("about:blank");
     await deleteTestPost(post.id);
   }
+});
+
+test("typing @ lists who may be mentioned, and picking one inserts a chip that is labelled as it lands", async ({
+  page,
+  draftDoc,
+  secondUser,
+}) => {
+  const { user: author } = await secondUser({ role: "AUTHOR" });
+  const { user: reader } = await secondUser({ role: "AUTHORIZED" });
+
+  await page.goto(`/doc/${draftDoc.id}/edit`);
+  await waitForDocCollabReady(page);
+  await bodyEditor(page).click();
+
+  // An "@" inside a word is an email address, not a mention.
+  await page.keyboard.type("Write to someone@example.com, or ask ");
+  const menu = page.getByRole("listbox", { name: "People" });
+  await expect(menu).toHaveCount(0);
+
+  // After a space it opens the menu, filtered as the name is typed. The doc
+  // is PRIVATE and this author isn't on its byline, and the row says so.
+  // Only the name's last word, which is the unique part of a fixture's name:
+  // the whole of it is longer than anything the menu takes for a name.
+  await page.keyboard.type(`@${author.name.split(" ").at(-1)}`);
+  const row = menu.getByRole("option", { name: author.name });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText("can't read this doc");
+  await page.keyboard.press("Enter");
+
+  const chips = bodyEditor(page).locator("span.entity-chip");
+  await expect(chips).toHaveText([`@${author.name}`]);
+  await expect(chips).toHaveAttribute("data-status", "live");
+  await expect(menu).toHaveCount(0);
+  // The query is gone, replaced by the chip and a space to go on typing after.
+  await page.keyboard.type("today.");
+  await expect(bodyEditor(page)).toContainText(`ask @${author.name} today.`);
+
+  // Someone below AUTHOR isn't offered, whatever is typed.
+  await page.keyboard.type(` @${reader.name.split(" ").at(-1)}`);
+  await expect(menu).toHaveCount(0);
+
+  // What was stored is the person, so a fresh load labels the chip from the server.
+  await page.reload();
+  await waitForDocCollabReady(page);
+  await expect(bodyEditor(page).locator("span.entity-chip")).toHaveText([`@${author.name}`]);
 });

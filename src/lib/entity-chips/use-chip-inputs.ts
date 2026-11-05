@@ -17,6 +17,8 @@ export type ChipSurface = {
   target: { doc: string } | { annotation: string };
   /** The inputs the page's first paint used. Omitted, the hook fetches them on mount. */
   initial?: ChipInputs;
+  /** Records a menu handed over as it inserted a chip (chip-surface.tsx). */
+  seeded?: ChipContext;
 };
 
 const ASK_DEBOUNCE_MS = 150;
@@ -39,6 +41,7 @@ function mergeContext(base: ChipContext, more: ChipContext): ChipContext {
 export function useChipInputs(editor: Editor | null, surface: ChipSurface | null | undefined): void {
   const targetKey = surface ? ("doc" in surface.target ? `doc=${surface.target.doc}` : `annotation=${surface.target.annotation}`) : null;
   const initial = surface?.initial;
+  const seeded = surface?.seeded;
 
   // What this hook has fetched, kept apart from `initial` so that a refreshed
   // page's newer context joins it by derivation rather than by an effect.
@@ -46,10 +49,10 @@ export function useChipInputs(editor: Editor | null, surface: ChipSurface | null
   const inputs = useMemo<ChipInputs>(
     () => ({
       styles: fetched.styles ?? initial?.styles ?? NO_CHIP_INPUTS.styles,
-      context: mergeContext(initial?.context ?? {}, fetched.context),
+      context: mergeContext(mergeContext(initial?.context ?? {}, fetched.context), seeded ?? {}),
       ...(fetched.pending ? { pending: fetched.pending } : {}),
     }),
-    [initial, fetched],
+    [initial, fetched, seeded],
   );
   // Every target id the server has been asked about, answered or not, per
   // chip kind: an id it didn't return doesn't exist for this viewer, and

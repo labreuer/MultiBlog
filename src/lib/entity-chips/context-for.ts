@@ -25,6 +25,41 @@ export async function chipInputsForBody(body: JSONContent | null | undefined): P
   return { styles: DEFAULT_CHIP_STYLES, context: chips.length > 0 ? await loadChipContext(chips) : {} };
 }
 
+/** A chip target `actor` may read: its stored body, and the doc behind it when there is one. */
+export type ResolvedChipTarget = {
+  body: JSONContent | null;
+  /** The doc itself, or the doc an annotation is on. Null for a note on a PDF. */
+  doc: { id: string; visibility: "PRIVATE" | "SHARED" } | null;
+};
+
+/**
+ * `target` under its own read rule, or null when it doesn't exist or `actor`
+ * may not read it. The one gate for everything that answers about a chip
+ * target: the context endpoint, and each chip kind's menu search.
+ */
+export async function resolveChipTarget(actor: Actor, target: ChipTarget): Promise<ResolvedChipTarget | null> {
+  if ("doc" in target) {
+    const doc = await prisma.doc.findUnique({
+      where: { id: target.doc },
+      select: { id: true, visibility: true, proseJson: true },
+    });
+    if (!doc || !(await canUserReadDoc(actor.userId, actor.role, doc))) return null;
+    return { body: doc.proseJson as JSONContent | null, doc: { id: doc.id, visibility: doc.visibility } };
+  }
+  const annotation = await prisma.annotation.findUnique({
+    where: { id: target.annotation },
+    select: {
+      userId: true,
+      status: true,
+      proseJson: true,
+      doc: { select: { id: true, visibility: true } },
+      file: { select: { id: true, visibility: true } },
+    },
+  });
+  if (!annotation || !(await canUserAccessAnnotationYdoc(actor.userId, actor.role, annotation))) return null;
+  return { body: annotation.proseJson as JSONContent | null, doc: annotation.doc };
+}
+
 /**
  * The inputs for `target` as `actor` may have them, or null when the actor
  * may not read it.
@@ -39,33 +74,10 @@ export async function chipInputsFor(
   target: ChipTarget,
   asked: Record<string, readonly string[]>,
 ): Promise<ChipInputs | null> {
-  let body: JSONContent | null;
-  let docId: string | null;
-
-  if ("doc" in target) {
-    const doc = await prisma.doc.findUnique({
-      where: { id: target.doc },
-      select: { id: true, visibility: true, proseJson: true },
-    });
-    if (!doc || !(await canUserReadDoc(actor.userId, actor.role, doc))) return null;
-    body = doc.proseJson as JSONContent | null;
-    docId = doc.id;
-  } else {
-    const annotation = await prisma.annotation.findUnique({
-      where: { id: target.annotation },
-      select: {
-        userId: true,
-        status: true,
-        proseJson: true,
-        docId: true,
-        doc: { select: { id: true, visibility: true } },
-        file: { select: { id: true, visibility: true } },
-      },
-    });
-    if (!annotation || !(await canUserAccessAnnotationYdoc(actor.userId, actor.role, annotation))) return null;
-    body = annotation.proseJson as JSONContent | null;
-    docId = annotation.docId;
-  }
+  const resolved = await resolveChipTarget(actor, target);
+  if (!resolved) return null;
+  const { body } = resolved;
+  const docId = resolved.doc?.id ?? null;
 
   const held = body ? chipTargets(chipsInJSON(body)) : {};
   const allowed: Record<string, Set<string>> = {};

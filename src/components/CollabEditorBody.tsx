@@ -17,6 +17,7 @@ import { perfMeasure } from "@/lib/perf-monitor";
 import AuthorHighlightStyles from "./AuthorHighlightStyles";
 import EditorToolbar from "./EditorToolbar";
 import DocRefMenu from "./DocRefMenu";
+import MentionMenu from "./MentionMenu";
 import { EDITOR_SCROLL_ATTRIBUTE } from "./editor-scroll";
 import styles from "./EditorChrome.module.css";
 import proseStyles from "@/styles/prose.module.css";
@@ -342,6 +343,7 @@ export default function CollabEditorBody({
           Beside the editor rather than in the toolbar, since the annotation
           editor's toolbar is hidden by default and this shouldn't be. */}
       <DocRefMenu editor={editor} disabled={!editable} />
+      <MentionMenu editor={editor} disabled={!editable} />
     </div>
   );
 }
