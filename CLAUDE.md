@@ -345,6 +345,9 @@ running `prisma migrate dev` on anything unusual.
   `npm run check:schema` is the fail-if-dirty version (`--write` to fix). Why it matters, why
   the obvious `git diff --exit-code` version of that check is wrong, and why `.gitattributes`
   pins this one file to LF: [docs/DATABASE.md](docs/DATABASE.md).
+- **`npx prisma migrate dev` does not regenerate the client** (Prisma 7): run
+  `npx prisma generate` after it, or `tsc` and the running server both still see the schema
+  from before the migration. docs/DATABASE.md.
 - `npx prisma generate` fails with **EPERM while the dev server runs** (query-engine DLL is
   locked). Stop `dev:all`, generate, restart.
 - **Adding a new model needs the dev server restarted, not just regenerated** — and the failure
@@ -374,7 +377,7 @@ running `prisma migrate dev` on anything unusual.
 
 ### Automated
 
-- **`npm run check`** — schema format, sign-in redirects, Prisma write data, unit tests,
+- **`npm run check`** — schema format, sign-in redirects, Prisma write data, label refreshes, unit tests,
   typecheck and lint in one command, in that order (cheapest first). **This is the bar before reporting any change
   as done**, not `tsc` and `eslint` alone: neither of those sees a `schema.prisma` edit, and
   one drifted through that gap within days of the rule being written (TODO.md, "No CI").
@@ -393,6 +396,12 @@ running `prisma migrate dev` on anything unusual.
   } } }` through a doc-link group made its owner an ADMIN. It compiles and lints, because the
   type is a subset of Prisma's. Build the data from named fields, or from a parse that does
   (`src/lib/doc-link-edit.ts`). The script's header lists what it can't see.
+- `npm run check:label-refresh` (part of `check`) — fails if a write changes a field an entity
+  chip's label is computed from (a person's name, initials, handle, or the person a bot works
+  for) in a function that never calls that chip kind's refresh (`scheduleMentionRefresh`).
+  A rename is not an edit, so nothing else rewrites the labels stored in `Doc.proseJson` and
+  `Annotation.bodyText`, and the miss shows only in search and the RAISED email. A new chip
+  kind adds its table to the script. docs/ENTITY_CHIPS.md, step 1, item 10.
 - `npm run test:unit` — `node --import tsx --test` over `src/**/*.test.ts`. **No new
   dependency**: Node 24 strips types natively and `tsx` resolves the `@/` alias. Sub-second,
   and the right home for exactly one kind of thing — pure functions whose *rejection surface*

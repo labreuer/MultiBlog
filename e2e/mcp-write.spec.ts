@@ -3,6 +3,7 @@ import {
   ADMIN_EMAIL,
   addTestDocAuthor,
   createTestAnnotation,
+  createTestBot,
   createTestDoc,
   createTestUser,
   deleteTestDoc,
@@ -359,5 +360,49 @@ test("add_note and edit_note write a mention from Markdown, and keep it through 
     await deleteTestDoc(doc.id);
     await deleteTestUser(adaEmail);
     await agent.dispose();
+  }
+});
+
+// docs/MENTIONS.md, "Who is listed" — the clauses about bots. The agent is a
+// bot itself, working for the suite's admin, so "its own bots" are that
+// person's.
+test("a bot may mention itself and its person's bots, and another person's bot only where that bot takes part", async ({ request }) => {
+  const agent = await createAgent(request);
+  const adaEmail = uniqueEmail("mcp-bots-ada");
+  const siblingEmail = uniqueEmail("mcp-bots-sibling");
+  const otherEmail = uniqueEmail("mcp-bots-other");
+  await createTestUser({ email: adaEmail, name: `Ada ${adaEmail.split("@")[0]}`, role: "AUTHOR" });
+  const sibling = await createTestBot({ email: siblingEmail, worksForEmail: ADMIN_EMAIL, name: `Sibling ${siblingEmail.split("@")[0]}` });
+  const other = await createTestBot({ email: otherEmail, worksForEmail: adaEmail, name: `Other ${otherEmail.split("@")[0]}` });
+  const noted = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "A doc the other bot leaves a note on." });
+  const bylined = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "A doc the other bot is an author of." });
+  const neither = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "A doc the other bot has nothing to do with." });
+  const md = (user: { name: string | null; slug: string }) => `[@${user.name}](/authors/${user.slug})`;
+  const note = (doc: { slug: string }, body: string) => agent.call("add_note", { on: `/doc/${doc.slug}`, body });
+  try {
+    // Itself, and its person's other bot, anywhere.
+    const own = await note(neither, `From ${md(agent.user)}, with ${md(sibling)}.`);
+    expect(own.isError, JSON.stringify(own.error)).toBe(false);
+    await expect.poll(() => getMentionSources(sibling.id)).toEqual([`annotation:${own.result.id}`]);
+
+    // Another person's bot: nowhere yet.
+    for (const doc of [noted, bylined, neither]) {
+      const refused = await note(doc, `Ask ${md(other)}.`);
+      expect(refused.error).toMatchObject({ code: "unknown_chip", handles: [other.slug] });
+    }
+
+    // Once it has written a note on a doc, or is on its byline, it can be mentioned there.
+    await createTestAnnotation({ docId: noted.id, authorEmail: otherEmail, bodyText: "A note from the other bot." });
+    await addTestDocAuthor(bylined.id, otherEmail);
+    for (const doc of [noted, bylined]) {
+      const allowed = await note(doc, `Ask ${md(other)}.`);
+      expect(allowed.isError, JSON.stringify(allowed.error)).toBe(false);
+    }
+    const still = await note(neither, `Ask ${md(other)}.`);
+    expect(still.error).toMatchObject({ code: "unknown_chip", handles: [other.slug] });
+  } finally {
+    for (const doc of [noted, bylined, neither]) await deleteTestDoc(doc.id);
+    await agent.dispose();
+    for (const email of [siblingEmail, otherEmail, adaEmail]) await deleteTestUser(email);
   }
 });

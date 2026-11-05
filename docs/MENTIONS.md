@@ -68,8 +68,10 @@ A nickname form would need a new user field.
 moved to another person. Built: each of those writes calls `scheduleMentionRefresh` once it has
 committed, from `updateAccountSettings`, `updateUserName`, `updateUserAdminInitials`,
 `changeUserSlug`, `revertUserSlug` and `moveBot`. A new way to change one of those fields has
-to call it too; a write that doesn't is what `check-doc-integrity.ts`'s `chip-labels` finding
-reports. A person's refresh covers their bots, whose labels can name them.
+to call it too, and `npm run check:label-refresh` fails for a Prisma write to one of them in a
+function that doesn't. What that check can't read (raw SQL, a script) is what
+`check-doc-integrity.ts`'s `chip-labels` finding reports. A person's refresh covers their bots,
+whose labels can name them.
 
 **Link:** the author page, `/authors/<slug>`, in docs and posts alike.
 

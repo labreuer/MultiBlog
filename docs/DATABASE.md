@@ -163,6 +163,15 @@ deliberate and worth not "simplifying" away:
   copy-paste from putting CRLF back, and a check that reports a difference on content identical
   line for line is a check that gets ignored.
 
+## `migrate dev` does not regenerate the client
+
+Under Prisma 7, `npx prisma migrate dev` applies the migration and stops: the client in
+`src/generated/prisma` is still the one from before it. Run `npx prisma generate` after it,
+with the dev server stopped, and start the server fresh. Skipping it reads like a bug in the
+code just written: `tsc` complains about a model or column that is plainly in
+`schema.prisma`, or, with a server that was left running, `prisma.<newModel>` is `undefined`
+at the first query.
+
 ## Adding a required column to a table that already has rows
 
 `prisma migrate dev` normally prompts interactively for how to backfill existing rows, which
