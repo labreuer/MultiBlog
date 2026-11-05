@@ -66,27 +66,17 @@ at all, since signing out reaches no server.
 
 ---
 
-## The schema gate's first bump needs a soak
+## A second layer under the schema gate: `enableContentCheck`
 
 The collab server refuses a tab whose bundle is on another schema version (docs/YDOC.md, "A tab
 whose schema is out of date is refused"), because such a tab deletes from the shared document
-whatever its schema can't build. `SCHEMA_VERSION` is 0, and the first schema change makes it 1.
-Three things are open before that bump:
+whatever its schema can't build. Two things stay open:
 
-- **The soak.** A tab opened before the gate deployed has no code to go read-only or to detach
-  its IndexedDB, so it can still take in a newer tab's content through y-indexeddb's compaction
-  and delete from it. Bump only once the collab log's
-  `schema gate: socket … states no schema version` lines have stopped on every instance.
-- **Whether to put `SCHEMA_VERSION` in the IndexedDB name** from that bump on. A new bundle would
-  then never share a database with an old one, which closes the path the soak waits out. The
-  cost: what a tab typed while collab was down, and hadn't yet synced, is abandoned at the
-  upgrade.
 - **A rollback past a bump isn't covered.** The old build becomes current again, and its tabs
   delete what the newer schema added. Roll forward.
-
-Later: once y-tiptap ships TipTap PR #8686, `enableContentCheck: true` writes nothing to the
-Y.Doc and makes the editor non-editable instead. Worth enabling as a second layer, though it
-protects only tabs already running that version.
+- **Once y-tiptap ships TipTap PR #8686**, `enableContentCheck: true` writes nothing to the
+  Y.Doc and makes the editor non-editable instead. Worth enabling as a second layer, though it
+  protects only tabs already running that version.
 
 ## Server/client environment divergence has no check covering it
 

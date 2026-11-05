@@ -135,9 +135,10 @@ has no deleted state and may have a static context, and its index table has no f
 
 ## Step 0: refuse a tab whose schema is out of date
 
-**Built.** An out-of-date tab deletes a node type it doesn't know just by decoding it. So the gate
-ships first, at version 0, and must have **soaked** before step 1 bumps it to 1: connections
-arriving with no `schema` parameter must have stopped. The design, its prior art and what it
+**Built.** An out-of-date tab deletes a node type it doesn't know just by decoding it, so the
+collab server refuses it, and a bundle's local copy of a doc is named by its schema version so
+that no tab reads a newer one's. Step 1's bump to version 1 can deploy with the gate: a tab from
+before the gate states no version, which counts as 0. The design, its prior art and what it
 doesn't cover are in [YDOC.md](YDOC.md).
 
 ## Step 1: the kit (schema version 1)
@@ -507,7 +508,7 @@ Because anchors never contain a label, no restyle, rename or renumbering detache
 4. **Every path from doc JSON to a post-side surface must convert chips**, or the page throws.
 5. **The refresh job:** compare-and-set correctness, and fan-out for a prolific author's rename or
    a change of the instance default.
-6. **Out-of-date tabs:** the gate, and its soak.
+6. **Out-of-date tabs:** the gate, and the local database's name.
 7. **A tab whose code predates a chip kind** must keep that kind's chips exactly as they are.
 
 ## Checks

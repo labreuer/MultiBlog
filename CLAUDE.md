@@ -241,8 +241,10 @@ before changing the behavior it describes.
   read: an extension added in `CollabEditorBody`, `AnnotationBody` or `CollabTitleField`
   beside that call is invisible to it. A bump refuses every open tab until it reloads, so it
   is never incidental; a socket you open yourself (a spec, a script) needs
-  `withSchemaVersion` on its URL; and a rollback past a bump is not covered. docs/YDOC.md "A
-  tab whose schema is out of date is refused".
+  `withSchemaVersion` on its URL; and a rollback past a bump is not covered. A tab's IndexedDB
+  copy of a ydoc is read with no server in between, so its name carries the version too
+  (`ydocDbName`), and a new bundle takes in an older version's database but never a newer
+  one's. docs/YDOC.md "A tab whose schema is out of date is refused".
 - **Tables are in `contentExtensions` and deliberately not in `annotationContentExtensions`.**
   The annotation list used to be an alias of `authorHighlightExtensions` and is now its own
   `[StarterKit, AuthorHighlight]`, mirrored by `annotationEditorExtensions`; don't re-derive one from

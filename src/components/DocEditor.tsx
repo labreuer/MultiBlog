@@ -258,12 +258,11 @@ export default function DocEditor({
   }, [docId, ydoc, getSocket, reportSignedOut]);
 
   // docs/YDOC.md "A tab whose schema is out of date is refused" — a refused
-  // tab stops writing its local database. What was typed before the refusal
-  // is already there and syncs after the reload; what must not happen is this
-  // bundle taking in, through y-indexeddb's compaction, content a newer tab in
-  // the same browser wrote, and deleting what its schema can't build. The
-  // editors go read-only with it (`editable` below), so nothing typed is lost
-  // to the detach.
+  // tab closes its local database. What was typed before the refusal is
+  // already there, and the reloaded page, on a newer bundle with a database of
+  // its own, takes this one in and deletes it; closed, it is read whole and
+  // the delete isn't held up. The editors go read-only with it (`editable`
+  // below), so nothing typed is lost to the detach.
   useEffect(() => {
     if (!outOfDate) return;
     detachIndexeddbRef.current?.();

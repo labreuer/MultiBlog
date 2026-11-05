@@ -339,8 +339,7 @@ before the content check sees it, so `contentError` never fires."
    - The gate throws `SchemaRefused`, whose `reason` is `SCHEMA_REFUSAL`: one sentence shared by
      server and client, "This page is out of date. Reload it to keep editing." The client matches
      on it (`isSchemaRefusal`) to tell this refusal from the others.
-   - It logs, once per socket, a refusal and a socket that states no version (The first bump
-     needs a soak, below).
+   - It logs each refusal, once per socket.
 4. **A refused tab receives nothing.** Hocuspocus 4 runs `onAuthenticate` before any sync, and
    holds and then drops a document's messages if it fails.
 5. **Every deploy reconnects every tab.** `deploy/deploy.sh` restarts web and collab in one
@@ -352,10 +351,10 @@ before the content check sees it, so `contentError` never fires."
    - `DocPresenceProvider` stops the socket and sets `outOfDate`, beside `signedOut`.
    - The doc editor's status line says "Out of date", with a reload button; both its editors go
      read-only; and its IndexedDB is detached. Anything typed while collab was restarting is
-     already in IndexedDB, and it syncs after the reload.
-   - Detaching IndexedDB closes the one path around the server. y-indexeddb's compaction reads
-     what other tabs in the same browser wrote, so an old tab that kept writing could take in a
-     new tab's content and then delete it.
+     already in IndexedDB, and the reloaded page takes it in (The local database is named by
+     schema version, below).
+   - Detaching IndexedDB is what makes that complete: the database is closed and no longer
+     written, so the reloaded page reads all of it and its delete isn't held up.
    - An annotation's editor has no IndexedDB, so it goes read-only at once, its submit is
      disabled, and it says to copy out anything unsaved before reloading.
    - The reading views and the PDF viewer show `OutOfDateNotice`.
@@ -378,18 +377,43 @@ before the content check sees it, so `contentError` never fires."
 refused on reconnect and live again after its reload, and a reading view refused at load. One
 build has no out-of-date tab, so the spec rewrites the version on the socket URL the page opens.
 
-### The first bump needs a soak
+### The local database is named by schema version
 
-Tabs opened before the gate have no code to detach their IndexedDB, and none to go read-only.
-The database is named `ydoc-debug:<document>:<lineage>` (`ydoc-persistence.ts`), the same across
-bundles. So an old tab can take in a new tab's content through compaction, delete what its schema
-lacks, and leave that deletion for its next load to sync. Before the first bump:
+The server can refuse a socket, but a tab reads its IndexedDB copy of a doc with no server in
+between, and y-indexeddb's compaction reads what other tabs in the same browser wrote. A
+database shared across bundles would hand an old tab a new tab's content, to delete what its
+schema lacks and leave that deletion for its next load to sync. A tab opened before the gate
+existed would do it with no refusal to stop its editor first.
 
-- **Bump only once sockets stating no version have stopped.** The collab log has a
-  `schema gate: socket … states no schema version` line for each.
-- **Optionally, put `SCHEMA_VERSION` in the database name from that bump on.** Then a new bundle
-  never shares a database with an old one. The cost: local changes not yet in the database, the
-  only thing IndexedDB holds, are abandoned at the upgrade.
+So `ydocDbName` (`src/lib/ydoc-db-name.ts`) puts the bundle's `SCHEMA_VERSION` in the name:
+`ydoc-debug:s<version>:<document>:<lineage>`. Version 0's name has no `s<version>:`, which is
+the name every bundle before the gate used. Two bundles never share a database, and that covers
+the tabs from before the gate too, so a bump waits on nothing.
+
+On its first attach of a doc, `attachIndexeddb` settles that doc's other local databases
+(`settleOtherDatabases`, `ydoc-persistence.ts`):
+
+- **An older version's, of the same lineage, is taken in and then deleted.** It holds what a tab
+  on that bundle typed and hadn't yet synced, typically while collab restarted for the deploy
+  that brought the new bundle. It holds nothing the new schema can't build, because no newer
+  bundle ever writes it. The updates are applied to the live `Y.Doc`, so y-indexeddb stores
+  them under the new name and the provider syncs them.
+- **A newer version's is left alone.** This bundle can't build what it holds, and the build
+  that can is the one a roll-forward brings back.
+- **Another lineage's is deleted**, as before (The database is keyed by lineage, above).
+
+Two limits:
+
+- **The delete waits on any tab that still has the database open**, and what such a tab writes
+  after the read is lost with the database. A refused tab has detached and gone read-only, so
+  this is only a tab from before the gate, typing on after its refusal, while a reloaded tab in
+  the same browser has the same doc open.
+- **It needs `indexedDB.databases()`.** Where a browser lacks it nothing is listed, so nothing
+  is taken in or deleted, and an older version's unsynced typing stays where it is.
+
+`e2e/local-database.spec.ts` types with collab cut off, moves the database to the previous
+version's name, and expects the next load to show and sync the text, delete that database, and
+leave a newer version's unread.
 
 ### What it doesn't cover
 
