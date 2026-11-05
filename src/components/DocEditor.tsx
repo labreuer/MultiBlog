@@ -6,7 +6,7 @@ import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import type { Editor } from "@tiptap/react";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
-import { attachProvider } from "@/lib/collab-socket";
+import { attachProvider, isSchemaRefusal } from "@/lib/collab-socket";
 import { CollabTokenDenied, refreshCollabToken } from "@/lib/collab-token-request";
 import { UNTITLED_DOC, docEditorTabTitle } from "@/lib/doc-title";
 import { useLiveTabTitle } from "@/lib/use-live-tab-title";
@@ -21,6 +21,7 @@ import EditorAnnotationRail from "./annotation/EditorAnnotationRail";
 import AnnotationPopover from "./annotation/AnnotationPopover";
 import { useDocPresence } from "./annotation/doc-presence-context";
 import { SignInAgainLink } from "./SignedOutNotice";
+import { ReloadButton } from "./OutOfDateNotice";
 import type { AnnotationEntry } from "./annotation/AnnotationList";
 import { annotationAnchorInputs } from "@/lib/annotation-highlight-extension";
 import { entryHasVisibleContent } from "@/lib/annotation-visibility";
@@ -134,7 +135,7 @@ export default function DocEditor({
   // widget — .mainColumn rather than a wrapping div, so nothing here alters
   // DocEditor.module.css's flex-height chain (STYLE.md's flex-grow trap).
   const containerRef = useRef<HTMLDivElement>(null);
-  const { setAwareness, getSocket, signedOut, reportSignedOut } = useDocPresence();
+  const { setAwareness, getSocket, signedOut, reportSignedOut, outOfDate } = useDocPresence();
 
   // The tab: generateMetadata composed it from the Doc.title cache, which lags
   // the fragment by a store debounce. Same composer on both sides, so the
@@ -158,10 +159,13 @@ export default function DocEditor({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ydoc = useMemo(() => new Y.Doc(), [docId]);
 
+  // The local database's detach, held where the out-of-date effect below can
+  // reach it as well as the connection effect's own cleanup.
+  const detachIndexeddbRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     let instance: HocuspocusProvider | null = null;
-    let detachIndexeddb: (() => void) | null = null;
 
     // Same reconnect fix as PostEditor.tsx: `token` as a function is called
     // on every connection attempt, not just the first, so a long-idle tab's
@@ -218,7 +222,7 @@ export default function DocEditor({
         // Lineage has to be known before connecting — see PLAN.md §11e for why
         // attaching first (or caching the lineage) would let a stale local
         // copy merge into a re-seeded document.
-        detachIndexeddb = attachIndexeddb(ydoc, documentName, lineage);
+        detachIndexeddbRef.current = attachIndexeddb(ydoc, documentName, lineage);
 
         // The page's shared socket (docs/YDOC.md "One socket per page"): the
         // annotation composers this editor opens attach to the same one.
@@ -231,8 +235,10 @@ export default function DocEditor({
             if (status !== "connected") setSynced(false);
           },
           onSynced: () => setSynced(true),
+          // A schema refusal is the page's to report (`outOfDate`, through
+          // attachProvider), and the status line says it.
           onAuthenticationFailed: ({ reason }) => {
-            if (!denied) setError(`Live editing unavailable: ${reason}`);
+            if (!denied && !isSchemaRefusal(reason)) setError(`Live editing unavailable: ${reason}`);
           },
         });
         setProvider(instance);
@@ -244,11 +250,25 @@ export default function DocEditor({
     return () => {
       cancelled = true;
       instance?.destroy();
-      detachIndexeddb?.();
+      detachIndexeddbRef.current?.();
+      detachIndexeddbRef.current = null;
       ydoc.destroy();
     };
     // getSocket and reportSignedOut are stable context callbacks.
   }, [docId, ydoc, getSocket, reportSignedOut]);
+
+  // docs/YDOC.md "A tab whose schema is out of date is refused" — a refused
+  // tab stops writing its local database. What was typed before the refusal
+  // is already there and syncs after the reload; what must not happen is this
+  // bundle taking in, through y-indexeddb's compaction, content a newer tab in
+  // the same browser wrote, and deleting what its schema can't build. The
+  // editors go read-only with it (`editable` below), so nothing typed is lost
+  // to the detach.
+  useEffect(() => {
+    if (!outOfDate) return;
+    detachIndexeddbRef.current?.();
+    detachIndexeddbRef.current = null;
+  }, [outOfDate]);
 
   // PLAN.md §13i — publishes this connection's awareness onto
   // DocPresenceProvider (edit/page.tsx wraps DocEditor in one, alongside
@@ -299,7 +319,7 @@ export default function DocEditor({
             userId={userId}
             userName={userName}
             userColor={userColor}
-            editable={!deleted}
+            editable={!deleted && !outOfDate}
             className={`${styles.titleInput} ${deleted ? styles.titleInputDisabled : ""}`}
             placeholder={UNTITLED_DOC}
             onTitleChange={setTitle}
@@ -314,7 +334,11 @@ export default function DocEditor({
           </div>
         )}
         <p className={styles.statusLine}>
-          {signedOut ? (
+          {outOfDate ? (
+            <>
+              🔴 Out of date — <ReloadButton /> to keep editing
+            </>
+          ) : signedOut ? (
             <>
               🔴 Signed out — <SignInAgainLink />
             </>
@@ -342,7 +366,7 @@ export default function DocEditor({
             userName={userName}
             userColor={userColor}
             userInitials={userInitials}
-            editable={!deleted}
+            editable={!deleted && !outOfDate}
             onEditorReady={setBodyEditor}
             onAuthorStats={setAuthorStats}
             onSelectionUpdate={widget.capture}

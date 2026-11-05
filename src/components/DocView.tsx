@@ -6,6 +6,7 @@ import type { JSONContent } from "@tiptap/react";
 import DocReadingBody from "./DocReadingBody";
 import DocScrubBar, { type ScrubbedState } from "./DocScrubBar";
 import { SignedOutNotice } from "./SignedOutNotice";
+import { OutOfDateNotice } from "./OutOfDateNotice";
 import type { AnnotationAnchorInput } from "@/lib/annotation-highlight-extension";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { useLiveTabTitle } from "@/lib/use-live-tab-title";
@@ -100,6 +101,7 @@ export default function DocView({
       <h1>{canEdit ? <Link href={`/doc/${docId}/edit`}>{title}</Link> : title}</h1>
       {byline}
       <SignedOutNotice />
+      <OutOfDateNotice />
       <DocReadingBody
         docId={docId}
         initialBodyJSON={initialBodyJSON}

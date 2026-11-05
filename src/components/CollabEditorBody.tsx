@@ -2,23 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
-import Collaboration from "@tiptap/extension-collaboration";
-import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { AuthorHighlight } from "@/lib/author-highlight-extension";
-import { Annotation } from "@/lib/annotation-extension";
-import { PendingAnnotation } from "@/lib/pending-annotation-extension";
-import { BlurredSelection } from "@/lib/blurred-selection-extension";
-import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
-import { Indent } from "@/lib/indent-extension";
-import { FormatInputEvents } from "@/lib/format-input-extension";
-import {
-  AnnotationHighlight,
-  setAnnotationAnchors,
-  type AnnotationAnchorInput,
-} from "@/lib/annotation-highlight-extension";
-import { collectAuthorHighlightStats, EDITOR_LINK_OPTIONS, StarterKit, tableExtensions } from "@/lib/tiptap-schema";
+import { setAnnotationAnchors, type AnnotationAnchorInput } from "@/lib/annotation-highlight-extension";
+import { docEditorExtensions } from "@/lib/live-editor-extensions";
+import { collectAuthorHighlightStats } from "@/lib/tiptap-schema";
 import { codecForFile } from "@/lib/table-codecs";
 import { insertTableFromFile } from "@/lib/table-file-editor";
 import { useAuthorColors } from "@/lib/use-author-colors";
@@ -164,54 +152,16 @@ export default function CollabEditorBody({
   }, [editable]);
 
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({ undoRedo: false, link: EDITOR_LINK_OPTIONS }),
-      // The table nodes (docs/TABLES.md) — the same list contentExtensions
-      // carries, so this editor's schema is that one plus the marks below
-      // and never a table short of it. Not in AnnotationBody, on purpose:
-      // annotationContentExtensions says why.
-      ...tableExtensions,
-      Collaboration.configure({ document: ydoc }),
-      CollaborationCaret.configure({
-        provider,
-        user: { id: userId, name: userName, color: userColor, initials: userInitials },
-        render: caretRenderer(userId),
-      }),
-      AuthorHighlight.configure({ getAuthorId: () => userId }),
-      // Keeps a non-empty selection painted (class "selection", styled in
-      // prose.module.css) while the editor is blurred — the link popover's
-      // URL box takes focus, and with it the browser's one DOM selection,
-      // so without this the text Ctrl-K is about to link goes unmarked the
-      // moment the popover opens. A decoration on state.selection, which
-      // survives the blur regardless (LinkControls reads it at Save). Ours,
-      // not @tiptap/extensions' Selection — that file says why.
-      // docs/TIPTAP.md, "The link popover is a form".
-      BlurredSelection,
-      // Enter inserts the hard break Shift-Enter does while the virtual
-      // keyboard is up — the extension file says why, and how it is detected.
-      VirtualKeyboardEnter,
-      // The indent/outdent commands behind the toolbar's pair and
-      // Ctrl/⌘+Shift+. and , — list nesting or quote depth by where the caret
-      // is; the extension file says why those keys.
-      Indent,
-      // The iPad keyboard's B/I/U buttons, which send no key — the
-      // extension file says what they send instead.
-      FormatInputEvents,
-      // Registers the mark type so a doc's annotation marks sync/render
-      // correctly here too (PLAN.md §12i) — posts never get one applied,
-      // and an unused mark type in the schema costs nothing.
-      Annotation,
-      // View-only decoration (PLAN.md §13f) — never touches the ydoc, so
-      // registering it unconditionally doesn't drift this schema from the
-      // reading view's. Harmless on embedders with no selection widget.
-      PendingAnnotation,
-      // Also view-only, and for the same reason (PLAN.md §13o) — the
-      // reading-view anchor's counterpart to the `Annotation` mark above.
-      // Unlike the reading views, this editor has a real transaction mapping
-      // to track those offsets through, so the ranges follow local typing
-      // exactly rather than being re-found by text.
-      AnnotationHighlight.configure({ anchors: initialAnchors }),
-    ],
+    // The whole list is live-editor-extensions.ts's, and nothing is added
+    // beside it here: that file says why.
+    extensions: docEditorExtensions({
+      ydoc,
+      provider,
+      user: { id: userId, name: userName, color: userColor, initials: userInitials },
+      renderCaret: caretRenderer(userId),
+      getAuthorId: () => userId,
+      initialAnchors,
+    }),
     // Matches the title field's own aria-label/role. Two contenteditables
     // share this page, and without distinct accessible names the only thing
     // telling them apart is DOM order — which is what the e2e suite would

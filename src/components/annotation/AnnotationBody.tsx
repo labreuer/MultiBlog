@@ -2,16 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
-import Collaboration from "@tiptap/extension-collaboration";
-import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
-import { AuthorHighlight } from "@/lib/author-highlight-extension";
-import { EDITOR_LINK_OPTIONS, StarterKit } from "@/lib/tiptap-schema";
-import { BlurredSelection } from "@/lib/blurred-selection-extension";
-import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
-import { Indent } from "@/lib/indent-extension";
-import { FormatInputEvents } from "@/lib/format-input-extension";
+import { annotationEditorExtensions } from "@/lib/live-editor-extensions";
 import EditorToolbar, { ANNOTATION_TOOLS } from "../EditorToolbar";
 import DocRefMenu from "../DocRefMenu";
 import proseStyles from "@/styles/prose.module.css";
@@ -79,26 +72,15 @@ export default function AnnotationBody({
   }, [ydoc]);
 
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({ undoRedo: false, link: EDITOR_LINK_OPTIONS }),
-      Collaboration.configure({ document: ydoc }),
-      CollaborationCaret.configure({ provider, user: { id: userId, name: userName, color: userColor } }),
-      // eslint-disable-next-line react-hooks/refs -- getAuthorId is only ever invoked from the AuthorHighlight plugin's appendTransaction, on a real ProseMirror transaction dispatch, never during React's render
-      AuthorHighlight.configure({ getAuthorId: () => (coAuthoringRef.current ? userId : null) }),
-      // Selection stays painted while the link popover holds focus —
-      // CollabEditorBody's comment on the same line.
-      BlurredSelection,
-      // Enter inserts the hard break Shift-Enter does while the virtual
-      // keyboard is up — the extension file says why, and how it is detected.
-      VirtualKeyboardEnter,
-      // The indent/outdent commands behind the toolbar's pair and
-      // Ctrl/⌘+Shift+. and , — list nesting or quote depth by where the caret
-      // is; the extension file says why those keys.
-      Indent,
-      // The iPad keyboard's B/I/U buttons, which send no key — the
-      // extension file says what they send instead.
-      FormatInputEvents,
-    ],
+    // The whole list is live-editor-extensions.ts's, and nothing is added
+    // beside it here: that file says why.
+    // eslint-disable-next-line react-hooks/refs -- getAuthorId is only ever invoked from the AuthorHighlight plugin's appendTransaction, on a real ProseMirror transaction dispatch, never during React's render
+    extensions: annotationEditorExtensions({
+      ydoc,
+      provider,
+      user: { id: userId, name: userName, color: userColor },
+      getAuthorId: () => (coAuthoringRef.current ? userId : null),
+    }),
     editorProps: { attributes: { "aria-label": "Annotation body", role: "textbox" } },
     immediatelyRender: false,
   });

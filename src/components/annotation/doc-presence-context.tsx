@@ -43,6 +43,15 @@ type Ctx = {
    * reconnects until the page is loaded again.
    */
   reportSignedOut: () => void;
+  /**
+   * True once the collab server refused a document on the page's socket for
+   * its schema version (docs/YDOC.md "A tab whose schema is out of date is
+   * refused"): this tab runs a bundle older than the server's. The socket is
+   * stopped, as for `signedOut`, and every editor on the page goes read-only
+   * until the page is loaded again. `attachProvider` reports it, so no
+   * surface has to.
+   */
+  outOfDate: boolean;
 };
 
 const DocPresenceContext = createContext<Ctx | null>(null);
@@ -56,8 +65,18 @@ export function DocPresenceProvider({ children }: { children: ReactNode }) {
   // cleanup; under StrictMode's mount/unmount/mount it destroys the socket
   // the children's first effects created, and their re-run creates the next.
   const socketRef = useRef<CollabSocket | null>(null);
+  const [outOfDate, setOutOfDate] = useState(false);
   const getSocket = useCallback(() => {
-    if (!socketRef.current) socketRef.current = createCollabSocket();
+    if (!socketRef.current) {
+      // `disconnect()` for the reason `reportSignedOut` below gives. A
+      // refused document is sent nothing, and stopping the socket keeps the
+      // page's other documents from retrying into the same refusal.
+      const socket = createCollabSocket(() => {
+        socket.disconnect();
+        setOutOfDate(true);
+      });
+      socketRef.current = socket;
+    }
     return socketRef.current;
   }, []);
   useEffect(
@@ -80,7 +99,7 @@ export function DocPresenceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <DocPresenceContext.Provider value={{ awareness, setAwareness, getSocket, signedOut, reportSignedOut }}>
+    <DocPresenceContext.Provider value={{ awareness, setAwareness, getSocket, signedOut, reportSignedOut, outOfDate }}>
       {children}
     </DocPresenceContext.Provider>
   );

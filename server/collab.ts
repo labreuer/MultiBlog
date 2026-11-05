@@ -27,6 +27,7 @@ import {
   send,
 } from "./ydoc-hooks";
 import { handleEditDoc } from "./doc-edit";
+import { refuseStaleSchema } from "./schema-gate";
 
 const server = new Server({
   // From scripts/dev-ports.ts, the same module every other reader of the slot
@@ -48,7 +49,12 @@ const server = new Server({
   // throw inside onLoadDocument would instead read as a document-creation
   // failure. The other hooks below call straight into ydoc-hooks.ts, since
   // nothing else can ever reach them once a connection gets this far.
+  //
+  // The schema gate runs first (docs/YDOC.md "A tab whose schema is out of
+  // date is refused"): a tab on another schema version is refused whatever
+  // its token says, before any document is loaded for it.
   async onAuthenticate(payload) {
+    refuseStaleSchema(payload.requestParameters, payload.socketId, payload.documentName);
     if (!isYdocDocument(payload.documentName)) {
       throw new Error("Unknown document namespace.");
     }

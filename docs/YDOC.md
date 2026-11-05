@@ -292,10 +292,10 @@ host, and `applyAnnotationMark` treats a non-JSON 200 as `applied: false` rather
 instance of the pattern, which suggests the general rule is worth stating: **a best-effort call
 may swallow a failure's *effect on control flow*, never its *existence in the log*.**
 
-## Planned: refusing a tab whose schema is out of date
+## A tab whose schema is out of date is refused
 
-**Status: planned, not built.** It is step 0 of [ENTITY_CHIPS.md](ENTITY_CHIPS.md), and it
-protects every schema change, not only that one.
+The first step of [ENTITY_CHIPS.md](ENTITY_CHIPS.md), and it protects every schema change, not
+only that one.
 
 ### The problem
 
@@ -318,9 +318,10 @@ before the content check sees it, so `contentError` never fires."
 ### The gate
 
 1. **A version in the bundle.** `src/lib/schema-version.ts` exports `SCHEMA_VERSION`, and it is
-   compiled into the bundle.
+   compiled into the bundle. It is 0: the gate by itself forces no reload. The first schema
+   change after it makes the version 1, which also refuses tabs opened before the gate existed.
 2. **The version goes on the socket URL.** `getCollabUrl()` (`src/lib/collab-url.ts`) appends
-   `schema=<SCHEMA_VERSION>`. Every browser socket is built from it:
+   `schema=<SCHEMA_VERSION>` through `withSchemaVersion`. Every browser socket is built from it:
    - `createCollabSocket`, the page's one socket;
    - the side-by-side columns (`sidebyside/DocColumn.tsx`);
    - `/ydoc-debug` (`YdocDebug.tsx`).
@@ -328,55 +329,64 @@ before the content check sees it, so `contentError` never fires."
    It isn't in the token. `/api/doc/<id>/token` is fetched again on every reconnect, so a new
    server would hand an old tab a token carrying the new version.
 
-   Three e2e specs build their own URL and import the constant: `annotation-readonly.spec.ts`,
-   `doc-apply-update.spec.ts` and `shared-socket.spec.ts`.
-3. **The server refuses a mismatch, with a reason the client can read.** `onAuthenticate`
-   (`server/collab.ts`) compares `requestParameters.get("schema")` with the server's own constant.
-   A missing parameter counts as 0.
-   - Hocuspocus sends the client `error.reason ?? "permission-denied"`.
-   - Every refusal today throws a plain `Error`, so the browser only ever reads
-     "permission-denied".
-   - So the gate throws `{ reason: SCHEMA_REFUSAL }`. That is a sentence shared by server and
-     client, such as "This page is out of date. Reload it to keep editing." The client matches on
-     it to tell this refusal from the others. `DocEditor` already prints a reason verbatim.
+   A spec that opens a socket of its own calls `withSchemaVersion` on its URL.
+3. **The server refuses a mismatch, with a reason the client can read.** `refuseStaleSchema`
+   (`server/schema-gate.ts`) runs first in `onAuthenticate` and compares the URL's `schema` with
+   the server's own constant. A missing parameter counts as 0; anything that isn't a whole number
+   matches no version.
+   - Hocuspocus sends the client `error.reason ?? "permission-denied"`, and every other refusal
+     throws a plain `Error`, so the browser reads "permission-denied" for those.
+   - The gate throws `SchemaRefused`, whose `reason` is `SCHEMA_REFUSAL`: one sentence shared by
+     server and client, "This page is out of date. Reload it to keep editing." The client matches
+     on it (`isSchemaRefusal`) to tell this refusal from the others.
+   - It logs, once per socket, a refusal and a socket that states no version (The first bump
+     needs a soak, below).
 4. **A refused tab receives nothing.** Hocuspocus 4 runs `onAuthenticate` before any sync, and
    holds and then drops a document's messages if it fails.
 5. **Every deploy reconnects every tab.** `deploy/deploy.sh` restarts web and collab in one
    command, so every open socket reconnects and is checked against the new server.
-6. **The refusal is detected once and shown once.** Today only `DocEditor` and `YdocDebug` handle
-   `onAuthenticationFailed`. The annotation providers, the live doc tap and PDF presence ignore it.
-   - Detection goes inside `attachProvider` (`collab-socket.ts`), which reports to
-     `DocPresenceProvider` the way `reportSignedOut` does.
-   - The provider shows an "out of date" state beside "Signed out", and every editor on the page
-     goes read-only. Annotation composers have no IndexedDB, so they must go read-only as soon as
-     the refusal arrives.
-   - The doc editor's IndexedDB is detached. Anything typed while collab was restarting is
+6. **The refusal is detected once and shown once.**
+   - `attachProvider` (`collab-socket.ts`) wraps every provider's `onAuthenticationFailed` and
+     tells the socket's owner, so the surfaces with no handler of their own (annotation bodies,
+     the live doc tap, PDF presence) are covered with the rest.
+   - `DocPresenceProvider` stops the socket and sets `outOfDate`, beside `signedOut`.
+   - The doc editor's status line says "Out of date", with a reload button; both its editors go
+     read-only; and its IndexedDB is detached. Anything typed while collab was restarting is
      already in IndexedDB, and it syncs after the reload.
    - Detaching IndexedDB closes the one path around the server. y-indexeddb's compaction reads
      what other tabs in the same browser wrote, so an old tab that kept writing could take in a
      new tab's content and then delete it.
-   - The side-by-side columns build their own provider, which has no handler today; it gets one.
-     `/ydoc-debug` already prints the reason.
-7. **A unit test makes a bump impossible to forget.**
-   - It fingerprints the schemas the live editors actually build, and fails until `SCHEMA_VERSION`
-     is bumped, the way `check:schema` fails on an unformatted `schema.prisma`.
-   - `CollabEditorBody`, `AnnotationBody` and `CollabTitleField` each assemble their own
-     extension list. So each list either moves into `src/lib`, shared by the editor and the test,
-     or the test asserts that `getSchema(editorList)` equals the matching schema from
-     `tiptap-schema.ts`. Either way, a change made only in an editor's list still trips the test.
-   - Judging by `tiptap-schema.ts`'s history, it would have forced a bump several times since
-     July: author highlights, the annotation mark, tables, and inline code's `excludes`.
-8. **It ships at 0, so the gate forces no reload by itself.** The first schema change after it
-   makes the version 1, which also refuses tabs opened before the gate existed.
+   - An annotation's editor has no IndexedDB, so it goes read-only at once, its submit is
+     disabled, and it says to copy out anything unsaved before reloading.
+   - The reading views and the PDF viewer show `OutOfDateNotice`.
+   - A side-by-side column and `/ydoc-debug` own their sockets, so each handles the refusal
+     itself: the socket stops, the editors stop, IndexedDB is detached.
+7. **A unit test makes a bump impossible to forget.** `src/lib/schema-version.test.ts`:
+   - Each live editor's whole extension list lives in `src/lib/live-editor-extensions.ts`
+     (`docEditorExtensions`, `annotationEditorExtensions`, `titleEditorExtensions`), and
+     `CollabEditorBody`, `AnnotationBody` and `CollabTitleField` pass that call and nothing
+     beside it. So the test reads the lists the editors run, and an extension added in a
+     component is one it would never see.
+   - It asserts that each list builds the same schema as the one `tiptap-schema.ts` decodes that
+     ydoc with.
+   - It fingerprints the three schemas: every node and mark in order, their attributes and
+     defaults, and what may sit where. It fails until `SCHEMA_FINGERPRINTS` has the new
+     fingerprint under a new `SCHEMA_VERSION`, the way `check:schema` fails on an unformatted
+     `schema.prisma`. The failure prints the line to add.
+
+`e2e/schema-gate.spec.ts` covers the rest: the server's refusal from a raw socket, an editor
+refused on reconnect and live again after its reload, and a reading view refused at load. One
+build has no out-of-date tab, so the spec rewrites the version on the socket URL the page opens.
 
 ### The first bump needs a soak
 
-Tabs opened before the gate have no code to detach their IndexedDB. The database is named
-`ydoc-debug:<document>:<lineage>` (`ydoc-persistence.ts`), the same across bundles. So an old tab
-can take in a new tab's content through compaction, delete what its schema lacks, and leave that
-deletion for its next load to sync. Before the first bump:
+Tabs opened before the gate have no code to detach their IndexedDB, and none to go read-only.
+The database is named `ydoc-debug:<document>:<lineage>` (`ydoc-persistence.ts`), the same across
+bundles. So an old tab can take in a new tab's content through compaction, delete what its schema
+lacks, and leave that deletion for its next load to sync. Before the first bump:
 
-- **Log connections that arrive with no `schema` parameter, and bump only once they stop.**
+- **Bump only once sockets stating no version have stopped.** The collab log has a
+  `schema gate: socket … states no schema version` line for each.
 - **Optionally, put `SCHEMA_VERSION` in the database name from that bump on.** Then a new bundle
   never shares a database with an old one. The cost: local changes not yet in the database, the
   only thing IndexedDB holds, are abandoned at the upgrade.

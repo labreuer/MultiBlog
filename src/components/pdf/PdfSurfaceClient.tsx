@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import type { ReactNode } from "react";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { SignedOutNotice } from "@/components/SignedOutNotice";
+import { OutOfDateNotice } from "@/components/OutOfDateNotice";
 import type { PdfAnnotationEntry } from "./PdfAnnotationPanel";
 import type { AnchoredLinkView } from "@/lib/anchored-link-data";
 import type { OwnDraft } from "@/lib/annotation-data";
@@ -49,10 +50,12 @@ export default function PdfSurfaceClient(props: {
   // surface's own presence hook attaches to the socket this owns (docs/YDOC.md
   // "One socket per page"), and LiveAnnotationComposer throws without it.
   // The notice sits here, outside the dynamic island, since the annotation
-  // bodies inside it are what would report a sign-out.
+  // bodies inside it are what would report a sign-out, or a refused schema
+  // version.
   return (
     <DocPresenceProvider>
       <SignedOutNotice />
+      <OutOfDateNotice />
       <PdfAnnotationSurface {...props} />
     </DocPresenceProvider>
   );

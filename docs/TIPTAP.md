@@ -870,8 +870,8 @@ tracks a selection or hover in state beside it.
 
 docs/TABLES.md. `@tiptap/extension-table` is not part of StarterKit, so it goes *beside* it —
 `tableExtensions` in `src/lib/tiptap-schema.ts`, spread into `contentExtensions` and, by
-hand, into `CollabEditorBody`'s own list (which builds its own StarterKit, per the rule
-above). Nine things worth knowing before touching it:
+hand, into the doc editor's own list, `docEditorExtensions` in
+`src/lib/live-editor-extensions.ts` (which builds its own StarterKit, per the rule above). Nine things worth knowing before touching it:
 
 - **The editor and the static renderer both emit `<div class="tableWrapper">`**, by two
   different routes. In the editor the extension's `TableView` node view draws it (it is

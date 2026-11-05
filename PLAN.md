@@ -4960,4 +4960,5 @@ renames and restyles, and anchored quotes store a placeholder that never moves. 
 every chip kind, so a later kind needs no schema change.
 **Plan: [docs/ENTITY_CHIPS.md](docs/ENTITY_CHIPS.md)**, the kit every chip kind shares, with a file
 per chip kind: [docs/MENTIONS.md](docs/MENTIONS.md) and [docs/CITATIONS.md](docs/CITATIONS.md).
-Its step 0, the schema-version gate, is planned in [docs/YDOC.md](docs/YDOC.md).
+Built 2026-11-04 on `entity-chips`: its step 0, the schema-version gate. **As built:
+[docs/YDOC.md](docs/YDOC.md), "A tab whose schema is out of date is refused".**

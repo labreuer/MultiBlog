@@ -1,6 +1,6 @@
 # Entity chips (planned)
 
-**Status: planned; nothing here is built.** An *entity chip* is an inline node in a doc's text
+**Status: planned; only step 0 is built.** An *entity chip* is an inline node in a doc's text
 that stands for an entity, such as a person or a work, and holds only *which* one. Its label is
 computed whenever it is shown, from the doc's style and the entity's current record. A rename, a
 corrected record or a change of style therefore changes every label at once, and no anchored
@@ -15,8 +15,8 @@ in the kind contract (below):
   `(BU p. 49)`, `(Radner 2012, p. 49)` or `[3, p. 49]`. That file also plans the reference library
   that citations draw on.
 
-Step 0, the schema-version gate, is planned in [YDOC.md](YDOC.md) ("Planned: refusing a tab
-whose schema is out of date"), and lands first.
+Step 0, the schema-version gate, is built: [YDOC.md](YDOC.md), "A tab whose schema is out of
+date is refused".
 
 ## Summary
 
@@ -135,10 +135,10 @@ has no deleted state and may have a static context, and its index table has no f
 
 ## Step 0: refuse a tab whose schema is out of date
 
-An out-of-date tab deletes a node type it doesn't know just by decoding it. So the gate ships
-first, at version 0, and must have **soaked** before step 1 bumps it to 1: connections arriving
-with no `schema` parameter must have stopped. The design, its prior art and what it doesn't cover
-are in [YDOC.md](YDOC.md).
+**Built.** An out-of-date tab deletes a node type it doesn't know just by decoding it. So the gate
+ships first, at version 0, and must have **soaked** before step 1 bumps it to 1: connections
+arriving with no `schema` parameter must have stopped. The design, its prior art and what it
+doesn't cover are in [YDOC.md](YDOC.md).
 
 ## Step 1: the kit (schema version 1)
 
@@ -308,9 +308,9 @@ are in [YDOC.md](YDOC.md).
     An integrity script with `--repair` checks the tables. *Who* inserted a chip comes from the
     collab server's `clients` map, never from the JSON.
 13. **Annotation bodies.** Notes are their own schema, and the family's one bump covers them too.
-    - The node goes into `annotationContentExtensions` and its mirror in `AnnotationBody.tsx` in
-      this step. The gate's fingerprint already covers `AnnotationBody` ([YDOC.md](YDOC.md)), so
-      adding it in a later step would be a second bump.
+    - The node goes into `annotationContentExtensions` and its mirror,
+      `annotationEditorExtensions`, in this step. The gate's fingerprint already covers the
+      annotation editor ([YDOC.md](YDOC.md)), so adding it in a later step would be a second bump.
     - Cards compute renderings at render, since `Annotation.proseJson` is the settled snapshot and
       stays label-free.
     - `bodyText` (the RAISED email and the annotation vector) is written with labels, and is

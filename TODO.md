@@ -66,20 +66,27 @@ at all, since signing out reaches no server.
 
 ---
 
-## A tab opened before a deploy deletes what its schema can't build
+## The schema gate's first bump needs a soak
 
-A tab still running the old bundle deletes from the shared document whatever its schema lacks,
-and nothing checks for it:
+The collab server refuses a tab whose bundle is on another schema version (docs/YDOC.md, "A tab
+whose schema is out of date is refused"), because such a tab deletes from the shared document
+whatever its schema can't build. `SCHEMA_VERSION` is 0, and the first schema change makes it 1.
+Three things are open before that bump:
 
-- a node type it doesn't know, such as a table;
-- the whole text of a paragraph that carries a mark it doesn't know.
+- **The soak.** A tab opened before the gate deployed has no code to go read-only or to detach
+  its IndexedDB, so it can still take in a newer tab's content through y-indexeddb's compaction
+  and delete from it. Bump only once the collab log's
+  `schema gate: socket … states no schema version` lines have stopped on every instance.
+- **Whether to put `SCHEMA_VERSION` in the IndexedDB name** from that bump on. A new bundle would
+  then never share a database with an old one, which closes the path the soak waits out. The
+  cost: what a tab typed while collab was down, and hadn't yet synced, is abandoned at the
+  upgrade.
+- **A rollback past a bump isn't covered.** The old build becomes current again, and its tabs
+  delete what the newer schema added. Roll forward.
 
-It also strips a new attribute as soon as it edits that run. The deletion is a Yjs update, so it
-reaches every tab and the stored row. Every schema change since July has carried this risk.
-TipTap's `enableContentCheck` doesn't catch it. Measured 2026-11-03.
-
-**Planned fix:** docs/YDOC.md, "Planned: refusing a tab whose schema is out of date". It is step 0
-of docs/ENTITY_CHIPS.md.
+Later: once y-tiptap ships TipTap PR #8686, `enableContentCheck: true` writes nothing to the
+Y.Doc and makes the editor non-editable instead. Worth enabling as a second layer, though it
+protects only tabs already running that version.
 
 ## Server/client environment divergence has no check covering it
 

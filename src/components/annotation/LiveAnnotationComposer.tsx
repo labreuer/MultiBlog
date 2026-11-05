@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import AnnotationBody from "./AnnotationBody";
-import { useAnnotationProvider } from "./use-annotation-provider";
+import { OUT_OF_DATE_BODY, useAnnotationProvider } from "./use-annotation-provider";
 import { useDocPresence } from "./doc-presence-context";
 import { useAnnotationReload } from "./annotation-reload-context";
 import { postAnnotation, saveDraftAnnotation, discardDraftAnnotation } from "@/app/actions/annotations";
@@ -132,7 +132,7 @@ export default function LiveAnnotationComposer({
   // A composer only ever opens on this viewer's own DRAFT, so `readOnly`
   // cannot come back true here — it is threaded through rather than assumed
   // so that the one place deciding `editable` is the token, on both surfaces.
-  const { provider, ydoc, readOnly, error: connectionError } = useAnnotationProvider(annotationId, connection);
+  const { provider, ydoc, readOnly, error: connectionError, outOfDate } = useAnnotationProvider(annotationId, connection);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [visibility, setVisibility] = useState<Visibility>("post");
@@ -238,9 +238,10 @@ export default function LiveAnnotationComposer({
         userId={session.user.id}
         userName={displayNameOf(session.user)}
         userColor={session.user.color}
-        editable={readOnly !== true}
+        editable={readOnly !== true && !outOfDate}
         bounded={bounded}
       />
+      {outOfDate && <p className={styles.error}>{OUT_OF_DATE_BODY}</p>}
       {error && <p className={styles.error}>{error}</p>}
       <div className={styles.buttonRow}>
         <select
@@ -259,7 +260,7 @@ export default function LiveAnnotationComposer({
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={pending}
+          disabled={pending || outOfDate}
           className={`${styles.submit} ${pending ? styles.submitPending : ""}`}
         >
           {submitLabel}
