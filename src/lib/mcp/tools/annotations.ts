@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { MAX_MARKDOWN_BYTES } from "@/lib/markdown-import";
 import { onceWithin } from "@/lib/api/idempotency";
-import { defineTool, listedName, objectRef, quoteFields, versionString } from "../tool";
+import { chipSyntax, defineTool, listedName, objectRef, quoteFields, versionString } from "../tool";
 import { annotateFor, editAnnotationFor } from "../annotation-writes";
 
 // docs/MCP.md §9 — add_note and edit_note. A note Claude writes is
@@ -13,7 +13,7 @@ const body = z
   .string()
   .min(1)
   .max(MAX_MARKDOWN_BYTES)
-  .describe(`Markdown. A mention is [@Name](/authors/<slug>), the slug from ${listedName("find_users")}.`);
+  .describe(`Markdown. ${chipSyntax()}`);
 
 export const addNoteTool = defineTool({
   name: "add_note",

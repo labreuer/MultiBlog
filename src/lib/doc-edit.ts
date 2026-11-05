@@ -199,7 +199,22 @@ function reconcile(old: Atom, next: Atom): Atom {
         ? (old.marks.find((o) => o.type.name === "link" && o.attrs.href === mark.attrs.href) ?? mark)
         : mark,
     );
-  return { text: old.text, marks: toSet([...kept, ...formatting]), leaf: old.leaf };
+  return { text: old.text, marks: toSet([...kept, ...formatting]), leaf: chipFieldsFrom(old.leaf, next.leaf) };
+}
+
+/**
+ * A chip that lined up with itself: the old node, with the fields the new
+ * text gave it (docs/ENTITY_CHIPS.md, MCP item 5). Only the same identity
+ * lines up, so what can differ is what the identity leaves out, such as a
+ * citation's page; its instance id stays the old one's, and with it every
+ * anchor on it.
+ */
+function chipFieldsFrom(old: PMNode | null, next: PMNode | null): PMNode | null {
+  if (!old || !next || !isChip(old) || !isChip(next)) return old;
+  if (JSON.stringify(old.attrs.data) === JSON.stringify(next.attrs.data)) return old;
+  // Built apart from the call: check:prisma-data reads a `create({ data })` as a Prisma write.
+  const attrs = { ...old.attrs, data: next.attrs.data };
+  return old.type.create(attrs, null, old.marks);
 }
 
 function authorMark(options: MergeOptions): Mark | null {

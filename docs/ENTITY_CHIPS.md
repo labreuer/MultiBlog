@@ -184,8 +184,9 @@ not listed here is still a plan.
 
   `create_doc` reads the same syntax (`markdownToDocContent` with `chips`), under the rule
   for a doc that doesn't exist yet, and `download` writes it, so a doc moves between
-  instances by handle. `/docs`' Markdown import reads it too, and leaves a mention it can't
-  resolve as the link its Markdown also is (`unresolved: "link"`), where MCP refuses.
+  instances by handle and key. `/docs`' Markdown import reads it too, and leaves a mention it
+  can't resolve as the link its Markdown also is (`unresolved: "link"`), where MCP refuses; a
+  citation it can't resolve refuses the import on both (CITATIONS.md, "Markdown").
 
   An edit whose passage holds a chip of a kind the server doesn't know is refused as
   `unknown_kind`, since the new text can't write that chip back; the words beside it can
@@ -193,12 +194,14 @@ not listed here is still a plan.
 
   The merge pairs a chip that continues another (`pairContinuations`, doc-edit.ts): where a
   textblock lost one chip and gained one its chip kind says continues it, and no other pairing
-  is possible either way, the new chip takes the old one's instance id. No edit reaches this
-  yet, since only a citation continues anything and no Markdown reads a citation back.
+  is possible either way, the new chip takes the old one's instance id. An edit reaches it by
+  a citation's Markdown with a work added. A chip that lines up with itself keeps its node and
+  instance id and takes its fields from the new text (`chipFieldsFrom`), so a citation sent
+  back with another page has that page.
 
-  Not built of item 14, each needing a chip kind whose Markdown carries fields, which a
-  mention's doesn't: the Markdown retry against identity text (the retry matches the label a
-  link's text gives, which is the same for a mention), and `chip_changed`.
+  Not built of item 14: the Markdown retry against identity text (the retry matches the label a
+  link's text gives, which is the same for a mention, and a quote in a citation's syntax
+  matches nothing), and with it `chip_changed`.
 - **Styling, per doc and per post:**
   - **The doc's style** is in a `Y.Map("settings")` in its ydoc, one key per chip kind
     (`settings.ts`), cached to `Doc.chipStyles` by the store. `DocSettingsPanel` writes it
@@ -569,17 +572,17 @@ So:
      reads back the same whatever the doc's style.
    - The lowering is one-to-one: text that would read back as a chip is escaped on the way out.
      CommonMark and Pandoc both read `\@` as a literal `@`, so hand-written `[@radner2012]` goes
-     out as `\[\@radner2012\]`. The serializer already escapes the brackets; the `@` is new.
-   - The new escapes need a subclass of `MarkdownManager`. `escapeMarkdownSyntax` is a fixed regex
-     with no hook, and overriding it keeps its caller's skipping of code, which an output pass
-     would have to redo. The escapes that depend on a neighbouring chip (CITATIONS.md, "Text
-     beside a chip") go in `renderNodeToMarkdown(node, parentNode, index)`, the one method that
-     sees a text node's siblings. The round-trip test catches a TipTap rename.
-   - Each `MarkdownManager` gets its own `new Marked()`, through the constructor's `marked`
-     option. All three in `markdown-import.ts` share marked's global instance today, so a chip
-     tokenizer registered for the doc parse would also run in the comment parse. That parse has
-     no chip node and drops the token, so a comment saying "@Andrew, see this" would lose
-     "@Andrew".
+     out as `\[\@radner2012\]`, the serializer escaping the brackets.
+   - The escapes are written into the JSON before the serializer runs, as a private-use stand-in
+     wherever a backslash belongs, replaced with one in its output (`serializeWithEscapes`). The
+     serializer offers no hook: `escapeMarkdownSyntax` is private, and inline text is written by
+     a private path that sees no sibling, which the escapes beside a chip (CITATIONS.md, "Text
+     beside a chip") need. The pass skips code, as the serializer's own escaping does. The
+     round-trip tests (`citation-markdown.test.ts`) catch a TipTap change that breaks it.
+   - Each chip parser has its own `new Marked()`, through the constructor's `marked` option, and
+     the other managers in `markdown-import.ts` share marked's global instance. A chip tokenizer
+     registered on that instance would also run in the comment parse, which has no chip node and
+     drops the token, so a comment saying "@Andrew, see this" would lose "@Andrew".
    - A chip whose target is gone is written with its stored id where its slug or key would go, so
      a round trip keeps it.
 3. **Chips in quotes.** Every quote an agent sends resolves through `resolveQuote`

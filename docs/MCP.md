@@ -266,7 +266,8 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
     and how many there are, and `no_match` for one that occurs nowhere, with up to three near
     misses (§7), or for a fragment link whose passage isn't on its page (§8);
   - `unknown_chip` for a mention written in Markdown whose handle names no account, or one the
-    actor may not mention there, with the handles; `chip_as_text` for an edit whose new
+    actor may not mention there, with the handles, and for a citation whose key names no
+    reference, or a deleted one, with the keys; `chip_as_text` for an edit whose new
     text has a mention's name as plain words where the mention was, with the labels;
     `splits_chip` for an edit whose passage begins or ends partway through a mention, with
     the passage as it would be whole; and `unknown_kind` for an edit whose passage holds a
@@ -1131,8 +1132,9 @@ as read.
 
 A chip kind's Markdown is read as a chip wherever an agent writes Markdown: `edit_doc`,
 `add_note`, `edit_note` and `create_doc` (and so `POST /api/mcp/docs`). A mention is resolved
-by its handle under the rule the `@` menu lists by, and `unknown_chip` refuses one it can't
-resolve (§4).
+by its handle under the rule the `@` menu lists by, a citation by its keys, and `unknown_chip`
+refuses one it can't resolve (§4). A citation's Markdown is Pandoc's, so any `@` before a word
+is one: text that reads that way is written `\@` in a read, and is sent back so.
 
 That is COLLAB.md §9's matcher pointed at its §2b stamped state: the state is immutable, the
 work is server-side, every hit is verified, and the stored text is derived rather than taken

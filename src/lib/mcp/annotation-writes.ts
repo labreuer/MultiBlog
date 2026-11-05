@@ -295,8 +295,8 @@ export async function editAnnotationFor(ctx: McpContext, input: { id: string; bo
   const oldNode = pmAnnotationContentSchema.nodeFromJSON(settledBody.proseJson);
   const nextNode = pmAnnotationContentSchema.nodeFromJSON(next);
   // A new body replaces the whole of the old one, and a chip the Markdown
-  // parse can't read back (a citation, or a kind this server doesn't know)
-  // would be dropped by it: refused, as an edit over one is in a doc.
+  // parse can't read back (a kind this server doesn't know) would be dropped
+  // by it: refused, as an edit over one is in a doc.
   const unwritable = [...new Set(chipsInJSON(settledBody.proseJson).map((chip) => chip.kind).filter((kind) => !writesBack(kind)))];
   if (unwritable.length > 0) {
     throw new ApiError(

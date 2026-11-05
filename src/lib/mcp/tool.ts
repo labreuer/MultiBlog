@@ -53,6 +53,11 @@ export function listedName(name: ToolName): string {
   return `${TOOL_PREFIX}${name}`;
 }
 
+/** How a Markdown write names an entity chip, as a Markdown read shows one: for every field that takes a body. */
+export function chipSyntax(): string {
+  return `A mention is [@Name](/authors/<slug>), the slug from ${listedName("find_users")}. A citation is Pandoc's, [@key, p. 49] or @key, the key from ${listedName("find_refs")}; any other @ before a word is written \\@.`;
+}
+
 /**
  * The two people a token names, as the instructions and the descriptions of
  * `search` and `create_doc` name them (§5, §21): each by name, and by author

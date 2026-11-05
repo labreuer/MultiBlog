@@ -2,6 +2,9 @@ import type { JSONContent } from "@tiptap/core";
 import type { Actor } from "@/lib/actor";
 import { ApiError } from "@/lib/api/errors";
 import { prismaIncludingDeleted } from "@/lib/prisma";
+import { referencesByKeys } from "@/lib/reference-data";
+import { CITATION, citationKind } from "./kinds/citation";
+import type { MarkdownCitationItem } from "./kinds/citation-markdown";
 import { MENTION, MENTION_HREF_PREFIX } from "./kinds/mention";
 import { mentionableAmong } from "./kinds/mention-rule";
 import { newChipIid } from "./node";
@@ -11,8 +14,8 @@ import { isChip } from "./text";
 // docs/ENTITY_CHIPS.md, MCP items 2 and 6 — what a Markdown parse leaves to
 // do before a chip can be stored. The parse (markdown-import.ts) reads each
 // chip kind's syntax into a placeholder: a chip holding what the Markdown
-// named (a mention's handle) and no instance id. This turns each into a real
-// chip, or refuses.
+// named (a mention's handle, a citation's keys) and no instance id. This
+// turns each into a real chip, or refuses.
 //
 // **One rule everywhere** (docs/MENTIONS.md): who may be named is the chip
 // kind's insertion rule, the one its menu lists by, so a handle typed into
@@ -27,6 +30,16 @@ function placeholderSlug(node: JSONContent): string | null {
   if (!isChip(node) || node.attrs?.kind !== MENTION) return null;
   const data = node.attrs?.data as Record<string, unknown> | undefined;
   return typeof data?.slug === "string" && typeof data.userId !== "string" ? data.slug : null;
+}
+
+/** A citation placeholder's works, as the Markdown named them, or null for any other node. */
+function placeholderCitation(node: JSONContent): { items: MarkdownCitationItem[]; narrative: boolean } | null {
+  if (!isChip(node) || node.attrs?.kind !== CITATION) return null;
+  const data = node.attrs?.data as Record<string, unknown> | undefined;
+  const items = data?.items;
+  if (!Array.isArray(items) || items.length === 0) return null;
+  if (!items.every((item) => typeof item?.key === "string" && item.refId === undefined)) return null;
+  return { items: items as MarkdownCitationItem[], narrative: data?.form === "narrative" };
 }
 
 /** A placeholder as the link its Markdown also is: the words it showed, linked to the author page it named. */
@@ -54,12 +67,22 @@ function walk(node: JSONContent, visit: (node: JSONContent) => JSONContent): JSO
  * itself, or the one a note is on, or null for a note on a PDF.
  *
  * Throws `unknown_chip` for a handle that names no account, or one this actor
- * may not mention here. With `unresolved: "link"` it leaves such a mention as
- * the link its Markdown also is, and throws nothing: a person importing a
- * file exported from another instance shouldn't lose the file to one handle
- * this instance doesn't have.
+ * may not mention here, and for a key that names no reference, or a deleted
+ * one. With `unresolved: "link"` it leaves such a mention as the link its
+ * Markdown also is: a person importing a file exported from another instance
+ * shouldn't lose the file to one handle this instance doesn't have. A
+ * citation has no such fallback, since an unknown key kept as text would
+ * quietly stop being a citation (docs/CITATIONS.md, "Markdown").
  */
 export async function resolveParsedChips(
+  content: JSONContent,
+  actor: Actor,
+  opts: { docId: string | null; held: JSONContent | null; unresolved?: "refuse" | "link" },
+): Promise<JSONContent> {
+  return resolveCitations(await resolveMentions(content, actor, opts), opts.held);
+}
+
+async function resolveMentions(
   content: JSONContent,
   actor: Actor,
   opts: { docId: string | null; held: JSONContent | null; unresolved?: "refuse" | "link" },
@@ -110,5 +133,61 @@ export async function resolveParsedChips(
     if (slug === null) return node;
     if (unresolved.has(slug)) return asLink(node, slug);
     return { ...node, attrs: { kind: MENTION, iid: newChipIid(), data: { userId: idOf.get(slug)! } } };
+  });
+}
+
+const keyList = (keys: readonly string[]) => keys.map((key) => `"${key}"`).join(", ");
+
+/**
+ * Each citation placeholder as a citation of the references its keys name. A
+ * key a reference used to have still names it. A deleted reference may be
+ * cited only where the body already cites it, as a struck-through citation
+ * written back; so may a work the library no longer has, written by its id.
+ */
+async function resolveCitations(content: JSONContent, held: JSONContent | null): Promise<JSONContent> {
+  const keys = new Set<string>();
+  walk(content, (node) => {
+    for (const item of placeholderCitation(node)?.items ?? []) keys.add(item.key);
+    return node;
+  });
+  if (keys.size === 0) return content;
+
+  const heldIds = new Set(held ? (chipTargets(chipsInJSON(held))[CITATION] ?? []) : []);
+  const found = await referencesByKeys([...keys]);
+  const idOf = new Map<string, string>();
+  const missing: string[] = [];
+  const deleted: string[] = [];
+  for (const key of keys) {
+    const reference = found.get(key);
+    if (reference && (!reference.deleted || heldIds.has(reference.id))) idOf.set(key, reference.id);
+    else if (reference) deleted.push(key);
+    else if (heldIds.has(key)) idOf.set(key, key);
+    else missing.push(key);
+  }
+  if (missing.length > 0) {
+    throw new ApiError(
+      "unknown_chip",
+      `No reference has the key ${keyList(missing)}. find_refs lists the library's keys. An @ before a word is a citation: for a mention write [@Name](/authors/<slug>), and for a literal @, \\@.`,
+      { keys: missing },
+    );
+  }
+  if (deleted.length > 0) {
+    throw new ApiError("unknown_chip", `The reference${deleted.length > 1 ? "s" : ""} ${keyList(deleted)} ${deleted.length > 1 ? "were" : "was"} deleted, and can't be cited until restored.`, {
+      keys: deleted,
+    });
+  }
+
+  return walk(content, (node) => {
+    const citation = placeholderCitation(node);
+    if (!citation) return node;
+    const data = citationKind.validate({
+      items: citation.items.map(({ key, ...fields }) => ({ ...fields, refId: idOf.get(key)! })),
+      ...(citation.narrative ? { form: "narrative" } : {}),
+    });
+    // Validation keeps only so many works, and a citation it shortened would lose some unseen.
+    if (!data || data.items.length !== citation.items.length) {
+      throw new ApiError("invalid", `The citation ${String((node.attrs?.data as { label?: unknown }).label ?? "")} names more works than one citation can hold.`);
+    }
+    return { ...node, attrs: { kind: CITATION, iid: newChipIid(), data } };
   });
 }

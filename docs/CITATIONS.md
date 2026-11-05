@@ -9,10 +9,10 @@ contract. The kit says how every chip is stored, rendered, quoted and searched. 
 
 ## Built so far
 
-The reference library (its data, its pages and its machine door) and the citation chip
-itself. Everything below not listed here is still a plan: reading a citation back from
-Markdown, the chip's popover, the bibliography, the search filters, and what a reference's
-page shows of who cites it.
+The reference library (its data, its pages and its machine door), the citation chip
+itself, and its Markdown both ways. Everything below not listed here is still a plan: the
+chip's popover, the bibliography, the search filters, what a reference's page shows of who
+cites it, and of the Markdown, a quote written in it and the transcript importer's escape.
 
 - **The chip kind:** `src/lib/entity-chips/kinds/citation.ts` holds its fields and
   validation, its identity (the works, in any order), when one citation continues another
@@ -36,10 +36,16 @@ page shows of who cites it.
   locator.
 - **The doc's style:** a Citations row in the doc's Settings, written to the ydoc's
   `settings` map as the mention style is.
-- **MCP:** a read shows a citation as its label in text and as Pandoc's syntax in Markdown.
-  The syntax is not read back yet (`readsMarkdown: false`), so an `edit_doc` whose passage
-  holds a citation, and an `edit_note` of a note holding one, are refused as `unknown_kind`
-  rather than drop it; the words beside it can be edited.
+- **MCP:** a read shows a citation as its label in text and as Pandoc's syntax in Markdown,
+  and every Markdown write reads that syntax back (Markdown, below).
+- **Markdown, both ways:** `citation-markdown.ts` reads Pandoc's forms for the chip parse's
+  tokenizer (`markdown-import.ts`), which yields a placeholder holding the keys; `resolveParsedChips`
+  makes each a citation of the references they name, a key a reference used to have included,
+  or refuses `unknown_chip`, in the UI's import as on every MCP write. The writer escapes text
+  that would read as a citation and guards the text beside one. An edit that sends a citation's
+  Markdown with a field changed keeps the chip and takes the field, and one that adds a work
+  continues it. Not built: a quote written in the syntax (below), which still matches only as
+  the label a text read shows, and so `chip_changed` (the kit's MCP, items 3 and 6).
 
 - **Records:** the `reference` table (migration `reference_library`), its `csl` built field by
   field by `parseCslItem` (`src/lib/references/csl.ts`) on every way in and read back through
@@ -174,13 +180,17 @@ call for no refresh.
     anything in code or link text. The braced form is read wherever it stands, which Pandoc doesn't
     do; the writer needs it (below).
   - The parse needs no key lookup. It makes a chip of every `@word`, and the write refuses a key
-    that doesn't exist, as `unknown_chip` (the kit's MCP, item 6).
+    that doesn't exist, as `unknown_chip` (the kit's MCP, item 6). A key a reference used to
+    have still names it. A deleted reference is refused too, unless the body already cites it,
+    so a struck-through citation can be written back; so can a work the library no longer has,
+    which is written with its stored id.
   - The refusal names the word and offers the two ways out: a mention,
     `[@Name](/authors/<slug>)`, or a literal `\@`.
   - Every Markdown write that can hold a chip refuses alike: `create_doc`, `edit_doc`, a note's
     body, and the UI's import and paste box. An import lists each unknown key and creates nothing.
   - Text that already reads `@word` is written as `\@word` on the way out, so a read can be sent
-    back unchanged. The serializer doesn't escape `@` today, so this is new.
+    back unchanged. So is a published post's text, where a mention's label at publish reads
+    `@Ada Lovelace`. Link text is left alone, since it holds no citation.
   - Keeping an unknown `@word` as text with a warning is rejected: a mistyped key would quietly
     stop being a citation.
 - **Text beside a chip can't change it.** The writer guards what would:
@@ -195,12 +205,13 @@ call for no refresh.
   ordinary link rather than being refused as an unknown key. A chip can't carry a link, since
   y-tiptap stores no marks on inline nodes, so a citation there would cost the link. This departs
   from Pandoc, which reads citations inside link text. A mention is claimed before any link.
-- **`scripts/import-claude-chats.ts` escapes `@` in a transcript** before the parse, outside code
+- **`scripts/import-claude-chats.ts`** parses without chips today, so a transcript's `@` is text.
+  The plan, should it read chips: it escapes `@` in a transcript before the parse, outside code
   and autolinks, as it already escapes a tag-like `<`. A transcript names packages rather than
   works, such as `@playwright/test`, and 6 of 354 local docs hold one. `escapeInline`, for quoted
   excerpts, file names and search queries, gains `@` too. Its `--markdown` files parse strictly.
-- **A quote copied from a Markdown read** holds this syntax, not the label, and finds its chip by
-  identity (the kit's MCP, item 3). A quote naming the right work at a different locator matches,
+- **A quote copied from a Markdown read** (planned) holds this syntax, not the label, and finds
+  its chip by identity (the kit's MCP, item 3). A quote naming the right work at a different locator matches,
   and the reply reports the current locator, unless it is an edit's target, which is refused.
 
 ## Step 3: references and citations

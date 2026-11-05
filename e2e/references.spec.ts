@@ -211,11 +211,14 @@ test("[@ cites a work from the library: the chip is labelled, indexed, published
     await expect(page.locator("a.entity-chip").filter({ visible: true })).toHaveText([`(${short} p. 49)`]);
     await expect(page.locator("a.entity-chip").filter({ visible: true })).toHaveAttribute("href", `/references/${key}`);
 
-    // A machine reader gets Pandoc's syntax, by key, and can't replace a passage over it.
+    // A machine reader gets Pandoc's syntax, by key, and can write a passage over it back.
     const read = await agent.call("read", { url: `/doc/${doc.slug}` });
     expect(String(read.result.markdown)).toContain(`[@${key}, p. 49]`);
-    const over = await agent.call("edit_doc", { url: `/doc/${doc.slug}`, edits: [{ old: `representations. (${short} p. 49)`, new: "representations." }] });
-    expect(over.error).toMatchObject({ code: "unknown_kind", kinds: ["citation"] });
+    const over = await agent.call("edit_doc", {
+      url: `/doc/${doc.slug}`,
+      edits: [{ old: `representations. (${short} p. 49)`, new: `representations [@${key}, p. 49].` }],
+    });
+    expect(over.isError, JSON.stringify(over.error)).toBe(false);
     const beside = await agent.call("edit_doc", { url: `/doc/${doc.slug}`, edits: [{ old: "Appearances are", new: "Appearances, he says, are" }] });
     expect(beside.isError, JSON.stringify(beside.error)).toBe(false);
     expect(await getCitationSources(key)).toEqual([`doc:${doc.id}`]);
@@ -256,6 +259,60 @@ test("[@ cites a work from the library: the chip is labelled, indexed, published
     await page.goto("about:blank");
     if (post) await deleteTestPost(post.id);
     await deleteTestDoc(doc.id);
+    await deleteTestReferences(prefix);
+    await agent.dispose();
+  }
+});
+
+// docs/CITATIONS.md, "Markdown" — a citation written by a machine client in
+// Pandoc's syntax, by key: read back as it was sent, changed by sending its
+// Markdown with the change in it, and refused for a key the library lacks.
+test("MCP writes citations in Pandoc's syntax, reads them back as sent, edits their pages, and refuses a key the library lacks", async ({ request }) => {
+  const agent = await createAgent(request);
+  const prefix = `e2ecm${Date.now().toString(36)}`;
+  const short = `S${Date.now() % 100000}`;
+  const radner = `${prefix}-radner2012`;
+  const barfield = `${prefix}-barfield1957`;
+  const created: string[] = [];
+  try {
+    for (const [key, csl, abbreviation] of [
+      [radner, { type: "book", title: `The Origin of Ideas ${prefix}`, author: [{ family: `Radner${prefix}` }], issued: { "date-parts": [[2012]] } }, undefined],
+      [barfield, { type: "book", title: `Saving the Appearances ${prefix}`, author: [{ family: `Barfield${prefix}` }], issued: { "date-parts": [[1957]] } }, short],
+    ] as const) {
+      const made = await agent.call("create_ref", { csl, key, ...(abbreviation ? { short: abbreviation } : {}) });
+      expect(made.isError, JSON.stringify(made.error)).toBe(false);
+    }
+
+    // Narrative and parenthetical, a prefix and pages, and an @ written as text.
+    const markdown = `As @${radner} [p. 49] argues, appearances are collective [see @${barfield}, p. 12]. Write \\@${radner} to name the key.`;
+    const doc = await agent.call("create_doc", { markdown, title: `Citations ${prefix}` });
+    expect(doc.isError, JSON.stringify(doc.error)).toBe(false);
+    created.push(String(doc.result.id));
+    const url = String(doc.result.url);
+    await expect.poll(() => getCitationSources(radner)).toEqual([`doc:${doc.result.id}`]);
+    await expect.poll(() => getCitationSources(barfield)).toEqual([`doc:${doc.result.id}`]);
+    // A read sends back what was written; a text read shows the labels.
+    expect((await agent.call("read", { url })).result.markdown).toBe(markdown);
+    const text = String((await agent.call("read", { url, format: "text" })).result.text ?? "");
+    expect(text).toContain(`As Radner${prefix} (2012, p. 49) argues, appearances are collective (see ${short} p. 12).`);
+
+    // The citation's Markdown sent with a new page and a second work: the same chip, edited.
+    const edit = await agent.call("edit_doc", { url, edits: [{ old: `collective (see ${short} p. 12)`, new: `collective [see @${barfield}, p. 13; @${radner}]` }] });
+    expect(edit.isError, JSON.stringify(edit.error)).toBe(false);
+    expect((await agent.call("read", { url })).result.markdown).toContain(`collective [see @${barfield}, p. 13; @${radner}].`);
+
+    // A note cites the same way, and its body can be replaced over a citation.
+    const note = await agent.call("add_note", { on: url, quote: "appearances are collective", body: `Compare [@${radner}, p. 3].` });
+    expect(note.isError, JSON.stringify(note.error)).toBe(false);
+    const edited = await agent.call("edit_note", { id: String(note.result.id), body: `Compare [@${radner}, p. 4] and @${barfield}.` });
+    expect(edited.isError, JSON.stringify(edited.error)).toBe(false);
+    await expect.poll(() => getCitationSources(barfield)).toContain(`annotation:${note.result.id}`);
+
+    // A key nothing has is refused, naming it, and nothing is created.
+    const unknown = await agent.call("create_doc", { markdown: `Cite @${prefix}-nothing here.`, title: `Unknown ${prefix}` });
+    expect(unknown.error).toMatchObject({ code: "unknown_chip", keys: [`${prefix}-nothing`] });
+  } finally {
+    for (const id of created) await deleteTestDoc(id);
     await deleteTestReferences(prefix);
     await agent.dispose();
   }

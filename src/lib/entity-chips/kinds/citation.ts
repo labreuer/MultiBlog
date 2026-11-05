@@ -1,4 +1,5 @@
 import type { ChipKind, ChipRendering } from "../types";
+import { escapeCitationField, writeKey } from "./citation-markdown";
 
 // docs/CITATIONS.md — a citation stands for one or more works at a page: a
 // chip whose identity is the works, shown as `(BU p. 49)`, `(Radner 2012,
@@ -153,9 +154,8 @@ function pdfHref(work: CitedWork, locator: string | undefined): string | null {
 
 export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext> = {
   name: CITATION,
-  // A citation is written out in Pandoc's syntax (below) and not yet read
-  // back: until it is, an MCP edit works around a citation, never over one.
-  readsMarkdown: false,
+  // Pandoc's syntax, written below and read by citation-markdown.ts.
+  readsMarkdown: true,
 
   validate(data) {
     if (!isRecord(data) || !Array.isArray(data.items)) return null;
@@ -280,17 +280,20 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
   // Pandoc's citation syntax, keyed by the works' keys, so every field
   // round-trips whatever style the doc shows: `[see @radner2012, p. 49;
   // @barfield1957]`, `[-@radner2012]`, and `@radner2012 [p. 49]` for the
-  // narrative form. A work that is gone is written with its stored id.
+  // narrative form. A work that is gone is written with its stored id. A
+  // bare key that its neighbours would change is braced by the writer, which
+  // sees them (markdown-import.ts).
   markdown(data, rendering, context) {
-    const keyOf = (item: CitationItem) => context[item.refId]?.key ?? item.refId;
-    const after = (item: CitationItem) => [item.locator ? pages(item.locator) : "", item.suffix ?? ""].filter(Boolean).join(", ");
+    const keyOf = (item: CitationItem) => writeKey(context[item.refId]?.key ?? item.refId);
+    const after = (item: CitationItem) =>
+      escapeCitationField([item.locator ? pages(item.locator) : "", item.suffix ?? ""].filter(Boolean).join(", "));
     let out: string;
     if (data.form === "narrative") {
       const [item] = data.items;
-      out = `@${keyOf(item)}${after(item) ? ` [${after(item)}]` : ""}`;
+      out = `${keyOf(item)}${after(item) ? ` [${after(item)}]` : ""}`;
     } else {
       out = `[${data.items
-        .map((item) => `${item.prefix ? `${item.prefix} ` : ""}${item.suppressAuthor ? "-" : ""}@${keyOf(item)}${after(item) ? `, ${after(item)}` : ""}`)
+        .map((item) => `${item.prefix ? `${escapeCitationField(item.prefix)} ` : ""}${item.suppressAuthor ? "-" : ""}${keyOf(item)}${after(item) ? `, ${after(item)}` : ""}`)
         .join("; ")}]`;
     }
     return rendering.status === "live" ? out : `~~${out}~~`;
