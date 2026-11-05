@@ -15,7 +15,10 @@
 // Browser-safe and dependency-free: the collab server, the browser bundle and
 // the e2e specs that open their own sockets all import it.
 
-export const SCHEMA_VERSION = 0;
+// Typed as a number, not as its literal: code that compares it (a spec
+// asking what a socket stating no version gets) has to typecheck at every
+// value it will ever hold.
+export const SCHEMA_VERSION: number = 1;
 
 /**
  * Every version's fingerprint, the newest being the current schemas'. The
@@ -25,6 +28,9 @@ export const SCHEMA_VERSION = 0;
  */
 export const SCHEMA_FINGERPRINTS: Record<number, string> = {
   0: "2f89f1d93f24c7ae",
+  // The `entityChip` node in doc and annotation bodies, and the link mark's
+  // `chip` attribute (docs/ENTITY_CHIPS.md, step 1).
+  1: "fb2e36e26fcad001",
 };
 
 /** The socket URL's query parameter carrying the version. */

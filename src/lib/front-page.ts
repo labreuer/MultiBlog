@@ -1,6 +1,6 @@
 import type { JSONContent } from "@tiptap/core";
 import { prisma } from "./prisma";
-import { stripMarksFromDoc } from "./tiptap-schema";
+import { docJsonForPostSide } from "./post-content";
 
 export const FRONT_PAGE_DOC_TITLE = "FRONT PAGE";
 
@@ -32,9 +32,9 @@ export async function getFrontPagePreamble(): Promise<JSONContent | null> {
     return null;
   }
 
-  // Same strip postContentFromYdoc applies before a post snapshot (§15b):
-  // a doc's prose can carry authorHighlight/annotation marks the public
-  // renderer's contentExtensions doesn't know, and rendering them unstripped
-  // would 500 this page.
-  return stripMarksFromDoc(doc.proseJson as JSONContent, ["authorHighlight", "annotation"]);
+  // The same conversion postContentFromYdoc applies before a post snapshot
+  // (§15b): a doc's prose can carry authorHighlight/annotation marks and
+  // entity chips the public renderer's contentExtensions doesn't know, and
+  // rendering them unconverted would 500 this page.
+  return docJsonForPostSide(doc.proseJson as JSONContent);
 }

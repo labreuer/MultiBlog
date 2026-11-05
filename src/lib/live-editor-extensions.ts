@@ -12,6 +12,7 @@ import { VirtualKeyboardEnter } from "./virtual-keyboard-enter-extension";
 import { Indent } from "./indent-extension";
 import { FormatInputEvents } from "./format-input-extension";
 import { AnnotationHighlight, type AnnotationAnchorInput } from "./annotation-highlight-extension";
+import { EntityChip } from "./entity-chips/node";
 import { EDITOR_LINK_OPTIONS, StarterKit, tableExtensions, titleExtensions } from "./tiptap-schema";
 
 // The whole extension list of each editor that binds a ydoc, here rather than
@@ -76,6 +77,9 @@ export function docEditorExtensions(options: {
     // correctly here too (PLAN.md §12i) — posts never get one applied,
     // and an unused mark type in the schema costs nothing.
     Annotation,
+    // The one node every entity chip is stored as (docs/ENTITY_CHIPS.md),
+    // with the node view and decorations that draw its computed label.
+    EntityChip,
     // View-only decoration (PLAN.md §13f) — never touches the ydoc, so
     // registering it unconditionally doesn't drift this schema from the
     // reading view's. Harmless on embedders with no selection widget.
@@ -104,6 +108,8 @@ export function annotationEditorExtensions(options: {
     Collaboration.configure({ document: options.ydoc }),
     CollaborationCaret.configure({ provider: options.provider, user: options.user }),
     AuthorHighlight.configure({ getAuthorId: options.getAuthorId }),
+    // Entity chips, as in the doc editor.
+    EntityChip,
     // Selection stays painted while the link popover holds focus —
     // docEditorExtensions' comment on the same line.
     BlurredSelection,

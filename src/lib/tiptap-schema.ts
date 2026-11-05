@@ -29,6 +29,7 @@ import {
 import { typedOrderedListInputRule } from "./ordered-list-input-rule";
 import { atLine, startingAtLine } from "./list-from-line";
 import { Annotation } from "./annotation-extension";
+import { EntityChip } from "./entity-chips/node";
 
 // docs/TIPTAP.md "Inline code takes other marks" — TipTap's code mark
 // excludes every other mark (`excludes: "_"`). This one excludes only itself,
@@ -94,7 +95,25 @@ export const ListItem = BaseListItem.extend({
 // dropped by `[[`, or a word added after any link the caret lands behind.
 // This one never is, ProseMirror's own choice for links. Typing inside a
 // link still extends it; only its two edges stop.
-export const Link = BaseLink.extend({ inclusive: false });
+//
+// `chip` is what a published post's link keeps of the entity chip it stands
+// for (docs/ENTITY_CHIPS.md, step 1, item 9): a post holds a chip's label as
+// linked text, and this says which chip kind and which targets it was. Set
+// at publish and nowhere else, so it is never parsed from HTML: a pasted link
+// can't claim to be a mention.
+export const Link = BaseLink.extend({
+  inclusive: false,
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      chip: {
+        default: null,
+        parseHTML: () => null,
+        renderHTML: (attributes) => (attributes.chip ? { "data-chip-ref": JSON.stringify(attributes.chip) } : {}),
+      },
+    };
+  },
+});
 
 // StarterKit with the Code above in place of its own, moved to the end of its
 // list, and the Link above in place of its own, where it was. A mark's
@@ -239,7 +258,11 @@ export const authorHighlightExtensions = [...contentExtensions, AuthorHighlight]
 // authorHighlight already demonstrates for the reverse case. Used for
 // anything decoding/encoding a *doc's* ydoc: server/doc-cache.ts,
 // src/lib/ydoc-render.ts, and the doc-side live editor/reading view.
-export const docContentExtensions = [...authorHighlightExtensions, Annotation];
+//
+// EntityChip (docs/ENTITY_CHIPS.md) is doc-side only. A post never holds the
+// node: publishing replaces each chip with its label as linked text, so
+// contentExtensions has no chip and the post-side renderers never meet one.
+export const docContentExtensions = [...authorHighlightExtensions, Annotation, EntityChip];
 
 // The plain prosemirror-model Schema counterpart of docContentExtensions —
 // for server-side code that builds/walks a doc-shaped Node outside a live
@@ -261,7 +284,9 @@ export const pmDocContentSchema = getSchema(docContentExtensions);
 // no headings. annotationEditorExtensions (live-editor-extensions.ts) mirrors
 // this one, so the live annotation editor and every decoder of its ydoc agree
 // on the shape.
-export const annotationContentExtensions = [StarterKit, AuthorHighlight];
+// EntityChip is here as in a doc: a note is where a person is most often
+// mentioned.
+export const annotationContentExtensions = [StarterKit, AuthorHighlight, EntityChip];
 export const pmAnnotationContentSchema = getSchema(annotationContentExtensions);
 
 // The schema for a post's *title*, which lives in its own Yjs fragment

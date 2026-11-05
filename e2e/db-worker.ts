@@ -299,7 +299,7 @@ export async function createTestPost(opts: {
       throughUpdateId,
       userId: author.id,
     });
-    const { proseJson, title: docTitle } = postContentFromYdoc(materialized);
+    const { proseJson, title: docTitle } = await postContentFromYdoc(materialized);
     materialized.destroy();
     const publishedTitle = title || docTitle || "Untitled";
     const scheduledFor = scheduledForIso ? new Date(scheduledForIso) : null;
