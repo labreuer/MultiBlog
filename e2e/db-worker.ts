@@ -1865,12 +1865,13 @@ export type ThreadState = {
   anchorFrom: number;
   anchorTo: number;
   anchoredEventId: string;
+  quotedText: string;
 };
 
 export async function getThread(threadId: string): Promise<ThreadState | null> {
   return prisma.commentThread.findUnique({
     where: { id: threadId },
-    select: { status: true, anchorFrom: true, anchorTo: true, anchoredEventId: true },
+    select: { status: true, anchorFrom: true, anchorTo: true, anchoredEventId: true, quotedText: true },
   });
 }
 

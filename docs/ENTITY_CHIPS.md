@@ -84,7 +84,11 @@ still a plan.
   `chip-labels`. No re-index was needed, since no doc could hold a chip before this.
 - **Item 9, posts and the landing preamble:** `docJsonForPostSide` (`post-content.ts`) replaces
   each chip with its label as linked text, struck through when its target is gone, and records
-  the chip on the link's `chip` attribute. Not the republish remap.
+  the chip on the link's `chip` attribute. On a republish, `remapThreadsToEvent` compares a
+  quote that holds a label whole by who its chips stand for (`post-chip-runs.ts`), follows a
+  chip at the quote's edge by instance id, and rewrites the thread's `quotedText` to the new
+  label, so a rename between publishes detaches no comment thread. A quote that cuts through
+  a label is compared as text.
 - **Item 10, the refresh, for mentions:** `refreshMentionLabels` (`refresh.ts`) finds the docs
   and notes that mention a person through the `mention` table and rewrites a doc's
   `prose_json` labels, a note's `bodyText`, and the chip records of the anchors into either
