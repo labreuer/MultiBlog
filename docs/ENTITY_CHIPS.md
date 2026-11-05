@@ -115,8 +115,11 @@ not listed here is still a plan.
     annotation search vector (`anchor_quote_text`), show a name without a chip context per
     row. It is kept as `prose_json`'s labels are: the rename refresh rewrites it, and so does
     every store of the doc the anchor points into (`refreshAnchorRecords`), from that doc's
-    own labels by instance id. A record whose chip that doc no longer holds is relabelled
-    only by the refresh (item 10), when its target changes.
+    own labels by instance id. An anchor into a note's body (a reply's quote, a tag or link
+    on the note) is relabelled when that body is settled (`writeSettledBody` calls
+    `refreshAnchorsIntoNote`), since a note's readers see only settled text. A record whose
+    chip that body no longer holds is relabelled only by the refresh (item 10), when its
+    target changes.
 
     So a record has two clocks. Its fields are the chip's as of the anchor's version and are
     never rewritten, which is what `chips-at-stamp` checks and what the continues rule below

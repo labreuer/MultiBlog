@@ -167,9 +167,10 @@ async function refreshAnchorsInto(target: { kind: "doc" | "annotation"; id: stri
  * A record whose chip the body no longer holds keeps the label it had.
  *
  * The doc store calls this too (server/doc-cache.ts), with the labels it has
- * just written to `prose_json`: an edit can change a label it never touched,
+ * just written to `prose_json`, and so does a note's settle
+ * (`refreshAnchorsIntoNote`): an edit can change a label it never touched,
  * by adding a second person of the same name, and the records follow the
- * column.
+ * body.
  */
 export async function refreshAnchorRecords(target: { kind: "doc" | "annotation"; id: string }, labels: ChipLabels): Promise<number> {
   if (labels.size === 0) return 0;
@@ -197,6 +198,19 @@ export async function refreshAnchorRecords(target: { kind: "doc" | "annotation";
     }
   }
   return written;
+}
+
+/**
+ * The chip records of every anchor into a note's body, relabelled as that
+ * body was just settled: its replies' quotes, and any tag, link or comment
+ * quote on it. A note's body is settled, never stored, as the version its
+ * readers see (src/lib/annotation-settle.ts), so this is the note's
+ * counterpart of the doc store's call. A body with no chip costs nothing.
+ */
+export async function refreshAnchorsIntoNote(annotationId: string, body: JSONContent): Promise<number> {
+  if (chipsInJSON(body).length === 0) return 0;
+  // A note's body has no style of its own.
+  return refreshAnchorRecords({ kind: "annotation", id: annotationId }, chipLabels(body, await chipInputsForBody(body)));
 }
 
 /** One anchor row's chip records as stored: `anchor_chips` itself on a note, the whole `selector` elsewhere. */

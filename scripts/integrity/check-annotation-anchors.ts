@@ -228,7 +228,9 @@ async function checkRecordLabels(subject: string, stored: readonly ChipRecord[],
     subject,
     "record-labels",
     stale.map((record) => `${record.iid} reads ${JSON.stringify(record.label ?? null)} but its chip is ${JSON.stringify(labels.get(record.iid))}`).join("; ") +
-      " — a rename or a restyle hasn't reached this anchor, so its quote shows the old label where no doc is open, until the doc's next store",
+      ` — a rename or a restyle hasn't reached this anchor, so its quote shows the old label where no doc is open, until ${
+        body.kind === "doc" ? "the doc's next store" : "the note is next edited"
+      }`,
   );
 }
 

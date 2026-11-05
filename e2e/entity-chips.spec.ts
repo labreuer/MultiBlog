@@ -8,6 +8,7 @@ import {
   annotationSearchHolds,
   createTestDoc,
   createTestPost,
+  createTestUser,
   deleteTestDoc,
   deleteTestPost,
   getAnnotationStates,
@@ -17,10 +18,13 @@ import {
   getMentionSources,
   getPostContentText,
   getUserIdByEmail,
+  deleteTestUser,
   restoreTestUser,
   setAnchorChipLabels,
   softDeleteTestUser,
 } from "./db";
+import { createAgent } from "./mcp";
+import { uniqueEmail } from "./naming";
 
 // Entity chips (docs/ENTITY_CHIPS.md): an inline node that holds only which
 // person it stands for, its label computed wherever it is shown. Nothing in
@@ -545,6 +549,49 @@ test("a card's quote is labelled by the body beside it, and a record left behind
   } finally {
     await page.goto("about:blank");
     await deleteTestDoc(doc.id);
+  }
+});
+
+test("a reply quoting a mention is relabelled when its parent note is edited to name a second person of that name", async ({
+  request,
+}) => {
+  const name = `Alex Kim ${Math.random().toString(36).slice(2, 6)}`;
+  const first = await createTestUser({ email: uniqueEmail("same-name"), name, role: "AUTHOR" });
+  const second = await createTestUser({ email: uniqueEmail("same-name"), name, role: "AUTHOR" });
+  const agent = await createAgent(request);
+  const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "The engine was reviewed last week." });
+  const check = async () => {
+    const { stdout } = await promisify(execFile)("npx", ["tsx", "scripts/integrity/check-annotation-anchors.ts", `--doc=${doc.id}`]);
+    return stdout;
+  };
+  try {
+    const note = await agent.call("add_note", { on: `/doc/${doc.slug}`, body: `[@${name}](/authors/${first.slug}) reviewed it.` });
+    expect(note.isError, JSON.stringify(note.error)).toBe(false);
+    const noteId = String(note.result.id);
+    const reply = await agent.call("add_note", { on: noteId, body: "Which one?", quote: `@${name} reviewed` });
+    expect(reply.isError, JSON.stringify(reply.error)).toBe(false);
+    const label = async () =>
+      ((await getAnnotationStates(doc.id)).find((a) => a.id === reply.result.id)?.anchorChips as { label: string }[] | null)?.[0]?.label;
+    expect(await label()).toBe(`@${name}`);
+
+    // The note now names two people of one name, so each is told apart, the one the reply quoted too.
+    const edited = await agent.call("edit_note", {
+      id: noteId,
+      body: `[@${name}](/authors/${first.slug}) reviewed it, and so did [@${name}](/authors/${second.slug}).`,
+    });
+    expect(edited.isError, JSON.stringify(edited.error)).toBe(false);
+    // Settled by the time the edit answers: nothing waits on a refresh.
+    expect(await label()).toBe(`@${name} (${first.slug})`);
+    // By id: the note and its reply share a card when made within one second.
+    const thread = await agent.call("read", { url: noteId });
+    expect(thread.isError, JSON.stringify(thread.error)).toBe(false);
+    expect((thread.result.replies as { quote: string }[])[0].quote).toBe(`@${name} (${first.slug}) reviewed`);
+    expect(await check()).toContain("0 error(s), 0 warning(s)");
+  } finally {
+    await deleteTestDoc(doc.id);
+    await agent.dispose();
+    await deleteTestUser(first.email);
+    await deleteTestUser(second.email);
   }
 });
 

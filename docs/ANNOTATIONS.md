@@ -228,9 +228,10 @@ U+FFFC is in the quote, its chip kind, instance id and fields, and its label as 
 - **A stored quote is shown through `quoteWithChipLabels`** (a card's quote line,
   `/annotations`, search hits, MCP), and a marked passage through `markAnchoredQuote`, which
   adds its edge chips' labels. Neither opens a ydoc. The record's label is rewritten when its
-  person is renamed and when the doc is stored (the kit's item 10). The cards beside a doc
-  pass the labels the page's own editor is drawing (`useLiveChipLabels`), so a card's quote
-  never names someone differently from the passage next to it.
+  person is renamed, when the doc is stored, and, for a reply, when its parent's body is
+  settled (the kit's items 10 and 11). The cards beside a doc pass the labels the page's own
+  editor is drawing (`useLiveChipLabels`), so a card's quote never names someone differently
+  from the passage next to it.
 
 **Degradation differs on purpose.** A lost mark leaves nothing behind, so the annotation
 becomes a document-level remark in the general discussion, derived per render from the marks
