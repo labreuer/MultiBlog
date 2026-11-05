@@ -4,6 +4,7 @@ import type { Schema } from "@tiptap/pm/model";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import { chipInputsForBody } from "../entity-chips/context";
 import { chipsInJSON } from "../entity-chips/renderings";
+import { chipStylesOf } from "../entity-chips/settings";
 import { chipLabels } from "../entity-chips/text";
 import { parsePdfTarget, type PdfTarget } from "../pdf-anchor";
 import { storedPageText } from "../pdf-page-text";
@@ -92,7 +93,7 @@ export async function captureAnchorInYdoc(opts: {
     const json = TiptapTransformer.extensions(extensions).fromYdoc(doc, "default");
     // Each chip's label as of now, for the records the selector keeps
     // (chips.ts). A body with no chip asks the database nothing.
-    const labels = chipsInJSON(json).length > 0 ? chipLabels(json, await chipInputsForBody(json)) : undefined;
+    const labels = chipsInJSON(json).length > 0 ? chipLabels(json, await chipInputsForBody(json, chipStylesOf(doc))) : undefined;
     return captureAnchorInNode(schema.nodeFromJSON(json), from, to, quotedText, labels);
   } catch (err) {
     // Best-effort, same stance applyAnnotationMark takes on an unreachable

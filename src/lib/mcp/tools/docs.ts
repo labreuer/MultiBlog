@@ -83,6 +83,19 @@ export const editDocTool = defineTool({
     version: versionString.optional().describe("The version you read the passages at; needed for any named by start and end."),
     edits: z.array(editItem).min(1).max(50).optional(),
     title: z.string().max(500).optional(),
+    settings: z
+      .strictObject({
+        mentions: z
+          .strictObject({
+            form: z.enum(["name", "initials", "handle"]),
+            at: z.boolean().nullable().optional().describe("Whether a label starts with @; by default yes, except for initials."),
+          })
+          .nullable()
+          .optional()
+          .describe("How this doc shows its mentions; null for the default, @Full Name."),
+      })
+      .optional()
+      .describe("The doc's own settings. A read's `styles` says what is set."),
     revert: versionString.optional().describe(`An edit's version, as ${listedName("edit_doc")} answered it: undo that edit.`),
     hunks: z.array(z.number().int().min(1)).max(500).optional().describe("With revert: just these hunks, numbered as dryRun lists them."),
     dryRun: z.boolean().optional().describe("With revert: list the hunks, change nothing."),
@@ -94,7 +107,7 @@ export const editDocTool = defineTool({
   searchHint: "edit revise rewrite replace append insert title doc revert",
   async run(args, ctx) {
     if (args.revert !== undefined) {
-      if (args.edits !== undefined || args.title !== undefined) throw invalid("revert undoes one edit; send it on its own.");
+      if (args.edits !== undefined || args.title !== undefined || args.settings !== undefined) throw invalid("revert undoes one edit; send it on its own.");
       if (args.dryRun) return revertEditFor(ctx, { url: args.url, revert: args.revert, dryRun: true });
       const { idempotencyKey: key, ...rest } = args;
       return onceWithin(ctx.token.id, "edit_doc", rest, key, () =>
@@ -104,7 +117,7 @@ export const editDocTool = defineTool({
     if (args.hunks !== undefined || args.dryRun !== undefined) throw invalid("hunks and dryRun go with revert.");
     const { idempotencyKey: key, ...rest } = args;
     return onceWithin(ctx.token.id, "edit_doc", rest, key, () =>
-      editDocFor(ctx, { url: args.url, version: args.version, edits: args.edits, title: args.title }),
+      editDocFor(ctx, { url: args.url, version: args.version, edits: args.edits, title: args.title, settings: args.settings }),
     );
   },
 });

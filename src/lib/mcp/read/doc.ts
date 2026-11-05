@@ -1,3 +1,5 @@
+import { MENTION, mentionKind } from "@/lib/entity-chips/kinds/mention";
+import { sameChipStyles } from "@/lib/entity-chips/settings";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { prisma } from "@/lib/prisma";
 import { docTitleOrFallback } from "@/lib/doc-title";
@@ -107,7 +109,20 @@ async function docMeta(doc: ResolvedDoc, state: DocState): Promise<ToolResult> {
     blocks: state.blocks.length,
     chars: row?.proseJsonLength ?? 0,
     ...(chips.length > 0 ? { tags: chips.map((chip) => ({ name: chip.name, slug: chip.slug })) } : {}),
+    ...stylesOf(state),
   };
+}
+
+/**
+ * The doc's own chip styles (docs/ENTITY_CHIPS.md, "Styling"), in the shape
+ * edit_doc's `settings` takes them. Absent for a doc that has set none, so a
+ * read says nothing about a default.
+ */
+function stylesOf(state: Pick<DocState, "chips">): { styles?: { mentions: { form: string; at?: boolean } } } {
+  const raw = state.chips.inputs.styles[MENTION];
+  if (raw === undefined) return {};
+  const style = mentionKind.parseStyle(raw);
+  return { styles: { mentions: { form: style.form, ...(style.at === null ? {} : { at: style.at }) } } };
 }
 
 function outlineOf(blocks: readonly DocBlock[], opts: { depth?: number; within?: BlockSpan }) {
@@ -384,6 +399,8 @@ async function changesSince(doc: ResolvedDoc, state: DocState, since: bigint): P
     url: `/doc/${doc.slug}`,
     since: since.toString(),
     version: versionOf(state),
+    // A change of style edits no block, though each block with a chip reads differently for it, so it is said on its own.
+    ...(sameChipStyles(before.chips.inputs.styles, state.chips.inputs.styles) ? {} : { settings: { was: stylesOf(before).styles ?? null, now: stylesOf(state).styles ?? null } }),
     changes,
     ...(more > 0 ? { more, note: `${more} more changed blocks than fit; read the blocks themselves.` } : {}),
   };

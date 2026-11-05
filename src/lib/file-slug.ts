@@ -142,11 +142,14 @@ export async function claimFileSlug(tx: TransactionClient, title: string): Promi
  * is the one another live file is currently answering on.
  */
 export async function freeFileSlugFor(
-  tx: TransactionClient | Prisma.TransactionClient,
+  // The base client's transaction, which is what restoreFile opens. Not the
+  // union with the extended one that `asBaseTx` takes: a call through that
+  // union is the comparison the header describes, and `next build` refused
+  // it again once the client grew two more columns.
+  client: Prisma.TransactionClient,
   fileId: string,
   currentSlug: string,
 ): Promise<string> {
-  const client = asBaseTx(tx);
   await lockFileSlug(client, currentSlug);
   if (!(await fileSlugInUse(currentSlug, client, fileId))) {
     return currentSlug;

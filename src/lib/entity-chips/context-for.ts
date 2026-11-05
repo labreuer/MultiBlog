@@ -7,7 +7,8 @@ import { loadChipContext } from "./context";
 import { MENTION } from "./kinds/mention";
 import { mentionableAmong } from "./kinds/mention-rule";
 import { chipsInJSON, chipTargets } from "./renderings";
-import { DEFAULT_CHIP_STYLES, type ChipInputs, type ChipOccurrence } from "./types";
+import { parseChipStyles } from "./settings";
+import { DEFAULT_CHIP_STYLES, type ChipInputs, type ChipOccurrence, type ChipStyles } from "./types";
 
 // docs/ENTITY_CHIPS.md, step 1, item 5 — the chip context for one object, as
 // one viewer may have it. Behind `GET /api/chip-context`, and behind a page's
@@ -19,6 +20,8 @@ export type ChipTarget = { doc: string } | { annotation: string };
 /** A chip target `actor` may read: its stored body, and what it is on. */
 export type ResolvedChipTarget = {
   body: JSONContent | null;
+  /** The styles the body's chips are shown in: a doc's own; none for a note, whose body has no style of its own. */
+  styles: ChipStyles;
   /** The doc itself, or the doc an annotation is on. Null for a note on a PDF. */
   doc: { id: string; visibility: "PRIVATE" | "SHARED" } | null;
   /** The file a note on a PDF is on. Null for a doc and for a note on one. */
@@ -34,10 +37,15 @@ export async function resolveChipTarget(actor: Actor, target: ChipTarget): Promi
   if ("doc" in target) {
     const doc = await prisma.doc.findUnique({
       where: { id: target.doc },
-      select: { id: true, visibility: true, proseJson: true },
+      select: { id: true, visibility: true, proseJson: true, chipStyles: true },
     });
     if (!doc || !(await canUserReadDoc(actor.userId, actor.role, doc))) return null;
-    return { body: doc.proseJson as JSONContent | null, doc: { id: doc.id, visibility: doc.visibility }, file: null };
+    return {
+      body: doc.proseJson as JSONContent | null,
+      styles: parseChipStyles(doc.chipStyles),
+      doc: { id: doc.id, visibility: doc.visibility },
+      file: null,
+    };
   }
   const annotation = await prisma.annotation.findUnique({
     where: { id: target.annotation },
@@ -50,7 +58,7 @@ export async function resolveChipTarget(actor: Actor, target: ChipTarget): Promi
     },
   });
   if (!annotation || !(await canUserAccessAnnotationYdoc(actor.userId, actor.role, annotation))) return null;
-  return { body: annotation.proseJson as JSONContent | null, doc: annotation.doc, file: annotation.file };
+  return { body: annotation.proseJson as JSONContent | null, styles: DEFAULT_CHIP_STYLES, doc: annotation.doc, file: annotation.file };
 }
 
 /**
@@ -87,5 +95,5 @@ export async function chipInputsFor(
     // One synthetic chip per target is all a loader reads: the kind and the id.
     if (kind === MENTION) for (const id of ids) occurrences.push({ kind, iid: "", pos: 0, data: { userId: id } });
   }
-  return { styles: DEFAULT_CHIP_STYLES, context: await loadChipContext(occurrences) };
+  return { styles: resolved.styles, context: await loadChipContext(occurrences) };
 }

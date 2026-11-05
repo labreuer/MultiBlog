@@ -22,6 +22,8 @@ import { verifyYdocToken, type YdocTokenPayload } from "../src/lib/ydoc-token";
 import { docContentExtensions, pmDocContentSchema, annotationContentExtensions, pmAnnotationContentSchema } from "../src/lib/tiptap-schema";
 import { edgeChipRecords, relabelChipRecords, resolveAnchorInDoc, type ChipRecord } from "../src/lib/anchors";
 import { chipInputsForBody } from "../src/lib/entity-chips/context";
+import { chipStylesOf } from "../src/lib/entity-chips/settings";
+import type { ChipStyles } from "../src/lib/entity-chips/types";
 import { chipLabels } from "../src/lib/entity-chips/text";
 import { annotationIdFromYdocId, docIdFromYdocId } from "../src/lib/ydoc-names";
 import {
@@ -683,6 +685,7 @@ export async function handleApplyAnnotationMark(
   // the mark below can't sit on, and the body they were read from.
   let edgeChips: ChipRecord[] = [];
   let marked: JSONContent | null = null;
+  let styles: ChipStyles = {};
   try {
     await connection.transact((document) => {
       const fragment = document.getXmlFragment("default");
@@ -708,6 +711,7 @@ export async function handleApplyAnnotationMark(
       applied = true;
       edgeChips = edgeChipRecords(node, range.from, range.to);
       marked = json as JSONContent;
+      styles = chipStylesOf(document);
     });
   } finally {
     await connection.disconnect();
@@ -733,7 +737,7 @@ export async function handleApplyAnnotationMark(
   // quote's records carry theirs. A failure costs the labels, not the anchor.
   if (edgeChips.length > 0 && marked) {
     try {
-      edgeChips = relabelChipRecords(edgeChips, chipLabels(marked, await chipInputsForBody(marked)));
+      edgeChips = relabelChipRecords(edgeChips, chipLabels(marked, await chipInputsForBody(marked, styles)));
     } catch (err) {
       console.error(`[annotation-mark] couldn't label the edge chips of ${annotationId} in ${documentName}:`, err);
     }

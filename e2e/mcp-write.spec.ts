@@ -517,3 +517,65 @@ test("an anchor on a passage with a mention shows its label, and is lost when th
     await agent.dispose();
   }
 });
+
+// docs/ENTITY_CHIPS.md, "Styling" — a doc's style, from the machine side:
+// edit_doc sets it, a read says what is set and shows every mention in it,
+// and what changed since a version names it.
+test("edit_doc sets how a doc shows its mentions, and reads report and follow it", async ({ request }) => {
+  const agent = await createAgent(request);
+  const adaEmail = uniqueEmail("mcp-style-ada");
+  const ada = await createTestUser({ email: adaEmail, name: `Ada ${adaEmail.split("@")[0]}`, role: "AUTHOR" });
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "Reviewed by " },
+            { type: "entityChip", attrs: { kind: "mention", iid: "m1", data: { userId: ada.id } } },
+            { type: "text", text: "." },
+          ],
+        },
+      ],
+    },
+  });
+  await addTestDocAuthor(doc.id, agent.user.email);
+  const url = `/doc/${doc.slug}`;
+  try {
+    const before = await agent.call("read", { url, format: "text" });
+    expect(before.result.styles).toBeUndefined();
+    expect(String(before.result.text)).toContain(`Reviewed by @${ada.name}.`);
+
+    const styled = await agent.call("edit_doc", { url, settings: { mentions: { form: "handle" } } });
+    expect(styled.isError, JSON.stringify(styled.error)).toBe(false);
+    expect(styled.result).toMatchObject({ settings: "changed" });
+
+    const after = await agent.call("read", { url, format: "text" });
+    expect(after.result.styles).toEqual({ mentions: { form: "handle" } });
+    expect(String(after.result.text)).toContain(`Reviewed by @${ada.slug}.`);
+    // A quote of what is read now finds the mention, as one of the old label no longer does.
+    const around = await agent.call("read", { url, around: `Reviewed by @${ada.slug}`, format: "text" });
+    expect(around.result.total).toBe(1);
+    // What search and every static render read follows.
+    await expect.poll(() => getDocSearchText(doc.id), { timeout: 15_000 }).toBe(`Reviewed by @${ada.slug}.`);
+
+    // The style is a change of its own in the history, beside the block that reads differently for it.
+    const since = await agent.call("read", { url, since: String(before.result.version) });
+    expect(since.result).toMatchObject({ settings: { was: null, now: { mentions: { form: "handle" } } }, changes: [{ block: 1 }] });
+
+    // Setting what is already set changes nothing, and null puts the default back.
+    // (Spelled another way: the very same call again is answered as a repeat, before it is looked at.)
+    const again = await agent.call("edit_doc", { url, settings: { mentions: { form: "handle", at: null } } });
+    expect(again.result).toMatchObject({ unchanged: true });
+    const cleared = await agent.call("edit_doc", { url, settings: { mentions: null } });
+    expect(cleared.result).toMatchObject({ settings: "changed" });
+    expect((await agent.call("read", { url })).result.styles).toBeUndefined();
+  } finally {
+    await deleteTestDoc(doc.id);
+    await deleteTestUser(adaEmail);
+    await agent.dispose();
+  }
+});

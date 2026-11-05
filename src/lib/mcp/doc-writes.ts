@@ -1,3 +1,4 @@
+import { MENTION } from "@/lib/entity-chips/kinds/mention";
 import { parseChipRecords } from "@/lib/anchors";
 import type { JSONContent } from "@tiptap/core";
 import { prisma } from "@/lib/prisma";
@@ -210,9 +211,12 @@ async function anchorsOn(ctx: McpContext, docId: string) {
  * the passage is found in the doc rebuilt there and its text sent along, for
  * the endpoint to compare with the text now.
  */
+/** edit_doc's `settings`: how the doc shows its mentions, or null for the default again. */
+export type DocSettingsInput = { mentions?: { form: "name" | "initials" | "handle"; at?: boolean | null } | null };
+
 export async function editDocFor(
   ctx: McpContext,
-  input: { url: string; version?: string; edits?: EditInput[]; title?: string },
+  input: { url: string; version?: string; edits?: EditInput[]; title?: string; settings?: DocSettingsInput },
 ): Promise<ToolResult> {
   const doc = await editableDoc(ctx, input.url);
   // The doc as it stands: whose chips an edit may write back, and what its
@@ -245,7 +249,12 @@ export async function editDocFor(
       throw invalid(`${label}an edit is {old, new}, {append} or {insert, after}.`);
     }
   }
-  if (edits.length === 0 && input.title === undefined) throw invalid("Give edits, a title, or both.");
+  // The doc's own settings ("Styling"): how its mentions are shown. Null puts the default back.
+  const chipStyles: Record<string, unknown> | undefined =
+    input.settings?.mentions === undefined
+      ? undefined
+      : { [MENTION]: input.settings.mentions === null ? null : { form: input.settings.mentions.form, at: input.settings.mentions.at ?? null } };
+  if (edits.length === 0 && input.title === undefined && !chipStyles) throw invalid("Give edits, a title, settings, or several of them.");
 
   // The middle of a passage named by its ends, checked against the version read.
   const named = edits.filter((e): e is Extract<EditSpec, { kind: "replace" }> => e.kind === "replace" && !e.target.quote);
@@ -288,6 +297,7 @@ export async function editDocFor(
     markChips: anchors.markChips,
     linkParts: anchors.linkParts,
     chipInputs: current.chips.inputs,
+    ...(chipStyles ? { chipStyles } : {}),
   });
   if (!answer.ok) {
     if ("refusal" in answer) throw refusalError(answer.refusal, edits.length);
@@ -303,6 +313,7 @@ export async function editDocFor(
     // Removing a mention on purpose is allowed, and never silent.
     ...(answer.chips && answer.chips.removed.length > 0 ? { mentionsRemoved: answer.chips.removed } : {}),
     ...(answer.chips && answer.chips.added > 0 ? { mentionsAdded: answer.chips.added } : {}),
+    ...(answer.restyled ? { settings: "changed" } : {}),
     ...(touchedAnnotations.length > 0 || touchedLinks.length > 0
       ? {
           touched: {

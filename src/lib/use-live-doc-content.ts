@@ -271,10 +271,6 @@ export function useLiveDocContent({
     editorRef.current = editor;
   }, [editor, editorRef]);
 
-  // Entity chips' labels (docs/ENTITY_CHIPS.md): the page names the doc and
-  // hands over the context its static body was rendered with.
-  useChipInputs(editor, useChipSurface());
-
 
   // Only constructed when nothing was hoisted in — see the options comment.
   //
@@ -292,6 +288,11 @@ export function useLiveDocContent({
   // hoisted callers never create a doc here.
   const [ownYdoc] = useState(() => (hoistedYdoc ? null : new Y.Doc()));
   const ydoc = hoistedYdoc ?? ownYdoc!;
+
+  // Entity chips' labels (docs/ENTITY_CHIPS.md): the page names the doc and
+  // hands over the context its static body was rendered with, and the doc's
+  // own styles are followed from this ydoc.
+  useChipInputs(editor, useChipSurface(), ydoc);
 
   // PLAN.md §13q. Assigned once against `ydoc` rather than recreated per
   // render: the Y.Doc identity is stable for this surface's lifetime, and the

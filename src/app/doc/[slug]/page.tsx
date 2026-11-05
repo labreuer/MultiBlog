@@ -10,6 +10,7 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { readYdocContent } from "@/lib/ydoc-render";
 import { chipInputsForBody } from "@/lib/entity-chips/context";
+import { parseChipStyles } from "@/lib/entity-chips/settings";
 import { renderWithChips } from "@/lib/entity-chips/static";
 import { ChipSurfaceProvider } from "@/lib/entity-chips/chip-surface";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
@@ -47,6 +48,7 @@ const DOC_SELECT = {
   title: true,
   visibility: true,
   proseJson: true,
+  chipStyles: true,
   deletedByUserId: true,
   updatedAt: true,
   authors: {
@@ -212,7 +214,7 @@ export default async function PublicDocPage({
   // Entity chips (docs/ENTITY_CHIPS.md): the context the static body's labels
   // are computed from, loaded once and handed to the live editor too, so the
   // swap from one to the other changes no label.
-  const chipInputs = await chipInputsForBody(bodyJSON);
+  const chipInputs = await chipInputsForBody(bodyJSON, parseChipStyles(doc.chipStyles));
   const staticBody = bodyError ? (
     <p style={{ color: "var(--error)" }}>{bodyError}</p>
   ) : (

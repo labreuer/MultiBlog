@@ -723,9 +723,12 @@ test.describe("annotations", () => {
     // of the margin rail the moment you clicked it. Asserted by replaying to
     // the stamp and looking, which is what makes this about the property
     // rather than about which id happens to be current.
+    //
+    // Polled: the mark is in the doc, and so in what the poll above reads,
+    // before the post that asked for it has written the stamp that names it.
     const [marked] = await getAnnotationStates(sharedDoc.id);
     expect(marked.ydocUpdateId).not.toBeNull();
-    expect(await markPresentAtStamp(sharedDoc.id, marked.id)).toBe(true);
+    await expect.poll(() => markPresentAtStamp(sharedDoc.id, marked.id), { timeout: 15_000 }).toBe(true);
   });
 });
 

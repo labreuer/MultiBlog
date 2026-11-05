@@ -1,3 +1,6 @@
+import { MENTION, mentionKind } from "@/lib/entity-chips/kinds/mention";
+import { mentionOptionFor } from "@/lib/entity-chips/kinds/mention-options";
+import { parseChipStyles } from "@/lib/entity-chips/settings";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
@@ -150,6 +153,11 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
       postStatus={status}
       publishedAt={post.publishedAt}
       moderationPolicy={post.moderationPolicy}
+      mentionStyle={
+        Object.hasOwn(parseChipStyles(post.chipStyles), MENTION)
+          ? mentionOptionFor(mentionKind.parseStyle(parseChipStyles(post.chipStyles)[MENTION]))
+          : "doc"
+      }
       createdAt={post.createdAt}
       authorIds={post.authors.map((a) => a.userId)}
       eligibleUsers={eligibleUsers}

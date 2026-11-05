@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   updatePostModerationPolicy,
+  updatePostMentionStyle,
   updatePostAuthor,
   updatePostAuthorOrder,
   deletePost,
   restorePost,
 } from "@/app/actions/posts";
 import { ModerationPolicy, type Role } from "@/generated/prisma/enums";
+import { MENTION_OPTIONS } from "@/lib/entity-chips/kinds/mention-options";
 import styles from "./PostSettingsPanel.module.css";
 
 export type EligibleUser = {
@@ -29,6 +31,13 @@ type Props = {
   eligibleUsers: EligibleUser[];
   deleted: boolean;
   onDeletedChange: (deleted: boolean) => void;
+  /**
+   * How this post shows its mentions: one of `MENTION_OPTIONS`' values, or
+   * "doc" to follow its doc (docs/ENTITY_CHIPS.md, "Styling").
+   */
+  mentionStyle: string;
+  /** Told when that changes, since the same version then publishes differently. */
+  onMentionStyleChange: () => void;
 };
 
 export default function PostSettingsPanel({
@@ -40,6 +49,8 @@ export default function PostSettingsPanel({
   eligibleUsers,
   deleted,
   onDeletedChange,
+  mentionStyle,
+  onMentionStyleChange,
 }: Props) {
   const router = useRouter();
   const detailsRef = useRef<HTMLDetailsElement>(null);
@@ -58,6 +69,24 @@ export default function PostSettingsPanel({
   const usersById = useMemo(() => new Map(eligibleUsers.map((u) => [u.id, u])), [eligibleUsers]);
   const dragIdRef = useRef<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  const [mentions, setMentions] = useState(mentionStyle);
+
+  function handleMentionStyleChange(next: string) {
+    const prev = mentions;
+    setMentions(next);
+    setError(null);
+    startTransition(async () => {
+      try {
+        await updatePostMentionStyle(postId, next);
+        onMentionStyleChange();
+        router.refresh();
+      } catch (e) {
+        setMentions(prev);
+        setError(e instanceof Error ? e.message : "Failed to update how mentions are shown.");
+      }
+    });
+  }
 
   function handlePolicyChange(next: ModerationPolicy) {
     const prev = policy;
@@ -213,6 +242,27 @@ export default function PostSettingsPanel({
                   {Object.values(ModerationPolicy).map((option) => (
                     <option key={option} value={option}>
                       {option}
+                    </option>
+                  ))}
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td className={styles.label}>Mentions</td>
+              <td>
+                {/* Applied when the post is next published: that is when its
+                    doc's mentions become the words a reader sees. */}
+                <select
+                  aria-label="How mentions are shown in the post"
+                  value={mentions}
+                  disabled={pending || deleted}
+                  onChange={(e) => handleMentionStyleChange(e.target.value)}
+                  className={styles.policySelect}
+                >
+                  <option value="doc">As in the doc</option>
+                  {MENTION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
                     </option>
                   ))}
                 </select>

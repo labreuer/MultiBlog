@@ -441,6 +441,7 @@ export default function DocEditor({
           eligibleUsers={eligibleUsers}
           deleted={deleted}
           onDeletedChange={setDeleted}
+          ydoc={provider ? ydoc : null}
         />
       </div>
       {/* data-editor-rail is this rail's stable handle — nothing in CSS needs

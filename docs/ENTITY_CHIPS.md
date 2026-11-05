@@ -164,7 +164,31 @@ still a plan.
   for a mention), a quote edge inside a label widened for a note, `chip_changed` and
   `unknown_kind` (a chip of a kind the server doesn't know reads as plain `[…]`, and an edit
   that sends that back is refused as `chip_as_text`), the pairing of a chip that continues
-  another, link titles stripped on the way in, and styles in a read's header.
+  another, and link titles stripped on the way in.
+- **Styling, per doc and per post:**
+  - **The doc's style** is in a `Y.Map("settings")` in its ydoc, one key per chip kind
+    (`settings.ts`), cached to `Doc.chipStyles` by the store. `DocSettingsPanel` writes it
+    through the editor's connection; open editors and reading views follow it live
+    (`useChipInputs` observes the map), and the next store relabels `prose_json` and the
+    anchors' chip records. Every server path that labels a doc's body takes the doc's style:
+    the cache write, the first paint, the chip-context endpoint, MCP's doc state, anchor
+    capture, the refresh and the integrity check.
+  - **MCP:** a doc read carries `styles` when the doc has set any, `edit_doc` takes
+    `settings` and writes it inside `/admin/doc-edit` with the edit, and `since` reports a
+    change of style.
+  - **A post's own style** is `Post.chipStyles`, set in `PostSettingsPanel`, each kind it
+    names winning over the doc's when the post's chips become linked text. Changing it makes
+    the live version publishable again, and the server's no-op check now compares the
+    content a publish would write, so a rename alone is also something to republish.
+  - **A note's body has no style of its own**, and shows each chip kind's default wherever
+    it is read. A note is shown away from its doc as often as beside it (`/annotations`,
+    search, the RAISED email), and its stored `bodyText` would otherwise depend on another
+    object's setting, with a refresh of every note for each change of a doc's style.
+
+  Not built of Styling: an instance default (each chip kind's own default stands in), a
+  control for a single chip's override (a mention's `form` field is honoured and nothing
+  sets it), the scrub bar showing each version in the style it had (it shows the current
+  one), and sections.
 - **Mentions:** the chip kind's fields, forms and labels, its context loader, the rule for who
   may be mentioned, the `@` menu in the doc editor and in a note's composer, the `mentions=`
   search filter with `@handle` in the search box, and the dashboard's "Mentions of you" card

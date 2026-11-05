@@ -6,6 +6,7 @@ import { parseChipRecords, relabelChipRecords } from "@/lib/anchors";
 import { chipInputsForBody } from "./context";
 import { relabelChips } from "./materialize";
 import { chipsInJSON } from "./renderings";
+import { parseChipStyles } from "./settings";
 import { chipLabels, type ChipLabels } from "./text";
 
 // docs/ENTITY_CHIPS.md, step 1, item 10 — the refresh. A label is computed
@@ -89,10 +90,10 @@ export async function refreshMentionLabels(userIds: readonly string[]): Promise<
 }
 
 async function refreshDoc(docId: string): Promise<boolean> {
-  const doc = await prisma.doc.findUnique({ where: { id: docId }, select: { proseJson: true } });
+  const doc = await prisma.doc.findUnique({ where: { id: docId }, select: { proseJson: true, chipStyles: true } });
   if (!doc?.proseJson) return false;
   const before = doc.proseJson as JSONContent;
-  const after = relabelChips(before, await chipInputsForBody(before));
+  const after = relabelChips(before, await chipInputsForBody(before, parseChipStyles(doc.chipStyles)));
   const [was, now] = [JSON.stringify(before), JSON.stringify(after)];
   if (was === now) return false;
   const written = await prisma.$executeRaw(
@@ -120,14 +121,15 @@ const SELECTOR_TABLES = ["tag_anchor", "anchored_link_anchor", "comment_quote_an
 
 /** The chip records of every anchor into one body, a doc's or a note's, relabelled as that body reads now. */
 async function refreshAnchorsInto(target: { kind: "doc" | "annotation"; id: string }): Promise<number> {
+  // A doc's labels are in its own style; a note's body has none of its own.
   const body =
     target.kind === "doc"
-      ? await prisma.doc.findUnique({ where: { id: target.id }, select: { proseJson: true } })
-      : await prisma.annotation.findUnique({ where: { id: target.id }, select: { proseJson: true } });
+      ? await prisma.doc.findUnique({ where: { id: target.id }, select: { proseJson: true, chipStyles: true } })
+      : { ...(await prisma.annotation.findUnique({ where: { id: target.id }, select: { proseJson: true } })), chipStyles: null };
   if (!body?.proseJson) return 0;
   const json = body.proseJson as JSONContent;
   if (chipsInJSON(json).length === 0) return 0;
-  return refreshAnchorRecords(target, chipLabels(json, await chipInputsForBody(json)));
+  return refreshAnchorRecords(target, chipLabels(json, await chipInputsForBody(json, parseChipStyles(body.chipStyles))));
 }
 
 /**

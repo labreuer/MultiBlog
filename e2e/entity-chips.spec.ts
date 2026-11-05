@@ -598,3 +598,103 @@ test("two mentions left sharing an instance id are told apart again, the same wa
     await deleteTestDoc(doc.id);
   }
 });
+
+// docs/ENTITY_CHIPS.md, "Styling" — a doc's choice of how its chips are
+// shown lives in the doc's own ydoc, so it reaches every open view at once
+// and the store relabels what search reads.
+test("a doc's mention style is set in its settings, relabels every open view at once, and is what search then reads", async ({
+  page,
+  context,
+  secondUser,
+}) => {
+  const { user: author } = await secondUser({ role: "AUTHOR" });
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: bodyOf(text("Ask "), mention("i1", author.id), text(" about it.")),
+  });
+  const reading = await context.newPage();
+  try {
+    await page.goto(`/doc/${doc.id}/edit`);
+    await waitForDocCollabReady(page);
+    await reading.goto(`/doc/${doc.slug}`);
+    await expect(reading.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+    const inEditor = bodyEditor(page).locator(".entity-chip");
+    const inReading = bodyEditor(reading).locator(".entity-chip");
+    await expect(inEditor).toHaveText([`@${author.name}`]);
+    await expect(inReading).toHaveText([`@${author.name}`]);
+
+    await page.locator("[data-doc-settings] > summary").click();
+    const select = page.getByRole("combobox", { name: "How mentions are shown" });
+    await expect(select).toHaveValue("name");
+    await select.selectOption("handle");
+
+    // Here at once, and in the other tab with no reload: the style is in the doc.
+    await expect(inEditor).toHaveText([`@${author.slug}`]);
+    await expect(inReading).toHaveText([`@${author.slug}`]);
+    // The store that follows relabels the cache, which search and every static render read.
+    await expect.poll(() => getDocSearchText(doc.id), { timeout: 15_000 }).toBe(`Ask @${author.slug} about it.`);
+
+    // A fresh load starts in that style: the first paint, and the editor once it has synced.
+    await reading.goto(`/doc/${doc.slug}`);
+    await expect(reading.locator("a.entity-chip").filter({ visible: true })).toHaveText([`@${author.slug}`]);
+    await page.reload();
+    await waitForDocCollabReady(page);
+    await expect(inEditor).toHaveText([`@${author.slug}`]);
+    await page.locator("[data-doc-settings] > summary").click();
+    await expect(select).toHaveValue("handle");
+
+    // Back to the default, which is stored as no choice at all.
+    await select.selectOption("name-plain");
+    await expect(inEditor).toHaveText([author.name]);
+    await select.selectOption("name");
+    await expect(inEditor).toHaveText([`@${author.name}`]);
+    await expect.poll(() => getDocSearchText(doc.id), { timeout: 15_000 }).toBe(`Ask @${author.name} about it.`);
+  } finally {
+    await reading.close();
+    await page.goto("about:blank");
+    await deleteTestDoc(doc.id);
+  }
+});
+
+// docs/ENTITY_CHIPS.md, "Styling" — a post can be published in a style of its
+// own: the doc as its writers like to read it, the post as readers should.
+test("a post is published in its own mention style, and changing the style alone is something to republish", async ({
+  page,
+  secondUser,
+}) => {
+  const { user: author } = await secondUser({ role: "AUTHOR" });
+  const post = await createTestPost({
+    authorEmail: ADMIN_EMAIL,
+    publish: true,
+    body: bodyOf(text("Written with "), mention("i1", author.id), text(".")),
+  });
+  try {
+    expect(await getPostContentText(post.id)).toBe(`Written with @${author.name}.`);
+
+    await page.goto(`/post/${post.id}/edit`);
+    await expect(page.getByLabel("Scrub through the doc's edit history")).toBeVisible({ timeout: 15_000 });
+    // Live at this version already, so there is nothing to republish yet.
+    const republish = page.getByRole("button", { name: "Republish", exact: true });
+    await expect(republish).toBeDisabled();
+
+    await page.locator("summary", { hasText: /^Settings$/ }).click();
+    const select = page.getByRole("combobox", { name: "How mentions are shown in the post" });
+    await expect(select).toHaveValue("doc");
+    await select.selectOption("handle");
+    // The same version now publishes differently.
+    await expect(republish).toBeEnabled();
+    await republish.click();
+    await expect(page.getByText("Published.")).toBeVisible();
+    expect(await getPostContentText(post.id)).toBe(`Written with @${author.slug}.`);
+
+    // The doc itself is as it was: the style is the post's.
+    expect(await getDocSearchText(post.docId)).toBe(`Written with @${author.name}.`);
+    const response = await page.goto(post.path!);
+    expect(response?.status()).toBe(200);
+    await expect(page.getByRole("link", { name: `@${author.slug}`, exact: true }).filter({ visible: true })).toBeVisible();
+  } finally {
+    await page.goto("about:blank");
+    await deleteTestPost(post.id);
+  }
+});

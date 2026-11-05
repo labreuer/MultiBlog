@@ -110,6 +110,7 @@ import * as Y from "yjs";
 import { docContentFromYdoc } from "../../src/lib/doc-content";
 import type { JSONContent } from "@tiptap/core";
 import { materializeChipLabels } from "../../src/lib/entity-chips/context";
+import { chipStylesOf } from "../../src/lib/entity-chips/settings";
 import { ydocIdForDoc } from "../../src/lib/ydoc-names";
 import { encodeYdocState } from "../../server/ydoc-store";
 import { prisma, prismaIncludingDeleted } from "../../src/lib/prisma";
@@ -497,7 +498,7 @@ async function main() {
         await tx.doc.update({
           where: { id: target.id },
           // With each entity chip's label, as every writer of this column leaves it.
-          data: { proseJson: (await materializeChipLabels(after.proseJson as JSONContent)) as Prisma.InputJsonValue },
+          data: { proseJson: (await materializeChipLabels(after.proseJson as JSONContent, chipStylesOf(state))) as Prisma.InputJsonValue },
         });
 
         // Put updated_at back where it was. Doc.updatedAt is @updatedAt, which

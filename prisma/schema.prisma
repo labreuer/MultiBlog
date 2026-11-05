@@ -352,6 +352,11 @@ model Post {
   title            String
   docId            String                   @map("doc_id")
   proseJson        Json?                    @map("prose_json")
+  // The style this post is published in, per chip kind, where it differs
+  // from its doc's (docs/ENTITY_CHIPS.md, "Styling"): initials while
+  // drafting, full names in print. Null takes the doc's. Applied when the
+  // doc's chips are turned into linked text at publish.
+  chipStyles       Json?                    @map("chip_styles")
   publishEventId   String?                  @unique @map("publish_event_id")
   moderationPolicy ModerationPolicy         @default(INHERIT) @map("moderation_policy")
   createdAt        DateTime                 @default(now()) @map("created_at")
@@ -775,6 +780,12 @@ model Doc {
   // `doc.create()` needn't name it; the trigger overwrites it on INSERT
   // anyway.
   proseJsonLength   Int                      @default(0) @map("prose_json_length")
+  // docs/ENTITY_CHIPS.md, "Styling" — the doc's choice of form per chip
+  // kind (mentions as names, initials or handles), as its ydoc's `settings`
+  // map holds it: a cache, written by the store with `title` and
+  // `proseJson`, for readers with no ydoc open. Null for a doc that has set
+  // none. Read through `parseChipStyles`, never a cast.
+  chipStyles        Json?                    @map("chip_styles")
   // docs/FULLTEXT.md §3 — the title (weight A) and body text (D) as a
   // tsvector, maintained by the doc_sync_search_vector trigger: never assign
   // to it, the same rule as proseJsonLength above. Unsupported, so the client

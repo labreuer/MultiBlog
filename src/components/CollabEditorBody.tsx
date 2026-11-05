@@ -248,7 +248,7 @@ export default function CollabEditorBody({
   }, [editor, hasContent]);
 
   // Entity chips' labels (docs/ENTITY_CHIPS.md), for the doc the page names.
-  useChipInputs(editor, useChipSurface());
+  useChipInputs(editor, useChipSurface(), ydoc);
 
   // useEditor's `editable` option is only read at construction time, not
   // reactive — toggling it later (e.g. after a soft delete) requires calling

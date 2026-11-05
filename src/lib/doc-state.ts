@@ -10,6 +10,7 @@ import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { docBlocks, type DocBlock } from "@/lib/doc-text";
 import { chipInputsForBody } from "@/lib/entity-chips/context";
+import { chipStylesOf } from "@/lib/entity-chips/settings";
 import { chipMarkdowns, chipsIn } from "@/lib/entity-chips/renderings";
 import { chipLabelsIn, type ChipLabels } from "@/lib/entity-chips/text";
 import type { ChipInputs } from "@/lib/entity-chips/types";
@@ -59,7 +60,8 @@ async function stateOf(doc: Y.Doc): Promise<Omit<DocState, "version">> {
       : "";
   // The labels are the targets' current ones, whichever version of the doc
   // this is: a label is not part of a version.
-  const inputs = await chipInputsForBody(content);
+  // The style is the doc's at this version: it lives in the ydoc.
+  const inputs = await chipInputsForBody(content, chipStylesOf(doc));
   const labels = chipLabelsIn(node, inputs);
   const markdown = chipMarkdowns(chipsIn(node), inputs.styles, inputs.context);
   return { json: content, title, node, blocks: docBlocks(node, labels), chips: { labels, markdown, inputs } };

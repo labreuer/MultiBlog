@@ -26,6 +26,8 @@ export type DocEditAnswer =
       chips?: { removed: string[]; added: number };
       blocks: number;
       touched: { annotations: { id: string; resolves: boolean }[]; linkParts: { id: string; resolves: boolean }[] };
+      /** Whether the edit changed the doc's chip styles. */
+      restyled?: boolean;
     }
   | { ok: false; refusal: EditRefusal }
   | { ok: false; unavailable: string };
@@ -42,6 +44,8 @@ export async function requestDocEdit(opts: {
   /** Of those, the ones whose passage reaches over an entity chip its mark can't sit on: their edge chips, by annotation id. */
   markChips: Record<string, ChipRecord[]>;
   linkParts: AnchorRef[];
+  /** The doc's style per chip kind, to set with the edit: a style, or null to clear it (docs/ENTITY_CHIPS.md, "Styling"). */
+  chipStyles?: Record<string, unknown>;
   /**
    * What the doc's entity chips are labelled from, as the client's read
    * labelled them (docs/ENTITY_CHIPS.md, MCP item 4): the collab server matches
@@ -68,6 +72,7 @@ export async function requestDocEdit(opts: {
         markChips: opts.markChips,
         linkParts: opts.linkParts,
         chipInputs: opts.chipInputs,
+        ...(opts.chipStyles ? { chipStyles: opts.chipStyles } : {}),
       }),
     });
   } catch (err) {

@@ -1894,6 +1894,12 @@ So `kinds=docs&authors=<slug>` is "this person's docs", and with the `tags` filt
   every matching page (§8). The object's own read gate runs first.
 - **A `tags` filter** (§11). Each kind's ids are narrowed to those carrying any of the named
   terms, as `authors` takes any of its slugs.
+- **A doc's settings.** A whole or outline read of a doc carries `styles` when the doc has set
+  how its entity chips are shown (`{ mentions: { form: "initials" } }`), and every label in
+  the read is in that style. `edit_doc` takes the same shape as `settings`, alone or with
+  edits; the collab server writes it into the doc's ydoc in the edit's transaction
+  ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), "Styling"). `since` names a change of style beside the
+  blocks that read differently for it.
 - **A `mentions` filter** (MENTIONS.md, "Search"). Each kind's ids are narrowed to those that
   mention any of the named people, `me` being the actor. PDFs and comments hold no mention,
   and the response names them as left out (`withoutMentions`).
