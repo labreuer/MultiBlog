@@ -129,3 +129,17 @@ export function chipTargets(chips: readonly ChipOccurrence[]): Record<string, st
   }
   return Object.fromEntries(Object.entries(targets).map(([name, ids]) => [name, [...ids]]));
 }
+
+/**
+ * What each chip in a JSON body stands for, in doc order: its chip kind and
+ * that kind's identity. Two bodies with equal lists hold the same entities in
+ * the same places, whatever their labels or instance ids. A chip this build
+ * can't validate is told apart by its raw fields.
+ */
+export function chipIdentities(doc: JSONContent): string[] {
+  return chipsInJSON(doc).map((chip) => {
+    const kind = chipKind(chip.kind);
+    const data = kind?.validate(chip.data) ?? null;
+    return `${chip.kind}:${kind && data !== null ? kind.identity(data) : JSON.stringify(chip.data)}`;
+  });
+}

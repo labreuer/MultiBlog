@@ -30,6 +30,7 @@ import { typedOrderedListInputRule } from "./ordered-list-input-rule";
 import { atLine, startingAtLine } from "./list-from-line";
 import { Annotation } from "./annotation-extension";
 import { EntityChip } from "./entity-chips/node";
+import { chipDisplayText, isChip } from "./entity-chips/text";
 
 // docs/TIPTAP.md "Inline code takes other marks" — TipTap's code mark
 // excludes every other mark (`excludes: "_"`). This one excludes only itself,
@@ -491,12 +492,25 @@ export function collectMarkAttrValues(doc: JSONContent, markName: string, attrNa
 // split into several adjacent text nodes (different bold/italic runs, etc.),
 // but never discontiguous — it was applied as one addMark(from, to) call —
 // so concatenation in document order always reconstructs the original span.
+//
+// An entity chip inside the span is the exception to "runs that carry the
+// mark": a ydoc stores no marks on an inline node, so the chip arrives here
+// unmarked between two marked runs. It is taken as part of the span when
+// marked text follows it, and gives its display text (entity-chips/text.ts),
+// which for `Doc.proseJson` is the label its cache write put on the node.
 export function extractMarkedText(doc: JSONContent, markName: string, attrName: string, attrValue: string): string {
   const parts: string[] = [];
+  // Chips met since the last marked run: inside the span only if another marked run follows.
+  let pending: string[] = [];
   function walk(node: JSONContent) {
     if (node.type === "text" && node.text) {
       const hasMark = node.marks?.some((mark) => mark.type === markName && mark.attrs?.[attrName] === attrValue);
-      if (hasMark) parts.push(node.text);
+      if (hasMark) {
+        parts.push(...pending, node.text);
+        pending = [];
+      }
+    } else if (isChip(node) && parts.length > 0) {
+      pending.push(chipDisplayText(node.attrs));
     }
     node.content?.forEach(walk);
   }

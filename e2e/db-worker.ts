@@ -1455,13 +1455,15 @@ export async function getAnnotationEditFacts(annotationId: string): Promise<Anno
     postedAt: annotation.postedAt?.toISOString() ?? null,
     editedAt: annotation.editedAt?.toISOString() ?? null,
     editingSince: annotation.editingSince?.toISOString() ?? null,
-    versions: snapshots.map((s, index) => ({
-      revisionNo: index + 1,
-      bodyText: decodeAnnotationSnapshot(new Uint8Array(s.ydoc)).bodyText,
-      authorEmail: s.user?.email ?? null,
-      mark: s.lastYdocUpdateId.toString(),
-      createdAt: s.createdAt.toISOString(),
-    })),
+    versions: await Promise.all(
+      snapshots.map(async (s, index) => ({
+        revisionNo: index + 1,
+        bodyText: (await decodeAnnotationSnapshot(new Uint8Array(s.ydoc))).bodyText,
+        authorEmail: s.user?.email ?? null,
+        mark: s.lastYdocUpdateId.toString(),
+        createdAt: s.createdAt.toISOString(),
+      })),
+    ),
   };
 }
 

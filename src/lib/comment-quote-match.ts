@@ -1,4 +1,5 @@
 import type { Node as PMNode } from "@tiptap/pm/model";
+import { anchorLeafText } from "./entity-chips/text";
 
 // PLAN.md §23n — the quote matcher, pure and browser-safe: given a comment
 // body's quotations (typed as `> …` in the Markdown box, pasted as "…", or
@@ -145,16 +146,20 @@ export type QuoteMatch = QuoteRange & {
   quotedText: string;
 };
 
+const QUOTE_LEAF_TEXT = anchorLeafText(" ");
+
 /**
  * The derivation every comment quote's `quoted_text` uses: `textBetween`
  * with a space for a block boundary, like every other anchor in the
  * codebase, and a space for an inline leaf too — a hard break inside the
  * quoted words would otherwise contribute nothing and glue two words
- * together. The integrity check and the rewrite (§23f) derive with this
- * same function, so the three copies agree by construction.
+ * together. An entity chip is the one leaf that isn't a space: it keeps its
+ * anchor text, as in every other stored quote (entity-chips/text.ts). The
+ * integrity check and the rewrite (§23f) derive with this same function, so
+ * the three copies agree by construction.
  */
 export function quotedTextAt(node: PMNode, from: number, to: number): string {
-  return node.textBetween(from, to, " ", " ");
+  return node.textBetween(from, to, " ", QUOTE_LEAF_TEXT);
 }
 
 /** The one-line rule for "is this range the query": normalized quotedTextAt equals normalized query. */

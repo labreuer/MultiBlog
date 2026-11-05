@@ -8,6 +8,7 @@
 // `tableJsonToGrid` dropping them: a second codec (xlsx) keeps merged cells
 // and hyperlinks, and must not inherit CSV's losses.
 
+import { chipDisplayText, isChip, type ChipLabels } from "./entity-chips/text";
 import type { JSONContent } from "@tiptap/core";
 
 export type GridCell = {
@@ -182,21 +183,23 @@ export function gridToTableJson(grid: TableGrid, { headerRow = true }: { headerR
 
 // --- table node → grid -------------------------------------------------------
 
-function textOfInline(node: JSONContent): string {
+function textOfInline(node: JSONContent, labels: ChipLabels | undefined): string {
   if (node.type === "text") return node.text ?? "";
   if (node.type === "hardBreak") return "\n";
-  return (node.content ?? []).map(textOfInline).join("");
+  // An entity chip is its label, as a reader sees the cell (entity-chips/text.ts).
+  if (isChip(node)) return chipDisplayText(node.attrs, labels);
+  return (node.content ?? []).map((child) => textOfInline(child, labels)).join("");
 }
 
 // A cell's blocks, each as a line — a paragraph is its text, and anything
 // else (a list, a nested table, a heading) is its paragraphs in order. Not a
 // faithful rendering of a list or a nested table; the format has no room
 // for either, and their text is what survives.
-function linesOfBlock(node: JSONContent): string[] {
+function linesOfBlock(node: JSONContent, labels: ChipLabels | undefined): string[] {
   if (node.type === "paragraph" || node.type === "heading" || node.type === "codeBlock") {
-    return [(node.content ?? []).map(textOfInline).join("")];
+    return [(node.content ?? []).map((child) => textOfInline(child, labels)).join("")];
   }
-  return (node.content ?? []).flatMap(linesOfBlock);
+  return (node.content ?? []).flatMap((child) => linesOfBlock(child, labels));
 }
 
 function firstHref(node: JSONContent): string | undefined {
@@ -215,12 +218,16 @@ function firstHref(node: JSONContent): string | undefined {
  * "\n", spans kept, the first link's href kept, every other mark dropped.
  * A header cell is just row one — the grid has no header flag, and every
  * writer treats the first row as the header anyway.
+ *
+ * `labels` are the table's entity chips' labels, which the JSON of a live
+ * editor doesn't hold; without them a chip's cell text is whatever label its
+ * node carries, or nothing.
  */
-export function tableJsonToGrid(table: JSONContent): TableGrid {
+export function tableJsonToGrid(table: JSONContent, labels?: ChipLabels): TableGrid {
   if (table.type !== "table") throw new Error(`Expected a table node, got ${table.type ?? "nothing"}.`);
   return (table.content ?? []).map((row) =>
     (row.content ?? []).map((cell) => {
-      const out: GridCell = { text: (cell.content ?? []).flatMap(linesOfBlock).join("\n") };
+      const out: GridCell = { text: (cell.content ?? []).flatMap((block) => linesOfBlock(block, labels)).join("\n") };
       const colspan = Number(cell.attrs?.colspan ?? 1);
       const rowspan = Number(cell.attrs?.rowspan ?? 1);
       if (colspan > 1) out.colspan = colspan;

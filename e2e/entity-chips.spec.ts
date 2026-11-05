@@ -6,6 +6,7 @@ import {
   createTestPost,
   deleteTestDoc,
   deleteTestPost,
+  getAnnotationStates,
   getPostContentText,
   getUserIdByEmail,
   restoreTestUser,
@@ -215,6 +216,17 @@ test("a mention typed into a note is labelled in the composer, on the posted car
   await expect(cardChip).toHaveText([`@${author.name}`]);
   await expect(cardChip).toHaveAttribute("href", `/authors/${author.slug}`);
   await expect(posted).toContainText(`Ask @${author.name} about this.`);
+  // And as stored text, which the RAISED email, /annotations and search read:
+  // the label is in it, where a chip would otherwise leave a gap.
+  await expect
+    .poll(async () => (await getAnnotationStates(sharedDoc.id)).map((annotation) => annotation.bodyText))
+    .toEqual([`Ask @${author.name} about this.`]);
+
+  // A collapsed card's one-line excerpt is text too.
+  await posted.getByRole("button", { name: "Collapse annotation" }).click();
+  await expect(posted).toContainText(`Ask @${author.name} about this.`);
+  await expect(posted.locator("a.entity-chip")).toHaveCount(0);
+  await posted.getByRole("button", { name: "Expand annotation" }).click();
 
   // A fresh load labels it from the server, for a reader as for its writer.
   await page.reload();

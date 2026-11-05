@@ -46,7 +46,7 @@ import { parentSettledMark, settleAnnotationBody, writeSettledBody, type Settled
 import { annotationHistoryFor, type AnnotationVersion } from "@/lib/annotation-history";
 import { actorFromSessionUser } from "@/lib/actor";
 import type { JSONContent } from "@tiptap/core";
-import { chipInputsForBodies, chipInputsForBody } from "@/lib/entity-chips/context-for";
+import { chipInputsForBodies, chipInputsForBody } from "@/lib/entity-chips/context";
 import { chipsInJSON } from "@/lib/entity-chips/renderings";
 import type { ChipInputs } from "@/lib/entity-chips/types";
 import { setAnnotationDeleted } from "@/lib/annotation-manage";
@@ -892,7 +892,7 @@ export async function cancelAnnotationEdit(annotationId: string): Promise<{ erro
     }
     let last;
     try {
-      last = decodeAnnotationSnapshot(new Uint8Array(newest.ydoc));
+      last = await decodeAnnotationSnapshot(new Uint8Array(newest.ydoc));
     } catch (err) {
       console.error(`[annotations] the newest version of ${annotationId} isn't TipTap-decodable:`, err);
       return { error: "Couldn't read the earlier version. Nothing was changed." };
@@ -997,7 +997,7 @@ export async function getQuotedParentVersion(
     return null;
   }
   try {
-    const { proseJson } = decodeAnnotationBody(materialized);
+    const { proseJson } = await decodeAnnotationBody(materialized);
     const hasChips = chipsInJSON(proseJson).length > 0;
     return { proseJson, quotedText: reply.quotedText, ...(hasChips ? { chipInputs: await chipInputsForBody(proseJson) } : {}) };
   } catch (err) {

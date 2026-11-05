@@ -138,7 +138,7 @@ async function main() {
       try {
         // Decoded with the same function the cache writer uses, so the
         // comparison measures the body and not the decoders.
-        const { bodyText } = decodeAnnotationSnapshot(new Uint8Array(newest.ydoc));
+        const { bodyText } = await decodeAnnotationSnapshot(new Uint8Array(newest.ydoc));
         if (bodyText !== annotation.bodyText) {
           findings.push({
             annotationId: annotation.id,

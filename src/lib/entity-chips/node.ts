@@ -5,6 +5,7 @@ import { Plugin, PluginKey, type EditorState, type Transaction } from "@tiptap/p
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { chipKind } from "./registry";
 import { chipRenderings, chipsIn, UNKNOWN_CHIP } from "./renderings";
+import type { ChipLabels } from "./text";
 import {
   CHIP_ANCHOR_TEXT,
   ENTITY_CHIP,
@@ -38,6 +39,16 @@ export function setChipInputs(view: EditorView, inputs: ChipInputs): void {
 /** The rendering a live editor currently shows for the chip with this instance id. */
 export function chipRenderingIn(state: EditorState, iid: string): ChipRendering | null {
   return entityChipKey.getState(state)?.byIid.get(iid) ?? null;
+}
+
+/**
+ * Every chip's label in a live editor, as the editor is drawing it: what a
+ * flattener of that editor's document passes for display text (text.ts).
+ */
+export function chipLabelsOf(state: EditorState): ChipLabels {
+  const labels = new Map<string, string>();
+  for (const [iid, rendering] of entityChipKey.getState(state)?.byIid ?? []) labels.set(iid, rendering.label);
+  return labels;
 }
 
 // A rendering rides to its node view as a node decoration's spec. Flat

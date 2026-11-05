@@ -1,5 +1,5 @@
 import { annotationContentExtensions } from "@/lib/tiptap-schema";
-import { chipInputsForBodies } from "@/lib/entity-chips/context-for";
+import { chipInputsForBodies } from "@/lib/entity-chips/context";
 import { chipsInJSON } from "@/lib/entity-chips/renderings";
 import { renderWithChips } from "@/lib/entity-chips/static";
 import type { ChipInputs } from "@/lib/entity-chips/types";

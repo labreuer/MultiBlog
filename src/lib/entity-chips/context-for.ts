@@ -16,25 +16,6 @@ import { DEFAULT_CHIP_STYLES, type ChipInputs, type ChipOccurrence } from "./typ
 /** The object whose chips are being rendered: a doc, or an annotation's body. */
 export type ChipTarget = { doc: string } | { annotation: string };
 
-/**
- * The inputs for a body already loaded and already gated by its page: the
- * styles, and the context for exactly the chips the body holds.
- */
-export async function chipInputsForBody(body: JSONContent | null | undefined): Promise<ChipInputs> {
-  const chips = body ? chipsInJSON(body) : [];
-  return { styles: DEFAULT_CHIP_STYLES, context: chips.length > 0 ? await loadChipContext(chips) : {} };
-}
-
-/**
- * The same for several bodies a page shows at once, such as every note in a
- * rail: one context, loaded in one pass, that each body's chips resolve
- * against. Each body is still its own document to the rendering pass.
- */
-export async function chipInputsForBodies(bodies: readonly (JSONContent | null | undefined)[]): Promise<ChipInputs> {
-  const chips = bodies.flatMap((body) => (body ? chipsInJSON(body) : []));
-  return { styles: DEFAULT_CHIP_STYLES, context: chips.length > 0 ? await loadChipContext(chips) : {} };
-}
-
 /** A chip target `actor` may read: its stored body, and what it is on. */
 export type ResolvedChipTarget = {
   body: JSONContent | null;

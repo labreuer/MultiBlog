@@ -71,21 +71,29 @@ still a plan.
   shows `…` meanwhile. The doc reading view's first paint gets its context as props.
 - **Item 6, node views and decorations:** in the doc editor, the doc reading view and
   side-by-side. A static render goes through `renderWithChips` (`static.tsx`).
+- **Item 7, the display-text rule:** `src/lib/entity-chips/text.ts` holds it: a chip's anchor
+  text, and its display text from computed labels or from a label on the JSON node. Through it
+  go `extractText` (a note's `bodyText`, a collapsed card's excerpt and word count),
+  `extractMarkedText`, the table grid a CSV is written from, and `quotedTextAt`, with
+  `text.test.ts` running them over one body. Not yet `blockText`, `flattenForMatch` and the
+  Markdown writer, which are MCP's (below), nor the clipboard's plain text beyond what the
+  node's `renderText` already gives.
 - **Item 9, posts and the landing preamble:** `docJsonForPostSide` (`post-content.ts`) replaces
   each chip with its label as linked text, struck through when its target is gone, and records
   the chip on the link's `chip` attribute. Not the republish remap.
 - **Item 13, annotation bodies:** the node is in their schema, and every surface that draws a
   note's body labels its chips: the cards (`buildAnnotationEntries` loads one context for every
   note on the page), the read-only editor over each card, the composer and the edit session,
-  and the earlier versions in the history panel. Not `bodyText`, which still leaves a chip out.
+  and the earlier versions in the history panel. `bodyText` is written with labels
+  (`annotationBodyText`); nothing refreshes it after a rename yet (item 10).
 - **Item 15:** `SCHEMA_VERSION` is 1.
 - **Mentions:** the chip kind's fields, forms and labels, its context loader, the rule for who
   may be mentioned, and the `@` menu in the doc editor and in a note's composer
   ([MENTIONS.md](MENTIONS.md)).
 
-Until the rest of step 1 is built, a chip is invisible to whatever isn't listed: full-text
-search, MCP reads and edits, Markdown export, `Annotation.bodyText`, the CSV export, and stored
-quotes shown outside a ydoc (which show U+FFFC). A collapsed note's excerpt leaves it out too.
+Until the rest of step 1 is built, a chip is invisible to whatever isn't listed: a doc's
+full-text search, MCP reads and edits, Markdown export, and stored quotes shown outside a ydoc
+(which show U+FFFC).
 
 ## Terms
 

@@ -260,7 +260,7 @@ export async function editAnnotationFor(ctx: McpContext, input: { id: string; bo
     prisma.ydoc.findUnique({ where: { id: ydocId }, select: { ydoc: true } }),
   ]);
   if (!newest || !row) throw invalid("This annotation has no settled version to edit from.");
-  const settledBody = decodeAnnotationSnapshot(new Uint8Array(newest.ydoc));
+  const settledBody = await decodeAnnotationSnapshot(new Uint8Array(newest.ydoc));
   const writers = new Set<string>([ctx.actor.userId]);
   const live = new Y.Doc();
   try {

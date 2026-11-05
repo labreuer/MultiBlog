@@ -163,7 +163,7 @@ export default function TableControls({
     }
     const found = tableAroundSelection(editor);
     if (!found) return;
-    void downloadTableNode(found.node, item.codec, `table${item.codec.extensions[0]}`);
+    void downloadTableNode(editor, found.node, item.codec, `table${item.codec.extensions[0]}`);
   }
 
   async function handleFile(file: File) {

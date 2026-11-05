@@ -84,11 +84,11 @@ export async function annotationHistoryFor(actor: Actor, annotationId: string): 
   // Decoded from the snapshot bytes on demand — there is no text copy
   // anywhere (§22e). A version that will not decode is listed from nothing
   // rather than dropped, so the count a reader sees is still honest.
-  return visible
-    .map((version) => {
+  const decoded = await Promise.all(
+    visible.map(async (version) => {
       let body: { proseJson: unknown; bodyText: string };
       try {
-        body = decodeAnnotationSnapshot(new Uint8Array(version.ydoc));
+        body = await decodeAnnotationSnapshot(new Uint8Array(version.ydoc));
       } catch (err) {
         console.error(`[annotations] version ${version.revisionNo} of ${annotationId} isn't TipTap-decodable:`, err);
         body = { proseJson: null, bodyText: "" };
@@ -101,6 +101,7 @@ export async function annotationHistoryFor(actor: Actor, annotationId: string): 
         authorName: version.user ? displayNameOf(version.user) : null,
         current: version.revisionNo === newestNo,
       };
-    })
-    .reverse();
+    }),
+  );
+  return decoded.reverse();
 }

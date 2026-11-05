@@ -43,9 +43,9 @@ export async function updateAnnotationCache(
   // The same decode the settle path runs on a materialised body
   // (src/lib/annotation-body.ts), so the cache and a settled version can be
   // compared as text without the comparison measuring the decoders.
-  let body: ReturnType<typeof decodeAnnotationBody>;
+  let body: Awaited<ReturnType<typeof decodeAnnotationBody>>;
   try {
-    body = decodeAnnotationBody(document);
+    body = await decodeAnnotationBody(document);
   } catch (err) {
     console.error(`[annotation-cache] ${ydocId} isn't TipTap-compatible, leaving prose_json unchanged:`, err);
     return;

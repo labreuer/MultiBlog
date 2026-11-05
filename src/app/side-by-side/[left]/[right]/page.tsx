@@ -10,7 +10,7 @@ import { canUserReadDoc } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { readYdocContent } from "@/lib/ydoc-render";
-import { chipInputsForBody } from "@/lib/entity-chips/context-for";
+import { chipInputsForBody } from "@/lib/entity-chips/context";
 import { renderWithChips } from "@/lib/entity-chips/static";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { getDocLinkGroupsForPair, countOtherDocLinks } from "@/lib/doc-links-query";

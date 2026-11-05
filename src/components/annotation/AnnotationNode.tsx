@@ -46,6 +46,7 @@ import {
   useCollapseState,
 } from "@/lib/collapsed-annotations";
 import { extractText } from "@/lib/diff";
+import { chipLabels, type ChipLabels } from "@/lib/entity-chips/text";
 import type { ChipInputs } from "@/lib/entity-chips/types";
 import styles from "./AnnotationNode.module.css";
 
@@ -159,8 +160,8 @@ function flashNewReplies(replies: readonly AnnotationNodeData[]) {
 // One line of a collapsed card's body: its text with the block breaks
 // flattened, cut well past anything a rail is wide enough to show, since the
 // ellipsis is CSS's to place.
-function excerptOf(proseJson: JSONContent | null): string {
-  return proseJson ? extractText(proseJson).replace(/\s+/g, " ").slice(0, 300) : "";
+function excerptOf(proseJson: JSONContent | null, labels: ChipLabels | undefined): string {
+  return proseJson ? extractText(proseJson, labels).replace(/\s+/g, " ").slice(0, 300) : "";
 }
 
 // The doc-side sibling of CommentNode (PLAN.md §13c) — un-shared from it now
@@ -275,11 +276,20 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   const collapseState = useCollapseState();
   const holdsEditor = editing !== null || replyDraft !== null;
   const collapsed = isCollapsed(collapseState, annotation.id) && !holdsEditor;
-  const excerpt = useMemo(() => (collapsed ? excerptOf(annotation.proseJson) : ""), [collapsed, annotation.proseJson]);
+  // The body's entity chips as text: the settled JSON holds no label, so the
+  // excerpt and the word count compute them from what the card was labelled with.
+  const chipLabelsOfBody = useMemo(
+    () => (annotation.proseJson && annotation.chipInputs ? chipLabels(annotation.proseJson, annotation.chipInputs) : undefined),
+    [annotation.proseJson, annotation.chipInputs],
+  );
+  const excerpt = useMemo(
+    () => (collapsed ? excerptOf(annotation.proseJson, chipLabelsOfBody) : ""),
+    [collapsed, annotation.proseJson, chipLabelsOfBody],
+  );
   // The length a clamped body's button names (docs/ANNOTATIONS.md, "Clamping a long body").
   const words = useMemo(
-    () => (annotation.proseJson ? countWords(extractText(annotation.proseJson)) : 0),
-    [annotation.proseJson],
+    () => (annotation.proseJson ? countWords(extractText(annotation.proseJson, chipLabelsOfBody)) : 0),
+    [annotation.proseJson, chipLabelsOfBody],
   );
 
 
