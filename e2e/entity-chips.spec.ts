@@ -1,5 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
-import { test, expect, bodyEditor, waitForDocCollabReady } from "./fixtures";
+import { test, expect, annotationEditor, bodyEditor, waitForDocCollabReady } from "./fixtures";
 import {
   ADMIN_EMAIL,
   createTestDoc,
@@ -14,8 +14,8 @@ import {
 
 // Entity chips (docs/ENTITY_CHIPS.md): an inline node that holds only which
 // person it stands for, its label computed wherever it is shown. Nothing in
-// the UI inserts one yet, so each test seeds its doc with the node and checks
-// what every surface then draws, but the last, which types "@".
+// the first three tests seed a doc with the node and check what every surface
+// then draws; the last two type "@", in the doc editor and in a note.
 
 const mention = (iid: string, userId: string): JSONContent => ({
   type: "entityChip",
@@ -180,4 +180,63 @@ test("typing @ lists who may be mentioned, and picking one inserts a chip that i
   await page.reload();
   await waitForDocCollabReady(page);
   await expect(bodyEditor(page).locator("span.entity-chip")).toHaveText([`@${author.name}`]);
+});
+
+test("a mention typed into a note is labelled in the composer, on the posted card and in its edit session", async ({
+  page,
+  sharedDoc,
+  secondUser,
+}) => {
+  const { user: author } = await secondUser({ role: "AUTHOR" });
+  const { page: readerPage } = await secondUser({ role: "AUTHORIZED" });
+  const lastName = author.name.split(" ").at(-1);
+
+  await page.goto(`/doc/${sharedDoc.slug}`);
+  await page.getByRole("button", { name: "Write an annotation..." }).click();
+  const composer = annotationEditor(page);
+  await expect(composer).toBeVisible({ timeout: 15_000 });
+  await composer.click();
+
+  // The same menu as the doc editor's, listing for the note's own doc.
+  await page.keyboard.type(`Ask @${lastName}`);
+  const menu = page.getByRole("listbox", { name: "People" });
+  await expect(menu.getByRole("option", { name: author.name })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(composer.locator("span.entity-chip")).toHaveText([`@${author.name}`]);
+  await page.keyboard.type("about this.");
+  await page.getByRole("button", { name: "Post annotation" }).click();
+  await expect(composer).toHaveCount(0);
+
+  // The posted card: a link to the person, in whichever copy of the body is
+  // showing (the server's, then the read-only editor over it). The doc's own
+  // body holds no chip, so these are the note's.
+  const posted = page.locator("[data-comment-id]").filter({ hasText: "about this." });
+  const cardChip = posted.locator("a.entity-chip").filter({ visible: true });
+  await expect(cardChip).toHaveText([`@${author.name}`]);
+  await expect(cardChip).toHaveAttribute("href", `/authors/${author.slug}`);
+  await expect(posted).toContainText(`Ask @${author.name} about this.`);
+
+  // A fresh load labels it from the server, for a reader as for its writer.
+  await page.reload();
+  await expect(cardChip).toHaveText([`@${author.name}`]);
+  await readerPage.goto(`/doc/${sharedDoc.slug}`);
+  const readerCard = readerPage.locator("[data-comment-id]").filter({ hasText: "about this." });
+  await expect(readerCard.locator("a.entity-chip").filter({ visible: true })).toHaveText([`@${author.name}`]);
+
+  // The edit session shows the same label, and so does the card after it.
+  await posted.getByRole("button", { name: "Edit", exact: true }).click();
+  const session = annotationEditor(page);
+  await expect(session.locator("span.entity-chip")).toHaveText([`@${author.name}`]);
+  await posted.getByRole("button", { name: "Cancel" }).click();
+  await expect(session).toHaveCount(0);
+  await expect(cardChip).toHaveText([`@${author.name}`]);
+
+  // Below AUTHOR nobody is listed, so a reader's own note opens no menu.
+  await readerPage.getByRole("button", { name: "Write an annotation..." }).click();
+  const readerComposer = annotationEditor(readerPage);
+  await expect(readerComposer).toBeVisible({ timeout: 15_000 });
+  await readerComposer.click();
+  await readerPage.keyboard.type(`Ask @${lastName}`);
+  await expect(readerComposer).toContainText(`Ask @${lastName}`);
+  await expect(readerPage.getByRole("listbox", { name: "People" })).toHaveCount(0);
 });

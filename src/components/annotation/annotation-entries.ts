@@ -1,10 +1,13 @@
-import { renderToReactElement } from "@tiptap/static-renderer";
 import { annotationContentExtensions } from "@/lib/tiptap-schema";
+import { chipInputsForBodies } from "@/lib/entity-chips/context-for";
+import { chipsInJSON } from "@/lib/entity-chips/renderings";
+import { renderWithChips } from "@/lib/entity-chips/static";
+import type { ChipInputs } from "@/lib/entity-chips/types";
 import type { AnnotationComment, AnnotationThread } from "@/lib/annotation-data";
 import type { AnnotationEntry } from "./AnnotationList";
 import type { AnnotationNodeData } from "./AnnotationNode";
 
-// Server-side only — `renderToReactElement` runs here and the finished
+// Server-side only — the static renderer runs here and the finished
 // elements ship in the RSC payload, which is what lets an annotation body
 // render its rich content without a live editor per card (PLAN.md §13j Phase
 // 2). Lifted out of AnnotationSection.tsx unchanged when the doc *editor*
@@ -15,23 +18,29 @@ import type { AnnotationNodeData } from "./AnnotationNode";
 // A static rendering of the annotation's ydoc cache — the same
 // @tiptap/static-renderer call the doc reading view already uses for its
 // own body (app/doc/[slug]/page.tsx), never a live editor for a comment
-// that isn't currently open in one.
-function renderBody(a: AnnotationComment) {
+// that isn't currently open in one. Through `renderWithChips`, so a chip in
+// a note shows its label (docs/ENTITY_CHIPS.md, step 1, item 13).
+function renderBody(a: AnnotationComment, chipInputs: ChipInputs) {
   if (!a.proseJson) return a.bodyText;
   try {
-    return renderToReactElement({ content: a.proseJson, extensions: annotationContentExtensions });
+    return renderWithChips(a.proseJson, annotationContentExtensions, chipInputs);
   } catch {
     return a.bodyText;
   }
 }
 
-function buildTree(comments: AnnotationComment[]): AnnotationNodeData[] {
+function buildTree(comments: AnnotationComment[], chipInputs: ChipInputs): AnnotationNodeData[] {
   const byId = new Map<string, AnnotationNodeData>();
   for (const a of comments) {
     byId.set(a.id, {
       id: a.id,
       displayName: a.displayName,
-      body: renderBody(a),
+      body: renderBody(a, chipInputs),
+      // What the static body above was labelled with, for the editors the
+      // card mounts over the same JSON. The one object for every note that
+      // holds a chip, which the RSC payload then carries once; nothing for a
+      // note that holds none.
+      chipInputs: a.proseJson && chipsInJSON(a.proseJson).length > 0 ? chipInputs : undefined,
       // PLAN.md §13p — the same content the static tree above was built
       // from, shipped alongside it because AnnotationBodyReader needs the
       // JSON (not the rendered elements) to seed its own editor. Both, not
@@ -77,13 +86,17 @@ function buildTree(comments: AnnotationComment[]): AnnotationNodeData[] {
 // more than one "" thread — every annotation whose mark is gone (§12h) plus
 // any genuinely general one — so every one of them is included, not just the
 // first, unlike a post's single general thread.
-export function buildAnnotationEntries(threads: AnnotationThread[]): AnnotationEntry[] {
+//
+// Async for the chip context alone: one load for every body in `threads`, and
+// no query at all when none of them holds a chip.
+export async function buildAnnotationEntries(threads: AnnotationThread[]): Promise<AnnotationEntry[]> {
+  const chipInputs = await chipInputsForBodies(threads.flatMap((thread) => thread.comments.map((a) => a.proseJson)));
   const quoteThreads = threads.filter((t) => t.quotedText !== "");
   const generalThreads = threads.filter((t) => t.quotedText === "");
 
   return [
     ...quoteThreads.flatMap((thread) =>
-      buildTree(thread.comments).map((root) => ({
+      buildTree(thread.comments, chipInputs).map((root) => ({
         threadId: thread.id,
         quotedText: thread.quotedText,
         anchorFrom: thread.anchorFrom,
@@ -93,7 +106,7 @@ export function buildAnnotationEntries(threads: AnnotationThread[]): AnnotationE
       })),
     ),
     ...generalThreads.flatMap((thread) =>
-      buildTree(thread.comments).map((root) => ({
+      buildTree(thread.comments, chipInputs).map((root) => ({
         threadId: thread.id,
         quotedText: "",
         anchorFrom: null,

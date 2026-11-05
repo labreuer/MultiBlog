@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useEditor, EditorContent, type Editor, type JSONContent } from "@tiptap/react";
 import { annotationContentExtensions } from "@/lib/tiptap-schema";
 import { PendingAnnotation, setPendingAnnotation } from "@/lib/pending-annotation-extension";
@@ -11,12 +11,18 @@ import {
   setAnnotationAnchors,
   type AnnotationAnchorInput,
 } from "@/lib/annotation-highlight-extension";
+import type { ChipInputs } from "@/lib/entity-chips/types";
+import { useChipInputs, type ChipSurface } from "@/lib/entity-chips/use-chip-inputs";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./AnnotationBodyReader.module.css";
 
 export type BodySelection = { from: number; to: number; quotedText: string };
 
 type Props = {
+  /** Whose body this is: what its entity chips' labels are asked about. */
+  annotationId: string;
+  /** What `staticBody`'s chips were labelled with. Absent when the body holds none. */
+  chipInputs?: ChipInputs;
   /** The annotation's body, from its own ydoc cache. Null for one that never reached a store debounce. */
   proseJson: JSONContent | null;
   /**
@@ -95,6 +101,8 @@ const EMPTY_BODY: JSONContent = { type: "doc", content: [{ type: "paragraph" }] 
 // contact is the escape hatch, with eager mounting kept for any annotation
 // that has anchored replies to decorate.
 export default function AnnotationBodyReader({
+  annotationId,
+  chipInputs,
   proseJson,
   staticBody,
   replyAnchors = EMPTY_ANCHORS,
@@ -165,6 +173,16 @@ export default function AnnotationBodyReader({
       onSelectRef.current?.({ from, to, quotedText });
     },
   });
+
+  // The chips' labels, from what the server labelled the static copy with
+  // (docs/ENTITY_CHIPS.md, step 1, item 13). A body arrives with the inputs
+  // for every chip it holds, so the hook asks the server nothing unless the
+  // two ever disagree.
+  const chipSurface = useMemo<ChipSurface>(
+    () => ({ target: { annotation: annotationId }, initial: chipInputs }),
+    [annotationId, chipInputs],
+  );
+  useChipInputs(editor, chipSurface);
 
   // PLAN.md §22e — **a posted body is mutable now, so the prop can change under
   // a mounted editor**, and `useEditor`'s `content` is a construction-time

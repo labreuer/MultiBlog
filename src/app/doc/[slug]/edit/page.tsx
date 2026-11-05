@@ -93,7 +93,7 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
 
   // "focus mode" pulls all annotations rather than just anchored ones and we
   // don't know whether we're in it at this point
-  const annotations = buildAnnotationEntries(threads);
+  const annotations = await buildAnnotationEntries(threads);
 
   return (
     // AnnotationMoveProvider: required by AnnotationPopover's own

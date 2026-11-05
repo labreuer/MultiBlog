@@ -7,12 +7,15 @@
 - its context loader (`mention-context.ts`);
 - the rule for who may be mentioned (`mention-rule.ts`), and the menu's search over it
   (`mention-search.ts`);
-- the `@` menu in the doc editor (`MentionMenu.tsx`), on the suggestion menu it shares with `[[`
-  (`SuggestionMenu.tsx`). A query is taken for a name only while it is at most 40 characters
-  and four words and doesn't start with a space, so "meet @ 5pm" opens nothing.
+- the `@` menu (`MentionMenu.tsx`) in the doc editor and in a note's composer and edit session,
+  on the suggestion menu it shares with `[[` (`SuggestionMenu.tsx`). A query is taken for a
+  name only while it is at most 40 characters and four words and doesn't start with a space, so
+  "meet @ 5pm" opens nothing. The menu isn't mounted for a viewer below AUTHOR, so a reader's
+  "@" opens nothing rather than a list of nobody. A row says when the person couldn't read the
+  doc, or the PDF a note is on.
 
-Still a plan: the menu in the annotation composer, ordering beyond "participants first", the
-Markdown, search, the dashboard card and notifications.
+Still a plan: ordering beyond "participants first", the Markdown, search, the dashboard card and
+notifications.
 
 A *mention* is an entity chip
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md)) that stands for a person: a MultiBlog account. It is shown as
@@ -99,7 +102,8 @@ A nickname form would need a new user field.
     check, and the people the chip-context endpoint answers for beyond the object's own chips. So
     a slug typed into Markdown can't get round it. `find_users` itself lists every named ADMIN,
     EDITOR and AUTHOR, bots included, and keeps doing so for bylines.
-  - A row says "can't read this doc" for someone who wouldn't see the mention.
+  - A row says "can't read this doc" (or "this PDF", in a note on one) for someone who wouldn't
+    see the mention.
 - **Search.**
   - `mentions=<slug>`.
   - Typing `@me` or `@<slug>` in the search box applies it. `me` becomes a reserved slug;

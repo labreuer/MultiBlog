@@ -74,15 +74,18 @@ still a plan.
 - **Item 9, posts and the landing preamble:** `docJsonForPostSide` (`post-content.ts`) replaces
   each chip with its label as linked text, struck through when its target is gone, and records
   the chip on the link's `chip` attribute. Not the republish remap.
-- **Item 13, annotation bodies:** the node is in their schema. Their cards and editors don't
-  label chips yet, so a chip in a note shows its placeholder.
+- **Item 13, annotation bodies:** the node is in their schema, and every surface that draws a
+  note's body labels its chips: the cards (`buildAnnotationEntries` loads one context for every
+  note on the page), the read-only editor over each card, the composer and the edit session,
+  and the earlier versions in the history panel. Not `bodyText`, which still leaves a chip out.
 - **Item 15:** `SCHEMA_VERSION` is 1.
 - **Mentions:** the chip kind's fields, forms and labels, its context loader, the rule for who
-  may be mentioned, and the `@` menu in the doc editor ([MENTIONS.md](MENTIONS.md)).
+  may be mentioned, and the `@` menu in the doc editor and in a note's composer
+  ([MENTIONS.md](MENTIONS.md)).
 
 Until the rest of step 1 is built, a chip is invisible to whatever isn't listed: full-text
 search, MCP reads and edits, Markdown export, `Annotation.bodyText`, the CSV export, and stored
-quotes shown outside a ydoc (which show U+FFFC).
+quotes shown outside a ydoc (which show U+FFFC). A collapsed note's excerpt leaves it out too.
 
 ## Terms
 

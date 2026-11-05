@@ -1,5 +1,6 @@
 import type { Actor } from "@/lib/actor";
 import { canUserReadDoc } from "@/lib/doc-authz";
+import { canUserReadFile } from "@/lib/file-authz";
 import { prisma } from "@/lib/prisma";
 import { resolveChipTarget, type ChipTarget } from "../context-for";
 import type { MentionCandidate } from "./mention";
@@ -27,8 +28,9 @@ const SELECT = {
  * byline and whoever wrote a note on it), then by name. Empty when the actor
  * may not read the target or may not insert mentions.
  *
- * Each row says whether that person could read the doc, since a mention of
- * someone who can't is one they will never see.
+ * Each row says whether that person could read what the mention is in (the
+ * doc, or the PDF a note is on), since a mention of someone who can't is one
+ * they will never see.
  */
 export async function mentionCandidates(actor: Actor, target: ChipTarget, query: string): Promise<MentionCandidate[]> {
   const resolved = await resolveChipTarget(actor, target);
@@ -82,7 +84,12 @@ export async function mentionCandidates(actor: Actor, target: ChipTarget, query:
         deleted: false,
         botOf: user.worksFor ? user.worksFor.name?.trim() || user.worksFor.slug : null,
       },
-      canRead: resolved.doc ? await canUserReadDoc(user.id, user.role, resolved.doc) : true,
+      canRead: resolved.doc
+        ? await canUserReadDoc(user.id, user.role, resolved.doc)
+        : resolved.file
+          ? await canUserReadFile(user.id, user.role, resolved.file)
+          : true,
+      container: resolved.file ? ("PDF" as const) : ("doc" as const),
     })),
   );
 }

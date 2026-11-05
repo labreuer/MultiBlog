@@ -1,3 +1,4 @@
+import type { Role } from "@/generated/prisma/enums";
 import type { ChipKind, ChipRendering } from "../types";
 
 // docs/MENTIONS.md — a mention stands for a person: a MultiBlog account. This
@@ -29,8 +30,26 @@ export type MentionUser = {
   botOf: string | null;
 };
 
+/** The roles that insert mentions, and the roles a mention may name (docs/MENTIONS.md, "Who is listed"). */
+export const MENTION_ROLES: readonly Role[] = ["ADMIN", "EDITOR", "AUTHOR"];
+
+/**
+ * Whether an account of this role may insert a mention at all. Here, in the
+ * browser-safe half, so a menu can stay unmounted for a viewer it would list
+ * nobody for; `mentionableUsersWhere` is what enforces it.
+ */
+export function canInsertMentions(role: Role): boolean {
+  return MENTION_ROLES.includes(role);
+}
+
 /** One row of a mention menu: who, and whether they could read the doc they'd be mentioned in. */
-export type MentionCandidate = { user: MentionUser; canRead: boolean };
+export type MentionCandidate = {
+  user: MentionUser;
+  /** Whether this person could read what the mention would be in. */
+  canRead: boolean;
+  /** What that is, as the row names it: the doc, or the PDF a note is on. */
+  container: "doc" | "PDF";
+};
 
 /** The mention context: the users a doc's mentions name, by id, deleted ones included. */
 export type MentionContext = Record<string, MentionUser>;

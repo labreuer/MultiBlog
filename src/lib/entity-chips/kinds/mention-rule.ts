@@ -1,21 +1,13 @@
-import type { Role } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Actor } from "@/lib/actor";
 import { prisma } from "@/lib/prisma";
+import { canInsertMentions, MENTION_ROLES } from "./mention";
 
 // docs/MENTIONS.md, "Who is listed" — the one rule for who a viewer may
 // mention. It binds the mention menu, MCP's lookup, the merge's
 // `unknown_chip` check, and the people the chip-context endpoint answers for
 // beyond an object's own chips, so a slug typed into Markdown can't get round
 // what the menu offers. Server-only.
-
-/** The roles that insert mentions, and the roles a mention may name. */
-const MENTION_ROLES: Role[] = ["ADMIN", "EDITOR", "AUTHOR"];
-
-/** Whether this actor may insert a mention at all. */
-export function canInsertMentions(role: Role): boolean {
-  return MENTION_ROLES.includes(role);
-}
 
 /**
  * The accounts `actor` may mention in the doc `docId` (null: an object with
@@ -43,7 +35,7 @@ export async function mentionableUsersWhere(actor: Actor, docId: string | null):
       named,
       {
         OR: [
-          { role: { in: MENTION_ROLES }, worksForUserId: null },
+          { role: { in: [...MENTION_ROLES] }, worksForUserId: null },
           { worksForUserId: person },
           ...(docId
             ? [

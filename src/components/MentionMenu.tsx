@@ -1,10 +1,11 @@
 "use client";
 
 import type { Editor } from "@tiptap/react";
+import { useSession } from "next-auth/react";
 import { PluginKey } from "@tiptap/pm/state";
 import { searchMentionable } from "@/app/actions/mentions";
 import { useChipSurface, useSeedChipContext } from "@/lib/entity-chips/chip-surface";
-import { MENTION, type MentionCandidate } from "@/lib/entity-chips/kinds/mention";
+import { canInsertMentions, MENTION, type MentionCandidate } from "@/lib/entity-chips/kinds/mention";
 import { newChipIid } from "@/lib/entity-chips/node";
 import { ENTITY_CHIP } from "@/lib/entity-chips/types";
 import SuggestionMenu from "./SuggestionMenu";
@@ -20,8 +21,8 @@ import styles from "./EditorChrome.module.css";
 // (Suggestion's default), so an email address never opens it; the search,
 // which is the server's one rule for who may be mentioned; and the rows.
 //
-// It needs to know which doc it is in, since that decides who is listed, so
-// it renders nothing on a page that names no chip surface.
+// It needs to know what it is in (a doc, or a note), since that decides who
+// is listed, so it renders nothing on a page that names no chip surface.
 const suggestionKey = new PluginKey("mentionSuggestion");
 
 // A query may hold spaces, for a full name, so something has to say when an
@@ -37,7 +38,10 @@ function looksLikeAName(query: string): boolean {
 export default function MentionMenu({ editor, disabled }: { editor: Editor; disabled?: boolean }) {
   const surface = useChipSurface();
   const seed = useSeedChipContext();
-  if (!surface) return null;
+  const { data: session } = useSession();
+  // Someone the rule lists nobody for gets no menu, rather than one that
+  // opens on every "@" to say it found no one: a reader's note is the case.
+  if (!surface || !session?.user || !canInsertMentions(session.user.role)) return null;
   const { target } = surface;
 
   return (
@@ -70,7 +74,7 @@ export default function MentionMenu({ editor, disabled }: { editor: Editor; disa
           </span>
           <span className={styles.linkResultMeta}>
             @{candidate.user.slug}
-            {candidate.canRead ? "" : " · can't read this doc"}
+            {candidate.canRead ? "" : ` · can't read this ${candidate.container}`}
           </span>
         </>
       )}

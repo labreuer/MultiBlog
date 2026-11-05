@@ -30,7 +30,7 @@ export default async function AnnotationSection({ docId, threads }: { docId: str
   // throw, never an expected runtime path.
   const ownDrafts = session?.user ? await getOwnDraftAnnotations(docId, session.user.id) : [];
 
-  const entries = buildAnnotationEntries(threads);
+  const entries = await buildAnnotationEntries(threads);
 
   return (
     <section className={styles.section} data-comment-section>

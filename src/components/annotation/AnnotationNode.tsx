@@ -30,7 +30,7 @@ import {
   getAnnotationHistory,
   getQuotedParentVersion,
   updateDraftAnchor,
-  type AnnotationVersion,
+  type AnnotationVersionShown,
 } from "@/app/actions/annotations";
 import { useDocScrub, useHasDocScrub } from "../DocScrubContext";
 import { scrubHref } from "@/lib/scrub-url";
@@ -46,6 +46,7 @@ import {
   useCollapseState,
 } from "@/lib/collapsed-annotations";
 import { extractText } from "@/lib/diff";
+import type { ChipInputs } from "@/lib/entity-chips/types";
 import styles from "./AnnotationNode.module.css";
 
 export type AnnotationNodeData = {
@@ -61,6 +62,9 @@ export type AnnotationNodeData = {
   body: ReactNode;
   // The JSON that tree was rendered from — see §13p and annotation-entries.ts.
   proseJson: JSONContent | null;
+  // What that tree's entity chips were labelled with, for the editors mounted
+  // over the same JSON (docs/ENTITY_CHIPS.md). Absent on a body with no chip.
+  chipInputs?: ChipInputs;
   // PLAN.md §13p — this annotation's own anchor into its *parent's* body, if
   // it is a reply that was made from a selection. Read by the parent, not by
   // the node itself: it is what tells the parent's body which range to
@@ -223,7 +227,7 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
   // distinction between "nothing resolves" and "nothing known yet" matters.
   const [resolvedReplyIds, setResolvedReplyIds] = useState<string[] | null>(null);
   // The parent version this reply quoted, fetched on demand.
-  const [quotedVersion, setQuotedVersion] = useState<{ proseJson: unknown; quotedText: string } | null>(null);
+  const [quotedVersion, setQuotedVersion] = useState<{ proseJson: unknown; quotedText: string; chipInputs?: ChipInputs } | null>(null);
   const [quotedVersionPending, setQuotedVersionPending] = useState(false);
   // Null outside a DocScrubProvider (the doc editor's rail has none) or
   // before the reading view's scrub bar has been touched at all — both
@@ -585,8 +589,8 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
                   onVersionsShown={setHistoryShown}
                   editedAt={annotation.editedAt}
                   load={() => getAnnotationHistory(annotation.id)}
-                  renderBody={(version: AnnotationVersion) => (
-                    <AnnotationVersionBody proseJson={version.proseJson} bodyText={version.bodyText} />
+                  renderBody={(version: AnnotationVersionShown) => (
+                    <AnnotationVersionBody proseJson={version.proseJson} bodyText={version.bodyText} chipInputs={version.chipInputs} />
                   )}
                 />
               </>
@@ -615,6 +619,7 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
                 {editing ? (
                   <AnnotationEditSession
                     annotationId={annotation.id}
+                    chipInputs={annotation.chipInputs}
                     connection={editing.connection}
                     onFinished={endEditing}
                     onCancelled={endEditing}
@@ -622,6 +627,8 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
                 ) : (
                   !historyShown && (
                     <AnnotationBodyReader
+                      annotationId={annotation.id}
+                      chipInputs={annotation.chipInputs}
                       proseJson={annotation.proseJson}
                       staticBody={annotation.body}
                       replyAnchors={replyAnchors}
@@ -656,7 +663,11 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
               {quotedVersion && (
                 <div className={styles.quotedVersion}>
                   <p className={styles.editStatus}>The annotation as it read when this reply quoted it:</p>
-                  <AnnotationVersionBody proseJson={quotedVersion.proseJson} bodyText={quotedVersion.quotedText} />
+                  <AnnotationVersionBody
+                    proseJson={quotedVersion.proseJson}
+                    bodyText={quotedVersion.quotedText}
+                    chipInputs={quotedVersion.chipInputs}
+                  />
                 </div>
               )}
               {heldByAnother && (

@@ -233,6 +233,7 @@ export default function LiveAnnotationComposer({
   return (
     <div className={bounded ? styles.bounded : undefined}>
       <AnnotationBody
+        annotationId={annotationId}
         provider={provider}
         ydoc={ydoc}
         userId={session.user.id}

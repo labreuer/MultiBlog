@@ -22,7 +22,7 @@ import type { PdfAnnotationEntry } from "@/components/pdf/PdfAnnotationPanel";
 export async function pdfAnnotationEntriesFor(fileId: string): Promise<PdfAnnotationEntry[]> {
   const threads = await getFileAnnotationsAsThreads(fileId);
   const targets = new Map(threads.map((thread) => [thread.id, thread.pdfTarget]));
-  return buildAnnotationEntries(threads).map((entry) => ({
+  return (await buildAnnotationEntries(threads)).map((entry) => ({
     threadId: entry.threadId,
     quotedText: entry.quotedText,
     color: entry.color,

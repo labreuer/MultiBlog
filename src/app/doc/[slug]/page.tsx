@@ -181,7 +181,7 @@ export default async function PublicDocPage({
   // still be a conversation), so the highlight is filtered here by the rule
   // its card is: a stored-offset anchor has no mark for the delete to remove.
   const annotationAnchors = [
-    ...annotationAnchorInputs(buildAnnotationEntries(threads).filter(entryHasVisibleContent)),
+    ...annotationAnchorInputs((await buildAnnotationEntries(threads)).filter(entryHasVisibleContent)),
     ...(linkGroupHere ? anchoredLinkAnchorInputs(linkGroupHere.parts) : []),
   ];
 
