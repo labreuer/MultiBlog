@@ -3,7 +3,7 @@ import { Transform } from "@tiptap/pm/transform";
 import type { JSONContent } from "@tiptap/core";
 import { diffText, tokenizeFine } from "./diff";
 import { writesBack } from "./entity-chips/registry";
-import { chipAttrsOf, chipContinues, chipIdentitiesBetween, chipIdentity, chipsIn } from "./entity-chips/renderings";
+import { chipAttrsOf, chipContinues, chipIdentitiesBetween, chipIdentity, chipMarkdownBetween, chipsIn } from "./entity-chips/renderings";
 import { chipDisplayText, displayTextBetween, isChip, type ChipLabels } from "./entity-chips/text";
 import { alignBlocks } from "./block-align";
 import { blockText, blocksOfRange, docBlocks, findHeading, sectionOf, type DocBlock } from "./doc-text";
@@ -72,7 +72,7 @@ export type EditSpec =
   | { kind: "insertBlock"; afterText: string | null; block: JSONContent };
 
 export type EditRefusal = {
-  code: "no_match" | "ambiguous" | "invalid" | "conflict" | "chip_as_text" | "splits_chip" | "unknown_kind";
+  code: "no_match" | "ambiguous" | "invalid" | "conflict" | "chip_as_text" | "splits_chip" | "chip_changed" | "unknown_kind";
   message: string;
   details?: Record<string, unknown>;
   /** Which edit, 0-based; -1 for a refusal of the request as a whole. */
@@ -100,6 +100,8 @@ export type MergeOptions = {
   keepMarks?: boolean;
   /** The old document's entity chips as the client read them: what a quote is matched against, and what `chip_as_text` looks for. */
   labels?: ChipLabels;
+  /** The old document's entity chips' Markdown, by instance id (`chipMarkdowns`): what `chip_changed` says a chip holds now. */
+  chipMarkdown?: ReadonlyMap<string, string>;
   /** One merge's chip bookkeeping (`chipMergeFor`). A caller that wants its findings makes one and passes it; otherwise each textblock makes its own. */
   chipMerge?: ChipMerge;
 };
@@ -532,6 +534,20 @@ export function planEdits(
             passage: displayTextBetween(doc, match.from, match.to, options.labels),
             ...where(target, blocks, match),
           });
+        }
+        // docs/ENTITY_CHIPS.md, MCP items 3 and 6. The quote named its chips
+        // by their Markdown with other fields than they hold now. The merge
+        // takes a chip's fields from the new text, so an edit made from a
+        // stale read would quietly undo a change made since; an agent changes
+        // a field by quoting its current value.
+        if (match.chipsDiffer) {
+          const now = options.chipMarkdown ? chipMarkdownBetween(doc, match.from, match.to, options.chipMarkdown) : [];
+          return refuse(
+            index,
+            "chip_changed",
+            `That passage's ${now.length === 1 ? "citation reads" : "citations read"} ${now.join(", ") || "otherwise"} now, not as your quote has ${now.length === 1 ? "it" : "them"}. Quote ${now.length === 1 ? "it" : "them"} as ${now.length === 1 ? "it is" : "they are"} to change ${now.length === 1 ? "it" : "them"}.`,
+            { chips: now, ...where(target, blocks, match) },
+          );
         }
         // A chip of a kind this server doesn't know has no Markdown, and one
         // whose Markdown isn't parsed yet (a citation) can't be read back, so

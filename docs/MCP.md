@@ -270,7 +270,8 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
     reference, or a deleted one, with the keys; `chip_as_text` for an edit whose new
     text has a mention's name as plain words where the mention was, with the labels;
     `splits_chip` for an edit whose passage begins or ends partway through a mention, with
-    the passage as it would be whole; and `unknown_kind` for an edit whose passage holds a
+    the passage as it would be whole; `chip_changed` for an edit whose quote gives a citation in
+    its Markdown with other fields than it holds now, with its Markdown now; and `unknown_kind` for an edit whose passage holds a
     chip of a kind this server doesn't know, with the kinds
     ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), MCP item 6);
   - `read_only` for an edit to a record (§6);
@@ -1160,7 +1161,9 @@ version is exactly the state the read returned (§6).
 - **One retry, for Markdown.** A quote that misses as written is parsed as Markdown, with the
   `MarkdownManager` the reads use, and matched again as the text that parse yields. So
   `the **key** claim`, or `[the paper](/link/…)`, copied out of a Markdown read still lands. A
-  quote taken from a `text` read (§6) needs no retry.
+  quote taken from a `text` read (§6) needs no retry. Where the quote holds a chip kind's
+  syntax, such as a citation's `[@radner2012, p. 49]`, the retry first matches it by what each
+  chip points at ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), MCP item 3).
 - **Only an exact match anchors.** The matcher's `ends` tier accepts a long quote whose first
   and last 32 characters match while its middle differs, and stores the real text in its
   place. For a write it never counts as a match. A miss answers `no_match`, with up to three

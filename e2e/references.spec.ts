@@ -298,7 +298,7 @@ test("[@ cites a work from the library: the chip is labelled, listed in the bibl
 // docs/CITATIONS.md, "Markdown" — a citation written by a machine client in
 // Pandoc's syntax, by key: read back as it was sent, changed by sending its
 // Markdown with the change in it, and refused for a key the library lacks.
-test("MCP writes citations in Pandoc's syntax, reads them back as sent, edits their pages, finds what cites a work, and refuses a key the library lacks", async ({
+test("MCP writes citations in Pandoc's syntax, reads them back as sent, edits their pages, finds them by a quote in it, finds what cites a work, and refuses a key the library lacks", async ({
   page,
   request,
 }) => {
@@ -334,6 +334,24 @@ test("MCP writes citations in Pandoc's syntax, reads them back as sent, edits th
     const edit = await agent.call("edit_doc", { url, edits: [{ old: `collective (see ${short} p. 12)`, new: `collective [see @${barfield}, p. 13; @${radner}]` }] });
     expect(edit.isError, JSON.stringify(edit.error)).toBe(false);
     expect((await agent.call("read", { url })).result.markdown).toContain(`collective [see @${barfield}, p. 13; @${radner}].`);
+
+    // A quote may give a citation as its Markdown: found by the works it cites, and an
+    // edit from a stale read, naming another page, is refused with the citation now.
+    const now = `[see @${barfield}, p. 13; @${radner}]`;
+    const around = await agent.call("read", { url, around: `collective ${now}` });
+    expect(around.isError, JSON.stringify(around.error)).toBe(false);
+    expect(around.result).toMatchObject({ total: 1, matchedAs: "markdown" });
+    const stale = await agent.call("read", { url, around: `collective [see @${barfield}, p. 12; @${radner}]` });
+    expect((stale.result.occurrences as { chipsNow?: string[] }[])[0].chipsNow).toEqual([now]);
+    const refused = await agent.call("edit_doc", { url, edits: [{ old: `collective [see @${barfield}, p. 12; @${radner}]`, new: "collective" }] });
+    expect(refused.error).toMatchObject({ code: "chip_changed", chips: [now] });
+    const repaged = await agent.call("edit_doc", { url, edits: [{ old: `collective ${now}`, new: `collective [see @${barfield}, p. 14; @${radner}]` }] });
+    expect(repaged.isError, JSON.stringify(repaged.error)).toBe(false);
+    expect((await agent.call("read", { url })).result.markdown).toContain(`collective [see @${barfield}, p. 14; @${radner}].`);
+    // A note on it from the stale read lands all the same, and is told the page now.
+    const asked = await agent.call("add_note", { on: url, quote: `collective ${now}`, body: "Which page?" });
+    expect(asked.isError, JSON.stringify(asked.error)).toBe(false);
+    expect((asked.result.passage as { chipsNow?: string[] }).chipsNow).toEqual([`[see @${barfield}, p. 14; @${radner}]`]);
 
     // A note cites the same way, and its body can be replaced over a citation.
     const note = await agent.call("add_note", { on: url, quote: "appearances are collective", body: `Compare [@${radner}, p. 3].` });

@@ -10,8 +10,8 @@ contract. The kit says how every chip is stored, rendered, quoted and searched. 
 ## Built so far
 
 The reference library (its data, its pages and its machine door), the citation chip itself
-with its popover, its Markdown both ways, a doc's bibliography, and search by cited work.
-Everything below not listed here is still a plan: of the Markdown, a quote written in it and the
+with its popover, its Markdown both ways and a quote written in it, a doc's bibliography, and
+search by cited work. Everything below not listed here is still a plan: of the Markdown, the
 transcript importer's escape; and Later.
 
 - **The chip kind:** `src/lib/entity-chips/kinds/citation.ts` holds its fields and
@@ -46,8 +46,10 @@ transcript importer's escape; and Later.
   or refuses `unknown_chip`, in the UI's import as on every MCP write. The writer escapes text
   that would read as a citation and guards the text beside one. An edit that sends a citation's
   Markdown with a field changed keeps the chip and takes the field, and one that adds a work
-  continues it. Not built: a quote written in the syntax (below), which still matches only as
-  the label a text read shows, and so `chip_changed` (the kit's MCP, items 3 and 6).
+  continues it. A quote may give a citation in the syntax as well as as the label a text read
+  shows (below): `withQuoteChips` (`parsed-chips.ts`) reads it, `resolveQuote` finds it by
+  identity, and an edit from a stale read is refused as `chip_changed` (the kit's MCP, items 3
+  and 6).
 - **Search by cited work** (below): `cites`, `cited_title` and `cited_author` on the page,
   MCP's `search` and the export.
 - **The bibliography** (below): `citation-bibliography.ts` computes it, `Bibliography.tsx`
@@ -218,9 +220,12 @@ call for no refresh.
   and autolinks, as it already escapes a tag-like `<`. A transcript names packages rather than
   works, such as `@playwright/test`, and 6 of 354 local docs hold one. `escapeInline`, for quoted
   excerpts, file names and search queries, gains `@` too. Its `--markdown` files parse strictly.
-- **A quote copied from a Markdown read** (planned) holds this syntax, not the label, and finds
-  its chip by identity (the kit's MCP, item 3). A quote naming the right work at a different locator matches,
-  and the reply reports the current locator, unless it is an edit's target, which is refused.
+- **A quote copied from a Markdown read** holds this syntax, not the label, and finds its chip
+  by identity (the kit's MCP, item 3). Of several citations of one work, the one whose locator
+  and words also agree wins. A quote naming the right work at a different locator matches, and
+  the reply reports the citation's Markdown now (`chipsNow`), unless it is an edit's target,
+  which is refused as `chip_changed` with the same. A key the library doesn't know finds
+  nothing, rather than being refused as it would be in a write.
 
 ## Step 3: references and citations
 

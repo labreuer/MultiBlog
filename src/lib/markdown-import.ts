@@ -273,9 +273,9 @@ const docMarkdownManager = new MarkdownManager({ extensions: [...contentExtensio
 
 // The other direction (MCP item 2): Markdown read with each chip kind's
 // syntax taken for a chip. Only the paths that ask for it parse this way
-// (MCP's doc and note writes, /docs' Markdown import); a comment, a post and
-// the quote matcher's retry never do, so `[@x](/authors/x)` pasted into a
-// comment stays the link it says it is.
+// (MCP's doc and note writes, /docs' Markdown import, and a quote's chip
+// form, `withQuoteChips`); a comment and a post never do, so `[@x](/authors/x)`
+// pasted into a comment stays the link it says it is.
 //
 // The parse keys on the syntax, never on the label: a link to an author page
 // whose text opens with a literal `@`. marked tells that `@` from an escaped

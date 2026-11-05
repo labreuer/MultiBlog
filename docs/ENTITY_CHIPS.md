@@ -198,9 +198,11 @@ Steps 0 to 3 are built but for the items each entry says are not; step 3's are i
   instance id and takes its fields from the new text (`chipFieldsFrom`), so a citation sent
   back with another page has that page.
 
-  Not built of item 14: the Markdown retry against identity text (the retry matches the label a
-  link's text gives, which is the same for a mention, and a quote in a citation's syntax
-  matches nothing), and with it `chip_changed`.
+  A quote that gives a chip in its chip kind's syntax finds it by identity (MCP item 3):
+  `withQuoteChips` (`parsed-chips.ts`) reads each part of the quote through the chip parse and
+  looks up the handles and keys it names, read-only (`chipsForFinding`, `placeholders.ts`), and
+  `resolveQuote` matches the result in the doc's identity text (`flattenForIdentity`). An edit
+  whose quote gives a chip other fields than it holds is refused as `chip_changed`.
 - **Styling, per doc and per post:**
   - **The doc's style** is in a `Y.Map("settings")` in its ydoc, one key per chip kind
     (`settings.ts`), cached to `Doc.chipStyles` by the store. `DocSettingsPanel` writes it
@@ -596,16 +598,21 @@ So:
      falls inside a label widens to the whole chip; an edit's is refused (item 6). Verification
      compares a range's text with the quote, which a widened range fails, so the resolver returns
      the match with the chip its edge fell in, and the caller widens or refuses.
-   - **The Markdown retry** parses with every chip kind's codec. Today it parses with
-     `contentExtensions`, which has no chips, so a citation in a quote stays literal text and
-     never matches. When the parse holds chips, the quote is matched against the doc's *identity
-     text* instead. There each chip is one private-use code point per identity, the text the
+   - **The Markdown retry** parses with every chip kind's codec. When the parse holds chips,
+     the quote is matched against the doc's *identity text* instead. There each chip is one private-use code point per identity, the text the
      merge aligns (item 5). So `[see @radner2012, p. 49]`, copied from a Markdown read, finds
      its chip whatever style, number or label the doc shows now. Where several chips of that
-     identity fit, the one whose other fields also agree wins.
+     identity fit, the one whose other fields also agree wins. The parse runs on the Next server,
+     where the handles and keys are looked up (`withQuoteChips`); the quote carries the result,
+     as JSON, to the collab server for an edit. A handle or key that names nothing is kept as
+     written, which is how a chip whose target is gone is written, so it finds that chip only.
+     When the identity text holds no match, the quote is matched as its plain parse's text, as a
+     quote with no chip is: `**Ask** @Ada Lovelace` still finds a mention shown as
+     `@Ada Lovelace`, though the chip parse takes `@Ada` for a citation.
    - **A quote whose fields disagree** names the right chip with, say, the wrong page.
-     - One chip fits: the quote matches, and the reply reports the chip's current fields. A refusal
-       would cost a round trip and land on the same chip.
+     - One chip fits: the quote matches, and the reply reports the chip's current Markdown
+       (`chipsNow`, in `around`'s occurrence and a note's `passage`). A refusal would cost a round
+       trip and land on the same chip. A link reports no passage, and so nothing.
      - One chip fits and the quote is an edit's target: refused as `chip_changed` (item 6). The
        merge takes fields from the new text, so an edit from a stale read would silently undo a
        correction made since. An agent changes a field by quoting its current value.

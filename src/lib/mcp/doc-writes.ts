@@ -8,11 +8,12 @@ import { createDocWithContent } from "@/lib/doc-create";
 import { MAX_MARKDOWN_BYTES, markdownToBlocks, markdownToDocContent, markdownToText } from "@/lib/markdown-import";
 import { pmDocContentSchema } from "@/lib/tiptap-schema";
 import { resolveParsedChips } from "@/lib/entity-chips/parsed-chips";
-import { chipIdentitiesBetween } from "@/lib/entity-chips/renderings";
+import { chipIdentitiesBetween, chipMarkdownBetween } from "@/lib/entity-chips/renderings";
 import { postedAnnotationWhere } from "@/lib/annotation-authz";
 import { linkPartsInto } from "@/lib/anchored-link-data";
 import { flattenForMatch, quotedTextAt } from "@/lib/comment-quote-match";
 import { resolveQuote } from "@/lib/quote-resolve";
+import { withQuoteChips } from "@/lib/entity-chips/parsed-chips";
 import { alignBlocks, diffRuns, renderWordDiff } from "@/lib/block-align";
 import { blockKey, type EditSpec, type EditTarget } from "@/lib/doc-edit";
 import { requestDocEdit, type AnchorRef } from "@/lib/doc-edit-client";
@@ -165,7 +166,7 @@ export type EditInput = {
 
 /** What the edit touched, and what the endpoint refused, said as the model reads them. */
 function refusalError(refusal: { code: string; message: string; details?: Record<string, unknown>; edit: number }, count: number): ApiError {
-  const code = refusal.code as "no_match" | "ambiguous" | "invalid" | "conflict" | "chip_as_text" | "splits_chip" | "unknown_kind";
+  const code = refusal.code as "no_match" | "ambiguous" | "invalid" | "conflict" | "chip_as_text" | "splits_chip" | "chip_changed" | "unknown_kind";
   // A refusal of the request as a whole names no edit.
   const numbered = count > 1 && refusal.edit >= 0;
   return new ApiError(code, numbered ? `Edit ${refusal.edit + 1}: ${refusal.message}` : refusal.message, {
@@ -229,10 +230,12 @@ export async function editDocFor(
     const label = (input.edits?.length ?? 0) > 1 ? `Edit ${index + 1}: ` : "";
     if (edit.old !== undefined) {
       if (edit.new === undefined) throw invalid(`${label}old needs new beside it.`);
-      const target: EditTarget =
+      // A chip quoted by its Markdown is found by what it points at (docs/ENTITY_CHIPS.md, MCP item 3).
+      const target: EditTarget = await withQuoteChips(
         typeof edit.old === "string"
           ? { quote: edit.old, prefix: edit.prefix, suffix: edit.suffix }
-          : { start: edit.old.start, end: edit.old.end, prefix: edit.prefix, suffix: edit.suffix, acrossHeadings: edit.acrossHeadings };
+          : { start: edit.old.start, end: edit.old.end, prefix: edit.prefix, suffix: edit.suffix, acrossHeadings: edit.acrossHeadings },
+      );
       const blocks = edit.new.trim() === "" ? [] : await blocksOf(edit.new);
       edits.push({ kind: "replace", target, blocks: blocks.length > 0 ? blocks : [] });
       written.push(...blocks);
@@ -280,6 +283,10 @@ export async function editDocFor(
         }
         if (found.matches[0].widened) {
           throw new ApiError("splits_chip", "That passage begins or ends partway through a mention. Name the whole of it, or none.");
+        }
+        if (found.matches[0].chipsDiffer) {
+          const was = chipMarkdownBetween(then.node, found.matches[0].from, found.matches[0].to, then.chips.markdown);
+          throw new ApiError("chip_changed", `At the version you read, that passage's citations read ${was.join(", ")}, not as your quote has them.`, { chips: was });
         }
         edit.target.expectText = quotedTextAt(then.node, found.matches[0].from, found.matches[0].to);
         edit.target.expectChips = chipIdentitiesBetween(then.node, found.matches[0].from, found.matches[0].to);

@@ -2,14 +2,15 @@ import type { JSONContent } from "@tiptap/core";
 import type { Actor } from "@/lib/actor";
 import { ApiError } from "@/lib/api/errors";
 import { prismaIncludingDeleted } from "@/lib/prisma";
+import { markdownToBlocks } from "@/lib/markdown-import";
+import type { ChipQuoteForm, QuoteSpec } from "@/lib/quote-resolve";
 import { referencesByKeys } from "@/lib/reference-data";
 import { CITATION, citationKind } from "./kinds/citation";
-import type { MarkdownCitationItem } from "./kinds/citation-markdown";
 import { MENTION, MENTION_HREF_PREFIX } from "./kinds/mention";
 import { mentionableAmong } from "./kinds/mention-rule";
 import { newChipIid } from "./node";
+import { chipsForFinding, placeholderCitation, placeholderSlug, placeholdersIn, walk } from "./placeholders";
 import { chipsInJSON, chipTargets } from "./renderings";
-import { isChip } from "./text";
 
 // docs/ENTITY_CHIPS.md, MCP items 2 and 6 — what a Markdown parse leaves to
 // do before a chip can be stored. The parse (markdown-import.ts) reads each
@@ -25,23 +26,6 @@ import { isChip } from "./text";
 //
 // Server-only.
 
-/** A mention placeholder's handle, or null for any other node. */
-function placeholderSlug(node: JSONContent): string | null {
-  if (!isChip(node) || node.attrs?.kind !== MENTION) return null;
-  const data = node.attrs?.data as Record<string, unknown> | undefined;
-  return typeof data?.slug === "string" && typeof data.userId !== "string" ? data.slug : null;
-}
-
-/** A citation placeholder's works, as the Markdown named them, or null for any other node. */
-function placeholderCitation(node: JSONContent): { items: MarkdownCitationItem[]; narrative: boolean } | null {
-  if (!isChip(node) || node.attrs?.kind !== CITATION) return null;
-  const data = node.attrs?.data as Record<string, unknown> | undefined;
-  const items = data?.items;
-  if (!Array.isArray(items) || items.length === 0) return null;
-  if (!items.every((item) => typeof item?.key === "string" && item.refId === undefined)) return null;
-  return { items: items as MarkdownCitationItem[], narrative: data?.form === "narrative" };
-}
-
 /** A placeholder as the link its Markdown also is: the words it showed, linked to the author page it named. */
 function asLink(node: JSONContent, slug: string): JSONContent {
   const label = (node.attrs?.data as Record<string, unknown> | undefined)?.label;
@@ -50,11 +34,6 @@ function asLink(node: JSONContent, slug: string): JSONContent {
     text: typeof label === "string" && label ? label : `@${slug}`,
     marks: [{ type: "link", attrs: { href: `${MENTION_HREF_PREFIX}${slug}` } }],
   };
-}
-
-function walk(node: JSONContent, visit: (node: JSONContent) => JSONContent): JSONContent {
-  const visited = visit(node);
-  return visited.content ? { ...visited, content: visited.content.map((child) => walk(child, visit)) } : visited;
 }
 
 /**
@@ -190,4 +169,41 @@ async function resolveCitations(content: JSONContent, held: JSONContent | null):
     }
     return { ...node, attrs: { kind: CITATION, iid: newChipIid(), data } };
   });
+}
+
+/** `content`'s placeholders as the chips they name (`chipsForFinding`), each handle and key looked up, deleted targets included. */
+async function lookUpForFinding(content: JSONContent[]): Promise<JSONContent[] | null> {
+  const { slugs, keys } = placeholdersIn(content);
+  if (slugs.length === 0 && keys.length === 0) return null;
+  const users = slugs.length > 0 ? await prismaIncludingDeleted.user.findMany({ where: { slug: { in: slugs } }, select: { id: true, slug: true } }) : [];
+  const userOf = new Map(users.map((user) => [user.slug, user.id]));
+  const references = await referencesByKeys(keys);
+  return chipsForFinding(content, { user: (slug) => userOf.get(slug), reference: (key) => references.get(key)?.id });
+}
+
+/**
+ * `spec` with its parts read through the chip parse (`QuoteSpec.chips`), when
+ * any of them holds a chip's syntax: what lets `resolveQuote` find a chip by
+ * the Markdown a read wrote for it. Unchanged when none does.
+ */
+export async function withQuoteChips<T extends QuoteSpec>(spec: T): Promise<T> {
+  const names = ["quote", "start", "end", "prefix", "suffix"] as const;
+  // Every chip kind's syntax has an `@` in it; most quotes have none.
+  if (!names.some((name) => spec[name]?.includes("@"))) return spec;
+  const chips: ChipQuoteForm = {};
+  let found = false;
+  for (const name of names) {
+    const part = spec[name];
+    if (part === undefined) continue;
+    let blocks: JSONContent[];
+    try {
+      blocks = markdownToBlocks(part, { chips: true });
+    } catch {
+      return spec;
+    }
+    const resolved = await lookUpForFinding(blocks);
+    if (resolved) found = true;
+    chips[name] = resolved ?? blocks;
+  }
+  return found ? { ...spec, chips } : spec;
 }
