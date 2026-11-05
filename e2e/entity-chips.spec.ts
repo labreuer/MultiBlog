@@ -9,6 +9,7 @@ import {
   deleteTestDoc,
   deleteTestPost,
   getAnnotationStates,
+  getDocChipIids,
   getDocSearchText,
   getDocState,
   getMentionSources,
@@ -555,5 +556,45 @@ test("what mentions a person is found by @handle in the search box and by mentio
   } finally {
     await page.goto("about:blank");
     for (const doc of [shared, hidden, plain]) await deleteTestDoc(doc.id);
+  }
+});
+
+// docs/ENTITY_CHIPS.md, step 1, item 3 — two chips sharing an instance id, a
+// state no single tab makes but concurrent changes can leave. Every editor
+// that receives it gives the later chip an id derived from its Yjs item, so
+// two tabs repairing at once write the same value rather than one each.
+test("two mentions left sharing an instance id are told apart again, the same way by every tab", async ({ page, context }) => {
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: bodyOf(text("Ask "), mention("dup", await adminId()), text(" or "), mention("dup", await adminId()), text(".")),
+  });
+  const other = await context.newPage();
+  const iidsIn = (tab: typeof page) =>
+    tab.evaluate(() => {
+      const editor = (document.querySelectorAll(".tiptap")[1] as unknown as { editor: { getJSON(): JSONContent } }).editor;
+      const found: string[] = [];
+      const walk = (node: JSONContent) => {
+        if (node.type === "entityChip") found.push(String(node.attrs?.iid));
+        node.content?.forEach(walk);
+      };
+      walk(editor.getJSON());
+      return found;
+    });
+  try {
+    // Both at once, so each meets the shared id before hearing of the other's repair.
+    await Promise.all([page.goto(`/doc/${doc.id}/edit`), other.goto(`/doc/${doc.id}/edit`)]);
+    await Promise.all([waitForDocCollabReady(page), waitForDocCollabReady(other)]);
+
+    const derived = expect.stringMatching(/^y[0-9a-z]+\.[0-9a-z]+$/);
+    await expect.poll(() => iidsIn(page)).toEqual(["dup", derived]);
+    await expect.poll(() => iidsIn(other)).toEqual(await iidsIn(page));
+    // And it is what was stored: one value, not the last of several.
+    await expect.poll(() => getDocChipIids(doc.id), { timeout: 15_000 }).toEqual(await iidsIn(page));
+    await expect(bodyEditor(page).locator("span.entity-chip")).toHaveText(["@E2E Admin", "@E2E Admin"]);
+  } finally {
+    await other.close();
+    await page.goto("about:blank");
+    await deleteTestDoc(doc.id);
   }
 });

@@ -1217,6 +1217,18 @@ export async function getAnnotationStates(docId: string): Promise<AnnotationStat
   );
 }
 
+/** The instance ids of a doc's entity chips, in order, as its cache column holds them after a store. */
+export async function getDocChipIids(docId: string): Promise<string[]> {
+  const doc = await prisma.doc.findUnique({ where: { id: docId }, select: { proseJson: true } });
+  const found: string[] = [];
+  const walk = (node: JSONContent) => {
+    if (node.type === "entityChip") found.push(String(node.attrs?.iid));
+    node.content?.forEach(walk);
+  };
+  if (doc?.proseJson) walk(doc.proseJson as JSONContent);
+  return found;
+}
+
 /** Whether a posted annotation's search vector holds `word`: its body, and its quoted passage with each chip as its label. */
 export async function annotationSearchHolds(annotationId: string, word: string): Promise<boolean> {
   const rows = await prisma.$queryRaw<{ hit: boolean }[]>`
@@ -2765,6 +2777,7 @@ const handlers = {
   getDocLinkFields,
   getAnnotationStates,
   annotationSearchHolds,
+  getDocChipIids,
   markPresentAtStamp,
   createTestAnnotation,
   getReplyAnchorFacts,

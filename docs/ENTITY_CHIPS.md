@@ -62,8 +62,10 @@ still a plan.
 - **Item 2, the node:** `entityChip` (`src/lib/entity-chips/node.ts`) in the doc and
   annotation-body schemas, with `leafText`, the parse rule and its validation.
 - **Item 3, instance ids:** a random id at insertion, and a fresh one for a pasted copy
-  (`repairChipIids`). Not the id derived from a Yjs item, for a duplicate that concurrent changes
-  leave.
+  (`repairChipIids`). A duplicate that concurrent changes leave is repaired by every editor
+  that receives it, with an id derived from the later chip's Yjs item (`repairSharedIids`,
+  `shared-iids.ts`), so their repairs agree. It runs only right after a remote change, when
+  the editor's document and the Yjs one hold the same chips, and is kept out of undo.
 - **Item 4, the rendering function:** `chipRenderings` (`renderings.ts`), the three statuses, and
   the placeholder for a chip kind the build doesn't know. Not the `~~ ~~` in Markdown.
 - **Item 5, the chip context:** `loadChipContext`, `GET /api/chip-context` with its per-viewer
