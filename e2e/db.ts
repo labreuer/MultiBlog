@@ -279,6 +279,8 @@ export const getCitationSources = (...args: Parameters<DbHandlers["getCitationSo
 export const getReferenceId = (...args: Parameters<DbHandlers["getReferenceId"]>) => call("getReferenceId", ...args);
 export const annotationSearchHolds = (...args: Parameters<DbHandlers["annotationSearchHolds"]>): Promise<boolean> =>
   call("annotationSearchHolds", ...args);
+export const setAnchorChipLabels = (...args: Parameters<DbHandlers["setAnchorChipLabels"]>): Promise<void> =>
+  call("setAnchorChipLabels", ...args);
 export const markPresentAtStamp = (...args: Parameters<DbHandlers["markPresentAtStamp"]>): Promise<boolean> =>
   call("markPresentAtStamp", ...args);
 

@@ -116,6 +116,8 @@ export const mentionKind: ChipKind<MentionData, MentionStyle, MentionContext> = 
 
   targets: (data) => [data.userId],
 
+  naming: (userId) => ({ userId }),
+
   parseStyle(raw) {
     const style = isRecord(raw) ? raw : {};
     return {

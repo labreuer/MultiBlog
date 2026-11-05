@@ -249,9 +249,9 @@ before changing the behavior it describes.
   compare it with a ydoc through `withoutChipLabels`. An anchor whose passage holds a chip keeps
   a record of which (`src/lib/anchors/chips.ts`): hand it to `resolveAnchorInDoc`, or mentions
   of two people resolve alike, and show a stored quote through `quoteWithChipLabels` or
-  `shownQuote`, never raw. Label a doc's body under its style
-  (`chipInputsForBody(body, styles)`), or default-style labels overwrite the doc's own.
-  docs/ENTITY_CHIPS.md.
+  `shownQuote`, never raw. A record's fields are never rewritten; only its label is. Label a
+  doc's body under its style (`chipInputsForBody(body, styles)`), or default-style labels
+  overwrite the doc's own. docs/ENTITY_CHIPS.md.
 - **Tables are in `contentExtensions` and deliberately not in `annotationContentExtensions`.**
   The annotation list used to be an alias of `authorHighlightExtensions` and is now its own
   `[StarterKit, AuthorHighlight]`, mirrored by `annotationEditorExtensions`; don't re-derive one from

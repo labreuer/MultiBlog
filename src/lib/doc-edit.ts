@@ -3,7 +3,7 @@ import { Transform } from "@tiptap/pm/transform";
 import type { JSONContent } from "@tiptap/core";
 import { diffText, tokenizeFine } from "./diff";
 import { writesBack } from "./entity-chips/registry";
-import { chipIdentitiesBetween, chipIdentity, chipsIn } from "./entity-chips/renderings";
+import { chipAttrsOf, chipContinues, chipIdentitiesBetween, chipIdentity, chipsIn } from "./entity-chips/renderings";
 import { chipDisplayText, displayTextBetween, isChip, type ChipLabels } from "./entity-chips/text";
 import { alignBlocks } from "./block-align";
 import { blockText, blocksOfRange, docBlocks, findHeading, sectionOf, type DocBlock } from "./doc-text";
@@ -113,7 +113,9 @@ type Atom = { text: string; marks: readonly Mark[]; leaf: PMNode | null };
 // Whatever label the new text gave a chip, it then lines up with the old chip
 // of the same identity and with nothing else: the old node survives, instance
 // id and all, and a chip that changed identity reads as one removed and one
-// added.
+// added. Where its chip kind says the added one continues the removed one (a
+// citation that gained a work), the two are one chip that was edited, and
+// the added one takes the removed one's instance id (`pairContinuations`).
 //
 // The characters are allocated per merge, skipping any that either document
 // holds, since extracted PDF text can hold any private-use character.
@@ -259,6 +261,9 @@ export function mergeTextblock(old: PMNode, next: PMNode, options: MergeOptions)
     tokenizeFine,
   );
   const out: Atom[] = [];
+  // The chips this merge removes, and where in `out` the ones it adds are.
+  const removedChips: PMNode[] = [];
+  const addedChips: number[] = [];
   let oi = 0;
   let ni = 0;
   let k = 0;
@@ -281,6 +286,7 @@ export function mergeTextblock(old: PMNode, next: PMNode, options: MergeOptions)
     const inserted: Atom[] = [];
     for (const change of tokens.slice(k, end)) {
       if (change.type === "delete") {
+        for (const atom of oa.slice(oi, oi + change.value.length)) if (atom.leaf && isChip(atom.leaf)) removedChips.push(atom.leaf);
         oi += change.value.length;
       } else {
         inserted.push(...na.slice(ni, ni + change.value.length));
@@ -289,12 +295,37 @@ export function mergeTextblock(old: PMNode, next: PMNode, options: MergeOptions)
     }
     const inherited =
       oi > deletedFrom ? annotationsOf(oa[deletedFrom].marks) : sharedAnnotations(oa[deletedFrom - 1], oa[deletedFrom]);
-    for (const atom of inserted) out.push(fresh(atom, inherited, options));
+    for (const atom of inserted) {
+      if (atom.leaf && isChip(atom.leaf)) addedChips.push(out.length);
+      out.push(fresh(atom, inherited, options));
+    }
     k = end;
   }
+  pairContinuations(removedChips, out, addedChips);
   // Not on a revert, which puts back what was there, plain words included.
   if (!options.keepMarks) noteChipsAsText(oa, na, merge);
   return build(next, out);
+}
+
+/**
+ * Gives an added chip the instance id of the removed chip it continues
+ * (docs/ENTITY_CHIPS.md, MCP item 5): the chip was edited, not swapped, and
+ * the anchors on that instance stay on it. Over the whole textblock, since an
+ * edited chip may also have moved. Only where one pairing is possible, each
+ * way: with two candidates on either side nothing says which is which, and
+ * both stand as one removed and one added.
+ */
+function pairContinuations(removed: readonly PMNode[], out: Atom[], added: readonly number[]): void {
+  if (removed.length === 0 || added.length === 0) return;
+  const continues = (old: PMNode, index: number) => chipContinues(chipAttrsOf(old.attrs), chipAttrsOf(out[index].leaf!.attrs));
+  for (const old of removed) {
+    const successors = added.filter((index) => continues(old, index));
+    if (successors.length !== 1) continue;
+    const [index] = successors;
+    if (removed.filter((other) => continues(other, index)).length !== 1) continue;
+    const leaf = out[index].leaf!;
+    out[index] = { ...out[index], leaf: leaf.type.create({ ...leaf.attrs, iid: old.attrs.iid }, null, leaf.marks) };
+  }
 }
 
 /**

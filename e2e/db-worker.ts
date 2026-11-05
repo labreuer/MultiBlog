@@ -1254,6 +1254,19 @@ export async function getTestReference(key: string): Promise<{ key: string; iden
     : null;
 }
 
+/**
+ * Overwrites the label of every chip record on an annotation's anchor: the
+ * state a rename leaves until its refresh has run, without racing one.
+ */
+export async function setAnchorChipLabels(annotationId: string, label: string): Promise<void> {
+  const row = await prisma.annotation.findUniqueOrThrow({ where: { id: annotationId }, select: { anchorChips: true } });
+  const records = Array.isArray(row.anchorChips) ? row.anchorChips : [];
+  if (records.length === 0) throw new Error(`Annotation ${annotationId} has no chip record to relabel.`);
+  const relabelled = records.map((record) => ({ ...(record as Record<string, unknown>), label }));
+  // Raw, as the refresh writes it: no date on the row moves.
+  await prisma.$executeRaw`UPDATE "annotation" SET anchor_chips = ${JSON.stringify(relabelled)}::jsonb WHERE id = ${annotationId}`;
+}
+
 /** Whether a posted annotation's search vector holds `word`: its body, and its quoted passage with each chip as its label. */
 export async function annotationSearchHolds(annotationId: string, word: string): Promise<boolean> {
   const rows = await prisma.$queryRaw<{ hit: boolean }[]>`
@@ -2815,6 +2828,7 @@ const handlers = {
   getDocLinkFields,
   getAnnotationStates,
   annotationSearchHolds,
+  setAnchorChipLabels,
   deleteTestReferences,
   getTestReference,
   getDocChipIids,

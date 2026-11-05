@@ -15,7 +15,9 @@ Markdown, the chip's popover, the bibliography, the search filters, and what a r
 page shows of who cites it.
 
 - **The chip kind:** `src/lib/entity-chips/kinds/citation.ts` holds its fields and
-  validation, its identity (the works, in any order), the three forms with their narrative
+  validation, its identity (the works, in any order), when one citation continues another
+  (it holds every work the other did), which both the anchors and the MCP merge ask, the
+  three forms with their narrative
   and author-suppressed shapes, numbering by first appearance, the year-then-key
   disambiguation of a shared abbreviation, the per-work fallback to author-date for a
   reference with no abbreviation, and Pandoc's syntax on the way out. A doc's link goes to

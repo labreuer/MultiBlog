@@ -9,6 +9,7 @@ import QuoteThreadHeader from "../QuoteThreadHeader";
 import CollapseAllControls from "./CollapseAllControls";
 import { useRevealForFragment } from "./use-reveal-for-fragment";
 import { useMarginNotesLayout } from "../margin-notes/use-margin-notes-layout";
+import { useLiveChipLabels } from "../margin-notes/use-live-chip-labels";
 import { quoteWithChipLabels, type ChipRecord } from "@/lib/anchors";
 import { resolveAnnotationRanges } from "@/lib/annotation-marks";
 import { activatePseudoBorderForHash, refreshPseudoBorders } from "@/lib/pseudo-border";
@@ -44,6 +45,8 @@ type Props = {
 export default function AnnotationList({ entries, docId }: Props) {
   const [sortMode, setSortMode] = useState<SortMode>("datetime");
   const collapseState = useCollapseState();
+  // The labels the body beside these cards is drawing, for the chips in their quotes.
+  const liveLabels = useLiveChipLabels();
   // Every thread that draws a card — a fully deleted one draws nothing (see
   // renderEntry), so there is nothing for "Collapse all" to close.
   const roots = useMemo(() => entries.filter(entryHasVisibleContent).map((entry) => entry.root), [entries]);
@@ -149,7 +152,7 @@ export default function AnnotationList({ entries, docId }: Props) {
         {entry.quotedText && !rootRendersNothing && (
           <QuoteThreadHeader
             threadId={entry.threadId}
-            quotedText={quoteWithChipLabels(entry.quotedText, entry.anchorChips)}
+            quotedText={quoteWithChipLabels(entry.quotedText, entry.anchorChips, liveLabels)}
             status="ACTIVE"
             context={null}
             color={entry.color}

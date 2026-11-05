@@ -1,5 +1,5 @@
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { chipAttrsOf, chipIdentity, UNKNOWN_CHIP } from "../entity-chips/renderings";
+import { chipAttrsOf, chipContinues, chipIdentity, UNKNOWN_CHIP } from "../entity-chips/renderings";
 import type { ChipLabels } from "../entity-chips/text";
 import { CHIP_ANCHOR_TEXT, ENTITY_CHIP } from "../entity-chips/types";
 
@@ -20,9 +20,13 @@ import { CHIP_ANCHOR_TEXT, ENTITY_CHIP } from "../entity-chips/types";
 //    on an inline node). The instance id finds the one chip an anchor means.
 //
 // A record carries the chip's fields rather than only its identity: a label
-// is computed from the fields, and the identity is derived from them by the
-// chip kind. Its `label` is the label as of the write, as `prose_json`'s is
-// (item 8): the refresh rewrites it when its target is renamed (item 10).
+// is computed from the fields, the identity is derived from them by the
+// chip kind, and whether the chip there now continues the recorded one is
+// asked of them (`chipMatch`). The fields are the chip's as of the anchor's
+// version, and are never rewritten. Its `label` is on another clock: the
+// label as of the write, as `prose_json`'s is (item 8), which the refresh
+// rewrites when its target changes (item 10). So show a record by its
+// `label`, never by a label computed from its `data`.
 //
 // Where it lives: in the DOC_RANGE selector of a tag, link or comment-quote
 // anchor, and in `annotation.anchor_chips` beside an annotation's anchor
@@ -131,6 +135,14 @@ export function relabelChipRecords(chips: readonly ChipRecord[], labels: ChipLab
  * stands for the recorded entity but at least one is another instance, null
  * when the range holds a different entity somewhere, or a different number of
  * chips. The text can't answer this: every chip reads U+FFFC.
+ *
+ * The recorded chip is still itself after an edit its chip kind says
+ * continues it (a citation that gained a work), though its identity is no
+ * longer the recorded one. Only that instance: another chip elsewhere that
+ * happens to hold the same works and more is not what the anchor was put on.
+ * The record keeps the fields it was written with, so a chip that goes on
+ * gaining works goes on continuing it, and one that loses a recorded work
+ * stops.
  */
 export function chipMatch(node: PMNode, from: number, to: number, chips: readonly ChipRecord[]): "instance" | "identity" | null {
   const want = [...chips].sort((a, b) => a.at - b.at);
@@ -141,7 +153,8 @@ export function chipMatch(node: PMNode, from: number, to: number, chips: readonl
     if (same && child.type.name === ENTITY_CHIP && pos >= from && pos < to) {
       const have = chipAttrsOf(child.attrs);
       const wanted = want[index++];
-      if (!wanted || chipIdentity(wanted) !== chipIdentity(have)) same = false;
+      if (!wanted) same = false;
+      else if (chipIdentity(wanted) !== chipIdentity(have)) same = wanted.iid === have.iid && chipContinues(wanted, have);
       else if (wanted.iid !== have.iid) instance = false;
     }
     return same && !child.isLeaf;

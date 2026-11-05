@@ -4,7 +4,7 @@ import * as Y from "yjs";
 import { yXmlFragmentToProsemirrorJSON, prosemirrorToYXmlFragment } from "y-prosemirror";
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { planEdits, type EditSpec } from "../doc-edit";
+import { mergeTextblock, planEdits, type EditSpec } from "../doc-edit";
 import { writeBackDoc } from "../doc-edit-yjs";
 import { docContentToMarkdown, markdownToBlocks, markdownToText } from "../markdown-import";
 import { pmDocContentSchema } from "../tiptap-schema";
@@ -240,4 +240,46 @@ test("write-back: a kept chip survives the ydoc round trip with its instance id,
   // The first parsed mention is the old chip again; the second is the added one.
   assert.deepEqual(chips(back), ["i1:u1", "new1:u2"]);
   assert.equal(shown(back), "Ask <i1> and <new1> about the loom today.");
+});
+
+// --- a chip that continues another (MCP item 5) ------------------------------
+//
+// At the merge itself: no Markdown reads a citation back yet, so no edit
+// reaches this through `planEdits`.
+
+const cite = (iid: string, ...refIds: string[]): JSONContent => ({
+  type: "entityChip",
+  attrs: { kind: "citation", iid, data: { items: refIds.map((refId) => ({ refId })) } },
+});
+const block = (...content: JSONContent[]) => pmDocContentSchema.nodeFromJSON(para(...content));
+const cited = (node: PMNode) => chipsIn(node).map((c) => `${c.iid}:${(c.data as { items: { refId: string }[] }).items.map((item) => item.refId).join("+")}`);
+const mergeOptions = { schema: pmDocContentSchema, authorId: AUTHOR };
+
+test("merge: a citation that gained a work keeps its instance id, and holds the new works", () => {
+  const old = block(text("As argued "), cite("c1", "radner"), text(" at length."));
+  const next = block(text("As argued "), cite("new", "radner", "barfield"), text(" at great length."));
+  assert.deepEqual(cited(mergeTextblock(old, next, mergeOptions)), ["c1:radner+barfield"]);
+});
+
+test("merge: a citation that lost a work, or cites another, is one removed and one added", () => {
+  const old = block(text("As argued "), cite("c1", "radner", "barfield"), text(" at length."));
+  assert.deepEqual(cited(mergeTextblock(old, block(text("As argued "), cite("new", "radner"), text(" at length.")), mergeOptions)), ["new:radner"]);
+  assert.deepEqual(cited(mergeTextblock(old, block(text("As argued "), cite("new", "polanyi"), text(" at length.")), mergeOptions)), ["new:polanyi"]);
+});
+
+test("merge: with two chips that could continue one, or one that could continue two, nothing is paired", () => {
+  const one = block(text("See "), cite("c1", "radner"), text(" here."));
+  const twoNew = block(text("See "), cite("n1", "radner", "barfield"), text(" and "), cite("n2", "radner", "polanyi"), text(" here."));
+  assert.deepEqual(cited(mergeTextblock(one, twoNew, mergeOptions)), ["n1:radner+barfield", "n2:radner+polanyi"]);
+
+  const two = block(text("See "), cite("c1", "radner"), text(" and "), cite("c2", "barfield"), text(" here."));
+  const oneNew = block(text("See "), cite("n1", "radner", "barfield"), text(" here."));
+  assert.deepEqual(cited(mergeTextblock(two, oneNew, mergeOptions)), ["n1:radner+barfield"]);
+});
+
+test("merge: a continued chip is paired wherever in the paragraph it went, beside one that is untouched", () => {
+  const old = block(cite("c1", "radner"), text(" opens, and "), cite("c2", "polanyi"), text(" closes."));
+  const next = block(cite("x", "polanyi"), text(" closes, after "), cite("y", "radner", "barfield"), text(" opens."));
+  const merged = cited(mergeTextblock(old, next, mergeOptions));
+  assert.ok(merged.includes("c1:radner+barfield"), merged.join(" "));
 });

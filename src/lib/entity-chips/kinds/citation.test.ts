@@ -128,6 +128,8 @@ test("identity is the works, in any order; a citation holding every work of an o
   // Adding a work continues the chip; removing one does not.
   assert.equal(citationKind.continues(cite("a"), ab), true);
   assert.equal(citationKind.continues(ab, cite("a")), false);
+  // What a stored record citing a work is found by: one item naming it, among however many.
+  assert.deepEqual(citationKind.naming("a"), { items: [{ refId: "a" }] });
 });
 
 test("Markdown is Pandoc's syntax, by key, with every field", () => {

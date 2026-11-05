@@ -179,6 +179,9 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
 
   targets: (data) => [...new Set(data.items.map((item) => item.refId))],
 
+  // An array contains another when each of the other's elements is contained by one of its own.
+  naming: (refId) => ({ items: [{ refId }] }),
+
   parseStyle(raw) {
     const style = isRecord(raw) ? raw : {};
     return { form: isForm(style.form) ? style.form : "short" };

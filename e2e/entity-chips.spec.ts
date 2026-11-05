@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { JSONContent } from "@tiptap/core";
 import type { Locator } from "@playwright/test";
 import { test, expect, annotationEditor, bodyEditor, openDashboardCard, selectChipInBody, waitForDocCollabReady } from "./fixtures";
@@ -16,6 +18,7 @@ import {
   getPostContentText,
   getUserIdByEmail,
   restoreTestUser,
+  setAnchorChipLabels,
   softDeleteTestUser,
 } from "./db";
 
@@ -440,6 +443,105 @@ test("a reading-view note on a passage with a mention keeps its chip's record, s
     await expect(chips).toHaveText([`@${renamed}`, `@${renamed}`]);
     await expect(paintedBy(chips.first(), noteId)).toHaveCount(1);
     await expect(paintedBy(chips.nth(1), loneId)).toHaveCount(1);
+  } finally {
+    await page.goto("about:blank");
+    await deleteTestDoc(doc.id);
+  }
+});
+
+test("a note whose mention has since left the doc still follows a rename, by what its record names", async ({ page, secondUser }) => {
+  const { user: author, page: authorPage } = await secondUser({ role: "AUTHOR" });
+  const lastName = author.name.split(" ").at(-1);
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: bodyOf(text("The engine was reviewed by "), mention("m1", author.id), text(" last week.")),
+  });
+  try {
+    await page.goto(`/doc/${doc.slug}`);
+    await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+    await selectChipInBody(page, { chip: 0, from: "reviewed by " });
+    const popup = page.getByTestId("annotation-popup");
+    await popup.getByRole("button", { name: "Annotate" }).click();
+    await annotationEditor(page).click();
+    await page.keyboard.type("Which review was this?");
+    await popup.getByRole("button", { name: "Post annotation" }).click();
+    const note = async () => (await getAnnotationStates(doc.id)).find((a) => a.bodyText === "Which review was this?");
+    await expect.poll(async () => (await note())?.status, { timeout: 15_000 }).toBe("LIVE");
+    const label = async () => ((await note())?.anchorChips as { label: string }[] | null)?.[0]?.label;
+    expect(await label()).toBe(`@${author.name}`);
+
+    // The passage is rewritten and the mention goes with it. The note stays, detached.
+    await page.goto(`/doc/${doc.slug}/edit`);
+    await waitForDocCollabReady(page);
+    await bodyEditor(page).click();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type("Nothing was reviewed.");
+    await expect.poll(() => getDocSearchText(doc.id), { timeout: 20_000 }).toBe("Nothing was reviewed.");
+    // The doc no longer mentions them, so the index has nothing to lead a refresh here.
+    await expect.poll(async () => (await getMentionSources(author.id)).filter((source) => source.includes(doc.id))).toEqual([]);
+    expect(await label()).toBe(`@${author.name}`);
+
+    const renamed = `Renamed ${lastName}`;
+    await authorPage.goto("/dashboard");
+    await openDashboardCard(authorPage, "Settings");
+    await authorPage.getByLabel("Name").fill(renamed);
+    await authorPage.getByRole("button", { name: "Save" }).click();
+    await expect(authorPage.getByText("Saved.")).toBeVisible();
+
+    // The record names them still, and is relabelled from that alone.
+    await expect.poll(label, { timeout: 15_000 }).toBe(`@${renamed}`);
+    await page.goto("/annotations");
+    await expect(page.getByText(`reviewed by @${renamed}`).first()).toBeVisible();
+  } finally {
+    await page.goto("about:blank");
+    await deleteTestDoc(doc.id);
+  }
+});
+
+test("a card's quote is labelled by the body beside it, and a record left behind is something the integrity check reports", async ({
+  page,
+  secondUser,
+}) => {
+  const { user: author } = await secondUser({ role: "AUTHOR" });
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: bodyOf(text("The engine was reviewed by "), mention("m1", author.id), text(" last week.")),
+  });
+  const check = async () => {
+    const { stdout } = await promisify(execFile)("npx", ["tsx", "scripts/integrity/check-annotation-anchors.ts", `--doc=${doc.id}`]);
+    return stdout;
+  };
+  try {
+    await page.goto(`/doc/${doc.slug}`);
+    await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+    await selectChipInBody(page, { chip: 0, from: "reviewed by " });
+    const popup = page.getByTestId("annotation-popup");
+    await popup.getByRole("button", { name: "Annotate" }).click();
+    await annotationEditor(page).click();
+    await page.keyboard.type("Which review was this?");
+    await popup.getByRole("button", { name: "Post annotation" }).click();
+    const note = async () => (await getAnnotationStates(doc.id)).find((a) => a.bodyText === "Which review was this?");
+    await expect.poll(async () => (await note())?.status, { timeout: 15_000 }).toBe("LIVE");
+    const noteId = (await note())!.id;
+    expect(await check()).toContain("0 error(s), 0 warning(s)");
+
+    // What a rename leaves until its refresh has run: the record holds the name as it was.
+    await setAnchorChipLabels(noteId, "@Someone Before");
+    await page.goto("/annotations");
+    await expect(page.getByText("reviewed by @Someone Before").first()).toBeVisible();
+    // The stale record is reported, by the chip it belongs to.
+    const report = await check();
+    expect(report).toContain("record-labels");
+    expect(report).toContain(`m1 reads "@Someone Before" but its chip is "@${author.name}"`);
+
+    // Beside the doc itself, the card says what the passage says.
+    await page.goto(`/doc/${doc.slug}`);
+    await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+    const card = page.locator(`[data-thread-id="${noteId}"]`).filter({ visible: true });
+    await expect(card).toContainText(`reviewed by @${author.name}`);
+    await expect(card).not.toContainText("Someone Before");
   } finally {
     await page.goto("about:blank");
     await deleteTestDoc(doc.id);

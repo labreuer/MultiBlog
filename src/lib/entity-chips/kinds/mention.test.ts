@@ -38,6 +38,7 @@ test("identity is the user, and a mention continues no other", () => {
   assert.equal(mentionKind.identity({ userId: "luke", form: "initials" }), mentionKind.identity({ userId: "luke" }));
   assert.notEqual(mentionKind.identity({ userId: "luke" }), mentionKind.identity({ userId: "andrew" }));
   assert.equal(mentionKind.continues({ userId: "luke" }, { userId: "andrew" }), false);
+  assert.deepEqual(mentionKind.naming("luke"), { userId: "luke" });
   assert.deepEqual(mentionKind.targets({ userId: "luke" }), ["luke"]);
 });
 
