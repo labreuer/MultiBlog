@@ -660,9 +660,11 @@ rules take more away:
 | A bot's, issued for `claude-code` | with `read` | with `write` | with `write` | ❌ |
 | Any `claude-ai` or `other` token, a header token or a connection | with `read` | with `write` | ❌ | ❌ |
 
-- **The reads** are `search`, `read`, `find_users`, `find_tags` and `download`; **the writes**
-  `upload`, `create_doc`, `edit_doc`, `add_note`, `edit_note`, `create_link`, `extend_link`,
-  `tag` and `untag`.
+- **The reads** are `search`, `read`, `find_users`, `find_tags`, `find_refs` and
+  `download`; **the writes** `upload`, `create_doc`, `edit_doc`, `add_note`, `edit_note`,
+  `create_link`, `extend_link`, `tag`, `untag` and `create_ref`. A token acts with its
+  account's role, so `create_ref` adds a work only for an AUTHOR or above, as in the UI
+  (`canWriteReferences`, `src/lib/reference-write.ts`).
 - **The tools that force a prompt** (`edit_link`, `rename_file`, `manage`) are listed only to a
   token issued for Claude Code, the one client documented to honor the flag, and `manage` to
   no bot's token, whatever its scopes. No connection is ever `claude-code`: a claim to be

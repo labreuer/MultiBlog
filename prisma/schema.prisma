@@ -171,6 +171,7 @@ model User {
   invites                UserInvite[]           @relation("UserInviteRecipient")
   invitesSent            UserInvite[]           @relation("UserInviteSender")
   tagsCreated            Tag[]                  @relation("TagCreatedBy")
+  referencesCreated      Reference[]            @relation("ReferenceCreatedBy")
   tagDeletions           Tag[]                  @relation("TagDeletedBy")
   tagAssignments         TagAssignment[]        @relation("TagAssignedBy")
   tagAssignmentDeletions TagAssignment[]        @relation("TagAssignmentDeletedBy")
@@ -1302,6 +1303,7 @@ model StoredFile {
   slugHistory         FileSlugHistory[]
   pageTexts           FilePageText[]
   annotations         Annotation[]
+  references          Reference[]
   metrics             FileMetrics?
   tagSummary          FileTagSummary?
   tagAnchors          TagAnchor[]          @relation("TagAnchorFile")
@@ -2103,4 +2105,93 @@ model Mention {
   @@unique([annotationId, iid, userId])
   @@index([userId])
   @@map("mention")
+}
+
+// docs/CITATIONS.md, "Records" — the reference library: one row per work
+// that a citation can stand for.
+//
+// `csl` is the bibliographic record, a CSL-JSON item, built field by field
+// by `parseCslItem` (src/lib/references/csl.ts) on every way in and read
+// back through `cslOf`, never a cast. `key` is what Markdown writes
+// (`[@radner2012]`) and what the public page is addressed by, so it is
+// permanent once used: a rename keeps the old key answering through
+// `reference_key_history`.
+//
+// **Not in the `$extends` soft-delete filter** (src/lib/prisma.ts), and
+// filtered by hand: a deleted reference must still be found by the duplicate
+// check, which is most of what reads this table by identifier, and by a
+// citation that shows it struck through.
+//
+// `search_vector` is written by a trigger from `key`, `short` and `csl`;
+// never assign to it. `updatedById` and `deletedByUserId` carry no foreign
+// key: an account is never hard-deleted, and each relation onto `user` is
+// more for the generated client to carry.
+model Reference {
+  id     String  @id @default(cuid())
+  key    String  @unique
+  csl    Json
+  // The abbreviation a `short`-style citation shows, such as "BU". Optional:
+  // a reference without one falls back to its author-date label.
+  short  String?
+  // The PDF of this work, when /files holds it. A citation with a locator
+  // then links to the passage.
+  fileId String? @map("file_id")
+
+  createdById String   @map("created_by_id")
+  updatedById String?  @map("updated_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  deletedByUserId String?   @map("deleted_by_user_id")
+  deletedAt       DateTime? @map("deleted_at")
+
+  searchVector Unsupported("tsvector")? @map("search_vector")
+
+  createdBy   User                  @relation("ReferenceCreatedBy", fields: [createdById], references: [id])
+  file        StoredFile?           @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  identifiers ReferenceIdentifier[]
+  keyHistory  ReferenceKeyHistory[]
+
+  @@index([fileId])
+  @@index([createdById])
+  @@index([searchVector], type: Gin)
+  @@map("reference")
+}
+
+enum ReferenceIdentifierScheme {
+  DOI
+  ISBN
+}
+
+// What a reference is recognised by (docs/CITATIONS.md, "Duplicates are
+// caught by DOI and ISBN"): each DOI and ISBN its record carries, in the one
+// form `src/lib/references/identifiers.ts` normalizes to. Unique per scheme
+// across the whole library, deleted references included, which is the
+// duplicate check. Written with the record, in the same transaction.
+model ReferenceIdentifier {
+  id          String                    @id @default(cuid())
+  referenceId String                    @map("reference_id")
+  scheme      ReferenceIdentifierScheme
+  value       String
+
+  reference Reference @relation(fields: [referenceId], references: [id], onDelete: Cascade)
+
+  @@unique([scheme, value])
+  @@index([referenceId])
+  @@map("reference_identifier")
+}
+
+// A key a reference used to have, still answering for it: posts link to
+// /references/<key> and Markdown exports write `[@key]`, so a renamed key
+// redirects, as `UserSlugHistory` does for an author's handle.
+model ReferenceKeyHistory {
+  id          String   @id @default(cuid())
+  referenceId String   @map("reference_id")
+  key         String   @unique
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  reference Reference @relation(fields: [referenceId], references: [id], onDelete: Cascade)
+
+  @@index([referenceId])
+  @@map("reference_key_history")
 }

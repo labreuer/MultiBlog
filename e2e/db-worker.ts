@@ -1229,6 +1229,31 @@ export async function getDocChipIids(docId: string): Promise<string[]> {
   return found;
 }
 
+/**
+ * Removes the references a test made, by key prefix, with their identifiers
+ * and key history (which cascade). A reference has no owner to find it by,
+ * so a spec gives its keys a prefix of its own.
+ */
+export async function deleteTestReferences(keyPrefix: string): Promise<number> {
+  if (!/^e2e[a-z0-9-]{4,}$/.test(keyPrefix)) throw new Error(`deleteTestReferences: "${keyPrefix}" isn't an e2e key prefix.`);
+  const history = await prisma.referenceKeyHistory.findMany({ where: { key: { startsWith: keyPrefix } }, select: { referenceId: true } });
+  const removed = await prisma.reference.deleteMany({
+    where: { OR: [{ key: { startsWith: keyPrefix } }, { id: { in: history.map((row) => row.referenceId) } }] },
+  });
+  return removed.count;
+}
+
+/** A reference as stored, by key: its identifiers, and whether it is deleted. Null for no such key. */
+export async function getTestReference(key: string): Promise<{ key: string; identifiers: string[]; deleted: boolean; short: string | null } | null> {
+  const row = await prisma.reference.findUnique({
+    where: { key },
+    select: { key: true, short: true, deletedAt: true, identifiers: { select: { scheme: true, value: true }, orderBy: { value: "asc" } } },
+  });
+  return row
+    ? { key: row.key, short: row.short, deleted: row.deletedAt !== null, identifiers: row.identifiers.map((id) => `${id.scheme}:${id.value}`) }
+    : null;
+}
+
 /** Whether a posted annotation's search vector holds `word`: its body, and its quoted passage with each chip as its label. */
 export async function annotationSearchHolds(annotationId: string, word: string): Promise<boolean> {
   const rows = await prisma.$queryRaw<{ hit: boolean }[]>`
@@ -2777,6 +2802,8 @@ const handlers = {
   getDocLinkFields,
   getAnnotationStates,
   annotationSearchHolds,
+  deleteTestReferences,
+  getTestReference,
   getDocChipIids,
   markPresentAtStamp,
   createTestAnnotation,

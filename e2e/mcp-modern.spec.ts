@@ -36,7 +36,7 @@ test("a 2026-07-28 client discovers, lists and calls, and is told to cache nothi
     expect(client.getDiscoverResult()).toMatchObject({ ttlMs: 0, cacheScope: "private" });
     const listed = await client.listTools();
     expect(listed).toMatchObject({ ttlMs: 0, cacheScope: "private" });
-    expect(listed.tools.map((t) => t.name)).toEqual(["multiblog_search", "multiblog_read", "multiblog_find_users", "multiblog_find_tags", "multiblog_download"]);
+    expect(listed.tools.map((t) => t.name)).toEqual(["multiblog_search", "multiblog_read", "multiblog_find_users", "multiblog_find_tags", "multiblog_find_refs", "multiblog_download"]);
 
     // Called after the list, so the client holds the result to read's
     // outputSchema, as a v2 client does once it has listed the tools.

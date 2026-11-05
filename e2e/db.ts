@@ -271,6 +271,9 @@ export const getAnnotationStates = (...args: Parameters<DbHandlers["getAnnotatio
   call("getAnnotationStates", ...args);
 
 export const getDocChipIids = (...args: Parameters<DbHandlers["getDocChipIids"]>): Promise<string[]> => call("getDocChipIids", ...args);
+export const deleteTestReferences = (...args: Parameters<DbHandlers["deleteTestReferences"]>): Promise<number> =>
+  call("deleteTestReferences", ...args);
+export const getTestReference = (...args: Parameters<DbHandlers["getTestReference"]>) => call("getTestReference", ...args);
 export const annotationSearchHolds = (...args: Parameters<DbHandlers["annotationSearchHolds"]>): Promise<boolean> =>
   call("annotationSearchHolds", ...args);
 export const markPresentAtStamp = (...args: Parameters<DbHandlers["markPresentAtStamp"]>): Promise<boolean> =>

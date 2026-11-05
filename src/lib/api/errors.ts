@@ -15,6 +15,7 @@ export type ApiErrorCode =
   | "not_found"
   | "forbidden"
   | "conflict"
+  | "duplicate"
   | "ambiguous"
   | "no_match"
   | "unknown_chip"
@@ -61,6 +62,7 @@ const HTTP_STATUS: Record<ApiErrorCode, number> = {
   not_found: 404,
   forbidden: 403,
   conflict: 409,
+  duplicate: 409,
   ambiguous: 409,
   no_match: 422,
   unknown_chip: 422,

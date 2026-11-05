@@ -64,6 +64,10 @@ per table feeding the `search_lexeme` vocabulary ([FULLTEXT.md](FULLTEXT.md) §3
 assign to them either; `scripts/integrity/check-search-index.ts` is their guard, and its
 `--repair` runs the no-op `UPDATE` for every drifted row.
 
+`reference.search_vector` is a seventh, written by its own trigger from `key`, `short` and
+`csl` ([CITATIONS.md](CITATIONS.md)). It feeds no vocabulary: the reference library is searched
+on its own page and through `find_refs`, never by the site search's typo correction.
+
 The `mention` table is a whole table of the same kind ([ENTITY_CHIPS.md](ENTITY_CHIPS.md),
 step 1, item 12): triggers on `doc.prose_json`, `annotation.prose_json` (and its `status`) and
 `post.prose_json` keep one row per mention chip, by a diff, so a row's `first_seen_at` is when

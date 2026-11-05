@@ -21,6 +21,7 @@ export const TOOL_NAMES = [
   "read",
   "find_users",
   "find_tags",
+  "find_refs",
   "download",
   "upload",
   "create_doc",
@@ -33,6 +34,7 @@ export const TOOL_NAMES = [
   "edit_link",
   "tag",
   "untag",
+  "create_ref",
   "manage",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];

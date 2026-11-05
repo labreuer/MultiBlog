@@ -115,3 +115,18 @@ export const BYLINE_ELIGIBLE_ROLES: Role[] = ["ADMIN", "EDITOR", "AUTHOR"];
 // because they concern docs. Nothing in the browser asks who may edit a
 // SHARED doc without a byline, so that one lives beside the rest of the doc
 // authorization rules in doc-authz.ts instead.
+
+// docs/CITATIONS.md, "Who writes them" — the reference library. Stated on
+// its own for the reason the file pair above is: who may add a work to the
+// library need not stay who may manage docs.
+export const REFERENCE_WRITER_ROLES: Role[] = ["ADMIN", "EDITOR", "AUTHOR"];
+
+/** Whether this role may create and edit references. A token acts with its account's role, so the rule binds agents alike. */
+export function canWriteReferences(role: Role): boolean {
+  return REFERENCE_WRITER_ROLES.includes(role);
+}
+
+/** Whether this role may list the library at /references. A reference's own page is public. */
+export function canViewReferences(role: Role): boolean {
+  return ["ADMIN", "EDITOR", "AUTHOR", "AUTHORIZED"].includes(role);
+}
