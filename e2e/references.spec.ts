@@ -269,6 +269,23 @@ test("[@ cites a work from the library: the chip is labelled, listed in the bibl
       "href",
       `/references/${key}`,
     );
+
+    // The reference's page lists the published posts citing it for everyone, and the docs only to whoever may read them.
+    await page.goto(`/references/${key}#p=49`);
+    await expect(page.locator("section", { hasText: "Cited in posts" }).getByRole("link", { name: post.title })).toBeVisible();
+    const citedBy = page.getByRole("region", { name: "Where you can read it" });
+    await expect(citedBy.locator(`a[href="/doc/${doc.slug}"]`)).toBeVisible();
+    await expect(citedBy.getByRole("link", { name: "Search what cites it" })).toHaveAttribute("href", `/search?cites=${key}`);
+    const anonymous = await page.context().browser()!.newContext({ storageState: { cookies: [], origins: [] } });
+    try {
+      const outsider = await anonymous.newPage();
+      await outsider.goto(`/references/${key}`);
+      await expect(outsider.getByRole("link", { name: post.title })).toBeVisible();
+      await expect(outsider.getByRole("region", { name: "Where you can read it" })).toHaveCount(0);
+      await expect(outsider.locator(`a[href="/doc/${doc.slug}"]`)).toHaveCount(0);
+    } finally {
+      await anonymous.close();
+    }
   } finally {
     await page.goto("about:blank");
     if (post) await deleteTestPost(post.id);

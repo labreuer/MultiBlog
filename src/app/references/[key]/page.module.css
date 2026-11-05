@@ -41,3 +41,28 @@
   color: var(--text-secondary);
   font-style: italic;
 }
+
+.citedIn,
+.citedBy {
+  margin-top: 2rem;
+}
+
+.citedIn h2,
+.citedBy h2 {
+  font-size: 1.1rem;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.citing {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+
+.citing li {
+  margin: 0.2rem 0;
+}
+
+.pdf,
+.searchAll {
+  margin-top: 1rem;
+}

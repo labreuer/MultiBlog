@@ -8,6 +8,7 @@ import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import type { CitedWork } from "@/lib/entity-chips/kinds/citation";
 import { loadCitationContext } from "@/lib/entity-chips/kinds/citation-context";
 import { findReferences } from "@/lib/reference-data";
+import { referenceCitedBy as citedByFor, type ReferenceCitedBy } from "@/lib/reference-cited-by";
 import { importReferences, referencePath, setReferenceDeleted, updateReference, type ImportOutcome } from "@/lib/reference-write";
 import { entryText } from "@/lib/references/entry";
 
@@ -93,4 +94,16 @@ export async function searchCitable(query: string): Promise<CiteCandidate[]> {
   const found = await findReferences(query.slice(0, 100), 8);
   const context = await loadCitationContext(found.map((reference) => reference.id));
   return found.flatMap((reference) => (context[reference.id] ? [{ work: context[reference.id], entry: entryText(reference.item) }] : []));
+}
+
+/**
+ * What a reference's public page shows only to whoever may see it
+ * (docs/CITATIONS.md, "Pages"): the docs and notes citing the work and its
+ * PDF, each through its read rule. Null for a reader who isn't signed in,
+ * who sees what the page already shows.
+ */
+export async function referenceCitedBy(referenceId: string): Promise<ReferenceCitedBy | null> {
+  const session = await auth();
+  if (!session?.user || typeof referenceId !== "string") return null;
+  return citedByFor(actorFromSessionUser(session.user), referenceId);
 }

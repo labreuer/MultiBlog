@@ -1,9 +1,9 @@
-# Citations and references (planned)
+# Citations and references
 
-**Status: partly built; "Built so far" below says which parts.** A *citation* is an entity chip
+**Status: built, but for what "Built so far" below names, and Later.** A *citation* is an entity chip
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md)) that stands for one or more works at a page. It is shown as
 `(BU p. 49)`, `(Radner 2012, p. 49)` or `[3, p. 49]`, depending on the doc's style. The works are
-*references*: records in a library, which this file also plans. This file fills in the kit's kind
+*references*: records in a library, which this file also covers. This file fills in the kit's kind
 contract. The kit says how every chip is stored, rendered, quoted and searched. Citations are step
 3 of the kit's order.
 
@@ -11,8 +11,8 @@ contract. The kit says how every chip is stored, rendered, quoted and searched. 
 
 The reference library (its data, its pages and its machine door), the citation chip itself
 with its popover, its Markdown both ways, a doc's bibliography, and search by cited work.
-Everything below not listed here is still a plan: what a reference's page shows of who cites
-it, and of the Markdown, a quote written in it and the transcript importer's escape.
+Everything below not listed here is still a plan: of the Markdown, a quote written in it and the
+transcript importer's escape; and Later.
 
 - **The chip kind:** `src/lib/entity-chips/kinds/citation.ts` holds its fields and
   validation, its identity (the works, in any order), when one citation continues another
@@ -77,9 +77,10 @@ it, and of the Markdown, a quote written in it and the transcript importer's esc
   restore. Author(s), Year and Title sort through the `reference_listing` view (migration
   `reference_listing_view`), since they are fields of the record's jsonb.
 - **`/references/[key]`** is public and reads no session: the entry as a bibliography sets
-  it, the abbreviation, and the DOI, ISBN and URL. A key the reference used to have redirects
-  to its current one. Not yet: the posts that cite it, and the client island for what only
-  some viewers may see.
+  it, the abbreviation, the DOI, ISBN and URL, and the published posts citing it. A key the
+  reference used to have redirects to its current one. `CitedBy.tsx`, a client island, asks
+  `referenceCitedBy` (`src/lib/reference-cited-by.ts`) for the docs and notes citing it and its
+  PDF, each through its read rule, and offers the PDF at the page a post's link names.
 - **The entry format:** `src/lib/references/entry.ts`, the one bibliography entry the house
   styles share.
 - **MCP:** `find_refs` and `create_ref` (`src/lib/mcp/tools/references.ts`). The names are
@@ -271,13 +272,16 @@ call for no refresh.
 **Pages.**
 
 - **`/references`**, through the admin table kit, for signed-in members.
-- **`/references/[key]`** is public. A published post's citations link to it, and it shows only
-  what a bibliography prints.
-  - The record, and the published posts citing it, are cached like an author page
-    (`revalidate = 60`).
-  - What only some viewers may see comes from a client island that asks the server on open, the
-    way `TagChips` keeps the post page static. That covers the docs and notes citing it, and its
-    PDF, at the page a post's link names. Each list goes through its read rule.
+- **`/references/[key]`** is public. A published post's citations link to it, and it shows what
+  a bibliography prints and where the work is cited publicly.
+  - The record, and the published posts citing it (found in the `citation` table), are cached
+    like an author page (`revalidate = 60`).
+  - What only some viewers may see comes from a client island that asks the server once the
+    reader is signed in, the way `TagChips` keeps the post page static. That covers the docs and
+    notes citing it, the first 20 of each with a link to `cites=` for the rest, and its PDF, at
+    the page a post's link names (`#p=49`, read in the browser so the page stays one cached
+    page). Each list goes through its read rule, a PDF included, so a PRIVATE file is offered
+    only to its owners.
 - **A key is permanent once used.** Posts link to `/references/<key>`, and Markdown exports write
   `[@key]`. So renaming a key keeps the old one redirecting through a key history, as
   `UserSlugHistory` does for users.
@@ -421,4 +425,9 @@ post's labels, and a republish refreshes both.
     post's text;
   - the popover: a page, the words before, the author left out, the narrative form offered only
     where it applies, a work added and removed on one chip, and Escape and Enter between it and
-    the editor.
+    the editor;
+  - search by key, title and author, each at once, through MCP and the page, and an unknown key
+    refused by MCP;
+  - a reference's page listing the posts citing it to everyone and the docs only to a reader
+    who may read them. Not covered: the PDF offered at the page a post's link names, which
+    needs a reference with a file.

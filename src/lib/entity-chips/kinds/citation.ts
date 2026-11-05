@@ -146,13 +146,17 @@ function itemText(item: CitationItem, form: CitationForm, label: string): string
   return [item.prefix, joined].filter(Boolean).join(" ") + (item.suffix ? `, ${item.suffix}` : "");
 }
 
-/** `/pdf/<slug>#page=<sheet>` for a locator the file's page labels name, else null. */
-function pdfHref(work: CitedWork, locator: string | undefined): string | null {
-  if (!work.file || !locator) return null;
+/**
+ * `/pdf/<slug>#page=<sheet>` for a locator the file's page labels name, else
+ * null: the first page of a range, found among the printed labels, or taken
+ * as the sheet itself for a file that has none.
+ */
+export function pdfPageHref(file: { slug: string; pageLabels: string[] | null } | null, locator: string | undefined): string | null {
+  if (!file || !locator) return null;
   const first = locator.split("–")[0].trim();
-  const labels = work.file.pageLabels;
+  const labels = file.pageLabels;
   const sheet = labels ? labels.indexOf(first) + 1 : /^\d+$/.test(first) ? Number(first) : 0;
-  return sheet > 0 ? `/pdf/${work.file.slug}#page=${sheet}` : null;
+  return sheet > 0 ? `/pdf/${file.slug}#page=${sheet}` : null;
 }
 
 /** What every label in a doc reads from the doc's citations as a whole: each work's number and its told-apart short label. */
@@ -289,7 +293,7 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
       const page = `/references/${known[0].key}`;
       return {
         label,
-        href: pdfHref(known[0], first.locator) ?? page,
+        href: pdfPageHref(known[0].file, first.locator) ?? page,
         postHref: first.locator ? `${page}#p=${encodeURIComponent(first.locator.split("–")[0])}` : page,
         status: "live",
       };
