@@ -8,10 +8,10 @@ import { chipRenderings, chipsIn, UNKNOWN_CHIP } from "./renderings";
 import {
   CHIP_ANCHOR_TEXT,
   ENTITY_CHIP,
+  NO_CHIP_INPUTS,
   type ChipAttrs,
-  type ChipContext,
+  type ChipInputs,
   type ChipRendering,
-  type ChipStyles,
 } from "./types";
 
 // docs/ENTITY_CHIPS.md, step 1 — the one node every chip kind is stored as.
@@ -24,10 +24,7 @@ import {
 // only ever run inside an editor, so the servers that decode a ydoc with this
 // in their extension list build neither.
 
-/** What a surface's renderings are computed from, beside the document itself. */
-export type ChipInputs = { styles: ChipStyles; context: ChipContext };
-
-const NO_INPUTS: ChipInputs = { styles: {}, context: {} };
+export type { ChipInputs };
 
 type ChipPluginState = { inputs: ChipInputs; decorations: DecorationSet; byIid: Map<string, ChipRendering> };
 
@@ -52,7 +49,7 @@ type ChipDecorationSpec = { chipLabel: string; chipHref: string | null; chipStat
 
 function compute(doc: PMNode, inputs: ChipInputs): Pick<ChipPluginState, "decorations" | "byIid"> {
   const chips = chipsIn(doc);
-  const renderings = chipRenderings(chips, inputs.styles, inputs.context);
+  const renderings = chipRenderings(chips, inputs.styles, inputs.context, inputs.pending);
   const byIid = new Map<string, ChipRendering>();
   const decorations = chips.map((chip, index) => {
     const rendering = renderings[index];
@@ -265,7 +262,7 @@ export const EntityChip = Node.create({
   addOptions() {
     return {
       /** The styles and context a surface already has when its editor is built, so its first paint shows labels. */
-      inputs: NO_INPUTS as ChipInputs,
+      inputs: NO_CHIP_INPUTS,
     };
   },
 
@@ -328,8 +325,12 @@ export const EntityChip = Node.create({
   },
 
   addNodeView() {
-    return ({ node, decorations }) => {
-      const dom = document.createElement("span");
+    return ({ node, decorations, editor }) => {
+      // A reading view's editor is built read-only, and there a live chip is
+      // the link it stands for. In an editor that can be typed in it is a
+      // span: a click selects the chip, as a click in a link places the caret.
+      const link = !editor.isEditable;
+      const dom = document.createElement(link ? "a" : "span");
       dom.className = "entity-chip";
       dom.contentEditable = "false";
       dom.dataset.entityChip = node.attrs.kind;
@@ -338,8 +339,8 @@ export const EntityChip = Node.create({
         const rendering = renderingFrom(current) ?? UNKNOWN_CHIP;
         if (dom.textContent !== rendering.label) dom.textContent = rendering.label;
         dom.dataset.status = rendering.status;
-        if (rendering.href) dom.dataset.href = rendering.href;
-        else delete dom.dataset.href;
+        if (link && rendering.href) dom.setAttribute("href", rendering.href);
+        else dom.removeAttribute("href");
       };
       draw(decorations);
       return {

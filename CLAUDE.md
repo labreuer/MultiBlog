@@ -18,7 +18,7 @@ to re-derive the decision from.
 | [docs/ANNOTATIONS.md](docs/ANNOTATIONS.md) | Annotations as built: a body that is its own ydoc, three anchor mechanisms picked by surface, the version stamp, DRAFT → LIVE → RAISED, editing a posted body, composing from the editor, the PDF panel. |
 | [docs/MARGIN_NOTES.md](docs/MARGIN_NOTES.md) | The margin rails as built: only the anchored cards move, CSS owns the grid and JS the alignment, the 1180px threshold and the 340–680px range, the editor's queue mode, the PDF rail. |
 | [docs/TAGS.md](docs/TAGS.md) | Tags as built: term vs. assignment vs. anchor, one write layer for both front doors, "you may tag what you may read", chips that read no session and where they mount, `/tag/[slug]`'s per-type sections, `/tags`, and the Tags column in `/docs` and `/files` with what the ADMIN override withholds. |
-| [docs/ENTITY_CHIPS.md](docs/ENTITY_CHIPS.md) | Entity chips, **planned** (only its step 0, the schema gate, is built): one inline leaf node, `entityChip`, holding only which person or work it stands for, its label computed wherever it is shown — the rules, the kind contract, the build order (the schema-version gate in docs/YDOC.md first), styling, MCP, quoting and search. A file per chip kind: [docs/MENTIONS.md](docs/MENTIONS.md), and [docs/CITATIONS.md](docs/CITATIONS.md) with the reference library. |
+| [docs/ENTITY_CHIPS.md](docs/ENTITY_CHIPS.md) | Entity chips, **partly built** (its "Built so far" says which parts): one inline leaf node, `entityChip`, holding only which person or work it stands for, its label computed wherever it is shown — the rules, the kind contract, the build order (the schema-version gate in docs/YDOC.md first), styling, MCP, quoting and search. A file per chip kind: [docs/MENTIONS.md](docs/MENTIONS.md), and [docs/CITATIONS.md](docs/CITATIONS.md) with the reference library. |
 | [docs/research/multi-anchoring.md](docs/research/multi-anchoring.md) | Literature survey behind §20's multi-part anchors: flat part-sets vs. per-part roles, and the recommendations not yet folded into PLAN.md. Read before giving any consumer's parts roles or per-part text. |
 | [docs/TABLES.md](docs/TABLES.md) | Tables as built: the native nodes and where they are not, pasted column widths, CSV into an existing doc and out again (the grid, the format table, the cap, the policy calls), auto-size, and the three specs. |
 | [docs/research/tables.md](docs/research/tables.md) | Why doc tables are TipTap's native nodes and not an external block (anything else holds no text in the ydoc, so nothing in it can be quoted or annotated), the CSV design and where the build departed from it, and what xlsx and docx would add. |
@@ -245,6 +245,18 @@ before changing the behavior it describes.
   copy of a ydoc is read with no server in between, so its name carries the version too
   (`ydocDbName`), and a new bundle takes in an older version's database but never a newer
   one's. docs/YDOC.md "A tab whose schema is out of date is refused".
+- **An entity chip's label is computed, never stored, and a post never holds a chip.** The
+  `entityChip` node (`src/lib/entity-chips/`) holds a chip kind, an instance id and the
+  kind's fields, and nothing a reader sees: `chipRenderings` computes every label, link and
+  status from the chips, the doc's style and the chip context, the same in the browser and
+  on both servers. Its `leafText` is U+FFFC, which is what a stored quote holds where a chip
+  is, so don't "fix" a flattener by putting the label there: the label is what a rename
+  changes, and the quote would detach. Two rules fail no check when broken. Every static
+  render of a doc or annotation body goes through `renderWithChips`, since the node's own
+  `renderHTML` has no label to give; and every path from a doc's JSON to a post-side surface
+  goes through `docJsonForPostSide`, since `contentExtensions` has no chip node and its
+  renderer throws on one. A new chip kind is a registry entry and adds no schema.
+  docs/ENTITY_CHIPS.md.
 - **Tables are in `contentExtensions` and deliberately not in `annotationContentExtensions`.**
   The annotation list used to be an alias of `authorHighlightExtensions` and is now its own
   `[StarterKit, AuthorHighlight]`, mirrored by `annotationEditorExtensions`; don't re-derive one from

@@ -2,7 +2,6 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import type { JSONContent } from "@tiptap/react";
 import type { ReactNode } from "react";
-import { renderToReactElement } from "@tiptap/static-renderer";
 import * as Y from "yjs";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
@@ -10,7 +9,9 @@ import { gated, titleWhenOk } from "@/lib/route-access";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { docContentExtensions } from "@/lib/tiptap-schema";
-import { renderYdocDoc } from "@/lib/ydoc-render";
+import { readYdocContent } from "@/lib/ydoc-render";
+import { chipInputsForBody } from "@/lib/entity-chips/context-for";
+import { renderWithChips } from "@/lib/entity-chips/static";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { getDocLinkGroupsForPair, countOtherDocLinks } from "@/lib/doc-links-query";
 import { signInPath } from "@/lib/sign-in-redirect";
@@ -41,7 +42,7 @@ type LoadedDoc = NonNullable<Awaited<ReturnType<typeof resolveDocParam<typeof DO
 async function loadBody(doc: LoadedDoc): Promise<{ bodyJSON: JSONContent; staticBody: ReactNode }> {
   if (doc.proseJson) {
     const bodyJSON = doc.proseJson as JSONContent;
-    return { bodyJSON, staticBody: renderToReactElement({ content: bodyJSON, extensions: docContentExtensions }) };
+    return { bodyJSON, staticBody: renderWithChips(bodyJSON, docContentExtensions, await chipInputsForBody(bodyJSON)) };
   }
 
   // decode-from-ydoc fallback (§12d) — prose_json is still null because no
@@ -50,10 +51,13 @@ async function loadBody(doc: LoadedDoc): Promise<{ bodyJSON: JSONContent; static
   const row = await prisma.ydoc.findUnique({ where: { id: ydocIdForDoc(doc.id) }, select: { ydoc: true } });
   const scratch = new Y.Doc();
   if (row) Y.applyUpdate(scratch, row.ydoc);
-  const result = renderYdocDoc(scratch);
+  const result = readYdocContent(scratch);
   scratch.destroy();
   if (result.ok) {
-    return { bodyJSON: result.bodyJSON, staticBody: result.body };
+    return {
+      bodyJSON: result.bodyJSON,
+      staticBody: renderWithChips(result.bodyJSON, docContentExtensions, await chipInputsForBody(result.bodyJSON)),
+    };
   }
   return { bodyJSON: EMPTY_DOC, staticBody: <p style={{ color: "var(--error)" }}>{result.error}</p> };
 }

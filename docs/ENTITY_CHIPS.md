@@ -1,6 +1,6 @@
 # Entity chips (planned)
 
-**Status: planned; only step 0 is built.** An *entity chip* is an inline node in a doc's text
+**Status: partly built; "Built so far" below says which parts.** An *entity chip* is an inline node in a doc's text
 that stands for an entity, such as a person or a work, and holds only *which* one. Its label is
 computed whenever it is shown, from the doc's style and the entity's current record. A rename, a
 corrected record or a change of style therefore changes every label at once, and no anchored
@@ -51,6 +51,38 @@ date is refused".
 
   Nothing exercises the kit without a chip kind, so steps 1 and 2 are built together. Section
   styles, comments, and each chip kind's own later work come after.
+
+## Built so far
+
+Steps 0 and 1 are under way on the `entity-chips` branch. Everything below not listed here is
+still a plan.
+
+- **Step 0, the gate:** all of it ([YDOC.md](YDOC.md)).
+- **Step 1, item 1:** the spike, with its result.
+- **Item 2, the node:** `entityChip` (`src/lib/entity-chips/node.ts`) in the doc and
+  annotation-body schemas, with `leafText`, the parse rule and its validation.
+- **Item 3, instance ids:** a random id at insertion, and a fresh one for a pasted copy
+  (`repairChipIids`). Not the id derived from a Yjs item, for a duplicate that concurrent changes
+  leave.
+- **Item 4, the rendering function:** `chipRenderings` (`renderings.ts`), the three statuses, and
+  the placeholder for a chip kind the build doesn't know. Not the `~~ ~~` in Markdown.
+- **Item 5, the chip context:** `loadChipContext`, `GET /api/chip-context` with its per-viewer
+  rule (`context-for.ts`), and `useChipInputs`, which refetches for a target it doesn't hold and
+  shows `…` meanwhile. The doc reading view's first paint gets its context as props.
+- **Item 6, node views and decorations:** in the doc editor, the doc reading view and
+  side-by-side. A static render goes through `renderWithChips` (`static.tsx`).
+- **Item 9, posts and the landing preamble:** `docJsonForPostSide` (`post-content.ts`) replaces
+  each chip with its label as linked text, struck through when its target is gone, and records
+  the chip on the link's `chip` attribute. Not the republish remap.
+- **Item 13, annotation bodies:** the node is in their schema. Their cards and editors don't
+  label chips yet, so a chip in a note shows its placeholder.
+- **Item 15:** `SCHEMA_VERSION` is 1.
+- **Mentions:** the chip kind's fields, forms and labels, its context loader, and the rule for
+  who may be mentioned ([MENTIONS.md](MENTIONS.md)). Nothing in the UI inserts a mention yet.
+
+Until the rest of step 1 is built, a chip is invisible to whatever isn't listed: full-text
+search, MCP reads and edits, Markdown export, `Annotation.bodyText`, the CSV export, and stored
+quotes shown outside a ydoc (which show U+FFFC).
 
 ## Terms
 

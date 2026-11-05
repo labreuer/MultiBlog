@@ -1,6 +1,9 @@
 # Mentions (planned)
 
-**Status: planned; nothing here is built.** A *mention* is an entity chip
+**Status: partly built.** The chip kind exists (`src/lib/entity-chips/kinds/mention.ts`): its
+fields, forms, labels and same-label rule; its context loader (`mention-context.ts`); and the rule
+for who may be mentioned (`mention-rule.ts`). The menu, the Markdown, search, the dashboard card
+and notifications are still a plan, so nothing in the UI inserts a mention yet. A *mention* is an entity chip
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md)) that stands for a person: a MultiBlog account. It is shown as
 `@Luke Breuer`, `LB` or `@luke-breuer`, depending on the doc's style, and it follows the
 person's renames. This file fills in the kit's kind contract. The kit says how every chip is

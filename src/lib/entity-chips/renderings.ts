@@ -1,7 +1,14 @@
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { chipKind } from "./registry";
-import { ENTITY_CHIP, type ChipContext, type ChipOccurrence, type ChipRendering, type ChipStyles } from "./types";
+import {
+  ENTITY_CHIP,
+  type ChipContext,
+  type ChipInputs,
+  type ChipOccurrence,
+  type ChipRendering,
+  type ChipStyles,
+} from "./types";
 
 // docs/ENTITY_CHIPS.md, rule 2 — a rendering is a pure function of the chip,
 // the style, the chip context and the doc's order. The same function runs in
@@ -9,6 +16,9 @@ import { ENTITY_CHIP, type ChipContext, type ChipOccurrence, type ChipRendering,
 
 /** What a chip shows when this build doesn't know its kind, or its fields don't pass its kind's validator. */
 export const UNKNOWN_CHIP: ChipRendering = { label: "[…]", href: null, postHref: null, status: "unknown" };
+
+/** What a chip shows while its target's record is on its way to the browser. */
+export const PENDING_CHIP: ChipRendering = { label: "…", href: null, postHref: null, status: "live" };
 
 function attrsOf(attrs: Record<string, unknown> | null | undefined): Omit<ChipOccurrence, "pos"> {
   const data = attrs?.data;
@@ -53,6 +63,7 @@ export function chipRenderings(
   chips: readonly ChipOccurrence[],
   styles: ChipStyles,
   context: ChipContext,
+  pending: ChipInputs["pending"] = undefined,
 ): ChipRendering[] {
   const renderings: ChipRendering[] = chips.map(() => UNKNOWN_CHIP);
 
@@ -78,8 +89,12 @@ export function chipRenderings(
       kind.parseStyle(styles[name]),
       kind.parseContext(context[name]),
     );
+    const waiting = new Set(pending?.[name] ?? []);
     valid.forEach((entry, i) => {
-      renderings[entry.index] = rendered[i] ?? UNKNOWN_CHIP;
+      renderings[entry.index] =
+        waiting.size > 0 && kind.targets(entry.data).some((id) => waiting.has(id))
+          ? PENDING_CHIP
+          : (rendered[i] ?? UNKNOWN_CHIP);
     });
   }
   return renderings;

@@ -1,7 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pmAnnotationContentSchema, pmDocContentSchema as schema } from "../tiptap-schema";
-import { chipRenderings, chipsIn, chipsInJSON, chipTargets, renderingsByIid, UNKNOWN_CHIP } from "./renderings";
+import {
+  chipRenderings,
+  chipsIn,
+  chipsInJSON,
+  chipTargets,
+  PENDING_CHIP,
+  renderingsByIid,
+  UNKNOWN_CHIP,
+} from "./renderings";
 import { CHIP_ANCHOR_TEXT, ENTITY_CHIP, type ChipContext } from "./types";
 import { UNKNOWN_PERSON } from "./kinds/mention";
 
@@ -112,4 +120,14 @@ test("an annotation body's schema has the node too", () => {
     ],
   });
   assert.equal(chipsIn(body).length, 1);
+});
+
+test("a target the browser is still asking about shows a placeholder, not its kind's unknown form", () => {
+  const chips = chipsIn(doc);
+  const waiting = chipRenderings(chips, {}, context, { mention: ["nobody"] });
+  assert.deepEqual(waiting[3], PENDING_CHIP);
+  // Only chips naming that target wait; the rest are as they were.
+  assert.equal(waiting[0].label, "@Luke Breuer");
+  // Once it is answered and still absent, the kind says so.
+  assert.equal(chipRenderings(chips, {}, context)[3].label, UNKNOWN_PERSON);
 });

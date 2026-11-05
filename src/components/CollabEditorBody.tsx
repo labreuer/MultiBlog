@@ -6,6 +6,8 @@ import type * as Y from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { setAnnotationAnchors, type AnnotationAnchorInput } from "@/lib/annotation-highlight-extension";
 import { docEditorExtensions } from "@/lib/live-editor-extensions";
+import { useChipSurface } from "@/lib/entity-chips/chip-surface";
+import { useChipInputs } from "@/lib/entity-chips/use-chip-inputs";
 import { collectAuthorHighlightStats } from "@/lib/tiptap-schema";
 import { codecForFile } from "@/lib/table-codecs";
 import { insertTableFromFile } from "@/lib/table-file-editor";
@@ -243,6 +245,9 @@ export default function CollabEditorBody({
       editor.off("update", check);
     };
   }, [editor, hasContent]);
+
+  // Entity chips' labels (docs/ENTITY_CHIPS.md), for the doc the page names.
+  useChipInputs(editor, useChipSurface());
 
   // useEditor's `editable` option is only read at construction time, not
   // reactive — toggling it later (e.g. after a soft delete) requires calling

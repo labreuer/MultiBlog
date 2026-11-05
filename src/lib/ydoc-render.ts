@@ -5,6 +5,8 @@ import { TiptapTransformer } from "@hocuspocus/transformer";
 import { renderToReactElement } from "@tiptap/static-renderer";
 import { docContentExtensions, titleAuthorHighlightExtensions, collectMarkAttrValues } from "@/lib/tiptap-schema";
 import { extractText } from "@/lib/diff";
+import { renderWithChips } from "@/lib/entity-chips/static";
+import { NO_CHIP_INPUTS, type ChipInputs } from "@/lib/entity-chips/types";
 
 // The one renderer for a materialized Y.Doc, wherever it came from: the doc
 // reading route's cold-start decode, the live tap's per-update render
@@ -78,13 +80,17 @@ export type YdocRenderResult =
   | (Extract<YdocContent, { ok: true }> & { body: ReactNode; title: ReactNode })
   | { ok: false; error: string };
 
-export function renderYdocDoc(doc: Y.Doc): YdocRenderResult {
+//
+// `chipInputs` is what the body's entity chips are labelled from
+// (docs/ENTITY_CHIPS.md); a caller with none gets each chip kind's
+// placeholder for an unknown target.
+export function renderYdocDoc(doc: Y.Doc, chipInputs: ChipInputs = NO_CHIP_INPUTS): YdocRenderResult {
   const content = readYdocContent(doc);
   if (!content.ok) return content;
 
   return {
     ...content,
-    body: renderToReactElement({ content: content.bodyJSON, extensions: docContentExtensions }),
+    body: renderWithChips(content.bodyJSON, docContentExtensions, chipInputs),
     title: content.titleJSON
       ? renderToReactElement({ content: content.titleJSON, extensions: titleAuthorHighlightExtensions })
       : null,

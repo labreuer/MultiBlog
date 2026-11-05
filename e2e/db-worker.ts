@@ -246,6 +246,8 @@ export async function createTestPost(opts: {
   authorEmail: string;
   title?: string;
   bodyText?: string;
+  /** The backing doc's body as TipTap JSON, in place of `bodyText`: for a post made from a doc holding entity chips. */
+  body?: JSONContent;
   policy?: ModerationPolicy;
   publish?: boolean;
   /**
@@ -267,6 +269,7 @@ export async function createTestPost(opts: {
     authorEmail,
     title = uniqueTitle("post"),
     bodyText = "The quick brown fox jumps over the lazy dog.",
+    body,
     policy = "AUTO",
     scheduledFor: scheduledForIso,
     publish = scheduledForIso !== undefined,
@@ -277,7 +280,7 @@ export async function createTestPost(opts: {
   const author = await prisma.user.findUnique({ where: { email: authorEmail } });
   if (!author) throw new Error(`No such test author: ${authorEmail}`);
 
-  const doc = await createTestDoc({ authorEmail, title: uniqueTitle("post-doc"), bodyText });
+  const doc = await createTestDoc({ authorEmail, title: uniqueTitle("post-doc"), ...(body ? { body } : { bodyText }) });
 
   const post = await prisma.post.create({
     data: {

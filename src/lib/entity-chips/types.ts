@@ -65,6 +65,21 @@ export const DEFAULT_CHIP_STYLES: ChipStyles = {};
  */
 export type ChipContext = Record<string, unknown>;
 
+/** What a surface's renderings are computed from, beside the document itself. */
+export type ChipInputs = {
+  styles: ChipStyles;
+  context: ChipContext;
+  /**
+   * Target ids a browser has asked the server about and not yet heard back
+   * on, per chip kind. A chip naming one shows a neutral placeholder rather
+   * than its kind's "unknown" form, which would be a claim nobody has checked.
+   * Never set on a server, which loads a context whole.
+   */
+  pending?: Record<string, readonly string[]>;
+};
+
+export const NO_CHIP_INPUTS: ChipInputs = { styles: DEFAULT_CHIP_STYLES, context: {} };
+
 /**
  * What a chip kind supplies (docs/ENTITY_CHIPS.md, "The kind contract"). This
  * is the browser-safe part: fields, identity, forms and rendering. A kind's

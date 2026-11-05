@@ -11,6 +11,7 @@ import { EDITOR_MARGIN_NOTES_MEDIA_QUERY } from "@/lib/margin-notes-layout";
 import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import DocEditor from "@/components/DocEditor";
+import { ChipSurfaceProvider } from "@/lib/entity-chips/chip-surface";
 import { docEditorTabTitle } from "@/lib/doc-title";
 import { signInPath } from "@/lib/sign-in-redirect";
 import { displayNameOf } from "@/lib/display-name";
@@ -109,21 +110,24 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
             in landscape the rail engages where 1180px alone would refuse
             (EDITOR_MARGIN_NOTES_MEDIA_QUERY). */}
         <MarginNotesProvider query={EDITOR_MARGIN_NOTES_MEDIA_QUERY}>
-          <DocEditor
-            docId={doc.id}
-            slug={doc.slug}
-            initialTitle={doc.title}
-            visibility={doc.visibility}
-            createdAt={doc.createdAt}
-            userId={user.id}
-            userName={displayNameOf(user)}
-            userColor={user.color}
-            userInitials={user.adminInitials}
-            authorIds={doc.authors.map((a) => a.userId)}
-            eligibleUsers={eligibleUsers}
-            initialDeleted={doc.deletedByUserId !== null}
-            annotations={annotations}
-          />
+          {/* Names the doc for its editors' entity chips (docs/ENTITY_CHIPS.md). */}
+          <ChipSurfaceProvider doc={doc.id}>
+            <DocEditor
+              docId={doc.id}
+              slug={doc.slug}
+              initialTitle={doc.title}
+              visibility={doc.visibility}
+              createdAt={doc.createdAt}
+              userId={user.id}
+              userName={displayNameOf(user)}
+              userColor={user.color}
+              userInitials={user.adminInitials}
+              authorIds={doc.authors.map((a) => a.userId)}
+              eligibleUsers={eligibleUsers}
+              initialDeleted={doc.deletedByUserId !== null}
+              annotations={annotations}
+            />
+          </ChipSurfaceProvider>
         </MarginNotesProvider>
       </AnnotationMoveProvider>
     </DocPresenceProvider>
