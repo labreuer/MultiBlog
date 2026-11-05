@@ -331,3 +331,85 @@ test("MCP writes citations in Pandoc's syntax, reads them back as sent, edits th
     await agent.dispose();
   }
 });
+
+// docs/CITATIONS.md, "The popover" — what a citation says beyond which works,
+// edited in place: each field one attribute set on the chip, so it keeps its
+// instance id and the bibliography follows.
+test("a citation's popover edits its page, the words before it, its form and its works", async ({ page, request }) => {
+  const agent = await createAgent(request);
+  const prefix = `e2epop${Date.now().toString(36)}`;
+  const short = `P${Date.now() % 100000}`;
+  const barfield = `${prefix}-barfield1957`;
+  const radner = `${prefix}-radner2012`;
+  let docId = "";
+  try {
+    for (const [key, csl, abbreviation] of [
+      [barfield, { type: "book", title: `Saving the Appearances ${prefix}`, author: [{ family: `Barfield${prefix}` }], issued: { "date-parts": [[1957]] } }, short],
+      [radner, { type: "book", title: `The Origin of Ideas ${prefix}`, author: [{ family: `Radner${prefix}` }], issued: { "date-parts": [[2012]] } }, undefined],
+    ] as const) {
+      const made = await agent.call("create_ref", { csl, key, ...(abbreviation ? { short: abbreviation } : {}) });
+      expect(made.isError, JSON.stringify(made.error)).toBe(false);
+    }
+    const doc = await agent.call("create_doc", { markdown: `Appearances are collective [@${barfield}, p. 49].`, title: `Popover ${prefix}` });
+    expect(doc.isError, JSON.stringify(doc.error)).toBe(false);
+    docId = String(doc.result.id);
+
+    await page.goto(`/doc/${docId}/edit`);
+    await waitForDocCollabReady(page);
+    const chip = bodyEditor(page).locator(".entity-chip");
+    await expect(chip).toHaveText([`(${short} p. 49)`]);
+    const iid = await chip.getAttribute("data-iid");
+
+    // Selecting the chip opens its popover; a field writes on Enter, or when it is left.
+    await chip.click();
+    const popover = page.locator(`[data-cite-popover="${iid}"]`);
+    const work = popover.getByRole("group", { name: barfield });
+    await work.getByLabel("Page").fill("50-52");
+    await work.getByLabel("Page").press("Enter");
+    await expect(chip).toHaveText([`(${short} pp. 50–52)`]);
+    await work.getByLabel("Before").fill("see");
+    await work.getByLabel("After").focus();
+    await expect(chip).toHaveText([`(see ${short} pp. 50–52)`]);
+    await work.getByLabel("Leave out the author").check();
+    await expect(chip).toHaveText(["(see pp. 50–52)"]);
+    // In the sentence holds one work with its author shown and nothing before it.
+    await expect(popover.getByLabel("In the sentence")).toBeDisabled();
+    await work.getByLabel("Leave out the author").uncheck();
+    await work.getByLabel("Before").fill("");
+    await work.getByLabel("Before").press("Enter");
+    await popover.getByLabel("In the sentence").check();
+    await expect(chip).toHaveText([`${short} (pp. 50–52)`]);
+    await popover.getByLabel("In parentheses").check();
+
+    // A second work, by a word of its author's name and a page, as the [@ menu finds one.
+    await popover.getByLabel("Add a work").fill(`Radner${prefix} 7`);
+    await popover.getByRole("button", { name: new RegExp(`The Origin of Ideas ${prefix}`) }).click();
+    await expect(chip).toHaveText([`(${short} pp. 50–52; Radner${prefix} 2012, p. 7)`]);
+    await expect(page.locator("[data-editor-scroll] [data-bibliography]").getByRole("listitem")).toHaveCount(2);
+    await popover.getByRole("button", { name: `Remove ${radner}` }).click();
+    await expect(chip).toHaveText([`(${short} pp. 50–52)`]);
+    await expect(page.locator("[data-editor-scroll] [data-bibliography]").getByRole("listitem")).toHaveCount(1);
+    // The same chip throughout.
+    await expect(chip).toHaveAttribute("data-iid", iid!);
+
+    // Escape goes back to the editor with the chip still selected, and Enter comes back in.
+    await page.keyboard.press("Escape");
+    await expect(popover).toBeVisible();
+    await expect(bodyEditor(page)).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(work.getByLabel("Page")).toBeFocused();
+    // Clicking elsewhere in the text closes it.
+    await bodyEditor(page).getByText("Appearances are").click();
+    await expect(popover).toBeHidden();
+
+    // What was written reaches the server, once the collab server has stored it.
+    await expect
+      .poll(async () => String((await agent.call("read", { url: `/doc/${docId}` })).result.markdown), { timeout: 15_000 })
+      .toBe(`Appearances are collective [@${barfield}, pp. 50–52].`);
+  } finally {
+    await page.goto("about:blank");
+    if (docId) await deleteTestDoc(docId);
+    await deleteTestReferences(prefix);
+    await agent.dispose();
+  }
+});

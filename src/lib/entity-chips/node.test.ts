@@ -155,6 +155,20 @@ test("a chip coming or going recomputes", () => {
   assert.equal(plugin(swallowed).byIid.size, 0);
 });
 
+test("a chip's attributes set in place recomputes: the citation popover's edit, and the id repair", () => {
+  const state = live(para("a ", mention("i1", "nobody"), " b"));
+  assert.deepEqual(labels(state), [[3, "unknown person"]]);
+  // An attribute set moves nothing, so its step map is empty: it has to be looked for by name.
+  const pointed = state.apply(state.tr.setNodeAttribute(3, "data", { userId: "luke" }));
+  assert.deepEqual(labels(pointed), [[3, "@Luke Breuer"]]);
+  const renamed = pointed.apply(pointed.tr.setNodeAttribute(3, "iid", "i9"));
+  assert.deepEqual([...plugin(renamed).byIid.keys()], ["i9"]);
+  // Setting another node's attribute is not a chip's change.
+  const other = live(para("a ", mention("i1")), schema.nodes.heading.create({ level: 2 }, schema.text("h")));
+  const headed = other.apply(other.tr.setNodeAttribute(5, "level", 3));
+  assert.equal(plugin(headed).byIid, plugin(other).byIid);
+});
+
 test("new inputs relabel every chip without touching the document", () => {
   const state = live(para(mention("i1"), " and ", mention("i2")));
   const restyled = state.apply(state.tr.setMeta(entityChipKey, { ...inputs, styles: { mention: { form: "initials" } } }));

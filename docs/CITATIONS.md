@@ -9,10 +9,10 @@ contract. The kit says how every chip is stored, rendered, quoted and searched. 
 
 ## Built so far
 
-The reference library (its data, its pages and its machine door), the citation chip
-itself, its Markdown both ways, and a doc's bibliography. Everything below not listed here is
-still a plan: the chip's popover, the search filters, what a reference's page shows of who
-cites it, and of the Markdown, a quote written in it and the transcript importer's escape.
+The reference library (its data, its pages and its machine door), the citation chip itself
+with its popover, its Markdown both ways, and a doc's bibliography. Everything below not listed
+here is still a plan: the search filters, what a reference's page shows of who cites it, and of
+the Markdown, a quote written in it and the transcript importer's escape.
 
 - **The chip kind:** `src/lib/entity-chips/kinds/citation.ts` holds its fields and
   validation, its identity (the works, in any order), when one citation continues another
@@ -34,6 +34,8 @@ cites it, and of the Markdown, a quote written in it and the transcript importer
 - **The menu:** `CiteMenu.tsx`, opened by `[@` in the doc editor and a note's composer. It
   searches the library by key, abbreviation, title and author, and "radner 49" sets the
   locator.
+- **The popover:** `CitePopover.tsx`, beside the menu: a selected citation's pages, words,
+  form and works, each edit one attribute set on the chip (below).
 - **The doc's style:** a Citations row in the doc's Settings, written to the ydoc's
   `settings` map as the mention style is.
 - **MCP:** a read shows a citation as its label in text and as Pandoc's syntax in Markdown,
@@ -285,11 +287,26 @@ prefixes.
 - It sits in the doc editor and the annotation composer.
 - It searches by key, short label, title and authors.
 - "radner 49" sets the locator.
-- The chip's popover edits what validation allows (The chip, above):
-  - the locator;
-  - prefix and suffix;
-  - the form;
-  - further works in the same citation.
+
+**The popover** (`CitePopover.tsx`) edits what validation allows (The chip, above): each work's
+page, the words before and after it, and whether its author is left out; the form; and further
+works, found as the menu finds them, "radner 7" included.
+
+- **Where.** Beside the menu, in the doc editor and the annotation composer, and only in an
+  editor that can be typed in. Selecting a citation opens it, by a click or the arrow keys, and
+  Enter moves into it.
+- **Each edit is one attribute set** on the chip's `data`, run through the kind's validation as
+  every other way in is. So the chip keeps its instance id and its place, and an anchor on it
+  asks the kind whether the new fields continue the old ones (The chip, above). Removing a work
+  can therefore detach an anchor, as an edit removing it by any other means would.
+- **A text field writes when it is left or Enter is pressed**, not on each keystroke, since
+  validation trims and would eat the space being typed. Escape puts a changed field back, and a
+  second Escape returns to the editor with the citation still selected.
+- **"In the sentence" is offered only where Pandoc has the form**: one work, its author shown,
+  nothing before it. Otherwise the choice is disabled and says why.
+- **Open while it is wanted.** It shows while the editor has focus and its selection is the
+  citation. Once focus moves into the popover, by a press, a key or a script, it holds the
+  popover open until focus or a press goes somewhere else.
 
 **The bibliography** is the works a doc's citations name, in the doc's style, shown after the
 doc in the reading view, the editor and side-by-side. Like a label, it is computed wherever the
@@ -388,4 +405,7 @@ post's labels, and a republish refreshes both.
   - a duplicate refused, from an import and through `create_ref`;
   - a post's citation linking to the reference page, and the page offering the PDF to a member;
   - the bibliography in the editor, following a change of style, in the reading view, and in a
-    post's text.
+    post's text;
+  - the popover: a page, the words before, the author left out, the narrative form offered only
+    where it applies, a work added and removed on one chip, and Escape and Enter between it and
+    the editor.

@@ -19,6 +19,7 @@ import EditorToolbar from "./EditorToolbar";
 import DocRefMenu from "./DocRefMenu";
 import MentionMenu from "./MentionMenu";
 import CiteMenu from "./CiteMenu";
+import CitePopover from "./CitePopover";
 import LiveBibliography from "./bibliography/LiveBibliography";
 import { EDITOR_SCROLL_ATTRIBUTE } from "./editor-scroll";
 import styles from "./EditorChrome.module.css";
@@ -352,6 +353,7 @@ export default function CollabEditorBody({
       <DocRefMenu editor={editor} disabled={!editable} />
       <MentionMenu editor={editor} disabled={!editable} />
       <CiteMenu editor={editor} disabled={!editable} />
+      <CitePopover editor={editor} disabled={!editable} />
     </div>
   );
 }

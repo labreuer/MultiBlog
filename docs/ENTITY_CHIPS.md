@@ -346,7 +346,8 @@ doesn't cover are in [YDOC.md](YDOC.md).
    - relabelling every chip at once (the context arriving, a restyle, a rename) takes 4–11 ms.
 
    The keystroke figure depends on one thing. The plugin maps its decoration set through a
-   transaction that touches no chip, and rebuilds it only when a chip comes or goes or the
+   transaction that touches no chip, and rebuilds it only when a chip comes or goes, has its
+   attributes set (an `AttrStep`, whose step map is empty, so it is looked for by name), or the
    inputs change. Rebuilding on every keystroke doubled typing latency at the doc's end, because
    ProseMirror then compares every block's decorations.
 

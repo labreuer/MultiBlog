@@ -2,6 +2,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { isChangeOrigin } from "@tiptap/extension-collaboration";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey, type EditorState, type Transaction } from "@tiptap/pm/state";
+import { AttrStep } from "@tiptap/pm/transform";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { chipKind } from "./registry";
 import { repairSharedIids } from "./shared-iids";
@@ -146,14 +147,17 @@ function insertsChip(tr: Transaction): boolean {
 }
 
 /**
- * Whether a transaction puts a chip in or takes one out: the only document
- * changes that can alter a rendering, since a chip's label reads nothing of
+ * Whether a transaction puts a chip in, takes one out or sets one's
+ * attributes: the only document changes that can alter a rendering, since a chip's label reads nothing of
  * the text around it. False for ordinary typing, at the cost of looking at
  * the few positions each step replaced.
  */
 function touchesChip(tr: Transaction): boolean {
   if (insertsChip(tr)) return true;
   return tr.steps.some((step, index) => {
+    // An attribute set moves nothing, so its map is empty: the citation
+    // popover's edit, and the instance-id repair.
+    if (step instanceof AttrStep) return tr.docs[index].nodeAt(step.pos)?.type.name === ENTITY_CHIP;
     let found = false;
     step.getMap().forEach((oldStart, oldEnd) => {
       if (found || oldEnd <= oldStart) return;

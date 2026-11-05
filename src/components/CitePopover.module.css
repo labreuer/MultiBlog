@@ -1,0 +1,172 @@
+/* docs/CITATIONS.md, "The popover" — a citation's fields, under the chip.
+   position: fixed and portaled to <body>, placed by floating-ui, as the link
+   bubble is (EditorChrome.module.css). */
+
+.popover {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(26rem, calc(100vw - 16px));
+  max-height: min(32rem, calc(100dvh - 16px));
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 8px;
+  font-size: 0.875rem;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px var(--shadow-color);
+}
+
+/* Focused only to keep focus inside it while a control it held goes away. */
+.popover:focus {
+  outline: none;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.done,
+.result {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.done {
+  flex: none;
+  padding: 2px 10px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.form,
+.work {
+  border: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+
+.work {
+  flex-direction: column;
+  align-items: stretch;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.workHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workKey {
+  color: var(--text-secondary);
+}
+
+.remove {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  appearance: none;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.remove:hover,
+.result:hover {
+  background: var(--surface-hover);
+}
+
+/* Before, Page and After on one line; the page narrower, as a page is. */
+.fields {
+  display: grid;
+  grid-template-columns: 2fr 1fr 2fr;
+  gap: 6px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fieldLabel {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.input {
+  min-width: 0;
+  padding: 3px 6px;
+  font: inherit;
+  color: inherit;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.add {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.result {
+  display: block;
+  width: 100%;
+  padding: 4px 6px;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 3px;
+}
