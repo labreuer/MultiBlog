@@ -82,11 +82,16 @@ still a plan.
   `docCacheFromYdoc`, which adds each chip's label (`materializeChipLabels`); `prose_text` reads
   it (migration `chip_labels_in_prose_text`), so a doc's search vector and snippets hold the
   label; and `check-doc-integrity.ts` compares without labels and reports a stale one as
-  `chip-labels`. No re-index was needed, since no doc could hold a chip before this. Nothing
-  rewrites a label after a rename until the doc's next store (item 10).
+  `chip-labels`. No re-index was needed, since no doc could hold a chip before this.
 - **Item 9, posts and the landing preamble:** `docJsonForPostSide` (`post-content.ts`) replaces
   each chip with its label as linked text, struck through when its target is gone, and records
   the chip on the link's `chip` attribute. Not the republish remap.
+- **Item 10, the refresh, for mentions:** `refreshMentionLabels` (`refresh.ts`) finds the docs
+  and notes that mention a person through the `mention` table and rewrites a doc's
+  `prose_json` labels and a note's `bodyText`, each as a compare-and-set on the text it read,
+  in raw SQL so no date moves. `scheduleMentionRefresh` runs it in the background after a
+  change to a name, initials, a handle or a bot's person, and once more past the store
+  debounce's ceiling. Not the instance default style, which doesn't exist yet.
 - **Item 12, the index table, for mentions:** `mention` (migration `mention_index`), one row per
   chip with its person, its instance id, its one source and when it was first seen. Triggers on
   `doc.prose_json`, `annotation.prose_json` and `post.prose_json` keep it by a diff; a post's
@@ -97,7 +102,7 @@ still a plan.
   note's body labels its chips: the cards (`buildAnnotationEntries` loads one context for every
   note on the page), the read-only editor over each card, the composer and the edit session,
   and the earlier versions in the history panel. `bodyText` is written with labels
-  (`annotationBodyText`); nothing refreshes it after a rename yet (item 10).
+  (`annotationBodyText`) and refreshed (item 10).
 - **Item 15:** `SCHEMA_VERSION` is 1.
 - **Mentions:** the chip kind's fields, forms and labels, its context loader, the rule for who
   may be mentioned, and the `@` menu in the doc editor and in a note's composer

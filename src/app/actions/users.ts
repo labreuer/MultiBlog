@@ -15,6 +15,7 @@ import { sendMail } from "@/lib/mail";
 import { appUrl } from "@/lib/app-url";
 import { SITE_TITLE } from "@/lib/site-config";
 import { softDeleteUser } from "@/lib/user-delete";
+import { scheduleMentionRefresh } from "@/lib/entity-chips/refresh";
 import { createBot as createBotAs, moveBot, requireBotRole, requireInvitable } from "@/lib/bots";
 import { actorFromSessionUser, type Actor } from "@/lib/actor";
 
@@ -82,6 +83,7 @@ export async function updateUserColor(userId: string, color: string): Promise<vo
 export async function updateUserName(userId: string, name: string): Promise<void> {
   await requireAdmin();
   await prisma.user.update({ where: { id: userId }, data: { name: name.trim() || null } });
+  scheduleMentionRefresh([userId]);
   revalidatePath("/users");
 }
 
@@ -92,6 +94,7 @@ export async function updateUserAdminInitials(userId: string, adminInitials: str
     throw new Error("Initials can't be empty.");
   }
   await prisma.user.update({ where: { id: userId }, data: { adminInitials: trimmed } });
+  scheduleMentionRefresh([userId]);
   revalidatePath("/users");
 }
 

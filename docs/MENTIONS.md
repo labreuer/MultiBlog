@@ -13,9 +13,10 @@
   "meet @ 5pm" opens nothing. The menu isn't mounted for a viewer below AUTHOR, so a reader's
   "@" opens nothing rather than a list of nobody. A row says when the person couldn't read the
   doc, or the PDF a note is on.
+- the `mention` index table and the label refresh after a rename (the kit's items 12 and 10).
 
-Still a plan: ordering beyond "participants first", the Markdown, search, the dashboard card and
-notifications.
+Still a plan: ordering beyond "participants first", the Markdown, `mentions=` search, the
+dashboard card and notifications.
 
 A *mention* is an entity chip
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md)) that stands for a person: a MultiBlog account. It is shown as
@@ -59,7 +60,12 @@ A nickname form would need a new user field.
 
 **Context:** each user's name, initials and slug, deleted users included.
 
-**Refresh** (the kit's step 1, item 10): a user's name, initials or slug changes.
+**Refresh** (the kit's step 1, item 10): a user's name, initials or slug changes, or a bot is
+moved to another person. Built: each of those writes calls `scheduleMentionRefresh` once it has
+committed, from `updateAccountSettings`, `updateUserName`, `updateUserAdminInitials`,
+`changeUserSlug`, `revertUserSlug` and `moveBot`. A new way to change one of those fields has
+to call it too; a write that doesn't is what `check-doc-integrity.ts`'s `chip-labels` finding
+reports. A person's refresh covers their bots, whose labels can name them.
 
 **Link:** the author page, `/authors/<slug>`, in docs and posts alike.
 

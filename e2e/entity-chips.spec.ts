@@ -1,5 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
-import { test, expect, annotationEditor, bodyEditor, waitForDocCollabReady } from "./fixtures";
+import { test, expect, annotationEditor, bodyEditor, openDashboardCard, waitForDocCollabReady } from "./fixtures";
 import {
   ADMIN_EMAIL,
   createTestDoc,
@@ -8,6 +8,7 @@ import {
   deleteTestPost,
   getAnnotationStates,
   getDocSearchText,
+  getDocState,
   getMentionSources,
   getPostContentText,
   getUserIdByEmail,
@@ -275,4 +276,63 @@ test("a mention typed into a note is labelled in the composer, on the posted car
   await readerPage.keyboard.type(`Ask @${lastName}`);
   await expect(readerComposer).toContainText(`Ask @${lastName}`);
   await expect(readerPage.getByRole("listbox", { name: "People" })).toHaveCount(0);
+});
+
+test("a rename reaches a doc nobody has open, and a note's stored text, without touching either's date", async ({
+  page,
+  sharedDoc,
+  secondUser,
+}) => {
+  const { user: author, page: authorPage } = await secondUser({ role: "AUTHOR" });
+  const lastName = author.name.split(" ").at(-1);
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: bodyOf(text("Reviewed by "), mention("i1", author.id), text(".")),
+  });
+  try {
+    // A note that mentions them too, posted the ordinary way.
+    await page.goto(`/doc/${sharedDoc.slug}`);
+    await page.getByRole("button", { name: "Write an annotation..." }).click();
+    const composer = annotationEditor(page);
+    await expect(composer).toBeVisible({ timeout: 15_000 });
+    await composer.click();
+    await page.keyboard.type(`Thanks @${lastName}`);
+    await expect(page.getByRole("listbox", { name: "People" }).getByRole("option", { name: author.name })).toBeVisible();
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("for this.");
+    await page.getByRole("button", { name: "Post annotation" }).click();
+    await expect(composer).toHaveCount(0);
+    const noteText = async () => (await getAnnotationStates(sharedDoc.id)).map((annotation) => annotation.bodyText);
+    await expect.poll(noteText).toEqual([`Thanks @${author.name} for this.`]);
+
+    expect(await getDocSearchText(doc.id)).toBe(`Reviewed by @${author.name}.`);
+    const before = await getDocState(doc.id);
+
+    // The person renames themselves. Nobody opens the doc or the note.
+    const renamed = `Renamed ${lastName}`;
+    await authorPage.goto("/dashboard");
+    await openDashboardCard(authorPage, "Settings");
+    await authorPage.getByLabel("Name").fill(renamed);
+    await authorPage.getByRole("button", { name: "Save" }).click();
+    await expect(authorPage.getByText("Saved.")).toBeVisible();
+
+    // Both stored texts follow, which is what search and the RAISED email read.
+    await expect.poll(() => getDocSearchText(doc.id), { timeout: 15_000 }).toBe(`Reviewed by @${renamed}.`);
+    await expect.poll(noteText, { timeout: 15_000 }).toEqual([`Thanks @${renamed} for this.`]);
+    await page.goto(`/search?q=${encodeURIComponent(renamed)}`);
+    await expect(page.getByRole("link", { name: doc.title }).first()).toBeVisible();
+
+    // A rename is not an edit: the doc's date and its last editor are where they were.
+    const after = await getDocState(doc.id);
+    expect(after?.updatedAt).toBe(before?.updatedAt);
+    expect(after?.updatedByEmail).toBe(before?.updatedByEmail);
+
+    // The surfaces that compute labels never held the old one.
+    await page.goto(`/doc/${doc.slug}`);
+    await expect(page.locator("a.entity-chip").filter({ visible: true })).toHaveText([`@${renamed}`]);
+  } finally {
+    await page.goto("about:blank");
+    await deleteTestDoc(doc.id);
+  }
 });
