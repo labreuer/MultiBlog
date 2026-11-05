@@ -2151,6 +2151,7 @@ model Reference {
   file        StoredFile?           @relation(fields: [fileId], references: [id], onDelete: SetNull)
   identifiers ReferenceIdentifier[]
   keyHistory  ReferenceKeyHistory[]
+  listing     ReferenceListing?
 
   @@index([fileId])
   @@index([createdById])
@@ -2194,4 +2195,21 @@ model ReferenceKeyHistory {
 
   @@index([referenceId])
   @@map("reference_key_history")
+}
+
+// What /references sorts and shows that lives inside `reference.csl`: a
+// jsonb field is not something Prisma's `orderBy` can reach, so the three a
+// reader sorts a library by are a view keyed 1:1 on the reference
+// (CLAUDE.md, "Admin tables are one kit"; PLAN.md §16e). Every reference has
+// a row, since the view is over `reference` itself; the columns are nullable
+// because a record may have no creator or no date.
+view ReferenceListing {
+  referenceId String  @unique @map("reference_id")
+  title       String?
+  people      String?
+  year        Int?
+
+  reference Reference @relation(fields: [referenceId], references: [id])
+
+  @@map("reference_listing")
 }

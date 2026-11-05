@@ -76,3 +76,72 @@ test("create_ref adds a work once: a second copy is refused by its ISBN, in eith
     await reader.dispose();
   }
 });
+
+test("the library's page: pasted BibTeX is imported once, listed, and a second paste says what is already there", async ({ page, browser }) => {
+  const prefix = `e2eui${Date.now().toString(36)}`;
+  const isbn = freshIsbn();
+  const bibtex = `
+    @book{${prefix}-barfield1957,
+      author = {Barfield, Owen},
+      title = {Saving the Appearances ${prefix}},
+      publisher = {Faber},
+      address = {London},
+      year = {1957},
+      isbn = {${isbn}}
+    }
+    @article{${prefix}-noauthor,
+      title = {An Anonymous Note ${prefix}},
+      journal = {Mind},
+      year = 1960,
+      pages = {1--3}
+    }
+    @book{${prefix}-untitled, author = {Nobody, N.}, year = 2000 }`;
+  try {
+    await page.goto("/references");
+    await page.getByText("Add references").click();
+    await page.getByRole("textbox", { name: "References to import" }).fill(bibtex);
+    await page.getByRole("button", { name: "Import" }).click();
+    const report = page.getByRole("list", { name: "Import results" });
+    await expect(report).toContainText(`Added ${prefix}-barfield1957: Saving the Appearances ${prefix}`);
+    await expect(report).toContainText(`Added ${prefix}-noauthor`);
+    // The one with no title is refused by name, and left in the box to be corrected.
+    await expect(report).toContainText("A reference needs a title.");
+    expect(await getTestReference(`${prefix}-barfield1957`)).toMatchObject({ identifiers: [`ISBN:${isbn}`], deleted: false });
+
+    // The table lists it, found by a word of its title, with the columns read from its record.
+    await page.goto(`/references?q=${prefix}`);
+    const row = page.getByRole("row").filter({ hasText: `${prefix}-barfield1957` });
+    await expect(row).toContainText("Barfield Owen");
+    await expect(row).toContainText("1957");
+    await expect(row).toContainText(`Saving the Appearances ${prefix}`);
+
+    // The same record pasted again is not a second copy.
+    await page.getByText("Add references").click();
+    await page.getByRole("textbox", { name: "References to import" }).fill(bibtex.split("@article")[0]);
+    await page.getByRole("button", { name: "Import" }).click();
+    await expect(page.getByRole("list", { name: "Import results" })).toContainText(`Already in the library as ${prefix}-barfield1957`);
+
+    // Its own page is public: a signed-out reader gets the entry, as a published post's citation will link to it.
+    const anonymous = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    const visitor = await anonymous.newPage();
+    const response = await visitor.goto(`/references/${prefix}-barfield1957`);
+    expect(response?.status()).toBe(200);
+    await expect(visitor.getByRole("heading", { level: 1 })).toHaveText(`Saving the Appearances ${prefix}`);
+    await expect(visitor.getByRole("main")).toContainText(`Barfield, O. (1957). Saving the Appearances ${prefix}. London: Faber.`);
+    // And the list is not: it is the members' table.
+    await visitor.goto("/references");
+    await expect(visitor).toHaveURL(/\/sign-in\?/);
+
+    // Renaming the key leaves the old one answering.
+    page.once("dialog", (dialog) => void dialog.accept(`${prefix}-barfield-appearances`));
+    await page.goto(`/references?q=${prefix}`);
+    await page.getByRole("button", { name: `Rename key ${prefix}-barfield1957` }).click();
+    await expect(page.getByRole("link", { name: `${prefix}-barfield-appearances` })).toBeVisible();
+    await visitor.goto(`/references/${prefix}-barfield1957`);
+    await expect(visitor).toHaveURL(new RegExp(`/references/${prefix}-barfield-appearances$`));
+    await anonymous.close();
+  } finally {
+    await page.goto("about:blank");
+    await deleteTestReferences(prefix);
+  }
+});

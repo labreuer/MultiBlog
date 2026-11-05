@@ -57,13 +57,13 @@ Each of these has been decided once and is easy to undo by accident. Read the li
 before changing the behavior it describes.
 
 - **Admin tables are one kit.** `/posts`, `/docs`, `/files`, `/users`, `/comments`,
-  `/annotations`, `/tags` and `/links` all
+  `/annotations`, `/tags`, `/links` and `/references` all
   render through `src/components/table/` plus a per-table `*-query.ts` over
   `src/lib/table-query.ts`. Filters, sort, pagination and the show-deleted toggle live in the
   querystring and are applied in Postgres, never client-side; a new admin table means a
   `*-query.ts` and the kit's hooks, not a fresh `<table>`. Every column sorts — the ones
   Prisma's `orderBy` can't reach go through a **database view keyed 1:1 on the primary key**
-  (`post_activity`, `post_metrics`, `doc_metrics`), which Prisma then treats as an ordinary
+  (`post_activity`, `post_metrics`, `doc_metrics`, `reference_listing`), which Prisma then treats as an ordinary
   to-one relation. Reach for that before denormalizing or re-sorting in JS. The exception is a
   value expensive to *compute* rather than awkward to reach: a view has no `WHERE` to push
   down when sorted through, so it evaluates for every row on every page load — hence `/docs`'

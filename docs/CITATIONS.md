@@ -9,9 +9,9 @@ contract. The kit says how every chip is stored, rendered, quoted and searched. 
 
 ## Built so far
 
-The reference library's data and its machine door. Everything below not listed here is still a
-plan: the pages, the import box, the citation chip kind, the menu, the bibliography and the
-search filters.
+The reference library: its data, its pages and its machine door. Everything below not listed
+here is still a plan: the citation chip kind, its menu, the bibliography, the search filters,
+and what a reference's page shows of who cites it.
 
 - **Records:** the `reference` table (migration `reference_library`), its `csl` built field by
   field by `parseCslItem` (`src/lib/references/csl.ts`) on every way in and read back through
@@ -27,9 +27,18 @@ search filters.
   `updateReference`, `setReferenceDeleted`, `importReferences`. AUTHOR and above
   (`canWriteReferences`). A duplicate is refused as `duplicate`, naming the record that holds
   the identifier, a deleted one included.
-- **Import parsing:** `src/lib/references/import.ts` reads pasted BibTeX, RIS or CSL-JSON, one
-  record or many, written by hand rather than taken as a dependency. Nothing in the UI calls
-  it yet.
+- **Import:** `src/lib/references/import.ts` reads pasted BibTeX, RIS or CSL-JSON, one record
+  or many, written by hand rather than taken as a dependency. `/references` has the box
+  (`ReferenceImport.tsx`): each record is added, shown as already in the library with the key
+  it has there, or refused with why.
+- **`/references`**, through the admin table kit, for signed-in members
+  (`canViewReferences`); AUTHOR and above rename a key, set an abbreviation, delete and
+  restore. Author(s), Year and Title sort through the `reference_listing` view (migration
+  `reference_listing_view`), since they are fields of the record's jsonb.
+- **`/references/[key]`** is public and reads no session: the entry as a bibliography sets
+  it, the abbreviation, and the DOI, ISBN and URL. A key the reference used to have redirects
+  to its current one. Not yet: the posts that cite it, and the client island for what only
+  some viewers may see.
 - **The entry format:** `src/lib/references/entry.ts`, the one bibliography entry the house
   styles share.
 - **MCP:** `find_refs` and `create_ref` (`src/lib/mcp/tools/references.ts`). The names are

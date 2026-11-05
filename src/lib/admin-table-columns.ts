@@ -158,6 +158,21 @@ export const ADMIN_TABLE_COLUMNS = {
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
     { key: "edit", label: "Edit" },
   ],
+  // docs/CITATIONS.md — /references. Title, Author(s) and Year are read from
+  // each record's CSL-JSON through the `reference_listing` view, which is
+  // what lets them sort. Abbr. is the label a short citation shows, and a
+  // blank one is the flag that a reference still needs it.
+  references: [
+    { key: "key", label: "Key" },
+    { key: "short", label: "Abbr." },
+    { key: "people", label: "Author(s)" },
+    { key: "year", label: "Year" },
+    { key: "title", label: "Title" },
+    { key: "file", label: "PDF" },
+    { key: "created", label: "Added at", defaultHidden: true },
+    { key: "createdBy", label: "Added by", defaultHidden: true },
+    { key: "deletedAt", label: "Deleted at", defaultHidden: true },
+  ],
 } as const satisfies Record<AdminTableName, readonly ColumnMeta[]>;
 
 /** The movable column keys of one admin table — what its `registryColumns` call must supply a body for. */

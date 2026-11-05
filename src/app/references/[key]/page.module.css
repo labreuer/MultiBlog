@@ -1,0 +1,43 @@
+/* docs/CITATIONS.md — a reference's own page: what a bibliography prints,
+   and nothing more. */
+
+.container {
+  max-width: 800px;
+  margin: 4rem auto;
+  padding: 0 1rem;
+}
+
+.kicker {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.entry {
+  margin-top: 1rem;
+  font-size: 1.1rem;
+  line-height: 1.5;
+}
+
+.details {
+  margin-top: 1.5rem;
+  border-collapse: collapse;
+}
+
+.details th {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.15rem 1.25rem 0.15rem 0;
+  vertical-align: top;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.details td {
+  padding: 0.15rem 0;
+}
+
+.deleted {
+  margin-top: 1rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
