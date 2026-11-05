@@ -1,5 +1,6 @@
 "use client";
 
+import { quoteWithChipLabels } from "@/lib/anchors";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import AnnotationNode from "./AnnotationNode";
@@ -170,7 +171,7 @@ export default function EditorAnnotationRail({ entries, docId }: Props) {
     >
       <QuoteThreadHeader
         threadId={entry.threadId}
-        quotedText={entry.quotedText}
+        quotedText={quoteWithChipLabels(entry.quotedText, entry.anchorChips)}
         status="ACTIVE"
         context={null}
         color={entry.color}

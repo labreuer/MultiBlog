@@ -10,7 +10,7 @@
 // `avatar.ts` (server) and `avatar-url.ts` (browser) are two files rather than
 // one with a conditional. Server callers import `@/lib/anchors/capture`
 // explicitly, which makes the boundary visible at the call site.
-export { resolveAnchorInDoc } from "./resolve";
+export { anchorHolds, resolveAnchorInDoc } from "./resolve";
 export {
   targetToColumns,
   targetFromColumns,
@@ -22,10 +22,25 @@ export {
   parseSelector,
   parseSelectorKind,
   deriveDocRangeSelector,
+  shownQuote,
   type AnchorSelector,
   type DocRangeSelector,
   type PdfTextSelector,
 } from "./selector";
+export {
+  chipMatch,
+  chipPositions,
+  chipRecordsBetween,
+  edgeChipRecords,
+  isChipOnlyQuote,
+  quoteWithEdgeChips,
+  rangeWithEdgeChips,
+  parseChipRecords,
+  quoteWithChipLabels,
+  recordIdentities,
+  relabelChipRecords,
+  type ChipRecord,
+} from "./chips";
 export {
   ANCHOR_TARGET_KINDS,
   SELECTOR_KINDS,

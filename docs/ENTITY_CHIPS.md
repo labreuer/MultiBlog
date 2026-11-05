@@ -87,10 +87,38 @@ still a plan.
   the chip on the link's `chip` attribute. Not the republish remap.
 - **Item 10, the refresh, for mentions:** `refreshMentionLabels` (`refresh.ts`) finds the docs
   and notes that mention a person through the `mention` table and rewrites a doc's
-  `prose_json` labels and a note's `bodyText`, each as a compare-and-set on the text it read,
-  in raw SQL so no date moves. `scheduleMentionRefresh` runs it in the background after a
+  `prose_json` labels, a note's `bodyText`, and the chip records of the anchors into either
+  (item 11), each as a compare-and-set on the text it read, in raw SQL so no date moves. `scheduleMentionRefresh` runs it in the background after a
   change to a name, initials, a handle or a bot's person, and once more past the store
   debounce's ceiling. Not the instance default style, which doesn't exist yet.
+- **Item 11, anchors:** `src/lib/anchors/chips.ts`.
+  - **The chip record** is written by the one capture (`captureAnchorInNode`), into the
+    DOC_RANGE selector's `chips` and, for an annotation, into `annotation.anchor_chips`
+    (migration `anchor_chip_records`). A record holds where the chip's U+FFFC is in the quote,
+    its chip kind, its instance id, the chip's *fields* rather than only its identity, and its
+    *label as of the write*. The fields are what a label is computed from, and the identity
+    is derived from them. The stored label is what lets a table of a hundred quotes, and the
+    annotation search vector (`anchor_quote_text`), show a name without a chip context per
+    row. It is kept as `prose_json`'s labels are: the rename refresh rewrites it, and so does
+    every store of the doc the anchor points into (`refreshAnchorRecords`), from that doc's
+    own labels by instance id.
+  - **Shown with labels:** a card's quote line, the annotation popover, "Your private notes",
+    `/annotations`, `/links`, `/link/[id]` with its banner and tray, search hits and MCP's
+    thread and link reads go through `quoteWithChipLabels` or `shownQuote`.
+  - **Identity checks:** `resolveAnchorInDoc` takes the records. A candidate counts only if
+    its chips stand for the recorded entities in order, and several that pass are told apart
+    by instance id. The highlight plugin, MCP's reads and the edit endpoint's "what it
+    touched" all pass them. An anchor with no record resolves by its text.
+  - **Instance anchoring:** a quote that is chips and nothing else resolves by instance
+    alone. In the doc editor, whose anchor is a mark, the row records the passage's *edge*
+    chips (before its first character, after its last, or all of them for a chip alone), and
+    the plugin finds them by instance id and stretches the mark's hull over them, only
+    within the hull's own textblock ([ANNOTATIONS.md](ANNOTATIONS.md), "Anchoring").
+  - `check-annotation-anchors.ts` checks each record against the stamped state
+    (`chips-at-stamp`).
+
+  Not built of item 11: the selector's `before`/`after` context still holds U+FFFC for a
+  chip beside the passage, and a tag's anchor is whole-object, so it has no record to keep.
 - **Item 12, the index table, for mentions:** `mention` (migration `mention_index`), one row per
   chip with its person, its instance id, its one source and when it was first seen. Triggers on
   `doc.prose_json`, `annotation.prose_json` and `post.prose_json` keep it by a diff; a post's
@@ -131,9 +159,8 @@ still a plan.
   may be mentioned, and the `@` menu in the doc editor and in a note's composer
   ([MENTIONS.md](MENTIONS.md)).
 
-Until the rest of step 1 is built, a stored quote shown outside a ydoc shows U+FFFC where a chip
-is, and `create_doc` can't write one. `/docs`'
-Length counts a chip as no characters.
+Until the rest of step 1 is built, `create_doc` can't write a chip, and `/docs`' Length counts
+one as no characters.
 
 ## Terms
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { chipLabelsOf } from "./entity-chips/node";
+import { displayTextBetween } from "./entity-chips/text";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { Editor } from "@tiptap/react";
 import { captureRelativeRange, resolveRelativeRange, type RelativeRange } from "./yjs-relative-anchor";
@@ -16,7 +18,8 @@ import {
   type PopoverPlacement,
 } from "./popover-placement";
 
-export type PendingEditorSelection = { relRange: RelativeRange; quotedText: string };
+/** `shown` is the passage as the writer sees it, each entity chip as its label; `quotedText` is what an anchor compares. */
+export type PendingEditorSelection = { relRange: RelativeRange; quotedText: string; shown: string };
 
 /** The collapsed marker's rendered size — mirrored by `.annotateMarker`'s CSS. */
 export const ANNOTATE_MARKER_SIZE = 28;
@@ -191,7 +194,7 @@ export function useEditorAnnotationWidget({
       // expanded panel described the *previous* range, and silently
       // re-pointing it at a new one would be worse than closing it. Its
       // decoration goes with it — stage one paints nothing of its own.
-      setPending({ relRange, quotedText });
+      setPending({ relRange, quotedText, shown: displayTextBetween(liveEditor.state.doc, from, to, chipLabelsOf(liveEditor.state)) });
       setAnchorPos(from);
       setExpanded(false);
       if (pendingAnnotationKey.getState(liveEditor.state)) setPendingAnnotation(liveEditor.view, null);

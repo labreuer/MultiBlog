@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { anchoredLinkLandingFor, linkPartsInto, type AnchoredLinkPart } from "@/lib/anchored-link-data";
 import { anchoredLinkTitle } from "@/lib/anchored-link-name";
 import { linkAnchorIds } from "@/lib/anchored-link-write";
-import { resolveAnchorInDoc } from "@/lib/anchors";
+import { resolveAnchorInDoc, shownQuote } from "@/lib/anchors";
 import { blocksOfRange, headingAbove } from "@/lib/doc-text";
 import { loadDocState, type DocState } from "@/lib/doc-state";
 import { docTitleOrFallback } from "@/lib/doc-title";
@@ -27,10 +27,14 @@ const QUOTE_CHARS = 200;
 type Where = { blocks?: string; heading?: string; lost?: true };
 
 /** Where a doc part resolves in the doc as read: its blocks and heading, or `lost` with its stored quote kept. */
-function placeDocPart(state: DocState, part: { from: number | null; to: number | null; quotedText: string }): Where {
+function placeDocPart(
+  state: DocState,
+  part: { from: number | null; to: number | null; quotedText: string; selector: AnchoredLinkPart["selector"] },
+): Where {
+  const chips = part.selector?.kind === "DOC_RANGE" ? part.selector.selector.chips : undefined;
   const range =
     part.from !== null && part.to !== null && part.quotedText
-      ? resolveAnchorInDoc(state.node, part.from, part.to, part.quotedText)
+      ? resolveAnchorInDoc(state.node, part.from, part.to, part.quotedText, undefined, chips)
       : null;
   if (!range) return { lost: true };
   const at = blocksOfRange(state.blocks, range.from, range.to);
@@ -43,7 +47,7 @@ function placeDocPart(state: DocState, part: { from: number | null; to: number |
 }
 
 function quoteOf(part: AnchoredLinkPart | { quotedText: string; selector: AnchoredLinkPart["selector"] }, clipTo?: number) {
-  const text = clipTo ? clip(part.quotedText, clipTo) : part.quotedText;
+  const text = clipTo ? clip(shownQuote(part), clipTo) : shownQuote(part);
   if (part.selector?.kind === "PDF_TEXT") {
     const { prefix, suffix } = part.selector.selector.quote;
     return { quote: text, ...(prefix ? { prefix } : {}), ...(suffix ? { suffix } : {}) };
@@ -141,7 +145,7 @@ export async function linksInto(
         link: `/link/${part.linkId}`,
         ...(part.linkName ? { name: part.linkName } : {}),
         ...(part.linkParts > 1 ? { of: part.linkParts } : {}),
-        quote: clip(part.quotedText, QUOTE_CHARS),
+        quote: clip(shownQuote(part), QUOTE_CHARS),
         ...where,
       };
     }),

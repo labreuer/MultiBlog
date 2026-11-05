@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } f
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import type { JSONContent } from "@tiptap/react";
+import type { ChipRecord } from "@/lib/anchors";
 import { annotationAnchorInputs } from "@/lib/annotation-highlight-extension";
 import { flashHighlight } from "@/lib/flash-highlight";
 import { NEUTRAL_THREAD_COLOR } from "@/lib/author-colors";
@@ -73,6 +74,8 @@ export type AnnotationNodeData = {
   anchorFrom: number | null;
   anchorTo: number | null;
   quotedText: string;
+  /** The entity chips in that quote (src/lib/anchors/chips.ts). */
+  anchorChips: ChipRecord[];
   color: string;
   createdAt: string;
   // When it became visible to readers, which for a reply can be long after
@@ -306,6 +309,7 @@ export default function AnnotationNode({ annotation, target, quoteLost, depth = 
             quotedText: reply.quotedText,
             anchorFrom: reply.anchorFrom,
             anchorTo: reply.anchorTo,
+            anchorChips: reply.anchorChips,
             color: reply.color,
           })),
       ),

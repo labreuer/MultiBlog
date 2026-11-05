@@ -1,10 +1,13 @@
+import { markAnchoredQuote } from "@/lib/annotation-marked-quote";
+import { materializedLabels } from "@/lib/entity-chips/materialize";
+import { parseChipRecords, quoteWithChipLabels } from "@/lib/anchors";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canManageDocs } from "@/lib/doc-authz";
 import { readableAnnotationsWhere } from "@/lib/annotation-authz";
-import { collectMarkAttrValues, extractMarkedText } from "@/lib/tiptap-schema";
+import { collectMarkAttrValues } from "@/lib/tiptap-schema";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import type { Prisma } from "@/generated/prisma/client";
 import type { JSONContent } from "@tiptap/core";
@@ -189,6 +192,7 @@ export default async function AnnotationsPage({
   // several rows typically share a doc. A column-anchored one (§13o) and an
   // anchored reply (§13p) carry theirs on the row and skip all of this.
   const markedIdsByDoc = new Map<string, Set<string>>();
+  const labelsByDoc = new Map<string, ReturnType<typeof materializedLabels>>();
   const proseJsonByDoc = new Map<string, JSONContent>();
 
   // Both containers, flattened to one shape. `containerKind` is what the table
@@ -221,6 +225,7 @@ export default async function AnnotationsPage({
     const proseJson = a.doc.proseJson as JSONContent;
     proseJsonByDoc.set(a.doc.id, proseJson);
     markedIdsByDoc.set(a.doc.id, new Set(collectMarkAttrValues(proseJson, "annotation", "id")));
+    labelsByDoc.set(a.doc.id, materializedLabels(proseJson));
   }
 
   const rows: AnnotationRow[] = rowsWithContainer.map((a) => {
@@ -243,7 +248,11 @@ export default async function AnnotationsPage({
       // too (PLAN.md §13p) — quoting a passage of the annotation it answers
       // rather than of the doc — which is why the `isRoot` gate applies only
       // to the mark branch, where it is still exactly right.
-      quote: a.quotedText || (isRoot && marked && proseJson ? extractMarkedText(proseJson, "annotation", "id", a.id) : ""),
+      quote: a.quotedText
+        ? quoteWithChipLabels(a.quotedText, parseChipRecords(a.anchorChips))
+        : isRoot && proseJson && (marked || a.anchorChips !== null)
+          ? markAnchoredQuote(proseJson, a.id, a.anchorChips, labelsByDoc.get(a.doc!.id) ?? new Map())
+          : "",
       isRoot,
       createdAt: a.createdAt,
       editedAt: a.editedAt,

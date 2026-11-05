@@ -9,6 +9,8 @@ import { annotationBodyText } from "@/lib/annotation-body";
 import type { PdfTarget } from "@/lib/pdf-anchor";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { invalid } from "@/lib/api/errors";
+import type { ChipRecord } from "@/lib/anchors";
+import { chipRecordsColumn } from "@/lib/anchors/capture";
 import { ydocStore } from "../../server/ydoc-store";
 
 // docs/MCP.md §9 — one call that creates a LIVE annotation, root or reply,
@@ -35,7 +37,7 @@ export type PostedAnchor =
   /** On the whole doc or PDF, or — for a reply — on the whole of its parent. */
   | { kind: "none"; stamp: bigint | null }
   /** Columns into a doc (a root) or into the parent's body (a reply), measured at `stamp`. */
-  | { kind: "range"; stamp: bigint; from: number; to: number; quotedText: string }
+  | { kind: "range"; stamp: bigint; from: number; to: number; quotedText: string; chips?: ChipRecord[] }
   /** A root on a PDF page: the whole target, its quote derived by this server. */
   | { kind: "pdf"; target: PdfTarget; quotedText: string };
 
@@ -83,7 +85,7 @@ export async function createPostedAnnotation(
         postedAt: now,
         ydocUpdateId: stamp,
         ...(anchor.kind === "range"
-          ? { anchorFrom: anchor.from, anchorTo: anchor.to, quotedText: anchor.quotedText }
+          ? { anchorFrom: anchor.from, anchorTo: anchor.to, quotedText: anchor.quotedText, anchorChips: chipRecordsColumn(anchor.chips) }
           : anchor.kind === "pdf"
             ? { pdfTarget: anchor.target as unknown as Prisma.InputJsonValue, quotedText: anchor.quotedText }
             : {}),

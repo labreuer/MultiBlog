@@ -1,6 +1,9 @@
+import { parseChipRecords, quoteWithChipLabels, type ChipRecord } from "./anchors";
 import type { JSONContent } from "@tiptap/core";
 import { prisma } from "@/lib/prisma";
-import { collectMarkAttrValues, extractMarkedText } from "@/lib/tiptap-schema";
+import { collectMarkAttrValues } from "@/lib/tiptap-schema";
+import { markAnchoredQuote } from "@/lib/annotation-marked-quote";
+import { materializedLabels } from "@/lib/entity-chips/materialize";
 import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
 import { isVersionQuoted, isVisiblyEdited, STALE_EDIT_SESSION_MS, withSupersededAt } from "@/lib/edit-grace";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
@@ -43,6 +46,8 @@ export type AnnotationComment = {
   anchorFrom: number | null;
   anchorTo: number | null;
   quotedText: string;
+  /** The entity chips in a reply's quote (src/lib/anchors/chips.ts); empty for a root. */
+  anchorChips: ChipRecord[];
   color: string;
   // PLAN.md §12p/§13 — which ydoc_update this was posted against, stringified
   // for the client boundary (BigInt isn't serializable). Metadata only — see
@@ -99,6 +104,12 @@ export type AnnotationThread = {
   // DETACHED comment thread does on the post side. Every "" thread renders,
   // not just the first, unlike a post's single general thread.
   quotedText: string;
+  // docs/ENTITY_CHIPS.md, step 1, item 11 — the entity chips in the passage.
+  // For a stored quote, one record per U+FFFC in `quotedText`: what a card
+  // shows the quote with (`quoteWithChipLabels`) and what the resolver
+  // checks. For a mark-anchored thread, the chips at the passage's edges,
+  // which the mark can't sit on.
+  anchorChips: ChipRecord[];
   // The thread's own color: whoever opened it (root.user.color) — shared by
   // every reply, same as the post side's per-thread color.
   color: string;
@@ -142,6 +153,7 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
 
   const proseJson = doc?.proseJson as JSONContent | null;
   const markedIds = new Set(proseJson ? collectMarkAttrValues(proseJson, "annotation", "id") : []);
+  const docLabels = proseJson ? materializedLabels(proseJson) : new Map<string, string>();
 
   const byId = new Map(annotations.map((a) => [a.id, a]));
   function rootIdOf(annotation: (typeof annotations)[number]): string {
@@ -174,16 +186,20 @@ export async function getDocAnnotationsAsThreads(docId: string): Promise<Annotat
     // store-debounce snapshot is fine for deciding *whether* to draw a quote
     // header, and is never what decides where the card goes (§18b).
     const columnAnchored = root.anchorFrom !== null && root.anchorTo !== null && root.quotedText !== "";
+    //
+    // A marked passage's edge chips are on the row, since the mark can't sit
+    // on them, and one that is a chip alone has no mark to look for.
     const quotedText = columnAnchored
       ? root.quotedText
-      : proseJson && markedIds.has(rootId)
-        ? extractMarkedText(proseJson, "annotation", "id", rootId)
+      : proseJson && (markedIds.has(rootId) || root.anchorChips !== null)
+        ? markAnchoredQuote(proseJson, rootId, root.anchorChips, docLabels)
         : "";
     threads.push({
       id: rootId,
       anchorFrom: columnAnchored ? root.anchorFrom : null,
       anchorTo: columnAnchored ? root.anchorTo : null,
       quotedText,
+      anchorChips: parseChipRecords(root.anchorChips),
       color: root.user.color,
       // Always null here: a doc annotation has no PDF to point into.
       pdfTarget: null,
@@ -202,7 +218,7 @@ export type OwnDraft = {
   id: string;
   bodyText: string;
   createdAt: string;
-  /** The passage the draft is anchored to, as stored when it was opened; "" for none. */
+  /** The passage the draft is anchored to, as stored when it was opened, each chip as its label; "" for none. */
   quotedText: string;
   /** A reply posts under its parent wherever it is reopened, so the list says so. */
   isReply: boolean;
@@ -213,6 +229,7 @@ const OWN_DRAFT_SELECT = {
   bodyText: true,
   createdAt: true,
   quotedText: true,
+  anchorChips: true,
   parentAnnotationId: true,
 } as const;
 
@@ -221,13 +238,14 @@ function toOwnDraft(d: {
   bodyText: string;
   createdAt: Date;
   quotedText: string;
+  anchorChips: unknown;
   parentAnnotationId: string | null;
 }): OwnDraft {
   return {
     id: d.id,
     bodyText: d.bodyText,
     createdAt: d.createdAt.toISOString(),
-    quotedText: d.quotedText,
+    quotedText: quoteWithChipLabels(d.quotedText, parseChipRecords(d.anchorChips)),
     isReply: d.parentAnnotationId !== null,
   };
 }
@@ -288,6 +306,8 @@ export async function getFileAnnotationsAsThreads(fileId: string): Promise<Annot
       anchorFrom: null,
       anchorTo: null,
       quotedText: root.quotedText,
+      // A PDF's text holds no chip.
+      anchorChips: [],
       color: root.user.color,
       pdfTarget,
       comments: members.map((a) => toComment(a, versions)),
@@ -321,6 +341,7 @@ type AnnotationRow = {
   anchorFrom: number | null;
   anchorTo: number | null;
   quotedText: string;
+  anchorChips?: unknown;
   ydocUpdateId: bigint | null;
   editingSince?: Date | null;
   // PLAN.md §22e — the DRAFT -> LIVE moment, where the grace window starts.
@@ -489,6 +510,7 @@ function toComment(a: AnnotationRow, context: VersionContext): AnnotationComment
     anchorFrom: a.parentAnnotationId !== null ? a.anchorFrom : null,
     anchorTo: a.parentAnnotationId !== null ? a.anchorTo : null,
     quotedText: a.parentAnnotationId !== null ? a.quotedText : "",
+    anchorChips: a.parentAnnotationId !== null ? parseChipRecords(a.anchorChips) : [],
     color: a.user.color,
     ydocUpdateId: a.ydocUpdateId?.toString() ?? null,
     ...editState(a, context),

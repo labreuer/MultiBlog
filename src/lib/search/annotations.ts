@@ -8,6 +8,9 @@
 // vector: its words find the doc instead (§10, item 9). The hit still shows
 // the passage, derived from the mark as /annotations derives it.
 
+import { markAnchoredQuote } from "@/lib/annotation-marked-quote";
+import { materializedLabels } from "@/lib/entity-chips/materialize";
+import { parseChipRecords, quoteWithChipLabels } from "@/lib/anchors";
 import type { JSONContent } from "@tiptap/core";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -16,7 +19,6 @@ import { visibleAnnotationEditDates } from "@/lib/annotation-data";
 import { annotationAnchorName } from "@/lib/annotation-anchor-name";
 import { displayNameOf } from "@/lib/display-name";
 import { docTitleOrFallback } from "@/lib/doc-title";
-import { extractMarkedText } from "@/lib/tiptap-schema";
 import { isWithin } from "./dates";
 import { headlineTexts, orderNewest, orderRanked, rankRows, snippetsFor } from "./sql";
 import { remember, taggedWhere, type KindContext, type KindSearch } from "./context";
@@ -92,6 +94,7 @@ export const annotationsSearch: KindSearch<AnnotationHit> = {
           postedAt: true,
           anchorFrom: true,
           quotedText: true,
+          anchorChips: true,
           parentAnnotationId: true,
           status: true,
           user: { select: { name: true, slug: true } },
@@ -116,9 +119,9 @@ export const annotationsSearch: KindSearch<AnnotationHit> = {
     const passages = ids.map((id) => {
       const row = byId.get(id);
       if (!row) return "";
-      if (!isMarkAnchored(row)) return row.quotedText;
+      if (!isMarkAnchored(row)) return quoteWithChipLabels(row.quotedText, parseChipRecords(row.anchorChips));
       const proseJson = proseJsonByDoc.get(row.doc!.id);
-      return proseJson ? extractMarkedText(proseJson, "annotation", "id", id) : "";
+      return proseJson ? markAnchoredQuote(proseJson, id, row.anchorChips, materializedLabels(proseJson)) : "";
     });
     const quotes = await headlineTexts(passages, query);
 

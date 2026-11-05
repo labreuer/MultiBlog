@@ -1,5 +1,7 @@
 import type { Node as PMNode } from "@tiptap/pm/model";
+import type { ChipLabels } from "../entity-chips/text";
 import { parsePdfTarget, type PdfTarget } from "../pdf-anchor";
+import { chipRecordsBetween, parseChipRecords, quoteWithChipLabels, type ChipRecord } from "./chips";
 import { SELECTOR_KINDS, type SelectorKind } from "./types";
 
 // PLAN.md §20b — the part selector's opaque half.
@@ -42,6 +44,12 @@ export type DocRangeSelector = {
   after: string;
   /** How many textblocks the range spans — >1 means it crossed a block boundary. */
   blocks: number;
+  /**
+   * The entity chips inside the range (chips.ts beside this file), in order.
+   * Absent for a range that holds none, and on a row written before chips
+   * existed, which reads the same.
+   */
+  chips?: ChipRecord[];
 };
 
 /**
@@ -57,6 +65,16 @@ export type PdfTextSelector = PdfTarget;
 export type AnchorSelector =
   | { kind: "DOC_RANGE"; selector: DocRangeSelector }
   | { kind: "PDF_TEXT"; selector: PdfTextSelector };
+
+/**
+ * An anchor row's stored quote as a reader sees it: each entity chip as the
+ * label its selector's record holds (chips.ts). What every surface showing a
+ * tag's, link's or comment's quote with no ydoc open calls, so none of them
+ * shows U+FFFC where a chip is.
+ */
+export function shownQuote(part: { quotedText: string; selector: AnchorSelector | null }): string {
+  return part.selector?.kind === "DOC_RANGE" ? quoteWithChipLabels(part.quotedText, part.selector.selector.chips) : part.quotedText;
+}
 
 // How much surrounding text a DOC_RANGE selector carries. The window is in
 // ProseMirror positions and the slice trims it to characters, so a range next
@@ -76,15 +94,19 @@ const CONTEXT_CHARS = 50;
  * twin of `parseDocRangeSelector` above, and the unit suite exercises its
  * edges (a range at the document's start, a selection spanning blocks)
  * without dragging PrismaClient into the test process.
+ *
+ * `labels` are the chips' labels as the writer computed them, by instance
+ * id; each record keeps its own (chips.ts).
  */
-export function deriveDocRangeSelector(node: PMNode, from: number, to: number): DocRangeSelector {
+export function deriveDocRangeSelector(node: PMNode, from: number, to: number, labels?: ChipLabels): DocRangeSelector {
   const before = node.textBetween(Math.max(0, from - CONTEXT_CHARS * 2), from, " ").slice(-CONTEXT_CHARS);
   const after = node.textBetween(to, Math.min(node.content.size, to + CONTEXT_CHARS * 2), " ").slice(0, CONTEXT_CHARS);
   let blocks = 0;
   node.nodesBetween(from, to, (n) => {
     if (n.isTextblock) blocks++;
   });
-  return { v: 1, before, after, blocks: Math.max(1, blocks) };
+  const chips = chipRecordsBetween(node, from, to, labels);
+  return { v: 1, before, after, blocks: Math.max(1, blocks), ...(chips.length > 0 ? { chips } : {}) };
 }
 
 /** Narrows an untrusted string to a selector kind. Null for anything else, including "POST_RANGE" (§20i). */
@@ -99,7 +121,8 @@ function parseDocRangeSelector(value: unknown): DocRangeSelector | null {
   const v = value as Record<string, unknown>;
   if (v.v !== 1 || typeof v.before !== "string" || typeof v.after !== "string") return null;
   if (!Number.isInteger(v.blocks) || (v.blocks as number) < 1) return null;
-  return { v: 1, before: v.before, after: v.after, blocks: v.blocks as number };
+  const chips = parseChipRecords(v.chips);
+  return { v: 1, before: v.before, after: v.after, blocks: v.blocks as number, ...(chips.length > 0 ? { chips } : {}) };
 }
 
 /**

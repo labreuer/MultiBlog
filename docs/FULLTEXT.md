@@ -32,7 +32,7 @@ indexing or when searching.**
 |---|---|---|
 | Docs | `doc.title`, `doc.prose_json` | The live text, at most one store debounce behind ([DOCS.md](DOCS.md), "The caches") |
 | Posts | `post.title`, `post.prose_json` | The published or scheduled version, searched under the post's read rule, never the doc's. A draft that was never published has no text of its own: it is found by its title, and its words through its doc |
-| Annotations | `annotation.body_text`, `annotation.quoted_text` | The last settled body: an edit in progress isn't searchable, just as it isn't readable ([ANNOTATIONS.md](ANNOTATIONS.md), "Editing after posting"). The quoted passage is a column only for a reading-view or PDF annotation; the doc editor's keep theirs as a mark in the doc's body, so those words find the doc instead (§10, item 9) |
+| Annotations | `annotation.body_text`, `annotation.quoted_text` with each entity chip as the label its record holds (`anchor_quote_text`, [ENTITY_CHIPS.md](ENTITY_CHIPS.md) step 1, item 11) | The last settled body: an edit in progress isn't searchable, just as it isn't readable ([ANNOTATIONS.md](ANNOTATIONS.md), "Editing after posting"). The quoted passage is a column only for a reading-view or PDF annotation; the doc editor's keep theirs as a mark in the doc's body, so those words find the doc instead (§10, item 9) |
 | Comments | `comment.body_text` | The current revision |
 | PDFs | `file.title` and `file.filename`; `file_page_text.text`, one row per page | Fixed per text version; §4 covers files that have more than one |
 
@@ -128,7 +128,7 @@ find it.
 |---|---|---|
 | `doc` | the title (A), the body's text (D) | `INSERT`, `UPDATE OF title, prose_json` |
 | `post` | the title (A), the body's text (D) | `INSERT`, `UPDATE OF title, prose_json` |
-| `annotation` | the body (B), the quoted passage (D) | `INSERT`, `UPDATE OF body_text, quoted_text` |
+| `annotation` | the body (B), the quoted passage (D) | `INSERT`, `UPDATE OF body_text, quoted_text, anchor_chips` |
 | `comment` | the body | `INSERT`, `UPDATE OF body_text` |
 | `file` | the title (A), the filename as uploaded (B) | `INSERT`, `UPDATE OF title, filename` |
 | `file_page_text` | the page's text | `INSERT`, `UPDATE OF text` (only a backfill or a repair updates it) |

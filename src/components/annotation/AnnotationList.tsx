@@ -9,6 +9,7 @@ import QuoteThreadHeader from "../QuoteThreadHeader";
 import CollapseAllControls from "./CollapseAllControls";
 import { useRevealForFragment } from "./use-reveal-for-fragment";
 import { useMarginNotesLayout } from "../margin-notes/use-margin-notes-layout";
+import { quoteWithChipLabels, type ChipRecord } from "@/lib/anchors";
 import { resolveAnnotationRanges } from "@/lib/annotation-marks";
 import { activatePseudoBorderForHash, refreshPseudoBorders } from "@/lib/pseudo-border";
 import { isCollapsed, useCollapseState } from "@/lib/collapsed-annotations";
@@ -17,6 +18,8 @@ import marginStyles from "../margin-notes/MarginNotes.module.css";
 export type AnnotationEntry = {
   threadId: string;
   quotedText: string;
+  /** The entity chips in the passage (src/lib/anchors/chips.ts): what the quote is shown with. */
+  anchorChips: ChipRecord[];
   // PLAN.md §13o — non-null exactly for a thread anchored from a reading
   // view; a mark-anchored one carries no stored offset and is found in the
   // live document instead. Both pages turn the non-null ones into the
@@ -146,7 +149,7 @@ export default function AnnotationList({ entries, docId }: Props) {
         {entry.quotedText && !rootRendersNothing && (
           <QuoteThreadHeader
             threadId={entry.threadId}
-            quotedText={entry.quotedText}
+            quotedText={quoteWithChipLabels(entry.quotedText, entry.anchorChips)}
             status="ACTIVE"
             context={null}
             color={entry.color}

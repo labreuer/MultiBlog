@@ -1,3 +1,4 @@
+import { parseChipRecords, type ChipRecord } from "@/lib/anchors";
 import type { Role } from "@/generated/prisma/enums";
 import { signYdocToken } from "./ydoc-token";
 import { collabHttpOrigin } from "./collab-http-origin";
@@ -52,7 +53,10 @@ export async function applyAnnotationMark(opts: {
   // `applied` is false, and also whenever the collab server couldn't name one
   // (a degraded append path): the caller keeps its earlier stamp rather than
   // inventing one.
-}): Promise<{ applied: boolean; markUpdateId: string | null }> {
+  //
+  // `chips` are the passage's edge chips (docs/ENTITY_CHIPS.md, step 1, item
+  // 11): the ones the mark can't sit on, for the caller to keep on the row.
+}): Promise<{ applied: boolean; markUpdateId: string | null; chips: ChipRecord[] }> {
   const { docId, userId, role, annotationId, from, to, quotedText } = opts;
   const documentName = ydocIdForDoc(docId);
   const token = await signYdocToken({ sub: userId, documentName, role });
@@ -66,12 +70,12 @@ export async function applyAnnotationMark(opts: {
     });
   } catch (err) {
     console.error(`[annotation-admin] annotation-mark unreachable for ${documentName}:`, err);
-    return { applied: false, markUpdateId: null };
+    return { applied: false, markUpdateId: null, chips: [] };
   }
 
   if (!response.ok) {
     console.error(`[annotation-admin] annotation-mark returned ${response.status} for ${documentName}`);
-    return { applied: false, markUpdateId: null };
+    return { applied: false, markUpdateId: null, chips: [] };
   }
 
   // Not just `await response.json()`. A 200 whose body isn't JSON is exactly
@@ -82,10 +86,11 @@ export async function applyAnnotationMark(opts: {
   // not-applied keeps the annotation posting either way; the log line is what
   // makes it findable.
   try {
-    return (await response.json()) as { applied: boolean; markUpdateId: string | null };
+    const answer = (await response.json()) as { applied: boolean; markUpdateId: string | null; chips?: unknown };
+    return { applied: answer.applied, markUpdateId: answer.markUpdateId, chips: parseChipRecords(answer.chips) };
   } catch (err) {
     console.error(`[annotation-admin] annotation-mark answered non-JSON for ${documentName} — is the endpoint routed correctly?`, err);
-    return { applied: false, markUpdateId: null };
+    return { applied: false, markUpdateId: null, chips: [] };
   }
 }
 

@@ -262,6 +262,7 @@ export default function DocReadingBody({
           from={selection.pending.from}
           to={selection.pending.to}
           quotedText={selection.pending.quotedText}
+          quoteShown={selection.pending.shown}
           atVersion={selection.pending.atVersion}
           ydocUpdateId={scrubUpdateId}
           onAddToLink={async () => {

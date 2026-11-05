@@ -948,7 +948,9 @@ every anchored-link part into it before applying and again after: the marks from
 and the columns and parts from rows the operation passes in.
 
 - **The answer lists each annotation and part an edit overlapped**, and whether it still
-  resolves.
+  resolves. Resolving checks an anchor's chip records beside its text, so a passage whose
+  mention the edit replaced with another person's is reported as no longer resolving, though
+  the text an anchor stores for it is the same.
 - **That is how a client knows which notes it addressed**, so it can reply to them (§9), and
   which links into a passage it broke.
 - **It names only what the actor could read** through `read`'s `include` (§9, §10).
@@ -1117,7 +1119,10 @@ read and `[@Luke Breuer](/authors/luke-breuer)` in a Markdown one, and a quote o
 it: `flattenForMatch` is given the doc's labels (`DocState.chips.labels`), puts a chip's label
 at the chip's one position, and verifies a hit against the same display text. A quote that ends
 inside a label is `no_match`. The capture in step 3 is unchanged, so the stored quote holds
-U+FFFC where the chip is and a rename can't detach it. An answer that echoes a passage shows it
+U+FFFC where the chip is and a rename can't detach it, and beside it the capture records which
+chip that is (the kit's step 1, item 11): a note's `anchor_chips`, a link part's
+`selector.chips`. A read that shows a stored quote (a lost passage, a link's part, a reply's
+quote) puts each chip's label back from that record. An answer that echoes a passage shows it
 as read.
 
 That is COLLAB.md §9's matcher pointed at its §2b stamped state: the state is immutable, the

@@ -603,6 +603,46 @@ export async function selectTextInAnnotation(page: Page, needle: string, nth = 0
   await selectTextIn(page, '[aria-label="Annotation"]', needle, nth);
 }
 
+/**
+ * Selects an entity chip in the body editor (docs/ENTITY_CHIPS.md): the
+ * `chip`th one alone, or, with `from`, a passage starting at that text and
+ * ending just after the chip. A chip holds no text node of its own, so the
+ * range's ends are set around its element rather than inside one.
+ */
+export async function selectChipInBody(page: Page, opts: { chip?: number; from?: string } = {}): Promise<void> {
+  await page.evaluate(
+    ({ chip, from }) => {
+      const root = document.querySelector('[aria-label="Post body"]');
+      if (!root) throw new Error("Body editor not found.");
+      if (root instanceof HTMLElement && root.isContentEditable) root.focus({ preventScroll: true });
+      const element = root.querySelectorAll(".entity-chip")[chip];
+      if (!element) throw new Error(`No entity chip at index ${chip} in the body editor.`);
+      const range = document.createRange();
+      range.setStartBefore(element);
+      if (from !== undefined) {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let node: Node | null;
+        let found = false;
+        while ((node = walker.nextNode())) {
+          const index = node.textContent?.indexOf(from) ?? -1;
+          if (index === -1) continue;
+          range.setStart(node, index);
+          found = true;
+          break;
+        }
+        if (!found) throw new Error(`"${from}" not found in the body editor.`);
+      }
+      range.setEndAfter(element);
+      const selection = window.getSelection();
+      if (!selection) throw new Error("No selection available.");
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    },
+    { chip: opts.chip ?? 0, from: opts.from },
+  );
+}
+
 async function selectTextIn(page: Page, rootSelector: string, needle: string, nth = 0): Promise<void> {
   await page.evaluate(
     ({ text, selector, index: rootIndex }) => {

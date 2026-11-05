@@ -270,6 +270,8 @@ export const getDocYdocUpdateIds = (...args: Parameters<DbHandlers["getDocYdocUp
 export const getAnnotationStates = (...args: Parameters<DbHandlers["getAnnotationStates"]>): Promise<AnnotationState[]> =>
   call("getAnnotationStates", ...args);
 
+export const annotationSearchHolds = (...args: Parameters<DbHandlers["annotationSearchHolds"]>): Promise<boolean> =>
+  call("annotationSearchHolds", ...args);
 export const markPresentAtStamp = (...args: Parameters<DbHandlers["markPresentAtStamp"]>): Promise<boolean> =>
   call("markPresentAtStamp", ...args);
 

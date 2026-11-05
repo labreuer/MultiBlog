@@ -1063,6 +1063,14 @@ model Annotation {
   anchorFrom         Int?                     @map("anchor_from")
   anchorTo           Int?                     @map("anchor_to")
   quotedText         String                   @default("") @map("quoted_text")
+  // docs/ENTITY_CHIPS.md, step 1, item 11 — the entity chips inside the
+  // anchored passage: a `ChipRecord[]` (src/lib/anchors/chips.ts), each with
+  // where its U+FFFC is in `quotedText`, its chip kind, instance id and
+  // fields, and its label as of the write. Null for an anchor holding no
+  // chip. For a mark-anchored annotation, whose passage is not a column, it
+  // holds the chips at the passage's edges, which a mark can't sit on.
+  // Read through `parseChipRecords`, never a cast.
+  anchorChips        Json?                    @map("anchor_chips")
   // PLAN.md §12p/§13n/§13o — which ydoc_update the author's view showed when
   // they posted (postAnnotation, src/app/actions/annotations.ts): the
   // client's own scrub position when known precisely (annotating while

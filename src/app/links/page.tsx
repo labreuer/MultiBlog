@@ -6,7 +6,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { canManageDocs, readableDocsWhere } from "@/lib/doc-authz";
 import { readableFilesWhere } from "@/lib/file-authz";
 import { canUserDeleteAnchoredLink, canUserRenameAnchoredLink } from "@/lib/anchored-link-authz";
-import { targetFromColumns, targetKey, type AnchorTarget } from "@/lib/anchors";
+import { parseSelector, shownQuote, targetFromColumns, targetKey, type AnchorTarget } from "@/lib/anchors";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { toURLSearchParams } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
@@ -271,6 +271,8 @@ export default async function LinksPage({
             targetAnnotationId: true,
             targetCommentId: true,
             quotedText: true,
+            selectorKind: true,
+            selector: true,
           },
         },
       },
@@ -312,7 +314,7 @@ export default async function LinksPage({
       if (!target) continue;
       const key = targetKey(target);
       const group = groups.get(key) ?? { target, quotes: [] };
-      group.quotes.push(anchor.quotedText);
+      group.quotes.push(shownQuote({ quotedText: anchor.quotedText, selector: parseSelector(anchor.selectorKind, anchor.selector) }));
       groups.set(key, group);
     }
     const targets: LinkRowTarget[] = [];

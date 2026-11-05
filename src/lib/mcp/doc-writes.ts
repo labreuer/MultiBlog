@@ -1,3 +1,4 @@
+import { parseChipRecords } from "@/lib/anchors";
 import type { JSONContent } from "@tiptap/core";
 import { prisma } from "@/lib/prisma";
 import { canManageDocs, canUserEditDoc } from "@/lib/doc-authz";
@@ -171,16 +172,27 @@ function refusalError(refusal: { code: string; message: string; details?: Record
 async function anchorsOn(ctx: McpContext, docId: string) {
   const roots = await prisma.annotation.findMany({
     where: { docId, parentAnnotationId: null, deletedByUserId: null, ...postedAnnotationWhere() },
-    select: { id: true, anchorFrom: true, anchorTo: true, quotedText: true },
+    select: { id: true, anchorFrom: true, anchorTo: true, quotedText: true, anchorChips: true },
   });
   const parts = await linkPartsInto({ kind: "doc", id: docId }, viewerOf(ctx.actor));
   const linkOf = new Map(parts.map((part) => [part.anchorId, part.linkId]));
   return {
     annotations: roots
       .filter((r) => r.anchorFrom !== null)
-      .map((r): AnchorRef => ({ id: r.id, from: r.anchorFrom, to: r.anchorTo, quotedText: r.quotedText })),
+      .map((r): AnchorRef => ({ id: r.id, from: r.anchorFrom, to: r.anchorTo, quotedText: r.quotedText, chips: parseChipRecords(r.anchorChips) })),
     markAnnotations: roots.filter((r) => r.anchorFrom === null).map((r) => r.id),
-    linkParts: parts.map((p): AnchorRef => ({ id: p.anchorId, from: p.from, to: p.to, quotedText: p.quotedText })),
+    markChips: Object.fromEntries(
+      roots.filter((r) => r.anchorFrom === null && r.anchorChips !== null).map((r) => [r.id, parseChipRecords(r.anchorChips)]),
+    ),
+    linkParts: parts.map(
+      (p): AnchorRef => ({
+        id: p.anchorId,
+        from: p.from,
+        to: p.to,
+        quotedText: p.quotedText,
+        ...(p.selector?.kind === "DOC_RANGE" && p.selector.selector.chips ? { chips: p.selector.selector.chips } : {}),
+      }),
+    ),
     linkOf,
   };
 }
@@ -268,6 +280,7 @@ export async function editDocFor(
     ...(input.title !== undefined ? { title: input.title } : {}),
     annotations: anchors.annotations,
     markAnnotations: anchors.markAnnotations,
+    markChips: anchors.markChips,
     linkParts: anchors.linkParts,
     chipInputs: current.chips.inputs,
   });
@@ -395,6 +408,7 @@ export async function revertEditFor(
     ...(titleHunk ? { title: titleHunk.title } : {}),
     annotations: anchors.annotations,
     markAnnotations: anchors.markAnnotations,
+    markChips: anchors.markChips,
     linkParts: anchors.linkParts,
     chipInputs: now.chips.inputs,
   });

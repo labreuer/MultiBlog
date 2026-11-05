@@ -5,6 +5,8 @@ import type { Editor } from "@tiptap/react";
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { setPendingAnnotation } from "./pending-annotation-extension";
 import { findQuoteOccurrences } from "./quote-occurrences";
+import { chipLabelsOf } from "./entity-chips/node";
+import { displayTextBetween } from "./entity-chips/text";
 import { isMouseDownOutside } from "./outside-mousedown";
 import { POPOVER_GAP, fitHeight, popoverBoundsElement } from "./popover-placement";
 
@@ -12,6 +14,8 @@ export type PendingSelection = {
   from: number;
   to: number;
   quotedText: string;
+  /** The passage as the reader sees it, each entity chip as its label: what the popover shows. */
+  shown: string;
   /**
    * PLAN.md §13q — the document version these offsets were read against, as
    * a base64 Yjs snapshot. Captured in the same tick as `from`/`to` so the
@@ -155,7 +159,8 @@ export function useSelectionPopover({
     // From here on the surface freezes (a pending selection *is* the freeze
     // condition), so the Y.Doc keeps advancing while the render is withheld
     // and any later capture would name a state the reader never saw.
-    setPending({ from, to, quotedText, atVersion: versionRef?.current?.() ?? null });
+    const shown = displayTextBetween(liveEditor.state.doc, from, to, chipLabelsOf(liveEditor.state));
+    setPending({ from, to, quotedText, shown, atVersion: versionRef?.current?.() ?? null });
     setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
   }
 
@@ -183,7 +188,7 @@ export function useSelectionPopover({
       // the offsets now describe the *new* document — pairing them with the
       // version captured against the old one would be the one combination
       // guaranteed to be wrong.
-      setPending({ from, to, quotedText: current.quotedText, atVersion: versionRef?.current?.() ?? null });
+      setPending({ from, to, quotedText: current.quotedText, shown: current.shown, atVersion: versionRef?.current?.() ?? null });
       setPendingAnnotation(liveEditor.view, { from, to, color: userColor });
     } else {
       // No unique match any more — the selected text changed underneath the

@@ -117,7 +117,11 @@ counts five columns, and the action refuses `comment` beside `post` and `annotat
 `anchoredLinkForViewer(linkId, viewer)` is the follow path's one read (server-only, the
 `tag-browse.ts` of this feature): load the link (`deletedAt` null; an unminted draft is
 visible to its creator alone), anchors ordered `[partOrder, id]` — removals leave gaps and
-nothing renumbers — every jsonb `selector` through `parseSelector`, never a cast. Each
+nothing renumbers — every jsonb `selector` through `parseSelector`, never a cast. A DOC_RANGE
+selector's `chips` are the entity chips in the part's passage
+([ENTITY_CHIPS.md](ENTITY_CHIPS.md), step 1, item 11): a part's quote is shown through
+`shownQuote`, which puts each chip's label where the stored text holds a placeholder, and the
+highlight plugin is handed the records so the part resolves by who it names. Each
 distinct target is rebuilt via `targetFromColumns` and gated by its own existing read
 predicate (`canUserReadDoc` / `canUserReadFile`; the doc/file lookups ride the soft-delete
 `$extends`, so a deleted target simply comes back null). Groups keep the order their first

@@ -406,3 +406,73 @@ test("a bot may mention itself and its person's bots, and another person's bot o
     for (const email of [siblingEmail, otherEmail, adaEmail]) await deleteTestUser(email);
   }
 });
+
+// docs/ENTITY_CHIPS.md, step 1, item 11 — an anchor's chip record, from the
+// machine side: a note and a link on a passage holding a mention keep which
+// mention, are shown with its label where only the stored quote is read, and
+// stop resolving once the passage names someone else, though its stored text
+// (a placeholder where the chip is) reads the same.
+test("an anchor on a passage with a mention shows its label, and is lost when the mention becomes someone else's", async ({ request }) => {
+  const agent = await createAgent(request);
+  const adaEmail = uniqueEmail("mcp-anchor-ada");
+  const graceEmail = uniqueEmail("mcp-anchor-grace");
+  const ada = await createTestUser({ email: adaEmail, name: `Ada ${adaEmail.split("@")[0]}`, role: "AUTHOR" });
+  const grace = await createTestUser({ email: graceEmail, name: `Grace ${graceEmail.split("@")[0]}`, role: "AUTHOR" });
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "The engine was reviewed by " },
+            { type: "entityChip", attrs: { kind: "mention", iid: "m1", data: { userId: ada.id } } },
+            { type: "text", text: " last week." },
+          ],
+        },
+      ],
+    },
+  });
+  await addTestDocAuthor(doc.id, agent.user.email);
+  const url = `/doc/${doc.slug}`;
+  try {
+    const note = await agent.call("add_note", { on: url, body: "Which review?", quote: `reviewed by @${ada.name}` });
+    expect(note.isError, JSON.stringify(note.error)).toBe(false);
+    const [row] = await getAnnotationStates(doc.id);
+    expect(row).toMatchObject({
+      quotedText: "reviewed by ￼",
+      anchorChips: [{ at: 12, kind: "mention", iid: "m1", data: { userId: ada.id }, label: `@${ada.name}` }],
+    });
+    const minted = await agent.call("create_link", { links: [{ parts: [{ on: url, quote: `reviewed by @${ada.name} last week` }] }] });
+    expect(minted.isError, JSON.stringify(minted.error)).toBe(false);
+    const link = (minted.result.links as { url: string }[])[0].url;
+    const linkRead = await agent.call("read", { url: link });
+    expect(JSON.stringify(linkRead.result)).toContain(`reviewed by @${ada.name} last week`);
+    expect(JSON.stringify(linkRead.result)).not.toContain("￼");
+
+    // The same words around a different person. Both anchors' text still reads the same.
+    const swapped = await agent.call("edit_doc", {
+      url,
+      edits: [{ old: `reviewed by @${ada.name} last week`, new: `reviewed by [@${grace.name}](/authors/${grace.slug}) last week` }],
+    });
+    expect(swapped.isError, JSON.stringify(swapped.error)).toBe(false);
+    expect(swapped.result).toMatchObject({
+      mentionsRemoved: [`@${ada.name}`],
+      mentionsAdded: 1,
+      touched: { annotations: [{ id: note.result.id, resolves: false }], links: [{ link, resolves: false }] },
+    });
+
+    // Each keeps what it was about, by name, as a lost anchor does.
+    const threads = await agent.call("read", { url, include: ["annotations"], format: "text" });
+    expect(JSON.stringify(threads.result.threads)).toContain(`reviewed by @${ada.name}`);
+    const linkAfter = await agent.call("read", { url: link });
+    expect(JSON.stringify(linkAfter.result)).toContain(`reviewed by @${ada.name} last week`);
+    expect(JSON.stringify(linkAfter.result)).toContain('"lost":true');
+  } finally {
+    await deleteTestDoc(doc.id);
+    for (const email of [adaEmail, graceEmail]) await deleteTestUser(email);
+    await agent.dispose();
+  }
+});

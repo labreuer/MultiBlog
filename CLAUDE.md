@@ -245,7 +245,10 @@ before changing the behavior it describes.
   render of a doc or note body goes through `renderWithChips`, and a doc's JSON on its way to a
   post-side surface through `docJsonForPostSide`, whose renderer throws on a chip.
   `Doc.proseJson` is the ydoc plus each chip's label: write it through `docCacheFromYdoc`, and
-  compare it with a ydoc through `withoutChipLabels`. docs/ENTITY_CHIPS.md.
+  compare it with a ydoc through `withoutChipLabels`. An anchor whose passage holds a chip keeps
+  a record of which (`src/lib/anchors/chips.ts`): hand it to `resolveAnchorInDoc`, or mentions
+  of two people resolve alike, and show a stored quote through `quoteWithChipLabels` or
+  `shownQuote`, never raw. docs/ENTITY_CHIPS.md.
 - **Tables are in `contentExtensions` and deliberately not in `annotationContentExtensions`.**
   The annotation list used to be an alias of `authorHighlightExtensions` and is now its own
   `[StarterKit, AuthorHighlight]`, mirrored by `annotationEditorExtensions`; don't re-derive one from

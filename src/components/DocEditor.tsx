@@ -415,6 +415,7 @@ export default function DocEditor({
             from={widgetAnchor.from}
             to={widgetAnchor.to}
             quotedText={widget.pending.quotedText}
+            quoteShown={widget.pending.shown}
             // PLAN.md §13o — the one surface that still writes a mark. It
             // can: this editor already holds a writable connection to the
             // document, so anchoring costs no privilege the author doesn't

@@ -1,5 +1,6 @@
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { findQuoteOccurrences } from "../quote-occurrences";
+import { chipMatch, isChipOnlyQuote, type ChipRecord } from "./chips";
 import type { AnchorRange } from "./types";
 
 export type { AnchorRange } from "./types";
@@ -61,32 +62,111 @@ export type { AnchorRange } from "./types";
 // was — so this strengthens tracking rather than trading it away, and the
 // global exactly-one rule is still the fallback when the window comes up
 // empty or ambiguous.
+//
+// **Entity chips** (docs/ENTITY_CHIPS.md, step 1, item 11). Every chip reads
+// U+FFFC in a quote, so the text alone can't tell a passage naming Ada from
+// one naming Grace, nor one mention of Ada from the next. An anchor captured
+// with chips in it carries their records (chips.ts), and `chips` hands them
+// in:
+//
+//   - a candidate counts only if its chips stand for the recorded entities,
+//     in order, so an anchor whose chip became someone else detaches, while a
+//     rename, which changes no identity, moves nothing;
+//   - several candidates that all pass are told apart by instance id, which
+//     is what lets an anchor mean one chip among many of the same person;
+//   - a quote that is chips and nothing else resolves by instance alone. It
+//     has no words to be re-found by, and landing on another mention of the
+//     same person would be an anchor on something the writer never chose.
+//
+// An anchor with no record (one holding no chip, or written before records
+// existed) resolves by its text, as before.
 export function resolveAnchorInDoc(
   node: PMNode,
   from: number,
   to: number,
   quotedText: string,
   near?: { pos: number; radius: number },
+  chips?: readonly ChipRecord[],
 ): AnchorRange | null {
   if (!quotedText) return null;
-  if (from >= 0 && to > from && to <= node.content.size && node.textBetween(from, to, " ") === quotedText) {
-    return { from, to };
-  }
+  const records = chips && chips.length > 0 ? chips : null;
+  const byInstance = records !== null && isChipOnlyQuote(quotedText);
+  if (rangeHolds(node, from, to, quotedText, records, byInstance)) return { from, to };
   const widths = searchWidths(quotedText, to - from, node.content.size);
   if (near) {
-    const windowed = distinctMatches(
+    const windowed = pick(
+      node,
+      distinctMatches(
+        node,
+        quotedText,
+        widths.flatMap((width) => findQuoteOccurrencesNear(node, quotedText, near.pos, near.radius, width)),
+      ),
+      records,
+      byInstance,
+    );
+    if (windowed) return windowed;
+  }
+  return pick(
+    node,
+    distinctMatches(
       node,
       quotedText,
-      widths.flatMap((width) => findQuoteOccurrencesNear(node, quotedText, near.pos, near.radius, width)),
-    );
-    if (windowed.length === 1) return windowed[0];
-  }
-  const occurrences = distinctMatches(
-    node,
-    quotedText,
-    widths.flatMap((width) => findQuoteOccurrences(node, quotedText, width)),
+      widths.flatMap((width) => findQuoteOccurrences(node, quotedText, width)),
+    ),
+    records,
+    byInstance,
   );
-  return occurrences.length === 1 ? occurrences[0] : null;
+}
+
+/**
+ * Whether `[from, to)` still is the anchored passage: its text is the quote,
+ * and its chips are the recorded ones (by instance, for a quote of chips
+ * alone). The exact-offsets tier above, and what a caller that has mapped a
+ * range through a transaction asks before trusting where it landed.
+ */
+export function anchorHolds(
+  node: PMNode,
+  from: number,
+  to: number,
+  quotedText: string,
+  chips?: readonly ChipRecord[],
+): boolean {
+  const records = chips && chips.length > 0 ? chips : null;
+  return rangeHolds(node, from, to, quotedText, records, records !== null && isChipOnlyQuote(quotedText));
+}
+
+function rangeHolds(
+  node: PMNode,
+  from: number,
+  to: number,
+  quotedText: string,
+  records: readonly ChipRecord[] | null,
+  byInstance: boolean,
+): boolean {
+  if (!(from >= 0 && to > from && to <= node.content.size) || node.textBetween(from, to, " ") !== quotedText) return false;
+  if (!records) return true;
+  const match = chipMatch(node, from, to, records);
+  return byInstance ? match === "instance" : match !== null;
+}
+
+// The one candidate an anchor means, or null: exactly one for an anchor with
+// no chip record; otherwise the one whose chips are the recorded entities,
+// and among several of those the one holding the recorded instances.
+function pick(
+  node: PMNode,
+  matches: AnchorRange[],
+  records: readonly ChipRecord[] | null,
+  byInstance: boolean,
+): AnchorRange | null {
+  if (!records) return matches.length === 1 ? matches[0] : null;
+  const graded = matches.flatMap((match) => {
+    const grade = chipMatch(node, match.from, match.to, records);
+    return grade ? [{ match, grade }] : [];
+  });
+  const instances = graded.filter((entry) => entry.grade === "instance");
+  if (byInstance) return instances.length === 1 ? instances[0].match : null;
+  if (graded.length === 1) return graded[0].match;
+  return instances.length === 1 ? instances[0].match : null;
 }
 
 // The quote's length, plus the range's own width when that differs and is a

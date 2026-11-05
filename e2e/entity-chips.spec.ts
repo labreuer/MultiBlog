@@ -1,7 +1,9 @@
 import type { JSONContent } from "@tiptap/core";
-import { test, expect, annotationEditor, bodyEditor, openDashboardCard, waitForDocCollabReady } from "./fixtures";
+import type { Locator } from "@playwright/test";
+import { test, expect, annotationEditor, bodyEditor, openDashboardCard, selectChipInBody, waitForDocCollabReady } from "./fixtures";
 import {
   ADMIN_EMAIL,
+  annotationSearchHolds,
   createTestDoc,
   createTestPost,
   deleteTestDoc,
@@ -331,6 +333,167 @@ test("a rename reaches a doc nobody has open, and a note's stored text, without 
     // The surfaces that compute labels never held the old one.
     await page.goto(`/doc/${doc.slug}`);
     await expect(page.locator("a.entity-chip").filter({ visible: true })).toHaveText([`@${renamed}`]);
+  } finally {
+    await page.goto("about:blank");
+    await deleteTestDoc(doc.id);
+  }
+});
+
+/**
+ * `chip`, if annotation `id`'s highlight covers it. The highlight is a
+ * decoration, which ProseMirror puts on the chip's own element or on a
+ * wrapper around it, so either counts.
+ */
+const paintedBy = (chip: Locator, id: string) =>
+  chip.locator(`xpath=ancestor-or-self::*[contains(concat(" ", @data-annotation-ids, " "), " ${id} ")]`);
+
+// docs/ENTITY_CHIPS.md, step 1, item 11 — anchors. A stored quote holds
+// U+FFFC where a chip is; the anchor's chip record says which chip, so the
+// quote can be shown with its label, the passage is re-found by who it names,
+// and one chip can be annotated by itself.
+test("a reading-view note on a passage with a mention keeps its chip's record, shows its label, and follows a rename", async ({
+  page,
+  secondUser,
+}) => {
+  const { user: author, page: authorPage } = await secondUser({ role: "AUTHOR" });
+  const lastName = author.name.split(" ").at(-1);
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: bodyOf(text("The engine was reviewed by "), mention("m1", author.id), text(" last week, and by "), mention("m2", author.id), text(" again.")),
+  });
+  const CHIP = "￼";
+  try {
+    await page.goto(`/doc/${doc.slug}`);
+    await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+    await expect(bodyEditor(page).locator("a.entity-chip")).toHaveText([`@${author.name}`, `@${author.name}`]);
+
+    // "reviewed by <mention>": text, then a chip at the passage's end.
+    await selectChipInBody(page, { chip: 0, from: "reviewed by " });
+    const popup = page.getByTestId("annotation-popup");
+    await popup.getByRole("button", { name: "Annotate" }).click();
+    // What the writer is shown is the label, never the placeholder a quote stores.
+    await expect(popup).toContainText(`Annotating: “reviewed by @${author.name}”`);
+    await annotationEditor(page).click();
+    await page.keyboard.type("Which review was this?");
+    await popup.getByRole("button", { name: "Post annotation" }).click();
+
+    const note = async () => (await getAnnotationStates(doc.id)).find((a) => a.bodyText === "Which review was this?");
+    await expect.poll(async () => (await note())?.status, { timeout: 15_000 }).toBe("LIVE");
+    expect(await note()).toMatchObject({
+      marked: false,
+      quotedText: `reviewed by ${CHIP}`,
+      quoteMatchesAtStamp: true,
+      anchorChips: [{ at: 12, kind: "mention", iid: "m1", data: { userId: author.id }, label: `@${author.name}` }],
+    });
+    const noteId = (await note())!.id;
+
+    // The card's quote, the highlight over text and chip together, and the stored quote where no ydoc is open.
+    const card = page.locator(`[data-thread-id="${noteId}"]`).filter({ visible: true });
+    await expect(card).toContainText(`reviewed by @${author.name}`);
+    const chips = bodyEditor(page).locator(".entity-chip");
+    await expect(paintedBy(chips.first(), noteId)).toHaveCount(1);
+    await expect(paintedBy(chips.nth(1), noteId)).toHaveCount(0);
+    await page.goto("/annotations");
+    await expect(page.getByText(`reviewed by @${author.name}`).first()).toBeVisible();
+    // And the note is found by the name in its passage, which its own words don't hold.
+    expect(await annotationSearchHolds(noteId, lastName!)).toBe(true);
+
+    // The second mention, alone: a passage with no words, anchored by its instance.
+    await page.goto(`/doc/${doc.slug}`);
+    await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+    await selectChipInBody(page, { chip: 1 });
+    await popup.getByRole("button", { name: "Annotate" }).click();
+    await expect(popup).toContainText(`Annotating: “@${author.name}”`);
+    await annotationEditor(page).click();
+    await page.keyboard.type("This one, specifically.");
+    await popup.getByRole("button", { name: "Post annotation" }).click();
+    const lone = async () => (await getAnnotationStates(doc.id)).find((a) => a.bodyText === "This one, specifically.");
+    await expect.poll(async () => (await lone())?.status, { timeout: 15_000 }).toBe("LIVE");
+    expect(await lone()).toMatchObject({
+      quotedText: CHIP,
+      quoteMatchesAtStamp: true,
+      anchorChips: [{ at: 0, kind: "mention", iid: "m2", data: { userId: author.id } }],
+    });
+    const loneId = (await lone())!.id;
+    // Its highlight is on the second mention and not the first, which reads exactly the same.
+    await expect(paintedBy(chips.nth(1), loneId)).toHaveCount(1);
+    await expect(paintedBy(chips.first(), loneId)).toHaveCount(0);
+
+    // The person renames themselves: no anchor moves, and each record's label follows.
+    const renamed = `Renamed ${lastName}`;
+    await authorPage.goto("/dashboard");
+    await openDashboardCard(authorPage, "Settings");
+    await authorPage.getByLabel("Name").fill(renamed);
+    await authorPage.getByRole("button", { name: "Save" }).click();
+    await expect(authorPage.getByText("Saved.")).toBeVisible();
+    await expect
+      .poll(async () => ((await note())?.anchorChips as { label: string }[] | null)?.[0]?.label, { timeout: 15_000 })
+      .toBe(`@${renamed}`);
+    expect(await note()).toMatchObject({ quotedText: `reviewed by ${CHIP}`, quoteMatchesAtStamp: true });
+    await page.goto("/annotations");
+    await expect(page.getByText(`reviewed by @${renamed}`).first()).toBeVisible();
+    await page.goto(`/doc/${doc.slug}`);
+    await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+    await expect(page.locator(`[data-thread-id="${noteId}"]`).filter({ visible: true })).toContainText(`reviewed by @${renamed}`);
+    await expect(chips).toHaveText([`@${renamed}`, `@${renamed}`]);
+    await expect(paintedBy(chips.first(), noteId)).toHaveCount(1);
+    await expect(paintedBy(chips.nth(1), loneId)).toHaveCount(1);
+  } finally {
+    await page.goto("about:blank");
+    await deleteTestDoc(doc.id);
+  }
+});
+
+test("the doc editor annotates one mention by itself, though no mark can sit on it", async ({ page, secondUser }) => {
+  const { user: author } = await secondUser({ role: "AUTHOR" });
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: bodyOf(text("Ask "), mention("m1", author.id), text(" or "), mention("m2", author.id), text(" about it.")),
+  });
+  try {
+    await page.goto(`/doc/${doc.id}/edit`);
+    await waitForDocCollabReady(page);
+    await expect(bodyEditor(page).locator("span.entity-chip")).toHaveText([`@${author.name}`, `@${author.name}`]);
+
+    await selectChipInBody(page, { chip: 1 });
+    await page.getByTestId("annotate-marker").click();
+    const popup = page.getByTestId("annotation-popup");
+    await expect(popup).toContainText(`Annotating: “@${author.name}”`);
+    await annotationEditor(page).click();
+    await page.keyboard.type("The second of the two.");
+    await popup.getByRole("button", { name: "Post annotation" }).click();
+
+    // One mechanism still: no offsets and no quote, as for any editor annotation.
+    // The record of its chip is the whole anchor.
+    const note = async () => (await getAnnotationStates(doc.id)).find((a) => a.bodyText === "The second of the two.");
+    await expect.poll(async () => (await note())?.status, { timeout: 15_000 }).toBe("LIVE");
+    await expect
+      .poll(async () => (await note())?.anchorChips, { timeout: 15_000 })
+      .toMatchObject([{ at: 0, kind: "mention", iid: "m2", data: { userId: author.id }, label: `@${author.name}` }]);
+    expect(await note()).toMatchObject({ marked: false, anchorFrom: null, quotedText: "" });
+    const noteId = (await note())!.id;
+
+    // The card says which passage, and the chip is painted: the second, not the first.
+    const chips = bodyEditor(page).locator(".entity-chip");
+    await expect(paintedBy(chips.nth(1), noteId)).toHaveCount(1);
+    await expect(paintedBy(chips.first(), noteId)).toHaveCount(0);
+    await expect(page.locator(`[data-thread-id="${noteId}"]`).filter({ visible: true })).toContainText(`@${author.name}`);
+
+    // The reading view finds it the same way.
+    await page.goto(`/doc/${doc.slug}`);
+    await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+    await expect(paintedBy(chips.nth(1), noteId)).toHaveCount(1);
+    await expect(page.locator(`[data-thread-id="${noteId}"]`).filter({ visible: true })).toContainText(`@${author.name}`);
+
+    // Deleting the chip leaves the note with no passage, as a lost mark does.
+    await page.goto(`/doc/${doc.id}/edit`);
+    await waitForDocCollabReady(page);
+    await selectChipInBody(page, { chip: 1 });
+    await page.keyboard.press("Backspace");
+    await expect(bodyEditor(page).locator("span.entity-chip")).toHaveCount(1);
+    await expect(page.locator(`[data-annotation-ids~="${noteId}"]`)).toHaveCount(0);
   } finally {
     await page.goto("about:blank");
     await deleteTestDoc(doc.id);

@@ -1166,6 +1166,8 @@ export type AnnotationState = {
   anchorFrom: number | null;
   anchorTo: number | null;
   quotedText: string;
+  /** The entity chips recorded with the anchor (src/lib/anchors/chips.ts), as stored; null for none. */
+  anchorChips: unknown;
   /** PLAN.md §13q — the version stamp, stringified (BigInt doesn't cross the RPC). */
   ydocUpdateId: string | null;
   /**
@@ -1203,6 +1205,7 @@ export async function getAnnotationStates(docId: string): Promise<AnnotationStat
       anchorFrom: a.anchorFrom,
       anchorTo: a.anchorTo,
       quotedText: a.quotedText,
+      anchorChips: a.anchorChips,
       ydocUpdateId: a.ydocUpdateId?.toString() ?? null,
       // `docId` is re-supplied rather than read off the row: the query above
       // filters on it, so it is non-null here, but Annotation.docId is a
@@ -1212,6 +1215,13 @@ export async function getAnnotationStates(docId: string): Promise<AnnotationStat
       deletedAt: a.deletedAt?.toISOString() ?? null,
     })),
   );
+}
+
+/** Whether a posted annotation's search vector holds `word`: its body, and its quoted passage with each chip as its label. */
+export async function annotationSearchHolds(annotationId: string, word: string): Promise<boolean> {
+  const rows = await prisma.$queryRaw<{ hit: boolean }[]>`
+    SELECT search_vector @@ plainto_tsquery('public.english_unaccent', ${word}) AS hit FROM "annotation" WHERE id = ${annotationId}`;
+  return rows[0]?.hit ?? false;
 }
 
 /**
@@ -2753,6 +2763,7 @@ const handlers = {
   getDocLinkGroupIds,
   getDocLinkFields,
   getAnnotationStates,
+  annotationSearchHolds,
   markPresentAtStamp,
   createTestAnnotation,
   getReplyAnchorFacts,

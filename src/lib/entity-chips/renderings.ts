@@ -20,7 +20,8 @@ export const UNKNOWN_CHIP: ChipRendering = { label: "[…]", href: null, postHre
 /** What a chip shows while its target's record is on its way to the browser. */
 export const PENDING_CHIP: ChipRendering = { label: "…", href: null, postHref: null, status: "live" };
 
-function attrsOf(attrs: Record<string, unknown> | null | undefined): Omit<ChipOccurrence, "pos"> {
+/** A chip node's three attributes, read without trusting their types. */
+export function chipAttrsOf(attrs: Record<string, unknown> | null | undefined): Omit<ChipOccurrence, "pos"> {
   const data = attrs?.data;
   return {
     kind: typeof attrs?.kind === "string" ? attrs.kind : "",
@@ -33,7 +34,7 @@ function attrsOf(attrs: Record<string, unknown> | null | undefined): Omit<ChipOc
 export function chipsIn(node: PMNode): ChipOccurrence[] {
   const chips: ChipOccurrence[] = [];
   node.descendants((child, pos) => {
-    if (child.type.name === ENTITY_CHIP) chips.push({ ...attrsOf(child.attrs), pos });
+    if (child.type.name === ENTITY_CHIP) chips.push({ ...chipAttrsOf(child.attrs), pos });
     return !child.isLeaf;
   });
   return chips;
@@ -47,7 +48,7 @@ export function chipsIn(node: PMNode): ChipOccurrence[] {
 export function chipsInJSON(doc: JSONContent): ChipOccurrence[] {
   const chips: ChipOccurrence[] = [];
   const walk = (node: JSONContent) => {
-    if (node.type === ENTITY_CHIP) chips.push({ ...attrsOf(node.attrs), pos: chips.length });
+    if (node.type === ENTITY_CHIP) chips.push({ ...chipAttrsOf(node.attrs), pos: chips.length });
     node.content?.forEach(walk);
   };
   walk(doc);
@@ -151,7 +152,7 @@ export function chipIdentity(chip: Pick<ChipOccurrence, "kind" | "data">): strin
 export function chipIdentitiesBetween(node: PMNode, from: number, to: number): string[] {
   const found: string[] = [];
   node.nodesBetween(from, to, (child, pos) => {
-    if (child.type.name === ENTITY_CHIP && pos >= from && pos < to) found.push(chipIdentity(attrsOf(child.attrs)));
+    if (child.type.name === ENTITY_CHIP && pos >= from && pos < to) found.push(chipIdentity(chipAttrsOf(child.attrs)));
     return !child.isLeaf;
   });
   return found;
