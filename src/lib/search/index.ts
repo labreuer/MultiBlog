@@ -15,7 +15,8 @@
 
 import { canViewDocs, canViewFiles } from "@/lib/role-checks";
 import { dayRangeToInstants } from "./dates";
-import { hasFilters, MENTIONS_ME, SEARCH_KINDS, splitMentionTokens, type SearchKind, type SearchParams } from "./params";
+import { hasCitationFilter, hasFilters, MENTIONS_ME, SEARCH_KINDS, splitMentionTokens, type SearchKind, type SearchParams } from "./params";
+import { referenceIdsMatching, referencesByKeys } from "@/lib/reference-data";
 import { prisma } from "@/lib/prisma";
 import { isEmptyQuery, websearchQuery, windowOf, type TsQuery } from "./sql";
 import { asYouTypeQuery } from "./as-you-type";
@@ -82,6 +83,25 @@ async function sectionFor(
   return { kind, total: ordered.length, hits } as SearchSection;
 }
 
+/** The kinds that can hold a citation; the rest drop out while a citation filter is set. */
+export const CITATION_KINDS: readonly SearchKind[] = ["docs", "posts", "annotations"];
+
+/**
+ * The reference ids each citation filter names, one list per filter that is
+ * set, or null for none (docs/CITATIONS.md, "Search"). A key a reference used
+ * to have still names it. A filter that names nothing gives an empty list,
+ * which passes nothing. Works are public records, so none of this depends on
+ * who is asking.
+ */
+export async function citedIdsFor(params: Pick<SearchParams, "cites" | "citedTitle" | "citedAuthor">): Promise<string[][] | null> {
+  if (!hasCitationFilter(params)) return null;
+  const lists: Promise<string[]>[] = [];
+  if (params.cites.length > 0) lists.push(referencesByKeys(params.cites).then((found) => [...new Set([...found.values()].map((ref) => ref.id))]));
+  if (params.citedTitle) lists.push(referenceIdsMatching(params.citedTitle, "title"));
+  if (params.citedAuthor) lists.push(referenceIdsMatching(params.citedAuthor, "author"));
+  return Promise.all(lists);
+}
+
 /** The kinds that can hold a mention; the rest drop out while a mention filter is set. */
 export const MENTION_KINDS: readonly SearchKind[] = ["docs", "posts", "annotations"];
 
@@ -144,7 +164,9 @@ export async function search(
   const withoutAuthors = authors.length > 0 ? selected.filter((kind) => !AUTHORED_KINDS.includes(kind)) : [];
   const withoutMentions =
     mentions.length > 0 ? selected.filter((kind) => !MENTION_KINDS.includes(kind) && !withoutAuthors.includes(kind)) : [];
-  const kinds = selected.filter((kind) => !withoutAuthors.includes(kind) && !withoutMentions.includes(kind));
+  const dropped = [...withoutAuthors, ...withoutMentions];
+  const withoutCitations = hasCitationFilter(params) ? selected.filter((kind) => !CITATION_KINDS.includes(kind) && !dropped.includes(kind)) : [];
+  const kinds = selected.filter((kind) => !dropped.includes(kind) && !withoutCitations.includes(kind));
   // Pagination when exactly one kind was asked for (§6), even if an author
   // filter then leaves it out.
   const paginated = params.kinds !== null && params.kinds.length === 1;
@@ -157,6 +179,7 @@ export async function search(
     withoutAuthors,
     mentions,
     withoutMentions,
+    withoutCitations,
     authorOptions: options.map(({ slug, name }) => ({ slug, name })),
     sections: [] as SearchSection[],
     corrected: false,
@@ -181,6 +204,7 @@ export async function search(
     scope,
     authorIds: authors.map((author) => author.id),
     mentionIds: mentions.length > 0 ? await mentionIdsFor(actor, mentions) : null,
+    citedIds: await citedIdsFor(params),
     created: dayRangeToInstants(params.created, params.tz),
     updated: dayRangeToInstants(params.updated, params.tz),
     excludePostId: opts.excludePostId ?? null,

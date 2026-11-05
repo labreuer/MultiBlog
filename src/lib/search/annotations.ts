@@ -21,7 +21,7 @@ import { displayNameOf } from "@/lib/display-name";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { isWithin } from "./dates";
 import { headlineTexts, orderNewest, orderRanked, rankRows, snippetsFor } from "./sql";
-import { mentionedWhere, remember, taggedWhere, type KindContext, type KindSearch } from "./context";
+import { citedWhere, mentionedWhere, remember, taggedWhere, type KindContext, type KindSearch } from "./context";
 import type { AnnotationHit } from "./types";
 
 /**
@@ -44,6 +44,7 @@ function candidates(ctx: KindContext): Promise<Map<string, Date>> {
           ctx.created ? { postedAt: ctx.created } : {},
           taggedWhere(ctx.tagIds),
           mentionedWhere(ctx.mentionIds),
+          citedWhere(ctx.citedIds),
         ],
       },
       select: { id: true, postedAt: true },

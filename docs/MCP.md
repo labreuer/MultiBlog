@@ -1909,6 +1909,11 @@ So `kinds=docs&authors=<slug>` is "this person's docs", and with the `tags` filt
 - **A `mentions` filter** (MENTIONS.md, "Search"). Each kind's ids are narrowed to those that
   mention any of the named people, `me` being the actor. PDFs and comments hold no mention,
   and the response names them as left out (`withoutMentions`).
+- **`cites`, `cited_title` and `cited_author`** (CITATIONS.md, "Search"). What cites a work by
+  its key, or a work whose title or authors have the given words, each filter at once. Unlike
+  the page, a key no reference has is refused as `invalid`, naming the keys, since it is
+  likelier a misremembered key than a question; a reference's record is public, so the refusal
+  discloses nothing. PDFs and comments drop out (`withoutCitations`).
 - **Correction is reported, never hidden.** The response carries `corrected` (FULLTEXT.md §5).
   - **Checking whether something exists needs `exact=1`.** Before creating a doc or minting a
     link, an agent asks whether one is already there. Without `exact=1`, typo correction
@@ -2016,7 +2021,7 @@ comment's writer and the post's moderators. So a hit never leads to `not_found`.
 
 | Tool | Scope | Does |
 |---|---|---|
-| `search` | read | Search, and filtered listing, across kinds; `within` one doc ranks its sections, within one PDF its pages; `tags`, `authors`, `mentions`, dates, `exact` (§14) |
+| `search` | read | Search, and filtered listing, across kinds; `within` one doc ranks its sections, within one PDF its pages; `tags`, `authors`, `mentions`, `cites`, `cited_title`, `cited_author`, dates, `exact` (§14) |
 | `read` | read | Any MultiBlog URL (below): whole, as its outline, as a range or `around` a quote; changes `since` a version, on a doc the actor can edit; and `include` for what hangs off the object, each list paged on its own, threads filtered under `threads` (§6, §9, §10) |
 | `find_users` | read | Byline-eligible users by name or slug, or one by exact email (§12) |
 | `find_tags` | read | Tag terms by name (§11) |

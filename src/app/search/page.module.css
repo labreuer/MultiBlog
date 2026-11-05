@@ -84,11 +84,18 @@
 }
 
 .check,
-.date {
+.date,
+.text {
   white-space: nowrap;
 }
 
-.date input {
+.text input {
+  width: 12rem;
+  max-width: 100%;
+}
+
+.date input,
+.text input {
   font: inherit;
   color: var(--foreground);
   background: var(--surface);

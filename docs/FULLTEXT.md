@@ -344,6 +344,8 @@ you mean" suggestions when a search did find something.
 | `kinds` | Any of `docs`, `posts`, `pdfs`, `annotations`, `comments`, comma-joined or repeated; by default every kind the viewer can read. A kind the viewer can't search is dropped |
 | `authors` | User slugs, comma-joined or repeated; a hit matches if any one of them is its author. A slug not on this viewer's picker is dropped |
 | `mentions` | User slugs, or `me` for the searcher, comma-joined or repeated; a hit matches if it mentions any one of them ([MENTIONS.md](MENTIONS.md), "Search"). An `@handle` word in `q` means the same. A handle nobody has narrows to nothing |
+| `cites` | Reference keys, comma-joined or repeated, an `@` before one allowed; a hit matches if it cites any one of them ([CITATIONS.md](CITATIONS.md), "Search"). A key a reference used to have still names it, and one nothing has narrows to nothing |
+| `cited_title`, `cited_author` | Text: a hit matches if it cites a work whose title, or whose authors and editors, have these words |
 | `created_from`, `created_to`, `updated_from`, `updated_to` | Dates as `YYYY-MM-DD`, inclusive |
 | `tz` | The IANA time zone those dates are in; UTC when absent or unknown |
 | `page` | Pagination, when exactly one kind is selected: 20 hits a page |
@@ -389,6 +391,15 @@ The filter is not checked against a picker, as an author is, and doesn't need to
 narrows what the viewer may already read, a handle that names nobody gives the same empty
 answer as a person nobody has mentioned where the viewer can see, and the page echoes handles
 rather than names.
+
+### Cited works
+
+A citation filter keeps a kind's readable ids to those with a row in the `citation` table for a
+work it names ([CITATIONS.md](CITATIONS.md), "Search"), by identity as a mention filter is. Each
+filter set is one list of works, and a hit cites a work from every list. Docs, posts and
+annotations can cite; PDFs and comments drop out (`withoutCitations`). A work is a public record,
+so which works a filter names depends on nobody's access, and an unknown key gives what a key
+nothing cites gives.
 
 ### Dates
 

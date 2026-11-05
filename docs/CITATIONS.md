@@ -10,9 +10,9 @@ contract. The kit says how every chip is stored, rendered, quoted and searched. 
 ## Built so far
 
 The reference library (its data, its pages and its machine door), the citation chip itself
-with its popover, its Markdown both ways, and a doc's bibliography. Everything below not listed
-here is still a plan: the search filters, what a reference's page shows of who cites it, and of
-the Markdown, a quote written in it and the transcript importer's escape.
+with its popover, its Markdown both ways, a doc's bibliography, and search by cited work.
+Everything below not listed here is still a plan: what a reference's page shows of who cites
+it, and of the Markdown, a quote written in it and the transcript importer's escape.
 
 - **The chip kind:** `src/lib/entity-chips/kinds/citation.ts` holds its fields and
   validation, its identity (the works, in any order), when one citation continues another
@@ -48,6 +48,8 @@ the Markdown, a quote written in it and the transcript importer's escape.
   Markdown with a field changed keeps the chip and takes the field, and one that adds a work
   continues it. Not built: a quote written in the syntax (below), which still matches only as
   the label a text read shows, and so `chip_changed` (the kit's MCP, items 3 and 6).
+- **Search by cited work** (below): `cites`, `cited_title` and `cited_author` on the page,
+  MCP's `search` and the export.
 - **The bibliography** (below): `citation-bibliography.ts` computes it, `Bibliography.tsx`
   and `LiveBibliography.tsx` (`src/components/bibliography/`) show it, and
   `docJsonForPostSide` appends it to a post's text.
@@ -348,16 +350,26 @@ post's labels, and a republish refreshes both.
   leave it out: it is generated, and an edit sent back with it would write it in as prose.
 - A CSL style's bibliography comes with citeproc (Later) and replaces this format for that doc.
 
-**Search.**
+**Search** ([FULLTEXT.md](FULLTEXT.md), "Cited works"):
 
-- `cites=<key>` finds what cites one work.
-- `citedTitle=<text>` and `citedAuthor=<text>` find what cites any work whose title or authors
-  match.
-  - The text matches against `reference.search_vector`. The matching references' ids then go
-    through the `citation` index table, inside each kind's readable `where`, so no citing doc's
-    own vector changes.
-  - `citedAuthor` is the author of a *cited work*. The existing `authors` filter is who wrote the
-    item, so the UI labels them "cites a work titled…" and "cites a work by…".
+- `cites=<key>` finds what cites a work. Several keys find what cites any of them, and a key a
+  reference used to have still names it.
+- `cited_title=<text>` and `cited_author=<text>` find what cites a work whose title, or whose
+  authors and editors, have those words, each as a prefix.
+  - The text matches against `reference.search_vector` by weight: its A is the key, the
+    abbreviation and the title, and its B the people (`referenceIdsMatching`,
+    `src/lib/reference-data.ts`). Deleted references count, since a citation of one still names
+    the work.
+  - The matching references' ids then go through the `citation` index table, inside each kind's
+    readable `where` (`citedWhere`, `src/lib/search/context.ts`), so no citing doc's own vector
+    changes.
+  - Each filter set must be met at once: `cites=radner2012&cited_author=barfield` finds what
+    cites both.
+  - The page labels them "Cites a work with the key…", "titled…" and "by…", since the existing
+    `authors` filter is who wrote the item found, not the work cited. It says what it narrowed
+    to, and that PDFs and comments, which cite nothing, are left out.
+- The underscores match the querystring's other names (`created_from`), and the bulk export
+  (MCP.md) takes the same three.
 
 **MCP.**
 
@@ -367,7 +379,8 @@ post's labels, and a republish refreshes both.
     for tag terms.
   - It refuses `duplicate` with the existing key, and `invalid` for an identifier that fails its
     check.
-- `search` gains `cites`, `cited_title` and `cited_author`.
+- `search` takes `cites`, `cited_title` and `cited_author`, and refuses a key nothing has
+  ([MCP.md](MCP.md)).
 
 ## Later
 

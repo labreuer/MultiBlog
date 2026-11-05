@@ -89,6 +89,7 @@ export function shapeSearch(result: SearchResult, nextFor?: (section: SearchSect
     ...(result.corrected ? { corrected: true } : {}),
     ...(result.withoutAuthors.length > 0 ? { withoutAuthors: result.withoutAuthors } : {}),
     ...(result.withoutMentions.length > 0 ? { withoutMentions: result.withoutMentions } : {}),
+    ...(result.withoutCitations.length > 0 ? { withoutCitations: result.withoutCitations } : {}),
     sections: result.sections.map((section) => {
       const next = nextFor?.(section);
       return { kind: section.kind, total: section.total, hits: shapeSection(section), ...(next ? { next } : {}) };

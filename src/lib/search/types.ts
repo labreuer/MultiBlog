@@ -129,6 +129,8 @@ export type SearchResult = {
   mentions: string[];
   /** Kinds a mention filter left out, because nothing in them is a mention. */
   withoutMentions: SearchKind[];
+  /** Kinds a citation filter left out, because nothing in them is a citation (docs/CITATIONS.md, "Search"). */
+  withoutCitations: SearchKind[];
   authorOptions: SearchAuthorOption[];
   /**
    * `idle`: no text and no filter, so nothing was searched. `stop-words`: the

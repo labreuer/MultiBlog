@@ -281,7 +281,10 @@ test("[@ cites a work from the library: the chip is labelled, listed in the bibl
 // docs/CITATIONS.md, "Markdown" — a citation written by a machine client in
 // Pandoc's syntax, by key: read back as it was sent, changed by sending its
 // Markdown with the change in it, and refused for a key the library lacks.
-test("MCP writes citations in Pandoc's syntax, reads them back as sent, edits their pages, and refuses a key the library lacks", async ({ request }) => {
+test("MCP writes citations in Pandoc's syntax, reads them back as sent, edits their pages, finds what cites a work, and refuses a key the library lacks", async ({
+  page,
+  request,
+}) => {
   const agent = await createAgent(request);
   const prefix = `e2ecm${Date.now().toString(36)}`;
   const short = `S${Date.now() % 100000}`;
@@ -321,6 +324,28 @@ test("MCP writes citations in Pandoc's syntax, reads them back as sent, edits th
     const edited = await agent.call("edit_note", { id: String(note.result.id), body: `Compare [@${radner}, p. 4] and @${barfield}.` });
     expect(edited.isError, JSON.stringify(edited.error)).toBe(false);
     await expect.poll(() => getCitationSources(barfield)).toContain(`annotation:${note.result.id}`);
+
+    // What cites a work: by its key, a word of its title, or its author's name, each filter at once.
+    type Found = { sections: { kind: string; hits: { url?: string; id?: string }[] }[]; withoutCitations?: string[] };
+    const found = async (args: Record<string, unknown>) => {
+      const answer = await agent.call("search", args);
+      expect(answer.isError, JSON.stringify(answer.error)).toBe(false);
+      const result = answer.result as unknown as Found;
+      return Object.fromEntries(result.sections.map((section) => [section.kind, section.hits.map((hit) => hit.url ?? hit.id)]));
+    };
+    expect(await found({ cites: [barfield], kinds: ["docs", "annotations"] })).toEqual({ docs: [url], annotations: [String(note.result.id)] });
+    expect(await found({ cited_title: `origin ${prefix}`, kinds: ["docs"] })).toEqual({ docs: [url] });
+    expect(await found({ cited_author: `Barfield${prefix}`, cites: [radner], kinds: ["docs"] })).toEqual({ docs: [url] });
+    // Every filter at once: nothing cites a work titled so.
+    expect(await found({ cited_author: `Barfield${prefix}`, cited_title: `nowhere ${prefix}`, kinds: ["docs"] })).toEqual({ docs: [] });
+    const comments = await agent.call("search", { cites: [radner], kinds: ["docs", "comments"] });
+    expect((comments.result as unknown as Found).withoutCitations).toEqual(["comments"]);
+    const unknownKey = await agent.call("search", { cites: [`${prefix}-nothing`] });
+    expect(unknownKey.error).toMatchObject({ code: "invalid", keys: [`${prefix}-nothing`] });
+    // The page reads the same filter, and says what it narrows to.
+    await page.goto(`/search?cites=${barfield}`);
+    await expect(page.getByText(`Only what cites @${barfield}`)).toBeVisible();
+    await expect(page.getByRole("link", { name: `Citations ${prefix}`, exact: true })).toBeVisible();
 
     // A key nothing has is refused, naming it, and nothing is created.
     const unknown = await agent.call("create_doc", { markdown: `Cite @${prefix}-nothing here.`, title: `Unknown ${prefix}` });
