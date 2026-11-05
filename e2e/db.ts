@@ -314,6 +314,8 @@ export const getPostContentText = (...args: Parameters<DbHandlers["getPostConten
   call("getPostContentText", ...args);
 export const getDocSearchText = (...args: Parameters<DbHandlers["getDocSearchText"]>): Promise<string | null> =>
   call("getDocSearchText", ...args);
+export const getMentionSources = (...args: Parameters<DbHandlers["getMentionSources"]>): Promise<string[]> =>
+  call("getMentionSources", ...args);
 
 export const countDocYdocSnapshots = (...args: Parameters<DbHandlers["countDocYdocSnapshots"]>): Promise<number> =>
   call("countDocYdocSnapshots", ...args);

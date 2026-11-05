@@ -8,6 +8,7 @@ import {
   deleteTestPost,
   getAnnotationStates,
   getDocSearchText,
+  getMentionSources,
   getPostContentText,
   getUserIdByEmail,
   restoreTestUser,
@@ -122,6 +123,11 @@ test("publishing turns each chip into its label as linked text, and the post pag
   });
   try {
     expect(await getPostContentText(post.id)).toBe("Written with @E2E Admin, not unknown person.");
+    // The post is indexed as mentioning the person, from its link's `chip`
+    // attribute; the id that names nobody has no row. Other tests mention
+    // the shared admin too, so this looks for the post among them.
+    expect(await getMentionSources(await adminId())).toContain(`post:${post.id}`);
+    expect(await getMentionSources("no-such-user")).toEqual([]);
 
     // The post-side schema has no chip node and its renderer throws on one,
     // so the page answering at all is the conversion having run.
@@ -187,6 +193,8 @@ test("typing @ lists who may be mentioned, and picking one inserts a chip that i
   // full-text search reads: the doc is found by the name of someone it
   // mentions, though its text never held that name.
   await expect.poll(() => getDocSearchText(draftDoc.id), { timeout: 15_000 }).toContain(`ask @${author.name} today.`);
+  // And the mention index has the doc, written by the same store.
+  expect(await getMentionSources(author.id)).toEqual([`doc:${draftDoc.id}`]);
   await page.goto(`/search?q=${encodeURIComponent(author.name)}`);
   await expect(page.getByRole("link", { name: draftDoc.title }).first()).toBeVisible();
 });
@@ -213,8 +221,16 @@ test("a mention typed into a note is labelled in the composer, on the posted car
   await page.keyboard.press("Enter");
   await expect(composer.locator("span.entity-chip")).toHaveText([`@${author.name}`]);
   await page.keyboard.type("about this.");
+  // A draft is a private note, however long it sits: its text reaches the
+  // cache as it is typed, and it mentions nobody until it is posted.
+  await expect
+    .poll(async () => (await getAnnotationStates(sharedDoc.id)).map((annotation) => annotation.bodyText), { timeout: 15_000 })
+    .toEqual([`Ask @${author.name} about this.`]);
+  expect(await getMentionSources(author.id)).toEqual([]);
   await page.getByRole("button", { name: "Post annotation" }).click();
   await expect(composer).toHaveCount(0);
+  const [{ id: noteId }] = await getAnnotationStates(sharedDoc.id);
+  await expect.poll(() => getMentionSources(author.id)).toEqual([`annotation:${noteId}`]);
 
   // The posted card: a link to the person, in whichever copy of the body is
   // showing (the server's, then the read-only editor over it). The doc's own

@@ -182,6 +182,7 @@ model User {
   bots                   User[]                 @relation("UserWorksFor")
   oauthCodes             OauthCode[]            @relation("OauthCodeUser")
   oauthCodesIssued       OauthCode[]            @relation("OauthCodeIssuer")
+  mentions               Mention[]
 
   @@index([worksForUserId])
   @@map("user")
@@ -378,6 +379,7 @@ model Post {
   commentQuoteAnchors CommentQuoteAnchor[]   @relation("CommentQuoteAnchorPost")
   activity            PostActivity?
   metrics             PostMetrics?
+  mentions            Mention[]
 
   @@index([docId])
   // docs/BLOG.md — the listing's order, `/page/N`'s offset and a post's
@@ -836,6 +838,7 @@ model Doc {
   tagAnchors          TagAnchor[]            @relation("TagAnchorDoc")
   anchoredLinkAnchors AnchoredLinkAnchor[]   @relation("AnchoredLinkAnchorDoc")
   commentQuoteAnchors CommentQuoteAnchor[]   @relation("CommentQuoteAnchorDoc")
+  mentions            Mention[]
 
   @@index([searchVector], type: Gin)
   @@index([importKey])
@@ -1117,6 +1120,7 @@ model Annotation {
   tagAnchors          TagAnchor[]          @relation("TagAnchorAnnotation")
   anchoredLinkAnchors AnchoredLinkAnchor[] @relation("AnchoredLinkAnchorAnnotation")
   commentQuoteAnchors CommentQuoteAnchor[] @relation("CommentQuoteAnchorAnnotation")
+  mentions            Mention[]
 
   @@index([docId])
   @@index([fileId])
@@ -2036,4 +2040,48 @@ enum ApiWriteState {
   FAILED
 
   @@map("api_write_state")
+}
+
+// docs/ENTITY_CHIPS.md, step 1, item 12 — where each mention chip is: one row
+// per chip, naming the person it stands for and the one object that holds it.
+// The index behind "where is this person mentioned": the label refresh after
+// a rename reads it, and so will `mentions=` search, the dashboard's card and
+// notifications.
+//
+// **Written only by triggers** on `doc.prose_json`, `annotation.prose_json`
+// and `post.prose_json` (migration `mention_index`), which diff, so a chip
+// that stays keeps its `firstSeenAt`. Never assign to it; `--repair` in
+// scripts/integrity/check-mentions.ts rebuilds a drifted object's rows.
+//
+// One table per chip kind and one shape for all of them, as the anchor tables
+// are (PLAN.md §20a): the target, the chip's instance id, exactly one source
+// (a hand-written CHECK), and when the chip was first seen. A DRAFT
+// annotation has no rows: a private note mentions nobody yet.
+//
+// A row says a chip exists, never that anyone may see it. Every reader joins
+// through the source's own read rule.
+model Mention {
+  id     BigInt @id @default(autoincrement())
+  /// The person mentioned. A soft-deleted account keeps its rows; a hard delete takes them.
+  userId String @map("user_id")
+  /// The chip's instance id within its source.
+  iid    String
+
+  // The source — exactly one non-null (CHECK in the migration).
+  docId        String? @map("doc_id")
+  postId       String? @map("post_id")
+  annotationId String? @map("annotation_id")
+
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  doc        Doc?        @relation(fields: [docId], references: [id], onDelete: Cascade)
+  post       Post?       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  annotation Annotation? @relation(fields: [annotationId], references: [id], onDelete: Cascade)
+
+  @@unique([docId, iid, userId])
+  @@unique([postId, iid, userId])
+  @@unique([annotationId, iid, userId])
+  @@index([userId])
+  @@map("mention")
 }

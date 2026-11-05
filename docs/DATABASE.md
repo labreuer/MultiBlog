@@ -64,6 +64,12 @@ per table feeding the `search_lexeme` vocabulary ([FULLTEXT.md](FULLTEXT.md) §3
 assign to them either; `scripts/integrity/check-search-index.ts` is their guard, and its
 `--repair` runs the no-op `UPDATE` for every drifted row.
 
+The `mention` table is a whole table of the same kind ([ENTITY_CHIPS.md](ENTITY_CHIPS.md),
+step 1, item 12): triggers on `doc.prose_json`, `annotation.prose_json` (and its `status`) and
+`post.prose_json` keep one row per mention chip, by a diff, so a row's `first_seen_at` is when
+its chip first appeared. Never write to it; `scripts/integrity/check-mentions.ts` is its guard,
+and its `--repair` runs the same diff.
+
 ### Self-join elimination does not rescue a view over its own base table
 
 It is on by default and does work — an inner join of a table to itself on the primary key
@@ -90,6 +96,10 @@ every trigger as the rows go in. Two things follow:
   vocabulary triggers refill it as the content tables load, and its own `COPY` would then
   collide on the primary key and abort the load. Run
   `scripts/integrity/check-search-index.ts` afterwards.
+- **Leave `mention`'s data out too** (`--exclude-table-data=mention`), for the same reason:
+  the triggers write its rows as the docs, notes and posts load, and its own `COPY` would
+  collide with them. The cost is that every `first_seen_at` becomes the load's time. Run
+  `scripts/integrity/check-mentions.ts` afterwards.
 
 A full dump restored into an empty database has neither problem: `pg_dump` creates triggers
 after the data, so none of them fires during the load.

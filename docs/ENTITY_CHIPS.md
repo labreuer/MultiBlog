@@ -87,6 +87,12 @@ still a plan.
 - **Item 9, posts and the landing preamble:** `docJsonForPostSide` (`post-content.ts`) replaces
   each chip with its label as linked text, struck through when its target is gone, and records
   the chip on the link's `chip` attribute. Not the republish remap.
+- **Item 12, the index table, for mentions:** `mention` (migration `mention_index`), one row per
+  chip with its person, its instance id, its one source and when it was first seen. Triggers on
+  `doc.prose_json`, `annotation.prose_json` and `post.prose_json` keep it by a diff; a post's
+  rows come from its links' `chip` attribute, and a DRAFT note has none.
+  `scripts/integrity/check-mentions.ts` checks it, with `--repair`. Nothing reads who inserted
+  a chip yet.
 - **Item 13, annotation bodies:** the node is in their schema, and every surface that draws a
   note's body labels its chips: the cards (`buildAnnotationEntries` loads one context for every
   note on the page), the read-only editor over each card, the composer and the edit session,

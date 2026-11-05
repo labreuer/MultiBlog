@@ -1894,6 +1894,18 @@ export async function getPostContentText(postId: string): Promise<string | null>
 }
 
 /**
+ * Where a person is mentioned, per the `mention` index (docs/ENTITY_CHIPS.md,
+ * step 1, item 12): one entry per row, naming the kind of source and its id.
+ * Sorted, so a test can compare the whole list.
+ */
+export async function getMentionSources(userId: string): Promise<string[]> {
+  const rows = await prisma.mention.findMany({ where: { userId }, select: { docId: true, postId: true, annotationId: true } });
+  return rows
+    .map((row) => (row.docId ? `doc:${row.docId}` : row.postId ? `post:${row.postId}` : `annotation:${row.annotationId}`))
+    .sort();
+}
+
+/**
  * A doc's body as full-text search reads it: `prose_text(prose_json)`, the
  * SQL function behind the search vector and its snippets. Null for a doc with
  * no cache yet.
@@ -2760,6 +2772,7 @@ const handlers = {
   getPublicationEvents,
   getPostContentText,
   getDocSearchText,
+  getMentionSources,
   countDocYdocSnapshots,
   getCommentStatus,
   createTestYdoc,

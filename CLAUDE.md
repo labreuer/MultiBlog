@@ -355,10 +355,11 @@ running `prisma migrate dev` on anything unusual.
   query line. Typecheck passes, which makes it read like a logic bug in the code you just
   wrote. Restarting web is the whole fix. Distinct from the EPERM case: that one is generate
   refusing to *write*, this one is a successful write the running process never picks up.
-- **Six `search_vector` columns and the `search_lexeme` table are written only by triggers**
-  (docs/FULLTEXT.md §3) — never assign to them, give a new trigger function its own
-  `SET search_path`, and leave `search_lexeme`'s data out of a data-only load, or its `COPY`
-  collides with what the triggers already refilled. docs/DATABASE.md.
+- **Six `search_vector` columns, the `search_lexeme` table and the `mention` table are written
+  only by triggers** (docs/FULLTEXT.md §3; docs/ENTITY_CHIPS.md, step 1, item 12) — never assign
+  to them, give a new trigger function its own `SET search_path`, and leave `search_lexeme`'s
+  and `mention`'s data out of a data-only load, or their `COPY` collides with what the triggers
+  already refilled. docs/DATABASE.md.
 - Generated Prisma client lives at `src/generated/prisma` (gitignored). Import from
   `@/generated/prisma/client` and `@/generated/prisma/enums`.
 - **One-off DB scripts can't `require()` the generated client with plain `node -e`** — it's TS
