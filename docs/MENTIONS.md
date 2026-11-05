@@ -16,11 +16,13 @@
 - the `mention` index table and the label refresh after a rename (the kit's items 12 and 10).
 
 - the Markdown, both ways: a read writes `[@Label](/authors/slug)`, with a deleted or unknown
-  account struck through and a hand-written link of that shape escaped; an MCP edit or note
-  reads it back as a mention, resolved by handle under the rule above (`resolveParsedChips`).
+  account struck through and a hand-written link of that shape escaped; an MCP edit, note or
+  `create_doc`, and `/docs`' Markdown import, read it back as a mention, resolved by handle
+  under the rule above (`resolveParsedChips`). The import leaves one it can't resolve as a
+  link; MCP refuses it.
 
-Still a plan: ordering beyond "participants first", `create_doc`'s Markdown, `mentions=`
-search, the dashboard card and notifications.
+Still a plan: ordering beyond "participants first", `mentions=` search, the dashboard card and
+notifications.
 
 A *mention* is an entity chip
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md)) that stands for a person: a MultiBlog account. It is shown as

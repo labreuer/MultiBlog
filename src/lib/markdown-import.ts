@@ -99,6 +99,13 @@ function plainText(node: JSONContent): string {
   if (typeof node.text === "string") {
     return node.text;
   }
+  // A chip placeholder (below) reads as the words its Markdown showed: a
+  // title is plain text, and a mention in the heading it is taken from would
+  // otherwise leave a gap.
+  if (isChip(node)) {
+    const label = (node.attrs?.data as Record<string, unknown> | undefined)?.label;
+    return typeof label === "string" ? label : "";
+  }
   return (node.content ?? []).map(plainText).join("");
 }
 
@@ -241,7 +248,12 @@ const ChipParsingLink = Link.extend({
     const first = token.tokens?.[0];
     if (href.startsWith(MENTION_HREF_PREFIX) && first?.type === "text" && String(first.raw ?? "").startsWith("@")) {
       const slug = href.slice(MENTION_HREF_PREFIX.length);
-      if (/^[^/?#\s]+$/.test(slug)) return { type: ENTITY_CHIP, attrs: { kind: MENTION, iid: "", data: { slug } } };
+      // The label rides along for the one reader that wants it: an import
+      // that leaves an unresolvable mention as the link it also is.
+      if (/^[^/?#\s]+$/.test(slug)) {
+        const label = helpers.parseInline(token.tokens || []).map(plainText).join("");
+        return { type: ENTITY_CHIP, attrs: { kind: MENTION, iid: "", data: { slug, label } } };
+      }
     }
     return helpers.applyMark("link", helpers.parseInline(token.tokens || []), { href: token.href, title: token.title || null });
   },
@@ -315,8 +327,9 @@ export function markdownToText(markdown: string): string {
   }
 }
 
-export function markdownToDocContent(markdown: string): MarkdownImport {
-  const parsed = decodeNodeEntities(markdownManager.parse(markdown));
+export function markdownToDocContent(markdown: string, opts: { chips?: boolean } = {}): MarkdownImport {
+  // With `chips`, as `markdownToBlocks`: placeholders the caller resolves.
+  const parsed = decodeNodeEntities((opts.chips ? docChipParser : markdownManager).parse(markdown));
   const blocks = Array.isArray(parsed.content) ? [...parsed.content] : [];
 
   // Consume the first block as the title if it is a heading at the SHALLOWEST

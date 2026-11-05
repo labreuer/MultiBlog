@@ -50,9 +50,21 @@ registered in one and missing from the other is dropped silently on encode** rat
 reported — CLAUDE.md's "picking the wrong variant silently drops marks", restated for
 another consumer.
 
-Not `docContentExtensions`: its two extra marks (`authorHighlight`, `annotation`) are things
-a doc acquires by being *edited*, and no Markdown source can produce either. The reading and
-editing sides register that superset, so nothing written here is dropped when it's read back.
+The parse is not over `docContentExtensions`: its two extra marks (`authorHighlight`,
+`annotation`) are things a doc acquires by being *edited*, and no Markdown source can produce
+either. The reading and editing sides register that superset, so nothing written here is
+dropped when it's read back.
+
+**The one thing a source can produce beyond that list is an entity chip**
+([ENTITY_CHIPS.md](ENTITY_CHIPS.md), MCP item 7): `[@Name](/authors/<handle>)` is a mention's
+Markdown, and an import reads it as one, so a doc exported from another instance arrives with
+its mentions. `markdownToDocContent(markdown, { chips: true })` parses with the same list but
+for its Link, which yields a placeholder holding the handle; `resolveParsedChips` then makes
+each a chip under the rule the `@` menu lists by. A handle that names no account here, or one
+this importer may not mention, stays the link the Markdown also is: a person shouldn't lose a
+file to one handle. (`create_doc` refuses instead, since an agent can look the handle up and
+try again.) So `createDocWithContent` encodes with `docContentExtensions`, the one list with
+the chip node; for a body with no chip the result is what `contentExtensions` gave.
 
 A GFM pipe table is the worked example of the rule cutting the other way. Until docs/TABLES.md's native tables put
 `@tiptap/extension-table` into `contentExtensions`, a table in the source was **silently

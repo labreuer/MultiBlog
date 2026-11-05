@@ -1125,6 +1125,11 @@ chip that is (the kit's step 1, item 11): a note's `anchor_chips`, a link part's
 quote) puts each chip's label back from that record. An answer that echoes a passage shows it
 as read.
 
+A chip kind's Markdown is read as a chip wherever an agent writes Markdown: `edit_doc`,
+`add_note`, `edit_note` and `create_doc` (and so `POST /api/mcp/docs`). A mention is resolved
+by its handle under the rule the `@` menu lists by, and `unknown_chip` refuses one it can't
+resolve (§4).
+
 That is COLLAB.md §9's matcher pointed at its §2b stamped state: the state is immutable, the
 work is server-side, every hit is verified, and the stored text is derived rather than taken
 from the request. It adds no new anchoring mechanism.

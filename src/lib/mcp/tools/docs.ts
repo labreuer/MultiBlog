@@ -28,7 +28,7 @@ export const createDocTool = defineTool({
     return `Write a new doc from Markdown: a research summary, notes, a draft. It is PRIVATE, with ${byline} on its byline, and its text shows in your author colour. The title is \`title\`, or the Markdown's leading heading. A summary opens with the prompt that asked for it, quoted. Link a whole doc as /doc/<slug>; a section or a claim in a doc with a /link/<id> from ${listedName("create_link")}, anchored on the heading's text or the claim's sentence; a PDF passage with a fragment link, /pdf/<slug>#page=N&text=start,end. Fragment links are checked, and a miss is refused as no_match. For a long draft in a local file, ${listedName("upload")} sends it without typing it here. Answers the doc's url and version.`;
   },
   input: z.strictObject({
-    markdown: markdown.min(1),
+    markdown: markdown.min(1).describe(`A mention is [@Name](/authors/<slug>), the slug from ${listedName("find_users")}.`),
     title: z.string().min(1).max(500).optional(),
     issuerOnly: z.boolean().optional().describe("Leave yourself off the byline: the issuer alone, when they ask."),
     idempotencyKey,

@@ -10,6 +10,7 @@ import {
   deleteTestUser,
   getAnnotationStates,
   getDocMarkFacts,
+  getDocSearchText,
   getMentionSources,
   getUserIdByEmail,
   setTestDocRecord,
@@ -233,6 +234,39 @@ test("edit_doc refuses what it should: a missing or repeated passage, a record, 
     await deleteTestDoc(doc.id);
     await deleteTestDoc(shared.id);
     await deleteTestDoc(hidden.id);
+    await agent.dispose();
+  }
+});
+
+// docs/ENTITY_CHIPS.md, MCP item 7 — create_doc speaks the Markdown a read
+// writes, mentions by handle, so a doc moves between instances with them.
+test("create_doc writes a mention from its Markdown, and refuses one that names nobody", async ({ request }) => {
+  const agent = await createAgent(request);
+  const adaEmail = uniqueEmail("mcp-create-ada");
+  const ada = await createTestUser({ email: adaEmail, name: `Ada ${adaEmail.split("@")[0]}`, role: "AUTHOR" });
+  const adaMd = `[@${ada.name}](/authors/${ada.slug})`;
+  const created: string[] = [];
+  try {
+    const refused = await agent.call("create_doc", { markdown: "# Notes\n\nAsk [@Nobody](/authors/no-such-handle-e2e)." });
+    expect(refused.error).toMatchObject({ code: "unknown_chip", handles: ["no-such-handle-e2e"] });
+
+    // The label in the Markdown is whatever the writer typed; the handle is what is read.
+    const made = await agent.call("create_doc", {
+      markdown: `# Review notes for [@Somebody](/authors/${ada.slug})\n\nReviewed by [@An Old Name](/authors/${ada.slug}) last week.`,
+    });
+    expect(made.isError, JSON.stringify(made.error)).toBe(false);
+    created.push(String(made.result.id));
+    // A title is plain text, and reads as the heading did.
+    expect(made.result).toMatchObject({ title: "Review notes for @Somebody" });
+    await expect.poll(() => getMentionSources(ada.id)).toEqual([`doc:${made.result.id}`]);
+
+    const read = await agent.call("read", { url: String(made.result.url) });
+    expect(read.result.markdown).toBe(`Reviewed by ${adaMd} last week.`);
+    // Found by the name from the moment it exists: the cache was written with its label.
+    expect(await getDocSearchText(String(made.result.id))).toBe(`Reviewed by @${ada.name} last week.`);
+  } finally {
+    for (const id of created) await deleteTestDoc(id);
+    await deleteTestUser(adaEmail);
     await agent.dispose();
   }
 });

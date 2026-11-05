@@ -8,8 +8,7 @@ import { uniqueDocSlug } from "@/lib/doc-slug";
 import { slugify } from "@/lib/slug";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import {
-  authorHighlightExtensions,
-  contentExtensions,
+  docContentExtensions,
   pmDocContentSchema,
   pmTitleSchema,
   titleAuthorHighlightExtensions,
@@ -142,11 +141,10 @@ export async function createDocWithContent(userId: string, title: string, body: 
   const author = opts.author ?? null;
   const seed = new Y.Doc();
   const clientIds: number[] = [];
-  const seededBody = TiptapTransformer.toYdoc(
-    author ? markAuthor(body, pmDocContentSchema, author) : body,
-    "default",
-    author ? authorHighlightExtensions : contentExtensions,
-  );
+  // The doc schema whoever the author is: a body may hold an entity chip
+  // (docs/ENTITY_CHIPS.md), which the post-side list has no node for and
+  // would drop without a word.
+  const seededBody = TiptapTransformer.toYdoc(author ? markAuthor(body, pmDocContentSchema, author) : body, "default", docContentExtensions);
   Y.applyUpdate(seed, Y.encodeStateAsUpdate(seededBody));
   clientIds.push(seededBody.clientID);
   seededBody.destroy();

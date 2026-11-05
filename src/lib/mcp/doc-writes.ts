@@ -5,7 +5,7 @@ import { canManageDocs, canUserEditDoc } from "@/lib/doc-authz";
 import { BYLINE_ELIGIBLE_ROLES } from "@/lib/role-checks";
 import { createDocWithContent } from "@/lib/doc-create";
 import { MAX_MARKDOWN_BYTES, markdownToBlocks, markdownToDocContent, markdownToText } from "@/lib/markdown-import";
-import { pmDocContentSchema, pmSchema } from "@/lib/tiptap-schema";
+import { pmDocContentSchema } from "@/lib/tiptap-schema";
 import { resolveParsedChips } from "@/lib/entity-chips/parsed-chips";
 import { chipIdentitiesBetween } from "@/lib/entity-chips/renderings";
 import { postedAnnotationWhere } from "@/lib/annotation-authz";
@@ -87,16 +87,21 @@ export async function createDocFor(
   if (bytes > MAX_MARKDOWN_BYTES) {
     throw new ApiError("too_large", `That's ${Math.round(bytes / 1024)} KB of Markdown; the limit is ${MAX_MARKDOWN_BYTES / 1024} KB.`);
   }
-  const parsed = markdownToDocContent(input.markdown);
+  // A chip kind's syntax is a chip here as in an edit (docs/ENTITY_CHIPS.md,
+  // MCP item 7), so a doc downloaded from one instance is created on another
+  // with its mentions, by handle.
+  const parsed = markdownToDocContent(input.markdown, { chips: true });
   let title = input.title?.replace(/\s+/g, " ").trim() || parsed.title || "";
   let body = parsed.body;
   // An explicit title that isn't the leading heading leaves the heading in the body.
   if (input.title?.trim() && parsed.title && parsed.title !== title) {
-    body = { type: "doc", content: markdownToBlocks(input.markdown) };
+    body = { type: "doc", content: markdownToBlocks(input.markdown, { chips: true }) };
   }
   title = title.slice(0, 500);
+  // No doc yet for the rule to ask about: whoever the actor may mention anywhere.
+  body = await resolveParsedChips(body, ctx.actor, { docId: null, held: null });
   try {
-    pmSchema.nodeFromJSON(body).check();
+    pmDocContentSchema.nodeFromJSON(body).check();
   } catch (err) {
     throw invalid(`That Markdown doesn't make a valid doc: ${err instanceof Error ? err.message : String(err)}`);
   }

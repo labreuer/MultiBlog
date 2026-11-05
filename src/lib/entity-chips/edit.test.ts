@@ -61,7 +61,8 @@ test("parse: a mention's syntax is a placeholder holding its handle, only when c
   const [block] = markdownToBlocks("Ask [@Ada Lovelace](/authors/ada) now.", { chips: true });
   assert.deepEqual(block.content, [
     { type: "text", text: "Ask " },
-    { type: "entityChip", attrs: { kind: MENTION, iid: "", data: { slug: "ada" } } },
+    // The words it showed ride along for an import that falls back to a link; resolving drops them.
+    { type: "entityChip", attrs: { kind: MENTION, iid: "", data: { slug: "ada", label: "@Ada Lovelace" } } },
     { type: "text", text: " now." },
   ]);
   // The same Markdown on any other path is the link it says it is.

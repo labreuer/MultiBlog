@@ -148,8 +148,12 @@ still a plan.
   (`expectChips`) beside the text. The collab server labels the live doc from the records the
   client's read used (`chipInputs` in the edit request).
 
-  Not built of item 14: `create_doc` and `download` (a new doc's ydoc is seeded with a schema
-  that has no chip, so a mention in `create_doc`'s Markdown stays a link), the Markdown retry
+  `create_doc` reads the same syntax (`markdownToDocContent` with `chips`), under the rule
+  for a doc that doesn't exist yet, and `download` writes it, so a doc moves between
+  instances by handle. `/docs`' Markdown import reads it too, and leaves a mention it can't
+  resolve as the link its Markdown also is (`unresolved: "link"`), where MCP refuses.
+
+  Not built of item 14: the Markdown retry
   against identity text (the retry matches the label a link's text gives, which is the same
   for a mention), a quote edge inside a label widened for a note, `chip_changed` and
   `unknown_kind` (a chip of a kind the server doesn't know reads as plain `[…]`, and an edit
@@ -159,8 +163,7 @@ still a plan.
   may be mentioned, and the `@` menu in the doc editor and in a note's composer
   ([MENTIONS.md](MENTIONS.md)).
 
-Until the rest of step 1 is built, `create_doc` can't write a chip, and `/docs`' Length counts
-one as no characters.
+`/docs`' Length counts a chip as no characters.
 
 ## Terms
 
