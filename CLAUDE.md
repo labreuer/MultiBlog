@@ -256,7 +256,10 @@ before changing the behavior it describes.
   `renderHTML` has no label to give; and every path from a doc's JSON to a post-side surface
   goes through `docJsonForPostSide`, since `contentExtensions` has no chip node and its
   renderer throws on one. A new chip kind is a registry entry and adds no schema.
-  docs/ENTITY_CHIPS.md.
+  `Doc.proseJson` is the decoded ydoc *plus* each chip's label as of the write
+  (`docCacheFromYdoc`), for readers with no context to compute one from, such as search's
+  `prose_text`: write that column through it, and strip the labels (`withoutChipLabels`) before
+  comparing the column with a ydoc. docs/ENTITY_CHIPS.md.
 - **Tables are in `contentExtensions` and deliberately not in `annotationContentExtensions`.**
   The annotation list used to be an alias of `authorHighlightExtensions` and is now its own
   `[StarterKit, AuthorHighlight]`, mirrored by `annotationEditorExtensions`; don't re-derive one from

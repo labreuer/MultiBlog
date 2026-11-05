@@ -16,7 +16,7 @@ import {
   titleExtensions,
 } from "@/lib/tiptap-schema";
 import { markNew } from "@/lib/doc-edit";
-import { docContentFromYdoc } from "@/lib/doc-content";
+import { docCacheFromYdoc } from "@/lib/doc-content";
 import { ydocStore, encodeYdocState } from "../../server/ydoc-store";
 
 // Creating a doc's row, and creating a doc seeded with content. Plain server
@@ -166,7 +166,7 @@ export async function createDocWithContent(userId: string, title: string, body: 
   const clients = seed.getMap<string>("clients");
   for (const clientId of clientIds) clients.set(String(clientId), userId);
   const { ydoc, stateVector } = encodeYdocState(seed);
-  const cached = docContentFromYdoc(seed);
+  const cached = await docCacheFromYdoc(seed);
   seed.destroy();
 
   const byline = [...new Set(opts.byline ?? [userId])];

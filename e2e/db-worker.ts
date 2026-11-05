@@ -55,7 +55,7 @@ import { captureAnchor } from "@/lib/doc-link-anchor";
 import { postContentFromYdoc } from "@/lib/post-content";
 import { registerClient, revokeClient } from "@/lib/oauth/clients";
 import { hashRefreshToken } from "@/lib/oauth/refresh";
-import { docContentFromYdoc } from "@/lib/doc-content";
+import { docCacheFromYdoc } from "@/lib/doc-content";
 import { ensureYdocSnapshotAt, materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
@@ -476,7 +476,7 @@ export async function createTestDoc(opts: {
   // stays NULL and nothing recomputes it on read, so a fixture doc measures 0
   // characters on /docs however much body text it was given — which is a
   // fixture that quietly can't be used to test anything reading a doc's body.
-  const cached = docContentFromYdoc(seed);
+  const cached = await docCacheFromYdoc(seed);
   seed.destroy();
   await ydocStore.createIfAbsent(ydocIdForDoc(doc.id), ydoc, stateVector);
   // prose_json_length follows from the doc_sync_prose_json_length trigger.
@@ -1893,6 +1893,18 @@ export async function getPostContentText(postId: string): Promise<string | null>
   return post?.proseJson ? extractText(post.proseJson) : null;
 }
 
+/**
+ * A doc's body as full-text search reads it: `prose_text(prose_json)`, the
+ * SQL function behind the search vector and its snippets. Null for a doc with
+ * no cache yet.
+ */
+export async function getDocSearchText(docId: string): Promise<string | null> {
+  const rows = await prisma.$queryRaw<{ text: string | null }[]>`
+    SELECT CASE WHEN prose_json IS NULL THEN NULL ELSE public.prose_text(prose_json) END AS text FROM "doc" WHERE id = ${docId}
+  `;
+  return rows[0]?.text ?? null;
+}
+
 /** ydoc_snapshot row count for a doc — the "publishing again reuses, doesn't duplicate" assertion (PLAN.md §15b). */
 export async function countDocYdocSnapshots(docId: string): Promise<number> {
   return prisma.ydocSnapshot.count({ where: { ydocId: ydocIdForDoc(docId) } });
@@ -2631,7 +2643,7 @@ export async function appendTestDocParagraph(opts: { docId: string; text: string
   const update = Y.encodeStateAsUpdate(scratch, before);
   const created = await prisma.ydocUpdate.create({ data: { ydocId, update: Buffer.from(update) }, select: { id: true } });
   const { ydoc, stateVector } = encodeYdocState(scratch);
-  const cached = docContentFromYdoc(scratch);
+  const cached = await docCacheFromYdoc(scratch);
   scratch.destroy();
   await prisma.ydoc.update({
     where: { id: ydocId },
@@ -2747,6 +2759,7 @@ const handlers = {
   getThread,
   getPublicationEvents,
   getPostContentText,
+  getDocSearchText,
   countDocYdocSnapshots,
   getCommentStatus,
   createTestYdoc,

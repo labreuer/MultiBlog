@@ -51,6 +51,13 @@
 //      Everything else is ordinary lag, --verbose only. A NULL prose_json
 //      behind an *empty* ydoc is not a finding at all — that is the honest
 //      state of a doc created but never edited.
+//      The comparison leaves out the label each entity chip carries in
+//      prose_json, which the ydoc never holds.
+//   2b. chip-labels  — those labels vs the ones the chips' targets give now
+//      (docs/ENTITY_CHIPS.md, step 1, item 8), for a doc whose body agrees.
+//      A WARN without --verbose, because it does not settle by itself: a
+//      label goes stale when a person is renamed, and only a store of that
+//      doc, or the refresh, rewrites it.
 //   3. length-cache  — Doc.proseJsonLength vs doc_length(prose_json). ERROR,
 //      not WARN, and this is the asymmetry worth understanding: 1 and 2 compare
 //      a cache against a *newer* source, so a mismatch is usually just debounce
@@ -74,6 +81,10 @@ import { prismaIncludingDeleted as prisma } from "../../src/lib/prisma";
 import { ydocIdForDoc } from "../../src/lib/ydoc-names";
 import { docContentExtensions, titleAuthorHighlightExtensions } from "../../src/lib/tiptap-schema";
 import { extractText } from "../../src/lib/diff";
+import type { JSONContent } from "@tiptap/core";
+import { materializeChipLabels } from "../../src/lib/entity-chips/context";
+import { withoutChipLabels } from "../../src/lib/entity-chips/materialize";
+import { chipDisplayText } from "../../src/lib/entity-chips/text";
 
 type Level = "error" | "warn";
 type Finding = { level: Level; docId: string; slug: string; check: string; detail: string };
@@ -81,6 +92,17 @@ type Finding = { level: Level; docId: string; slug: string; check: string; detai
 function arg(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
   return hit?.slice(name.length + 3);
+}
+
+/** Each chip's stored label, in doc order: what a chip-labels finding prints. */
+function chipLabelList(doc: JSONContent): string[] {
+  const labels: string[] = [];
+  const walk = (node: JSONContent) => {
+    if (node.type === "entityChip") labels.push(chipDisplayText(node.attrs));
+    node.content?.forEach(walk);
+  };
+  walk(doc);
+  return labels;
 }
 
 function truncate(s: string, n = 80): string {
@@ -256,7 +278,10 @@ async function main() {
             "doc's cache, so /docs reads it as 0 characters until someone opens it.",
         });
       }
-    } else if (canonical(doc.proseJson) !== canonical(bodyJSON)) {
+    } else if (canonical(withoutChipLabels(doc.proseJson as JSONContent)) !== canonical(bodyJSON)) {
+      // Compared without the labels the cache carries on its entity chips
+      // (docs/ENTITY_CHIPS.md, step 1, item 8): the ydoc holds none, so with
+      // them every doc that has a chip would read as stale.
       if (ydocBodyEmpty) {
         findings.push({
           level: "warn",
@@ -277,6 +302,26 @@ async function main() {
             "prose_json is stale against the ydoc's body — the cache self-corrects on the next store.\n" +
             `        cached: ${truncate(canonical(doc.proseJson))}\n` +
             `        ydoc:   ${truncate(canonical(bodyJSON))}`,
+        });
+      }
+    } else {
+      // --- 2b. chip-labels ------------------------------------------------
+      // The body agrees, so what is left to differ is the labels. Reported
+      // without --verbose: a store relabels a doc, but nothing stores a doc
+      // nobody opens, so a label the refresh missed stays wrong, and search
+      // goes on finding the doc by the old name.
+      const relabelled = await materializeChipLabels(bodyJSON as JSONContent);
+      if (canonical(doc.proseJson) !== canonical(relabelled)) {
+        findings.push({
+          level: "warn",
+          docId: doc.id,
+          slug: doc.slug,
+          check: "chip-labels",
+          detail:
+            "prose_json's entity chips don't carry their current labels — a rename or a restyle hasn't reached " +
+            "this doc's cache, so search and exports show the old ones until its next store.\n" +
+            `        cached:  ${truncate(JSON.stringify(chipLabelList(doc.proseJson as JSONContent)))}\n` +
+            `        current: ${truncate(JSON.stringify(chipLabelList(relabelled)))}`,
         });
       }
     }

@@ -156,17 +156,29 @@ quiet or ten seconds at most — and issues one `updateMany` writing `prose_json
 `prose_json_update_id` and `updated_by_user_id`. The `WHERE id = docIdFromYdocId(name)`
 matches zero rows for a `/ydoc-debug` document, so there is no lookup to decide whether to
 write and no doc-awareness in `server/ydoc-store.ts`. The derivation is
-`docContentFromYdoc` (`src/lib/doc-content.ts`), shared with the two paths that seed a ydoc
-without a collab server (`scripts/seed-sample-data.ts`, `e2e/db-worker.ts`), so that a
+`docCacheFromYdoc` (`src/lib/doc-content.ts`): `docContentFromYdoc`, which decodes the ydoc,
+and then the entity chips' labels (below). It is shared with the paths that create a doc
+without a collab server (`doc-create.ts`, `e2e/db-worker.ts`), so that a
 seeded cache is exactly what the hook would have written — a seed that diverges from the
 hook stays wrong until the doc's first store, because nothing else rewrites it. A document
 that isn't TipTap-shaped is logged and dropped rather than thrown into the hook.
 
-**`prose_json` is the document, marks and all.** `authorHighlight` and the editor's
+**`prose_json` is the document, marks and all, plus each entity chip's label as of the
+write.** `authorHighlight` and the editor's
 annotation mark come through `fromYdoc` and are rendered, never filtered; nothing on the doc
 side ever rewrites the document to remove a mark. The deliberate contrast is
 `postContentFromYdoc`, which strips marks because a published post renders through a schema
 that has none.
+
+The label is the one thing in it the ydoc doesn't hold. An entity chip
+([ENTITY_CHIPS.md](ENTITY_CHIPS.md)) stores which person or work it stands for, and its label
+is computed wherever it is shown. The cache's readers that have nothing to compute one from
+(the `prose_text` SQL function behind search, `extractMarkedText`) read it from the node
+instead: the cache write adds it as a `label` attribute (`materializeChipLabels`). The schema
+doesn't declare that attribute, so decoding the JSON drops it and every position is the
+ydoc's. Anything comparing the cache with a decoded ydoc strips it first (`withoutChipLabels`,
+as `check-doc-integrity.ts` does), and that script's `chip-labels` check reports a label that
+is no longer its target's.
 
 **Staleness is bounded by the debounce, and the rule about it is the one that matters.**
 `prose_json` is fine for deciding *whether* to draw something and wrong for deciding

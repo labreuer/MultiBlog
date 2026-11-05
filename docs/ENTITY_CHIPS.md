@@ -78,6 +78,12 @@ still a plan.
   `text.test.ts` running them over one body. Not yet `blockText`, `flattenForMatch` and the
   Markdown writer, which are MCP's (below), nor the clipboard's plain text beyond what the
   node's `renderText` already gives.
+- **Item 8, `prose_json` materialization:** every writer of `Doc.proseJson` goes through
+  `docCacheFromYdoc`, which adds each chip's label (`materializeChipLabels`); `prose_text` reads
+  it (migration `chip_labels_in_prose_text`), so a doc's search vector and snippets hold the
+  label; and `check-doc-integrity.ts` compares without labels and reports a stale one as
+  `chip-labels`. No re-index was needed, since no doc could hold a chip before this. Nothing
+  rewrites a label after a rename until the doc's next store (item 10).
 - **Item 9, posts and the landing preamble:** `docJsonForPostSide` (`post-content.ts`) replaces
   each chip with its label as linked text, struck through when its target is gone, and records
   the chip on the link's `chip` attribute. Not the republish remap.
@@ -91,9 +97,9 @@ still a plan.
   may be mentioned, and the `@` menu in the doc editor and in a note's composer
   ([MENTIONS.md](MENTIONS.md)).
 
-Until the rest of step 1 is built, a chip is invisible to whatever isn't listed: a doc's
-full-text search, MCP reads and edits, Markdown export, and stored quotes shown outside a ydoc
-(which show U+FFFC).
+Until the rest of step 1 is built, a chip is invisible to whatever isn't listed: MCP reads and
+edits, Markdown export, and stored quotes shown outside a ydoc (which show U+FFFC). `/docs`'
+Length counts a chip as no characters.
 
 ## Terms
 

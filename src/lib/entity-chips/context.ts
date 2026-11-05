@@ -1,6 +1,7 @@
 import { loadMentionContext } from "./kinds/mention-context";
 import { MENTION } from "./kinds/mention";
 import type { JSONContent } from "@tiptap/core";
+import { relabelChips } from "./materialize";
 import { chipsInJSON, chipTargets } from "./renderings";
 import { DEFAULT_CHIP_STYLES, type ChipContext, type ChipInputs, type ChipOccurrence } from "./types";
 
@@ -40,4 +41,14 @@ export async function chipInputsForBody(body: JSONContent | null | undefined): P
 export async function chipInputsForBodies(bodies: readonly (JSONContent | null | undefined)[]): Promise<ChipInputs> {
   const chips = bodies.flatMap((body) => (body ? chipsInJSON(body) : []));
   return { styles: DEFAULT_CHIP_STYLES, context: chips.length > 0 ? await loadChipContext(chips) : {} };
+}
+
+/**
+ * `doc` as a cache column holds it (materialize.ts): each chip labelled from its target's
+ * current record. No query for a body with no chip, which is returned as it
+ * came.
+ */
+export async function materializeChipLabels(doc: JSONContent): Promise<JSONContent> {
+  if (chipsInJSON(doc).length === 0) return doc;
+  return relabelChips(doc, await chipInputsForBody(doc));
 }

@@ -7,6 +7,7 @@ import {
   deleteTestDoc,
   deleteTestPost,
   getAnnotationStates,
+  getDocSearchText,
   getPostContentText,
   getUserIdByEmail,
   restoreTestUser,
@@ -181,6 +182,13 @@ test("typing @ lists who may be mentioned, and picking one inserts a chip that i
   await page.reload();
   await waitForDocCollabReady(page);
   await expect(bodyEditor(page).locator("span.entity-chip")).toHaveText([`@${author.name}`]);
+
+  // The doc's cache carries the label beside the person, which is what
+  // full-text search reads: the doc is found by the name of someone it
+  // mentions, though its text never held that name.
+  await expect.poll(() => getDocSearchText(draftDoc.id), { timeout: 15_000 }).toContain(`ask @${author.name} today.`);
+  await page.goto(`/search?q=${encodeURIComponent(author.name)}`);
+  await expect(page.getByRole("link", { name: draftDoc.title }).first()).toBeVisible();
 });
 
 test("a mention typed into a note is labelled in the composer, on the posted card and in its edit session", async ({
