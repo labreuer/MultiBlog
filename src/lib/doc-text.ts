@@ -1,5 +1,6 @@
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { normalizeForMatch } from "./comment-quote-match";
+import { chipDisplayText, isChip, type ChipLabels } from "./entity-chips/text";
 
 // docs/MCP.md §6 — a doc read as a machine client reads it: its top-level
 // blocks, numbered; its text form; its outline with each section's size; and
@@ -28,32 +29,37 @@ export type DocBlock = {
  * its own, and a hard break is a line break too. It is what the quote matcher
  * flattens (comment-quote-match.ts), where every one of those boundaries
  * becomes a space — so a quote copied out of a text read matches as written.
+ *
+ * An entity chip is its display text (entity-chips/text.ts): its label in
+ * `labels`, which is what the matcher flattens it to as well. Without
+ * `labels` a chip contributes nothing.
  */
-export function blockText(node: PMNode): string {
-  if (node.isTextblock) return inlineText(node);
+export function blockText(node: PMNode, labels?: ChipLabels): string {
+  if (node.isTextblock) return inlineText(node, labels);
   if (node.isLeaf) return node.isText ? (node.text ?? "") : "";
   const lines: string[] = [];
   node.forEach((child) => {
-    const text = blockText(child);
+    const text = blockText(child, labels);
     if (child.isTextblock || text !== "") lines.push(text);
   });
   return lines.join("\n");
 }
 
-function inlineText(node: PMNode): string {
+function inlineText(node: PMNode, labels: ChipLabels | undefined): string {
   let text = "";
   node.forEach((child) => {
     if (child.isText) text += child.text ?? "";
     else if (child.type.name === "hardBreak") text += "\n";
+    else if (isChip(child)) text += chipDisplayText(child.attrs, labels);
   });
   return text;
 }
 
-/** Every top-level block of `doc`, in order. */
-export function docBlocks(doc: PMNode): DocBlock[] {
+/** Every top-level block of `doc`, in order, its entity chips read as `labels` gives them. */
+export function docBlocks(doc: PMNode, labels?: ChipLabels): DocBlock[] {
   const blocks: DocBlock[] = [];
   doc.forEach((node, offset, index) => {
-    const text = blockText(node);
+    const text = blockText(node, labels);
     blocks.push({
       number: index + 1,
       node,

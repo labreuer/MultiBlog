@@ -86,6 +86,18 @@ function qualifier(user: MentionUser, form: MentionForm): string | null {
   return form === "handle" || baseLabel(user, form) === user.slug ? null : user.slug;
 }
 
+/** The path a mention's Markdown links to: `/authors/<slug>`, and what its parse keys on. */
+export const MENTION_HREF_PREFIX = "/authors/";
+
+/**
+ * A label as link text: the characters that would end the brackets or start
+ * other syntax inside them are escaped. The parse never reads the label, so
+ * this only has to keep the link a link.
+ */
+function escapeLinkText(text: string): string {
+  return text.replace(/[\\[\]*_`<&~]/g, "\\$&");
+}
+
 export const mentionKind: ChipKind<MentionData, MentionStyle, MentionContext> = {
   name: MENTION,
 
@@ -144,5 +156,15 @@ export const mentionKind: ChipKind<MentionData, MentionStyle, MentionContext> = 
         ? { label, href: null, postHref: null, status: "deleted" }
         : { label, href, postHref: href, status: "live" };
     });
+  },
+
+  // `[@<label>](/authors/<slug>)`, the `@` written whatever the style: it and
+  // the author-page path are what the parse keys on (docs/MENTIONS.md,
+  // "Markdown"). An account that is deleted or unknown is struck through, and
+  // an unknown one carries its stored id in the slug's place.
+  markdown(data, rendering, context) {
+    const user = context[data.userId];
+    const link = `[@${escapeLinkText(rendering.label.replace(/^@/, ""))}](${MENTION_HREF_PREFIX}${user?.slug ?? data.userId})`;
+    return rendering.status === "live" ? link : `~~${link}~~`;
   },
 };

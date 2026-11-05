@@ -5,6 +5,7 @@ import { tagsForTarget } from "@/lib/tag-data";
 import { displayNameOf } from "@/lib/display-name";
 import { docContentToMarkdown, markdownToText } from "@/lib/markdown-import";
 import { flattenForMatch } from "@/lib/comment-quote-match";
+import { chipDisplayText, isChip, type ChipLabels } from "@/lib/entity-chips/text";
 import { contextOf, resolveQuote } from "@/lib/quote-resolve";
 import { alignBlocks, diffRuns, renderWordDiff } from "@/lib/block-align";
 import {
@@ -33,25 +34,33 @@ import { DEFAULT_READ_CHARS, readBoundFor, type ReadArgs } from "./args";
 
 type Format = "markdown" | "text";
 
-/** One block in the format asked for. */
-function renderBlock(block: DocBlock, format: Format): string {
+/** Each entity chip's Markdown, by instance id: `DocState.chips.markdown`, for the doc the blocks are of. */
+type ChipMarkdown = DocState["chips"]["markdown"];
+
+/** One block in the format asked for. A chip is its label in text, and its chip kind's syntax in Markdown. */
+function renderBlock(block: DocBlock, format: Format, chips: ChipMarkdown): string {
   if (format === "text") return block.text;
-  return docContentToMarkdown({ type: "doc", content: [block.node.toJSON()] }).trim();
+  return docContentToMarkdown({ type: "doc", content: [block.node.toJSON()] }, chips).trim();
 }
 
-function render(blocks: readonly DocBlock[], format: Format): string {
-  return format === "text" ? docText(blocks) : blocks.map((block) => renderBlock(block, format)).join("\n\n");
+function render(blocks: readonly DocBlock[], format: Format, chips: ChipMarkdown): string {
+  return format === "text" ? docText(blocks) : blocks.map((block) => renderBlock(block, format, chips)).join("\n\n");
 }
 
 /**
  * As many of `blocks` as fit in `budget` characters of serialized result,
  * always at least one, and the number of the first block left out.
  */
-function fitBlocks(blocks: readonly DocBlock[], format: Format, budget: number): { body: string; next: number | null } {
+function fitBlocks(
+  blocks: readonly DocBlock[],
+  format: Format,
+  chips: ChipMarkdown,
+  budget: number,
+): { body: string; next: number | null } {
   const parts: string[] = [];
   let size = 0;
   for (const block of blocks) {
-    const part = renderBlock(block, format);
+    const part = renderBlock(block, format, chips);
     // JSON-escaped, as the result will be measured.
     const cost = JSON.stringify(part).length - 2 + (parts.length > 0 ? 2 : 0);
     if (parts.length > 0 && size + cost > budget) {
@@ -172,7 +181,7 @@ export async function readDoc(
     if (args.outline) {
       return { kind: "doc-outline", url, version: versionOf(state), from: span.from, to: span.to, outline: outlineOf(state.blocks, { depth: args.depth, within: span }) };
     }
-    const fitted = fitBlocks(state.blocks.slice(span.from - 1, span.to), format, maxChars - 1000);
+    const fitted = fitBlocks(state.blocks.slice(span.from - 1, span.to), format, state.chips.markdown, maxChars - 1000);
     const lastIncluded = fitted.next === null ? span.to : fitted.next - 1;
     return {
       kind: "doc-blocks",
@@ -189,7 +198,7 @@ export async function readDoc(
   const meta = await docMeta(doc, state);
   const more = await extras(state, null);
   if (!args.outline) {
-    const whole = { ...meta, [bodyKey(format)]: render(state.blocks, format), ...more };
+    const whole = { ...meta, [bodyKey(format)]: render(state.blocks, format, state.chips.markdown), ...more };
     const bound = args.whole ? maxChars : DEFAULT_READ_CHARS;
     if (sizeOf(whole) <= bound) return whole;
   }
@@ -215,7 +224,7 @@ export async function readDoc(
  * than refused, since nothing is being anchored.
  */
 async function aroundQuote(state: DocState, args: ReadArgs, format: Format, url: string): Promise<ToolResult> {
-  const target = flattenForMatch(state.node);
+  const target = flattenForMatch(state.node, state.chips.labels);
   const resolution = resolveQuote(target, { quote: args.around, prefix: args.prefix, suffix: args.suffix }, markdownToText);
   if (resolution.kind === "none") {
     throw new ApiError("no_match", "That quote isn't in this doc as written.", {
@@ -238,7 +247,7 @@ async function aroundQuote(state: DocState, args: ReadArgs, format: Format, url:
       from,
       to,
       ...(heading && heading.number !== at.from ? { heading: heading.heading!.text } : {}),
-      [bodyKey(format)]: render(state.blocks.slice(from - 1, to), format),
+      [bodyKey(format)]: render(state.blocks.slice(from - 1, to), format, state.chips.markdown),
     };
   });
   return {
@@ -263,11 +272,12 @@ function locate(blocks: readonly DocBlock[], from: number, to: number): { blocks
 }
 
 /**
- * Per character of `blockText(node)`, the `authorHighlight` it carries, or
- * null — a line break between textblocks, a hard break, and unmarked text
- * (an import's) carry none.
+ * Per character of `blockText(node, labels)`, the `authorHighlight` it
+ * carries, or null — a line break between textblocks, a hard break, unmarked
+ * text (an import's) and an entity chip's label carry none: a ydoc keeps no
+ * mark on a chip, so who put it there isn't in the document.
  */
-function charAuthors(node: PMNode): (string | null)[] {
+function charAuthors(node: PMNode, labels: ChipLabels): (string | null)[] {
   if (node.isTextblock) {
     const out: (string | null)[] = [];
     node.forEach((child) => {
@@ -277,6 +287,8 @@ function charAuthors(node: PMNode): (string | null)[] {
         for (let i = 0; i < (child.text ?? "").length; i++) out.push(id);
       } else if (child.type.name === "hardBreak") {
         out.push(null);
+      } else if (isChip(child)) {
+        for (let i = 0; i < chipDisplayText(child.attrs, labels).length; i++) out.push(null);
       }
     });
     return out;
@@ -286,7 +298,7 @@ function charAuthors(node: PMNode): (string | null)[] {
   // with a line break between them.
   const lines: (string | null)[][] = [];
   node.forEach((child) => {
-    const line = charAuthors(child);
+    const line = charAuthors(child, labels);
     if (child.isTextblock || line.length > 0) lines.push(line);
   });
   return lines.flatMap((line, index) => (index > 0 ? [null, ...line] : line));
@@ -318,7 +330,7 @@ async function changesSince(doc: ResolvedDoc, state: DocState, since: bigint): P
     const heading = newBlock ? headingAbove(state.blocks, newBlock.number) : headingAbove(before.blocks, oldBlock!.number);
     const headingText = heading && heading.number !== (newBlock ?? oldBlock)!.number ? heading.heading!.text : undefined;
     if (newBlock && !oldBlock) {
-      const authors = charAuthors(newBlock.node);
+      const authors = charAuthors(newBlock.node, state.chips.labels);
       pending.push({ result: { block: newBlock.number, ...(headingText ? { heading: headingText } : {}), added: newBlock.text }, runs: [authors] });
       authors.forEach((id) => id && authorIds.add(id));
       continue;
@@ -328,7 +340,7 @@ async function changesSince(doc: ResolvedDoc, state: DocState, since: bigint): P
       continue;
     }
     const runs = diffRuns(oldBlock!.text, newBlock!.text);
-    const authors = charAuthors(newBlock!.node);
+    const authors = charAuthors(newBlock!.node, state.chips.labels);
     const insertAuthors = runs
       .filter((run) => run.type === "insert")
       .map((run) => authors.slice(run.start, run.end));

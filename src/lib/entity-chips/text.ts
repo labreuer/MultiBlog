@@ -67,3 +67,13 @@ export function chipDisplayText(attrs: Record<string, unknown> | null | undefine
 export function anchorLeafText(other: string): (leaf: PMNode) => string {
   return (leaf) => (leaf.type.name === ENTITY_CHIP ? CHIP_ANCHOR_TEXT : other);
 }
+
+/**
+ * A range's text as a reader sees it: `textBetween` with `blockSeparator`
+ * between blocks, each chip as its display text. For showing a passage; what
+ * an anchor stores is the plain `textBetween`, where a chip is its anchor
+ * text.
+ */
+export function displayTextBetween(node: PMNode, from: number, to: number, labels: ChipLabels | undefined, blockSeparator = " "): string {
+  return node.textBetween(from, to, blockSeparator, (leaf) => (isChip(leaf) ? chipDisplayText(leaf.attrs, labels) : ""));
+}

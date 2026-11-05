@@ -143,3 +143,24 @@ export function chipIdentities(doc: JSONContent): string[] {
     return `${chip.kind}:${kind && data !== null ? kind.identity(data) : JSON.stringify(chip.data)}`;
   });
 }
+
+/**
+ * Each chip's Markdown, by instance id (docs/ENTITY_CHIPS.md, MCP item 1):
+ * its chip kind's own syntax, from the same doc-order pass the labels come
+ * from. A chip this build can't render reads as the placeholder a tab shows,
+ * as plain text, which no parse reads back as a chip.
+ */
+export function chipMarkdowns(chips: readonly ChipOccurrence[], styles: ChipStyles, context: ChipContext): Map<string, string> {
+  const renderings = chipRenderings(chips, styles, context);
+  const out = new Map<string, string>();
+  chips.forEach((chip, index) => {
+    if (out.has(chip.iid)) return;
+    const kind = chipKind(chip.kind);
+    const data = kind?.validate(chip.data) ?? null;
+    out.set(
+      chip.iid,
+      kind && data !== null ? kind.markdown(data, renderings[index], kind.parseContext(context[chip.kind])) : renderings[index].label.replace(/[\\[\]]/g, "\\$&"),
+    );
+  });
+  return out;
+}

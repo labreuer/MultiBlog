@@ -117,4 +117,12 @@ export type ChipKind<Data = unknown, Style = unknown, Context = unknown> = {
    * apart two entities that would share a label.
    */
   render(chips: readonly Data[], style: Style, context: Context): ChipRendering[];
+  /**
+   * One chip as Markdown (the kind contract, item 7), given the rendering
+   * `render` made for it. The syntax is this kind's own, and its parse keys on
+   * the syntax, never on the label, so a chip reads back as the same chip
+   * whatever style the doc shows it in. A chip whose target is gone is written
+   * with its stored id where a slug or key would go, so a round trip keeps it.
+   */
+  markdown(data: Data, rendering: ChipRendering, context: Context): string;
 };

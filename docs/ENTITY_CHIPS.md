@@ -75,9 +75,8 @@ still a plan.
   text, and its display text from computed labels or from a label on the JSON node. Through it
   go `extractText` (a note's `bodyText`, a collapsed card's excerpt and word count),
   `extractMarkedText`, the table grid a CSV is written from, and `quotedTextAt`, with
-  `text.test.ts` running them over one body. Not yet `blockText`, `flattenForMatch` and the
-  Markdown writer, which are MCP's (below), nor the clipboard's plain text beyond what the
-  node's `renderText` already gives.
+  `text.test.ts` running them over one body, and `blockText`, `flattenForMatch` and the
+  Markdown writer, which take labels from the MCP doc state (`quote.test.ts`).
 - **Item 8, `prose_json` materialization:** every writer of `Doc.proseJson` goes through
   `docCacheFromYdoc`, which adds each chip's label (`materializeChipLabels`); `prose_text` reads
   it (migration `chip_labels_in_prose_text`), so a doc's search vector and snippets hold the
@@ -104,12 +103,20 @@ still a plan.
   and the earlier versions in the history panel. `bodyText` is written with labels
   (`annotationBodyText`) and refreshed (item 10).
 - **Item 15:** `SCHEMA_VERSION` is 1.
+- **Item 14, MCP, the reading half:** reads show each chip as its label in text and in its chip
+  kind's Markdown (`ChipKind.markdown`, `chipMarkdowns`, `docContentToMarkdown`), in docs, notes
+  and thread passages, with a hand-written link of a mention's shape written `[\@…]`. A quote
+  is matched against the doc's display text and verified against it (`flattenForMatch` with
+  labels), and what is stored stays the anchor text; a quote ending inside a label is a miss
+  rather than widened. Not yet: parsing a chip's Markdown, the chip-aware merge and its
+  refusals, the identity-text retry, styles in a read's header, `create_doc` and `download`
+  round trips.
 - **Mentions:** the chip kind's fields, forms and labels, its context loader, the rule for who
   may be mentioned, and the `@` menu in the doc editor and in a note's composer
   ([MENTIONS.md](MENTIONS.md)).
 
-Until the rest of step 1 is built, a chip is invisible to whatever isn't listed: MCP reads and
-edits, Markdown export, and stored quotes shown outside a ydoc (which show U+FFFC). `/docs`'
+Until the rest of step 1 is built: an MCP edit can't write a chip, and one whose passage holds
+a chip removes it; and a stored quote shown outside a ydoc shows U+FFFC. `/docs`'
 Length counts a chip as no characters.
 
 ## Terms

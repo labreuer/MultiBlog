@@ -14,6 +14,9 @@ import {
   stripMarksFromDoc,
 } from "./tiptap-schema";
 import { blockText } from "./doc-text";
+import { MENTION_HREF_PREFIX } from "./entity-chips/kinds/mention";
+import { EntityChip } from "./entity-chips/node";
+import { isChip } from "./entity-chips/text";
 
 // contentExtensions, and specifically the same exported value the caller
 // encodes the ydoc with — a node type registered here but missing there is
@@ -147,13 +150,98 @@ function splitCodeAtFormatting(json: JSONContent): JSONContent {
   return { ...json, content };
 }
 
+// ---------------------------------------------------------------------------
+// docs/ENTITY_CHIPS.md, MCP items 1 and 2 — a doc's own Markdown: what
+// `contentExtensions` writes, plus entity chips.
+//
+// A chip is written in its chip kind's syntax, which is computed before the
+// serializer runs (`chipMarkdowns`, from the doc-order pass the labels come
+// from) and handed over on the node as `md`: the serializer meets one node at
+// a time and has no chip context.
+//
+// A mention's syntax is a link, `[@Label](/authors/slug)`, so a link someone
+// wrote by hand with that shape has to be told apart from one. It is written
+// with its `@` escaped, `[\@Andrew](/authors/andrew)`, which CommonMark reads
+// as the same link text. The lowering stays one-to-one: nothing in a doc's
+// text reads back as a chip that wasn't one.
+//
+// The serializer has no hook for that escape: a mark's `renderMarkdown` is
+// asked for its opening and closing around a placeholder and never sees the
+// text, and the method that escapes a text node is private. So the `@` is
+// swapped for a stand-in before the serializer runs, and the stand-in for
+// `\@` in what it wrote. The stand-in is a private-use character the doc
+// doesn't hold, checked per doc, since extracted PDF text can hold any.
+
+/** Whether `node`, child `index` of `parent`, is the text a mention-shaped link opens with. */
+function opensMentionShapedLink(node: JSONContent, parent: JSONContent | undefined, index: number): boolean {
+  if (node.type !== "text" || !node.text?.startsWith("@")) return false;
+  const marks = node.marks ?? [];
+  // Inside code the `@` is literal either way, and a backslash would be too.
+  if (marks.some((mark) => mark.type === "code")) return false;
+  const href = marks.find((mark) => mark.type === "link")?.attrs?.href;
+  if (typeof href !== "string" || !href.startsWith(MENTION_HREF_PREFIX)) return false;
+  // Only the link's first text: the parse reads a mention off how the link's text starts.
+  const previous = index > 0 ? parent?.content?.[index - 1] : undefined;
+  return !previous?.marks?.some((mark) => mark.type === "link" && mark.attrs?.href === href);
+}
+
+/**
+ * `json` serialized by `manager`, with the `@` that opens a hand-written
+ * mention-shaped link escaped.
+ */
+function serializeEscapingMentionShapes(manager: MarkdownManager, json: JSONContent): string {
+  let found = false;
+  const mark = (node: JSONContent, parent: JSONContent | undefined, index: number, standIn: string): JSONContent => {
+    if (opensMentionShapedLink(node, parent, index)) {
+      found = true;
+      return { ...node, text: standIn + node.text!.slice(1) };
+    }
+    return node.content ? { ...node, content: node.content.map((child, i) => mark(child, node, i, standIn)) } : node;
+  };
+  const source = JSON.stringify(json);
+  let code = 0xe000;
+  while (source.includes(String.fromCharCode(code))) code += 1;
+  const standIn = String.fromCharCode(code);
+  const marked = mark(json, undefined, 0, standIn);
+  const markdown = manager.serialize(found ? marked : json);
+  return found ? markdown.replaceAll(standIn, "\\@") : markdown;
+}
+
+const ChipMarkdown = EntityChip.extend({
+  renderMarkdown: (node) => (typeof node.attrs?.md === "string" ? node.attrs.md : ""),
+});
+
+const docMarkdownManager = new MarkdownManager({ extensions: [...contentExtensions, ChipMarkdown] });
+
+/** `json` with each chip carrying its Markdown as `md`, for `ChipMarkdown` to write. */
+function withChipMarkdown(json: JSONContent, chipMarkdown: ReadonlyMap<string, string>): JSONContent {
+  if (isChip(json)) {
+    const md = typeof json.attrs?.iid === "string" ? chipMarkdown.get(json.attrs.iid) : undefined;
+    return md === undefined ? json : { ...json, attrs: { ...json.attrs, md } };
+  }
+  return json.content ? { ...json, content: json.content.map((child) => withChipMarkdown(child, chipMarkdown)) } : json;
+}
+
 /**
  * A doc body (docContentExtensions JSON) as Markdown. The `annotation` and
- * `authorHighlight` marks are stripped first: neither has a Markdown form,
- * and `contentExtensions` would refuse both.
+ * `authorHighlight` marks are stripped first: neither has a Markdown form.
+ *
+ * `chipMarkdown` is each entity chip's Markdown by instance id
+ * (`chipMarkdowns`, over the whole doc, even when `json` is one block of it:
+ * a label can depend on the chips around it). A chip it has no entry for is
+ * left out.
  */
-export function docContentToMarkdown(json: JSONContent): string {
-  return markdownManager.serialize(splitCodeAtFormatting(stripMarksFromDoc(json, ["annotation", "authorHighlight"])));
+export function docContentToMarkdown(json: JSONContent, chipMarkdown?: ReadonlyMap<string, string>): string {
+  const stripped = stripMarksFromDoc(json, ["annotation", "authorHighlight"]);
+  return serializeEscapingMentionShapes(
+    docMarkdownManager,
+    splitCodeAtFormatting(chipMarkdown ? withChipMarkdown(stripped, chipMarkdown) : stripped),
+  );
+}
+
+/** A published post's content (contentExtensions JSON) as Markdown. A post holds no chip, and its links are written as they are. */
+export function postContentToMarkdown(json: JSONContent): string {
+  return markdownManager.serialize(splitCodeAtFormatting(json));
 }
 
 /**
@@ -333,9 +421,24 @@ const annotationMarkdownManager = new MarkdownManager({
   extensions: [...annotationContentExtensions, commentMarkdownShims[2]],
 });
 
-/** An annotation body (annotationContentExtensions JSON) as Markdown, the author mark stripped. */
-export function annotationContentToMarkdown(json: JSONContent): string {
-  return annotationMarkdownManager.serialize(splitCodeAtFormatting(stripMarksFromDoc(json, ["authorHighlight"])));
+// The writer: the same list with the doc writer's chip and its escape
+// (above), which a note's body shares with a doc's.
+const annotationMarkdownWriter = new MarkdownManager({
+  extensions: [...annotationContentExtensions, ChipMarkdown, commentMarkdownShims[2]],
+});
+
+/**
+ * An annotation body (annotationContentExtensions JSON) as Markdown, the
+ * author mark stripped. `chipMarkdown` is each of its entity chips' Markdown
+ * by instance id, as for `docContentToMarkdown`; a body is its own document
+ * to that pass.
+ */
+export function annotationContentToMarkdown(json: JSONContent, chipMarkdown?: ReadonlyMap<string, string>): string {
+  const stripped = stripMarksFromDoc(json, ["authorHighlight"]);
+  return serializeEscapingMentionShapes(
+    annotationMarkdownWriter,
+    splitCodeAtFormatting(chipMarkdown ? withChipMarkdown(stripped, chipMarkdown) : stripped),
+  );
 }
 
 /**

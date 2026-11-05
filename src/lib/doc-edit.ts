@@ -269,8 +269,8 @@ export function mergeBlock(old: PMNode, next: PMNode, options: MergeOptions): PM
     const oc = childrenOf(old);
     const nc = childrenOf(next);
     const pairs = alignBlocks(
-      oc.map(blockText),
-      nc.map(blockText),
+      oc.map((node) => blockText(node)),
+      nc.map((node) => blockText(node)),
       { old: oc.map(blockKey), new: nc.map(blockKey) },
     );
     const children = pairs.flatMap((pair) =>
@@ -294,7 +294,7 @@ export function mergeBlock(old: PMNode, next: PMNode, options: MergeOptions): PM
 export function mergeDoc(old: PMNode, next: PMNode, options: MergeOptions): PMNode {
   const oc = childrenOf(old);
   const nc = childrenOf(next);
-  const pairs = alignBlocks(oc.map(blockText), nc.map(blockText), { old: oc.map(blockKey), new: nc.map(blockKey) });
+  const pairs = alignBlocks(oc.map((node) => blockText(node)), nc.map((node) => blockText(node)), { old: oc.map(blockKey), new: nc.map(blockKey) });
   const merged = pairs.flatMap((pair) =>
     pair.new === null ? [] : pair.old === null ? [markNew(nc[pair.new], options)] : [mergeBlock(oc[pair.old], nc[pair.new], options)],
   );
@@ -491,7 +491,7 @@ export function planEdits(
   // Step 2: the merge, top-level block by block.
   const oc = childrenOf(doc);
   const nc = childrenOf(shaped);
-  const pairs = alignBlocks(oc.map(blockText), nc.map(blockText), { old: oc.map(blockKey), new: nc.map(blockKey) });
+  const pairs = alignBlocks(oc.map((node) => blockText(node)), nc.map((node) => blockText(node)), { old: oc.map(blockKey), new: nc.map(blockKey) });
   const merged: PMNode[] = [];
   const changed: number[] = [];
   for (const pair of pairs) {

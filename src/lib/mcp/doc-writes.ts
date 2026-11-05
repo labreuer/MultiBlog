@@ -226,7 +226,7 @@ export async function editDocFor(
     const tail = await docLogTail(doc.id);
     if (tail !== null && version < tail) {
       const then = await loadDocStateAt(doc.id, version);
-      const target = flattenForMatch(then.node);
+      const target = flattenForMatch(then.node, then.chips.labels);
       for (const edit of named) {
         const found = resolveQuote(target, edit.target, markdownToText);
         if (found.kind === "none" || found.matches.length === 0) {

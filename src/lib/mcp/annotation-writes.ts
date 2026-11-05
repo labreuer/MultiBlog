@@ -24,6 +24,8 @@ import { docLogTail, isDocVersion, loadDocStateAt } from "@/lib/doc-state";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { ApiError, ERROR_LIST_CAP, forbidden, invalid, notFound } from "@/lib/api/errors";
+import { chipInputsForBody } from "@/lib/entity-chips/context";
+import { chipLabels, displayTextBetween, type ChipLabels } from "@/lib/entity-chips/text";
 import type { McpContext, ToolResult } from "./tool";
 import { parse, readableContainer, readableDocByParam, readableFileBySlug, type ResolvedContainer } from "./resolve";
 import { annotationByFragment } from "./read/threads";
@@ -79,9 +81,19 @@ async function resolveOn(ctx: McpContext, on: string): Promise<Target> {
   return { container, parent: { id: parent.id } };
 }
 
-/** A quote's one match in `node`, or the refusal: `no_match` with near misses, `ambiguous` with where. */
-function findOne(node: PMNode, spec: QuoteSpec, describeWhere: (from: number, to: number) => Record<string, unknown>) {
-  const target = flattenForMatch(node);
+/**
+ * A quote's one match in `node`, or the refusal: `no_match` with near misses,
+ * `ambiguous` with where. `labels` are the node's entity chips as the agent
+ * read them, so a quote that holds a label finds its chip; what is captured
+ * and stored is the node's own text, where a chip is its anchor text.
+ */
+function findOne(
+  node: PMNode,
+  labels: ChipLabels | undefined,
+  spec: QuoteSpec,
+  describeWhere: (from: number, to: number) => Record<string, unknown>,
+) {
+  const target = flattenForMatch(node, labels);
   const found = resolveQuote(target, spec, markdownToText);
   if (found.kind === "none") {
     throw new ApiError("no_match", "That quote isn't there as written.", {
@@ -97,7 +109,8 @@ function findOne(node: PMNode, spec: QuoteSpec, describeWhere: (from: number, to
   const match = found.matches[0];
   const captured = captureAnchorInNode(node, match.from, match.to, node.textBetween(match.from, match.to, " "));
   if (!captured) throw new ApiError("no_match", "That quote couldn't be anchored.");
-  return captured;
+  // `shown` is the passage as the agent reads it, for the answer; `quotedText` is what is stored.
+  return { ...captured, shown: displayTextBetween(node, captured.from, captured.to, labels) };
 }
 
 export type QuoteInput = QuoteSpec & { version?: string; page?: number; label?: string };
@@ -111,7 +124,7 @@ export type QuoteInput = QuoteSpec & { version?: string; page?: number; label?: 
 export async function anchorInDoc(
   docId: string,
   quote: QuoteInput,
-): Promise<{ stamp: bigint; from: number; to: number; quotedText: string; selector: DocRangeSelector }> {
+): Promise<{ stamp: bigint; from: number; to: number; quotedText: string; shown: string; selector: DocRangeSelector }> {
   const tail = await docLogTail(docId);
   if (tail === null) throw invalid("This doc has no history to anchor into yet.");
   let stamp = tail;
@@ -122,15 +135,15 @@ export async function anchorInDoc(
     }
   }
   const state = await loadDocStateAt(docId, stamp);
-  const blocks = docBlocks(state.node);
-  const captured = findOne(state.node, quote, (from, to) => {
+  const blocks = docBlocks(state.node, state.chips.labels);
+  const captured = findOne(state.node, state.chips.labels, quote, (from, to) => {
     const at = blocksOfRange(blocks, from, to);
     const heading = at ? headingAbove(blocks, at.from) : null;
     return at
       ? { blocks: at.from === at.to ? String(at.from) : `${at.from}-${at.to}`, ...(heading ? { heading: heading.heading!.text } : {}) }
       : {};
   });
-  return { stamp, from: captured.from, to: captured.to, quotedText: captured.quotedText, selector: captured.selector };
+  return { stamp, from: captured.from, to: captured.to, quotedText: captured.quotedText, shown: captured.shown, selector: captured.selector };
 }
 
 /** A reply's anchor in its parent's body, at the parent's newest settled version — what the replier was reading. */
@@ -140,8 +153,10 @@ async function anchorInParent(parentId: string, quote: QuoteInput) {
   const doc = await materializeYdocAt(ydocIdForAnnotation(parentId), stamp);
   try {
     const json = TiptapTransformer.extensions(annotationContentExtensions).fromYdoc(doc, "default") as JSONContent;
-    const captured = findOne(pmAnnotationContentSchema.nodeFromJSON(json), quote, () => ({}));
-    return { stamp, from: captured.from, to: captured.to, quotedText: captured.quotedText };
+    // The parent's chips as a thread read shows them, so a quote of one lands.
+    const labels = chipLabels(json, await chipInputsForBody(json));
+    const captured = findOne(pmAnnotationContentSchema.nodeFromJSON(json), labels, quote, () => ({}));
+    return { stamp, from: captured.from, to: captured.to, quotedText: captured.quotedText, shown: captured.shown };
   } finally {
     doc.destroy();
   }
@@ -170,12 +185,12 @@ export async function annotateFor(ctx: McpContext, input: QuoteInput & { on: str
     anchor = { kind: "none", stamp: container.kind === "doc" ? await docLogTail(container.doc.id) : null };
   } else if (parent) {
     const at = await anchorInParent(parent.id, input);
-    anchor = { kind: "range", ...at };
-    passage = { text: at.quotedText };
+    anchor = { kind: "range", stamp: at.stamp, from: at.from, to: at.to, quotedText: at.quotedText };
+    passage = { text: at.shown };
   } else if (container.kind === "doc") {
     const at = await anchorInDoc(container.doc.id, input);
     anchor = { kind: "range", stamp: at.stamp, from: at.from, to: at.to, quotedText: at.quotedText };
-    passage = { text: at.quotedText };
+    passage = { text: at.shown };
   } else {
     const at = await anchorPdfQuote(container.file, input);
     anchor = { kind: "pdf", target: at.target, quotedText: at.quotedText };

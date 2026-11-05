@@ -1107,6 +1107,15 @@ below), so the words between the ends need no checking here; an edit's do (§6).
    since an agent that named a passage didn't ask for a note on the whole doc. One sent with
    no quote at all is a note on the whole doc, or a reply to the whole of its parent (§9).
 
+**An entity chip is its label to the matcher, and its anchor text in what is stored**
+([ENTITY_CHIPS.md](ENTITY_CHIPS.md), MCP items 1 and 3). A mention reads `@Luke Breuer` in a text
+read and `[@Luke Breuer](/authors/luke-breuer)` in a Markdown one, and a quote of either finds
+it: `flattenForMatch` is given the doc's labels (`DocState.chips.labels`), puts a chip's label
+at the chip's one position, and verifies a hit against the same display text. A quote that ends
+inside a label is `no_match`. The capture in step 3 is unchanged, so the stored quote holds
+U+FFFC where the chip is and a rename can't detach it. An answer that echoes a passage shows it
+as read.
+
 That is COLLAB.md §9's matcher pointed at its §2b stamped state: the state is immutable, the
 work is server-side, every hit is verified, and the stored text is derived rather than taken
 from the request. It adds no new anchoring mechanism.

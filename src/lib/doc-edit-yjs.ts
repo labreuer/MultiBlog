@@ -70,7 +70,7 @@ function syncNode(parent: Y.XmlFragment | Y.XmlElement, index: number, old: PMNo
 
 /** `parent`'s children, which are `old`, rewritten to be `next` with the fewest changes the alignment allows. */
 function syncChildren(parent: Y.XmlFragment | Y.XmlElement, old: PMNode[], next: PMNode[]): void {
-  const pairs = alignBlocks(old.map(blockText), next.map(blockText), { old: old.map(blockKey), new: next.map(blockKey) });
+  const pairs = alignBlocks(old.map((node) => blockText(node)), next.map((node) => blockText(node)), { old: old.map(blockKey), new: next.map(blockKey) });
   let index = 0;
   for (const pair of pairs) {
     if (pair.old !== null && pair.new !== null) {
