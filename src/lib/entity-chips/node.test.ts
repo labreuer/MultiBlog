@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Fragment, Slice, type Node as PMNode } from "@tiptap/pm/model";
 import { EditorState, type Transaction } from "@tiptap/pm/state";
 import { pmDocContentSchema as schema } from "../tiptap-schema";
-import { conformChipAttrs, newChipIid, repairChipIids } from "./node";
+import { conformChipAttrs, entityChipKey, entityChipPlugin, newChipIid, repairChipIids, type ChipInputs } from "./node";
 import { chipsIn } from "./renderings";
 import { ENTITY_CHIP } from "./types";
 
@@ -108,4 +108,59 @@ test("ordinary typing, and a duplicate this client didn't insert, call for no re
   const state = stateOf(para("a ", mention("same"), mention("same")));
   const typed = state.tr.insertText("x", 1);
   assert.equal(repairChipIids([typed], state.apply(typed)), null);
+});
+
+// The plugin: renderings as node decorations.
+
+const inputs: ChipInputs = {
+  styles: {},
+  context: {
+    mention: { luke: { id: "luke", name: "Luke Breuer", initials: "LB", slug: "luke-breuer", deleted: false, botOf: null } },
+  },
+};
+const live = (...blocks: PMNode[]) =>
+  EditorState.create({ doc: schema.nodes.doc.create(null, blocks), plugins: [entityChipPlugin(inputs)] });
+const plugin = (state: EditorState) => entityChipKey.getState(state)!;
+const labels = (state: EditorState) =>
+  plugin(state)
+    .decorations.find()
+    .map((decoration) => [decoration.from, (decoration.spec as { chipLabel: string }).chipLabel]);
+
+test("each chip gets one node decoration carrying its rendering", () => {
+  const state = live(para("a ", mention("i1"), " b ", mention("i2", "nobody")));
+  assert.deepEqual(labels(state), [
+    [3, "@Luke Breuer"],
+    [7, "unknown person"],
+  ]);
+  assert.equal(plugin(state).byIid.get("i1")?.href, "/authors/luke-breuer");
+});
+
+test("typing beside chips maps the decorations and recomputes nothing", () => {
+  const state = live(para("a ", mention("i1"), " b"), para("c"));
+  const next = state.apply(state.tr.insertText("xx", 1));
+  assert.equal(plugin(next).byIid, plugin(state).byIid);
+  assert.deepEqual(labels(next), [[5, "@Luke Breuer"]]);
+});
+
+test("a chip coming or going recomputes", () => {
+  const state = live(para("a ", mention("i1"), " b"));
+  const added = state.apply(state.tr.insert(1, mention("i2", "nobody")));
+  assert.notEqual(plugin(added).byIid, plugin(state).byIid);
+  assert.equal(labels(added).length, 2);
+  const removed = added.apply(added.tr.delete(1, 2));
+  assert.deepEqual(labels(removed), [[3, "@Luke Breuer"]]);
+  // A deletion that swallows a chip among text counts too.
+  const swallowed = state.apply(state.tr.delete(1, 6));
+  assert.deepEqual(labels(swallowed), []);
+  assert.equal(plugin(swallowed).byIid.size, 0);
+});
+
+test("new inputs relabel every chip without touching the document", () => {
+  const state = live(para(mention("i1"), " and ", mention("i2")));
+  const restyled = state.apply(state.tr.setMeta(entityChipKey, { ...inputs, styles: { mention: { form: "initials" } } }));
+  assert.equal(restyled.doc, state.doc);
+  assert.deepEqual(
+    labels(restyled).map(([, label]) => label),
+    ["LB", "LB"],
+  );
 });

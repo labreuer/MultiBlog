@@ -136,6 +136,27 @@ function insertsChip(tr: Transaction): boolean {
   });
 }
 
+/**
+ * Whether a transaction puts a chip in or takes one out: the only document
+ * changes that can alter a rendering, since a chip's label reads nothing of
+ * the text around it. False for ordinary typing, at the cost of looking at
+ * the few positions each step replaced.
+ */
+function touchesChip(tr: Transaction): boolean {
+  if (insertsChip(tr)) return true;
+  return tr.steps.some((step, index) => {
+    let found = false;
+    step.getMap().forEach((oldStart, oldEnd) => {
+      if (found || oldEnd <= oldStart) return;
+      tr.docs[index].nodesBetween(oldStart, oldEnd, (node) => {
+        if (node.type.name === ENTITY_CHIP) found = true;
+        return !found;
+      });
+    });
+    return found;
+  });
+}
+
 /** The ranges `transactions` inserted, in the positions of the document they end at. */
 function insertedRanges(transactions: readonly Transaction[]): [number, number][] {
   const ranges: [number, number][] = [];
@@ -199,6 +220,38 @@ export function repairChipIids(transactions: readonly Transaction[], newState: E
     }
   }
   return tr;
+}
+
+/**
+ * The plugin behind a live editor's chips: their renderings as node
+ * decorations, recomputed when the inputs change or a chip comes or goes, and
+ * the instance-id repair.
+ */
+export function entityChipPlugin(initial: ChipInputs): Plugin<ChipPluginState> {
+  return new Plugin<ChipPluginState>({
+    key: entityChipKey,
+    state: {
+      init: (_config, state) => ({ inputs: initial, ...compute(state.doc, initial) }),
+      apply(tr, previous) {
+        const inputs = (tr.getMeta(entityChipKey) as ChipInputs | undefined) ?? previous.inputs;
+        if (inputs === previous.inputs) {
+          if (!tr.docChanged) return previous;
+          // Typing beside chips changes no rendering, so the set is mapped
+          // rather than rebuilt. A rebuilt set is a new object all the way
+          // down, and ProseMirror then compares every block's decorations on
+          // every keystroke; a mapped one shares what the edit didn't reach.
+          if (!touchesChip(tr)) {
+            return { ...previous, decorations: previous.decorations.map(tr.mapping, tr.doc) };
+          }
+        }
+        return { inputs, ...compute(tr.doc, inputs) };
+      },
+    },
+    props: {
+      decorations: (state) => entityChipKey.getState(state)?.decorations,
+    },
+    appendTransaction: (transactions, _oldState, newState) => repairChipIids(transactions, newState),
+  });
 }
 
 export const EntityChip = Node.create({
@@ -305,23 +358,6 @@ export const EntityChip = Node.create({
   },
 
   addProseMirrorPlugins() {
-    const initial = this.options.inputs;
-    return [
-      new Plugin<ChipPluginState>({
-        key: entityChipKey,
-        state: {
-          init: (_config, state) => ({ inputs: initial, ...compute(state.doc, initial) }),
-          apply(tr, previous) {
-            const inputs = (tr.getMeta(entityChipKey) as ChipInputs | undefined) ?? previous.inputs;
-            if (!tr.docChanged && inputs === previous.inputs) return previous;
-            return { inputs, ...compute(tr.doc, inputs) };
-          },
-        },
-        props: {
-          decorations: (state) => entityChipKey.getState(state)?.decorations,
-        },
-        appendTransaction: (transactions, _oldState, newState) => repairChipIids(transactions, newState),
-      }),
-    ];
+    return [entityChipPlugin(this.options.inputs)];
   },
 });

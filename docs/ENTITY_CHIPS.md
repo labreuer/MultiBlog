@@ -143,23 +143,34 @@ doesn't cover are in [YDOC.md](YDOC.md).
 
 ## Step 1: the kit (schema version 1)
 
-1. **Performance spike, first.** The server-side cost is known. On the largest local doc, with
-   each of its 638 `/pdf/` links made a chip (563 citations and the reference list's 75 entries,
-   over 75 works):
+1. **Performance spike: done, and no cache is needed.** Measured on the largest local doc
+   (135,000 characters), with each of its 638 `/pdf/` links made a chip (563 citations and the
+   reference list's 75 entries, over 75 works).
+
+   Server-side, in Node:
    - a whole-doc label pass takes 0.13–0.15 ms, numbering included;
    - materializing labels into `prose_json` takes 0.06 ms;
    - an MCP Markdown read takes 4.6 ms, against 3.7 ms without chips;
+   - the chip-context query takes 2–4 ms (median; 75 distinct targets);
    - for scale, today's Yjs decode on that doc is about 1.2 ms.
 
-   Still to measure, with a large explore doc whose `/pdf/` links are converted into chips in a
-   copy:
-   - the chip-context query;
-   - the editor and reading view with hundreds of chip node views: first render, and keystroke
-     latency through PERFORMANCE.md's tool;
-   - a refresh across many docs.
+   In the browser, with 638 chip node views against the same doc with none (chromium, a
+   production build, 2026-11-04, on an AMD Ryzen 9 9950X under Fedora 44 whose load average was
+   20–30 from other work, so each figure is a range over four runs):
+   - the editor and the reading view load no slower: 0.3–0.5 s either way;
+   - a keystroke costs the same: a median of 0.9–1.5 ms at the doc's start and 1.3–2.4 ms at
+     its end, against 0.8–3.8 ms and 1.5–6.1 ms without chips;
+   - relabelling every chip at once (the context arriving, a restyle, a rename) takes 4–11 ms.
 
-   A database cache of labels or context is added only if these show a need. House styles are
-   not expected to need one. CSL styles probably will ([CITATIONS.md](CITATIONS.md), Later).
+   The keystroke figure depends on one thing. The plugin maps its decoration set through a
+   transaction that touches no chip, and rebuilds it only when a chip comes or goes or the
+   inputs change. Rebuilding on every keystroke doubled typing latency at the doc's end, because
+   ProseMirror then compares every block's decorations.
+
+   Not measured, because it isn't built: a refresh across many docs (item 10).
+
+   So no database cache of labels or context is planned for house styles. CSL styles probably
+   will need one ([CITATIONS.md](CITATIONS.md), Later).
 2. **The node**, `entityChip`, in `tiptap-schema.ts`'s `docContentExtensions`. It has three
    attributes, and they never change:
    - `kind`, the chip kind;
