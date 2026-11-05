@@ -1,4 +1,5 @@
 import type { ChipKind } from "./types";
+import { citationKind } from "./kinds/citation";
 import { mentionKind } from "./kinds/mention";
 
 // The chip kinds this build knows (docs/ENTITY_CHIPS.md, "The kind
@@ -11,10 +12,16 @@ import { mentionKind } from "./kinds/mention";
 // other functions take.
 const KINDS: Record<string, ChipKind> = {
   [mentionKind.name]: mentionKind as unknown as ChipKind,
+  [citationKind.name]: citationKind as unknown as ChipKind,
 };
 
 export function chipKind(name: string): ChipKind | null {
   return Object.hasOwn(KINDS, name) ? KINDS[name] : null;
+}
+
+/** Whether an edit can write a chip of this kind back from Markdown: the kind is known, and its syntax is parsed. */
+export function writesBack(name: string): boolean {
+  return chipKind(name)?.readsMarkdown === true;
 }
 
 export function chipKinds(): ChipKind[] {

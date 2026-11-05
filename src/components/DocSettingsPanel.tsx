@@ -7,7 +7,7 @@ import Link from "next/link";
 import { updateDocVisibility, updateDocAuthor, updateDocAuthorOrder, deleteDoc, restoreDoc } from "@/app/actions/docs";
 import { loadTaggerState, type TaggerState } from "@/app/actions/tags";
 import TagStrip from "@/components/tags/TagStrip";
-import { MentionStyleSelect } from "@/components/ChipStyleSettings";
+import { CitationStyleSelect, MentionStyleSelect } from "@/components/ChipStyleSettings";
 import { DocVisibility, type Role } from "@/generated/prisma/enums";
 import styles from "./DocSettingsPanel.module.css";
 
@@ -268,6 +268,14 @@ export default function DocSettingsPanel({
                   {/* Written into the doc itself, through the editor's
                       connection: every open view relabels at once. */}
                   <MentionStyleSelect ydoc={ydoc} disabled={deleted} className={styles.visibilitySelect} />
+                </td>
+              </tr>
+            )}
+            {ydoc && (
+              <tr>
+                <td className={styles.label}>Citations</td>
+                <td>
+                  <CitationStyleSelect ydoc={ydoc} disabled={deleted} className={styles.visibilitySelect} />
                 </td>
               </tr>
             )}

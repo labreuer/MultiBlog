@@ -1953,6 +1953,19 @@ export async function getMentionSources(userId: string): Promise<string[]> {
     .sort();
 }
 
+/** Where a reference is cited, by the trigger-kept `citation` table: `doc:<id>`, `post:<id>` or `annotation:<id>`, sorted. By key. */
+export async function getCitationSources(key: string): Promise<string[]> {
+  const rows = await prisma.citation.findMany({ where: { reference: { key } }, select: { docId: true, postId: true, annotationId: true } });
+  return rows
+    .map((row) => (row.docId ? `doc:${row.docId}` : row.postId ? `post:${row.postId}` : `annotation:${row.annotationId}`))
+    .sort();
+}
+
+/** A reference's id, by key. */
+export async function getReferenceId(key: string): Promise<string | null> {
+  return (await prisma.reference.findUnique({ where: { key }, select: { id: true } }))?.id ?? null;
+}
+
 /**
  * A doc's body as full-text search reads it: `prose_text(prose_json)`, the
  * SQL function behind the search vector and its snippets. Null for a doc with
@@ -2825,6 +2838,8 @@ const handlers = {
   getPostContentText,
   getDocSearchText,
   getMentionSources,
+  getCitationSources,
+  getReferenceId,
   countDocYdocSnapshots,
   getCommentStatus,
   createTestYdoc,

@@ -70,6 +70,25 @@ export async function refreshMentionLabels(userIds: readonly string[]): Promise<
     where: { userId: { in: targets }, postId: null },
     select: { docId: true, annotationId: true },
   });
+  return refreshSources(rows);
+}
+
+/**
+ * Relabels every doc and note that cites one of `refIds`: a reference's
+ * record or abbreviation changed (docs/CITATIONS.md, "Refresh"). Found
+ * through the `citation` table, as a mention's are through `mention`.
+ */
+export async function refreshCitationLabels(refIds: readonly string[]): Promise<RefreshResult> {
+  if (refIds.length === 0) return { docs: 0, annotations: 0, anchors: 0 };
+  const rows = await prisma.citation.findMany({
+    where: { referenceId: { in: [...refIds] }, postId: null },
+    select: { docId: true, annotationId: true },
+  });
+  return refreshSources(rows);
+}
+
+/** The refresh proper, over the docs and notes an index table named. */
+async function refreshSources(rows: readonly { docId: string | null; annotationId: string | null }[]): Promise<RefreshResult> {
   const docIds = [...new Set(rows.flatMap((row) => (row.docId ? [row.docId] : [])))];
   const annotationIds = [...new Set(rows.flatMap((row) => (row.annotationId ? [row.annotationId] : [])))];
 
@@ -193,9 +212,17 @@ export async function refreshAnchorRecords(target: { kind: "doc" | "annotation";
  * refresh reads the record as it was.
  */
 export function scheduleMentionRefresh(userIds: readonly string[]): void {
-  const ids = [...userIds];
+  schedule([...userIds], refreshMentionLabels);
+}
+
+/** The same for references whose record or abbreviation changed: every doc and note citing one is relabelled. */
+export function scheduleCitationRefresh(refIds: readonly string[]): void {
+  schedule([...refIds], refreshCitationLabels);
+}
+
+function schedule(ids: string[], refresh: (ids: readonly string[]) => Promise<RefreshResult>): void {
   const run = (pass: string) =>
-    refreshMentionLabels(ids).catch((err) => {
+    refresh(ids).catch((err) => {
       console.error(`[entity-chips] the ${pass} label refresh for ${ids.join(", ")} failed:`, err);
     });
   void run("first");

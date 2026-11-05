@@ -350,10 +350,11 @@ running `prisma migrate dev` on anything unusual.
   wrote. Restarting web is the whole fix. Distinct from the EPERM case: that one is generate
   refusing to *write*, this one is a successful write the running process never picks up.
 - **Seven `search_vector` columns (the reference library's is the seventh), the `search_lexeme`
-  table and the `mention` table are written only by triggers** (docs/FULLTEXT.md §3;
-  docs/ENTITY_CHIPS.md, step 1, item 12) — never assign to them, give a new trigger function its
-  own `SET search_path`, and leave `search_lexeme`'s and `mention`'s data out of a data-only
-  load, or their `COPY` collides with what the triggers already refilled. docs/DATABASE.md.
+  table and the `mention` and `citation` tables are written only by triggers** (docs/FULLTEXT.md
+  §3; docs/ENTITY_CHIPS.md, step 1, item 12) — never assign to them, give a new trigger function
+  its own `SET search_path`, and leave `search_lexeme`'s, `mention`'s and `citation`'s data out
+  of a data-only load, or their `COPY` collides with what the triggers already refilled.
+  docs/DATABASE.md.
 - Generated Prisma client lives at `src/generated/prisma` (gitignored). Import from
   `@/generated/prisma/client` and `@/generated/prisma/enums`.
 - **One-off DB scripts can't `require()` the generated client with plain `node -e`** — it's TS
@@ -388,8 +389,9 @@ running `prisma migrate dev` on anything unusual.
   type is a subset of Prisma's. Build the data from named fields, or from a parse that does
   (`src/lib/doc-link-edit.ts`). The script's header lists what it can't see.
 - `npm run check:label-refresh` (part of `check`) — fails if a function writes a field a chip's
-  label is computed from and never starts that chip kind's refresh (`scheduleMentionRefresh`). A
-  new chip kind adds its fields to the script. docs/ENTITY_CHIPS.md, step 1, item 10.
+  label is computed from and never starts that chip kind's refresh (`scheduleMentionRefresh`,
+  `scheduleCitationRefresh`). A new chip kind adds its fields to the script.
+  docs/ENTITY_CHIPS.md, step 1, item 10.
 - `npm run test:unit` — `node --import tsx --test` over `src/**/*.test.ts`. **No new
   dependency**: Node 24 strips types natively and `tsx` resolves the `@/` alias. Sub-second,
   and the right home for exactly one kind of thing — pure functions whose *rejection surface*

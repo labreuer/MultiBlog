@@ -13,8 +13,9 @@
 // THE RULE. For each table below, a Prisma `update`, `updateMany`,
 // `updateManyAndReturn` or `upsert` whose data names one of its fields must
 // sit inside a function that also calls the table's refresh. The data has to
-// be readable here: an object built in place, or a local built from one in
-// the same function (its literal, plus any `local.field = …` after it).
+// be readable here: an object built in place (a `cond ? {…} : {…}` counts,
+// as both branches), or a local built from one in the same function (its
+// literal, plus any `local.field = …` after it).
 // Anything else is flagged as unreadable rather than passed.
 //
 // A new chip kind adds its table here, with the fields its context loader
@@ -47,6 +48,12 @@ const WATCHED: Record<string, Watched> = {
     fields: new Set(["name", "adminInitials", "slug", "worksForUserId", "worksFor"]),
     refresh: "scheduleMentionRefresh",
     doc: "docs/MENTIONS.md, \"Refresh\"",
+  },
+  // docs/CITATIONS.md, "Refresh": a reference's record, or its abbreviation.
+  reference: {
+    fields: new Set(["csl", "short"]),
+    refresh: "scheduleCitationRefresh",
+    doc: "docs/CITATIONS.md, \"Refresh\"",
   },
 };
 
@@ -129,6 +136,11 @@ function assignedKeys(name: string, scope: ts.Node): string[] {
 function keysOf(expr: ts.Expression, at: ts.Node): string[] | null {
   const value = unwrap(expr);
   if (ts.isObjectLiteralExpression(value)) return literalKeys(value);
+  // `cond ? { a } : { b }`, alone or spread: whichever branch runs, so both.
+  if (ts.isConditionalExpression(value)) {
+    const [yes, no] = [keysOf(value.whenTrue, at), keysOf(value.whenFalse, at)];
+    return yes && no ? [...yes, ...no] : null;
+  }
   if (!ts.isIdentifier(value)) return null;
   return keysOfLocal(checker.getSymbolAtLocation(value), value.text, at);
 }

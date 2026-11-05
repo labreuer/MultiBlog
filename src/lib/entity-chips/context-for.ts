@@ -4,6 +4,7 @@ import { canUserAccessAnnotationYdoc } from "@/lib/annotation-authz";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { prisma } from "@/lib/prisma";
 import { loadChipContext } from "./context";
+import { CITATION } from "./kinds/citation";
 import { MENTION } from "./kinds/mention";
 import { mentionableAmong } from "./kinds/mention-rule";
 import { chipsInJSON, chipTargets } from "./renderings";
@@ -90,10 +91,15 @@ export async function chipInputsFor(
     (allowed[MENTION] ??= new Set()).add(id);
   }
 
+  // A reference's record is public (docs/CITATIONS.md, "Pages"), so anything
+  // asked about a citation's works may be answered.
+  for (const id of asked[CITATION] ?? []) (allowed[CITATION] ??= new Set()).add(id);
+
   const occurrences: ChipOccurrence[] = [];
   for (const [kind, ids] of Object.entries(allowed)) {
     // One synthetic chip per target is all a loader reads: the kind and the id.
     if (kind === MENTION) for (const id of ids) occurrences.push({ kind, iid: "", pos: 0, data: { userId: id } });
+    if (kind === CITATION) for (const id of ids) occurrences.push({ kind, iid: "", pos: 0, data: { items: [{ refId: id }] } });
   }
   return { styles: resolved.styles, context: await loadChipContext(occurrences) };
 }

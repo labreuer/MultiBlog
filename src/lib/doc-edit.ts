@@ -2,7 +2,7 @@ import { Fragment, Mark, Slice, type Node as PMNode, type Schema } from "@tiptap
 import { Transform } from "@tiptap/pm/transform";
 import type { JSONContent } from "@tiptap/core";
 import { diffText, tokenizeFine } from "./diff";
-import { chipKind } from "./entity-chips/registry";
+import { writesBack } from "./entity-chips/registry";
 import { chipIdentitiesBetween, chipIdentity, chipsIn } from "./entity-chips/renderings";
 import { chipDisplayText, displayTextBetween, isChip, type ChipLabels } from "./entity-chips/text";
 import { alignBlocks } from "./block-align";
@@ -487,13 +487,14 @@ export function planEdits(
             ...where(target, blocks, match),
           });
         }
-        // A chip of a kind this server doesn't know has no Markdown, so the
-        // new text can't write it back, and replacing the passage would drop
-        // it without the edit having said so.
+        // A chip of a kind this server doesn't know has no Markdown, and one
+        // whose Markdown isn't parsed yet (a citation) can't be read back, so
+        // the new text can't write either, and replacing the passage would
+        // drop it without the edit having said so.
         const unknownKinds = [
           ...new Set(
             chipsIn(doc)
-              .filter((chip) => chip.pos >= match.from && chip.pos < match.to && chipKind(chip.kind) === null)
+              .filter((chip) => chip.pos >= match.from && chip.pos < match.to && !writesBack(chip.kind))
               .map((chip) => chip.kind),
           ),
         ];
@@ -501,7 +502,7 @@ export function planEdits(
           return refuse(
             index,
             "unknown_kind",
-            `That passage holds ${unknownKinds.map((kind) => `a "${kind}" chip`).join(" and ")}, which this server can't write back. Edit the words around it instead.`,
+            `That passage holds ${unknownKinds.map((kind) => `a ${kind}`).join(" and ")}, which this server can't write back from Markdown. Edit the words around it instead.`,
             { kinds: unknownKinds, ...where(target, blocks, match) },
           );
         }

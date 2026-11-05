@@ -9,9 +9,35 @@ contract. The kit says how every chip is stored, rendered, quoted and searched. 
 
 ## Built so far
 
-The reference library: its data, its pages and its machine door. Everything below not listed
-here is still a plan: the citation chip kind, its menu, the bibliography, the search filters,
-and what a reference's page shows of who cites it.
+The reference library (its data, its pages and its machine door) and the citation chip
+itself. Everything below not listed here is still a plan: reading a citation back from
+Markdown, the chip's popover, the bibliography, the search filters, and what a reference's
+page shows of who cites it.
+
+- **The chip kind:** `src/lib/entity-chips/kinds/citation.ts` holds its fields and
+  validation, its identity (the works, in any order), the three forms with their narrative
+  and author-suppressed shapes, numbering by first appearance, the year-then-key
+  disambiguation of a shared abbreviation, the per-work fallback to author-date for a
+  reference with no abbreviation, and Pandoc's syntax on the way out. A doc's link goes to
+  the page in the work's PDF when the file is SHARED and its page labels name the locator
+  (a PRIVATE file is never linked, since a rendering can't depend on who is looking), and
+  otherwise to the reference's page; a post's goes to `/references/<key>#p=<page>`.
+- **Its context:** `citation-context.ts` loads the cited references, deleted ones included.
+  The chip-context endpoint answers for any work asked about, a reference's record being
+  public.
+- **Its index and refresh:** the `citation` table (migration `citation_index`), kept by
+  triggers as `mention` is, and checked by the same script. `updateReference` starts
+  `scheduleCitationRefresh`, which relabels the docs and notes citing the work, and
+  `check:label-refresh` holds a write to `csl` or `short` to that.
+- **The menu:** `CiteMenu.tsx`, opened by `[@` in the doc editor and a note's composer. It
+  searches the library by key, abbreviation, title and author, and "radner 49" sets the
+  locator.
+- **The doc's style:** a Citations row in the doc's Settings, written to the ydoc's
+  `settings` map as the mention style is.
+- **MCP:** a read shows a citation as its label in text and as Pandoc's syntax in Markdown.
+  The syntax is not read back yet (`readsMarkdown: false`), so an `edit_doc` whose passage
+  holds a citation, and an `edit_note` of a note holding one, are refused as `unknown_kind`
+  rather than drop it; the words beside it can be edited.
 
 - **Records:** the `reference` table (migration `reference_library`), its `csl` built field by
   field by `parseCslItem` (`src/lib/references/csl.ts`) on every way in and read back through

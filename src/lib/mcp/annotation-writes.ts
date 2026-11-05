@@ -1,3 +1,5 @@
+import { chipsInJSON } from "@/lib/entity-chips/renderings";
+import { writesBack } from "@/lib/entity-chips/registry";
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { TiptapTransformer } from "@hocuspocus/transformer";
@@ -292,6 +294,17 @@ export async function editAnnotationFor(ctx: McpContext, input: { id: string; bo
   writers.add(annotation.userId);
   const oldNode = pmAnnotationContentSchema.nodeFromJSON(settledBody.proseJson);
   const nextNode = pmAnnotationContentSchema.nodeFromJSON(next);
+  // A new body replaces the whole of the old one, and a chip the Markdown
+  // parse can't read back (a citation, or a kind this server doesn't know)
+  // would be dropped by it: refused, as an edit over one is in a doc.
+  const unwritable = [...new Set(chipsInJSON(settledBody.proseJson).map((chip) => chip.kind).filter((kind) => !writesBack(kind)))];
+  if (unwritable.length > 0) {
+    throw new ApiError(
+      "unknown_kind",
+      `This note holds ${unwritable.map((kind) => `a ${kind}`).join(" and ")}, which this server can't write back from Markdown, so its body can't be replaced here.`,
+      { kinds: unwritable },
+    );
+  }
   // The merge keeps a mention the new text still names, instance id and all,
   // and says when one came back as its label in plain words.
   const chipMerge = chipMergeFor(oldNode, nextNode, chipLabels(settledBody.proseJson, await chipInputsForBody(settledBody.proseJson)));

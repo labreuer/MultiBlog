@@ -54,8 +54,9 @@ date is refused".
 
 ## Built so far
 
-Steps 0 and 1 are under way on the `entity-chips` branch. Everything below not listed here is
-still a plan.
+Steps 0 to 2 are built on the `entity-chips` branch but for the items each entry says are
+not, and step 3 is under way ([CITATIONS.md](CITATIONS.md), "Built so far"). Everything below
+not listed here is still a plan.
 
 - **Step 0, the gate:** all of it ([YDOC.md](YDOC.md)).
 - **Step 1, item 1:** the spike, with its result.

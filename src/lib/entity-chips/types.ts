@@ -125,4 +125,11 @@ export type ChipKind<Data = unknown, Style = unknown, Context = unknown> = {
    * with its stored id where a slug or key would go, so a round trip keeps it.
    */
   markdown(data: Data, rendering: ChipRendering, context: Context): string;
+  /**
+   * Whether the server's Markdown parse reads this kind's syntax back as a
+   * chip. Where it doesn't, an edit can't write the chip back, and refuses
+   * to replace a passage that holds one rather than drop it
+   * (`unknown_kind`), as for a kind the server doesn't know at all.
+   */
+  readsMarkdown: boolean;
 };

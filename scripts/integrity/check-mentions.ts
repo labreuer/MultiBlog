@@ -1,11 +1,14 @@
-// Verifies the `mention` index (docs/ENTITY_CHIPS.md, step 1, item 12): that
-// its rows are exactly the mention chips the documents hold.
+// Verifies the chip kinds' index tables, `mention` and `citation`
+// (docs/ENTITY_CHIPS.md, step 1, item 12): that each one's rows are exactly
+// the chips of its kind the documents hold. The tables share a shape, so one
+// script checks both; it keeps the name it had when there was one.
 //
-// Why this needs a check at all: the table is written by triggers (migration
-// `mention_index`) and read by things that would not notice it being wrong.
-// The label refresh after a rename finds the docs to rewrite through it, so a
-// missing row is a doc that goes on showing, and being found by, the old
-// name; an extra row is a mention reported where there is none.
+// Why this needs a check at all: each table is written by triggers
+// (migrations `mention_index`, `citation_index`) and read by things that
+// would not notice it being wrong. The label refresh after a rename, or a
+// corrected reference, finds the docs to rewrite through it, so a missing row
+// is a doc that goes on showing, and being found by, the old label; an extra
+// row is a mention or citation reported where there is none.
 //
 // Three checks:
 //
@@ -47,43 +50,58 @@ type Source = {
   table: string;
   column: "doc_id" | "post_id" | "annotation_id";
   trigger: string;
-  /** SQL over the source aliased `s`: the jsonb array of {iid, user_id} its rows should be. */
+  /** SQL over the source aliased `s`: the jsonb array of {iid, <target>} its rows should be. */
   wanted: string;
-  /** `mention_sync`'s three id arguments for a source row aliased `s`. */
+  /** The sync function's three id arguments for a source row aliased `s`. */
   syncArgs: string;
 };
 
-const SOURCES: Source[] = [
+/** One chip kind's index table: what it points at, and the SQL that keeps it. */
+type Index = {
+  table: "mention" | "citation";
+  /** The column naming the target, and the table the target lives in. */
+  target: string;
+  targetTable: string;
+  sync: string;
+  sources: Source[];
+};
+
+function sourcesOf(noun: string, wanted: string, postWanted: string): Source[] {
+  return [
+    { table: "doc", column: "doc_id", trigger: `doc_sync_${noun}`, wanted: `public.${wanted}(s.prose_json)`, syncArgs: "s.id, NULL, NULL" },
+    {
+      table: "annotation",
+      column: "annotation_id",
+      trigger: `annotation_sync_${noun}`,
+      wanted: `CASE WHEN s.status = 'DRAFT' THEN '[]'::jsonb ELSE public.${wanted}(s.prose_json) END`,
+      syncArgs: "NULL, NULL, s.id",
+    },
+    { table: "post", column: "post_id", trigger: `post_sync_${noun}`, wanted: `public.${postWanted}(s.prose_json)`, syncArgs: "NULL, s.id, NULL" },
+  ];
+}
+
+const INDEXES: Index[] = [
+  { table: "mention", target: "user_id", targetTable: "user", sync: "mention_sync", sources: sourcesOf("mentions", "mentions_wanted", "post_mentions_wanted") },
   {
-    table: "doc",
-    column: "doc_id",
-    trigger: "doc_sync_mentions",
-    wanted: "public.mentions_wanted(s.prose_json)",
-    syncArgs: "s.id, NULL, NULL",
-  },
-  {
-    table: "annotation",
-    column: "annotation_id",
-    trigger: "annotation_sync_mentions",
-    wanted: "CASE WHEN s.status = 'DRAFT' THEN '[]'::jsonb ELSE public.mentions_wanted(s.prose_json) END",
-    syncArgs: "NULL, NULL, s.id",
-  },
-  {
-    table: "post",
-    column: "post_id",
-    trigger: "post_sync_mentions",
-    wanted: "public.post_mentions_wanted(s.prose_json)",
-    syncArgs: "NULL, s.id, NULL",
+    table: "citation",
+    target: "reference_id",
+    targetTable: "reference",
+    sync: "citation_sync",
+    sources: sourcesOf("citations", "citations_wanted", "post_citations_wanted"),
   },
 ];
 
-type Drift = { source: string; id: string; iid: string; userId: string };
+type Drift = { index: Index["table"]; source: string; id: string; iid: string; targetId: string };
 type Report = { triggers: string[]; missing: Drift[]; extra: Drift[] };
 
 async function check(): Promise<Report> {
   const report: Report = { triggers: [], missing: [], extra: [] };
+  for (const index of INDEXES) await checkIndex(index, report);
+  return report;
+}
 
-  for (const source of SOURCES) {
+async function checkIndex(index: Index, report: Report): Promise<void> {
+  for (const source of index.sources) {
     const [trigger] = await prisma.$queryRawUnsafe<{ enabled: string }[]>(
       `SELECT tgenabled::text AS enabled FROM pg_trigger WHERE tgname = $1 AND tgrelid = $2::regclass AND NOT tgisinternal`,
       source.trigger,
@@ -92,36 +110,36 @@ async function check(): Promise<Report> {
     if (!trigger) report.triggers.push(`${source.trigger} on ${source.table} does not exist`);
     else if (trigger.enabled === "D") report.triggers.push(`${source.trigger} on ${source.table} is disabled`);
 
-    // What each source should have, joined to the accounts that exist: a chip
+    // What each source should have, joined to the targets that exist: a chip
     // naming none has no row by design.
     const wanted = `
-      SELECT s.id AS source_id, w.iid, w.user_id
+      SELECT s.id AS source_id, w.iid, w.${index.target} AS target_id
       FROM "${source.table}" s
-      CROSS JOIN LATERAL jsonb_to_recordset(${source.wanted}) AS w(iid text, user_id text)
-      JOIN "user" u ON u.id = w.user_id
+      CROSS JOIN LATERAL jsonb_to_recordset(${source.wanted}) AS w(iid text, ${index.target} text)
+      JOIN "${index.targetTable}" t ON t.id = w.${index.target}
     `;
-    const missing = await prisma.$queryRawUnsafe<{ source_id: string; iid: string; user_id: string }[]>(`
-      SELECT w.source_id, w.iid, w.user_id FROM (${wanted}) w
+    const missing = await prisma.$queryRawUnsafe<{ source_id: string; iid: string; target_id: string }[]>(`
+      SELECT w.source_id, w.iid, w.target_id FROM (${wanted}) w
       WHERE NOT EXISTS (
-        SELECT 1 FROM "mention" m WHERE m.${source.column} = w.source_id AND m.iid = w.iid AND m.user_id = w.user_id
+        SELECT 1 FROM "${index.table}" m WHERE m.${source.column} = w.source_id AND m.iid = w.iid AND m.${index.target} = w.target_id
       )
     `);
-    const extra = await prisma.$queryRawUnsafe<{ source_id: string; iid: string; user_id: string }[]>(`
-      SELECT m.${source.column} AS source_id, m.iid, m.user_id FROM "mention" m
+    const extra = await prisma.$queryRawUnsafe<{ source_id: string; iid: string; target_id: string }[]>(`
+      SELECT m.${source.column} AS source_id, m.iid, m.${index.target} AS target_id FROM "${index.table}" m
       WHERE m.${source.column} IS NOT NULL AND NOT EXISTS (
-        SELECT 1 FROM (${wanted}) w WHERE w.source_id = m.${source.column} AND w.iid = m.iid AND w.user_id = m.user_id
+        SELECT 1 FROM (${wanted}) w WHERE w.source_id = m.${source.column} AND w.iid = m.iid AND w.target_id = m.${index.target}
       )
     `);
-    const drift = (row: { source_id: string; iid: string; user_id: string }): Drift => ({
+    const drift = (row: { source_id: string; iid: string; target_id: string }): Drift => ({
+      index: index.table,
       source: source.table,
       id: row.source_id,
       iid: row.iid,
-      userId: row.user_id,
+      targetId: row.target_id,
     });
     report.missing.push(...missing.map(drift));
     report.extra.push(...extra.map(drift));
   }
-  return report;
 }
 
 function print(report: Report): number {
@@ -132,29 +150,38 @@ function print(report: Report): number {
     ["extra", report.extra],
   ] as const) {
     if (rows.length === 0) continue;
-    const sources = new Set(rows.map((row) => `${row.source}:${row.id}`));
+    const sources = new Set(rows.map((row) => `${row.index}:${row.source}:${row.id}`));
     console.log(`  ERROR [${name}] ${rows.length} row(s) across ${sources.size} source(s)`);
-    if (verbose) for (const row of rows) console.log(`          ${row.source} ${row.id}  chip ${row.iid}  user ${row.userId}`);
+    if (verbose) for (const row of rows) console.log(`          ${row.index}  ${row.source} ${row.id}  chip ${row.iid}  target ${row.targetId}`);
   }
   return count;
 }
 
 async function repairIndex(report: Report) {
-  for (const source of SOURCES) {
-    const ids = [...new Set([...report.missing, ...report.extra].filter((row) => row.source === source.table).map((row) => row.id))];
-    if (ids.length === 0) continue;
-    await prisma.$queryRawUnsafe(
-      // Cast to text: the function returns void, which the driver can't read back.
-      `SELECT public.mention_sync(${source.syncArgs}, ${source.wanted})::text FROM "${source.table}" s WHERE s.id = ANY($1::text[])`,
-      ids,
-    );
-    console.log(`  repaired ${ids.length} ${source.table}(s)`);
+  for (const index of INDEXES) {
+    for (const source of index.sources) {
+      const ids = [
+        ...new Set(
+          [...report.missing, ...report.extra].filter((row) => row.index === index.table && row.source === source.table).map((row) => row.id),
+        ),
+      ];
+      if (ids.length === 0) continue;
+      await prisma.$queryRawUnsafe(
+        // Cast to text: the function returns void, which the driver can't read back.
+        `SELECT public.${index.sync}(${source.syncArgs}, ${source.wanted})::text FROM "${source.table}" s WHERE s.id = ANY($1::text[])`,
+        ids,
+      );
+      console.log(`  repaired ${index.table}: ${ids.length} ${source.table}(s)`);
+    }
   }
 }
 
 async function main() {
-  const [{ rows }] = await prisma.$queryRawUnsafe<{ rows: bigint }[]>(`SELECT count(*) AS rows FROM "mention"`);
-  console.log(`\nmention index: ${rows} row(s)`);
+  console.log("");
+  for (const index of INDEXES) {
+    const [{ rows }] = await prisma.$queryRawUnsafe<{ rows: bigint }[]>(`SELECT count(*) AS rows FROM "${index.table}"`);
+    console.log(`${index.table} index: ${rows} row(s)`);
+  }
 
   let report = await check();
   let errors = print(report);
