@@ -66,6 +66,21 @@ at all, since signing out reaches no server.
 
 ---
 
+## A tab opened before a deploy deletes what its schema can't build
+
+A tab still running the old bundle deletes from the shared document whatever its schema lacks,
+and nothing checks for it:
+
+- a node type it doesn't know, such as a table;
+- the whole text of a paragraph that carries a mark it doesn't know.
+
+It also strips a new attribute as soon as it edits that run. The deletion is a Yjs update, so it
+reaches every tab and the stored row. Every schema change since July has carried this risk.
+TipTap's `enableContentCheck` doesn't catch it. Measured 2026-11-03.
+
+**Planned fix:** docs/YDOC.md, "Planned: refusing a tab whose schema is out of date". It is step 0
+of docs/ENTITY_CHIPS.md.
+
 ## Server/client environment divergence has no check covering it
 
 **Status:** two instances found and fixed on 2026-08-11; the *class* is still untested, and one
