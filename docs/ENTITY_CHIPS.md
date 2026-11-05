@@ -141,8 +141,9 @@ still a plan.
   kind's Markdown (`ChipKind.markdown`, `chipMarkdowns`, `docContentToMarkdown`), in docs, notes
   and thread passages, with a hand-written link of a mention's shape written `[\@…]`. A quote
   is matched against the doc's display text and verified against it (`flattenForMatch` with
-  labels), and what is stored stays the anchor text; a quote ending inside a label is a miss
-  rather than widened.
+  labels), and what is stored stays the anchor text. A quote that begins or ends inside a
+  label takes the whole chip (`QuoteMatch.widened`): a note, a link and `around` anchor on
+  it, and an edit refuses it as `splits_chip`.
 - **Item 14, MCP, the writing half:** `edit_doc`, `add_note` and `edit_note` read a chip kind's
   syntax as a chip. The parse yields a placeholder holding what the Markdown named
   (`markdownToBlocks` with `chips`), and `resolveParsedChips` makes it a chip under the kind's
@@ -159,12 +160,14 @@ still a plan.
   instances by handle. `/docs`' Markdown import reads it too, and leaves a mention it can't
   resolve as the link its Markdown also is (`unresolved: "link"`), where MCP refuses.
 
-  Not built of item 14: the Markdown retry
-  against identity text (the retry matches the label a link's text gives, which is the same
-  for a mention), a quote edge inside a label widened for a note, `chip_changed` and
-  `unknown_kind` (a chip of a kind the server doesn't know reads as plain `[…]`, and an edit
-  that sends that back is refused as `chip_as_text`), the pairing of a chip that continues
-  another, and link titles stripped on the way in.
+  An edit whose passage holds a chip of a kind the server doesn't know is refused as
+  `unknown_kind`, since the new text can't write that chip back; the words beside it can
+  still be edited, and the merge keeps it. The chip-aware parse stores no link title.
+
+  Not built of item 14, each needing a chip kind whose Markdown carries fields, which a
+  mention's doesn't: the Markdown retry against identity text (the retry matches the label a
+  link's text gives, which is the same for a mention), `chip_changed`, and the pairing of a
+  chip that continues another.
 - **Styling, per doc and per post:**
   - **The doc's style** is in a `Y.Map("settings")` in its ydoc, one key per chip kind
     (`settings.ts`), cached to `Doc.chipStyles` by the store. `DocSettingsPanel` writes it

@@ -266,8 +266,11 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
     and how many there are, and `no_match` for one that occurs nowhere, with up to three near
     misses (§7), or for a fragment link whose passage isn't on its page (§8);
   - `unknown_chip` for a mention written in Markdown whose handle names no account, or one the
-    actor may not mention there, with the handles; and `chip_as_text` for an edit whose new
-    text has a mention's name as plain words where the mention was, with the labels
+    actor may not mention there, with the handles; `chip_as_text` for an edit whose new
+    text has a mention's name as plain words where the mention was, with the labels;
+    `splits_chip` for an edit whose passage begins or ends partway through a mention, with
+    the passage as it would be whole; and `unknown_kind` for an edit whose passage holds a
+    chip of a kind this server doesn't know, with the kinds
     ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), MCP item 6);
   - `read_only` for an edit to a record (§6);
   - `already_done` for a write that repeats one made within a day, with that one's time and
@@ -1117,8 +1120,9 @@ below), so the words between the ends need no checking here; an edit's do (§6).
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), MCP items 1 and 3). A mention reads `@Luke Breuer` in a text
 read and `[@Luke Breuer](/authors/luke-breuer)` in a Markdown one, and a quote of either finds
 it: `flattenForMatch` is given the doc's labels (`DocState.chips.labels`), puts a chip's label
-at the chip's one position, and verifies a hit against the same display text. A quote that ends
-inside a label is `no_match`. The capture in step 3 is unchanged, so the stored quote holds
+at the chip's one position, and verifies a hit against the same display text. A quote that begins
+or ends inside a label takes the whole mention, since a chip is one position: an anchor or a
+read lands on it, and an edit is refused as `splits_chip` (§4). The capture in step 3 is unchanged, so the stored quote holds
 U+FFFC where the chip is and a rename can't detach it, and beside it the capture records which
 chip that is (the kit's step 1, item 11): a note's `anchor_chips`, a link part's
 `selector.chips`. A read that shows a stored quote (a lost passage, a link's part, a reply's

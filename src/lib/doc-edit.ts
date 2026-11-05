@@ -2,6 +2,7 @@ import { Fragment, Mark, Slice, type Node as PMNode, type Schema } from "@tiptap
 import { Transform } from "@tiptap/pm/transform";
 import type { JSONContent } from "@tiptap/core";
 import { diffText, tokenizeFine } from "./diff";
+import { chipKind } from "./entity-chips/registry";
 import { chipIdentitiesBetween, chipIdentity, chipsIn } from "./entity-chips/renderings";
 import { chipDisplayText, displayTextBetween, isChip, type ChipLabels } from "./entity-chips/text";
 import { alignBlocks } from "./block-align";
@@ -71,7 +72,7 @@ export type EditSpec =
   | { kind: "insertBlock"; afterText: string | null; block: JSONContent };
 
 export type EditRefusal = {
-  code: "no_match" | "ambiguous" | "invalid" | "conflict" | "chip_as_text";
+  code: "no_match" | "ambiguous" | "invalid" | "conflict" | "chip_as_text" | "splits_chip" | "unknown_kind";
   message: string;
   details?: Record<string, unknown>;
   /** Which edit, 0-based; -1 for a refusal of the request as a whole. */
@@ -478,6 +479,32 @@ export function planEdits(
           });
         }
         const match = resolution.matches[0];
+        // docs/ENTITY_CHIPS.md, MCP item 6. A passage that begins or ends
+        // inside a mention's label names half of one position.
+        if (match.widened) {
+          return refuse(index, "splits_chip", "That passage begins or ends partway through a mention. Name the whole of it, or none.", {
+            passage: displayTextBetween(doc, match.from, match.to, options.labels),
+            ...where(target, blocks, match),
+          });
+        }
+        // A chip of a kind this server doesn't know has no Markdown, so the
+        // new text can't write it back, and replacing the passage would drop
+        // it without the edit having said so.
+        const unknownKinds = [
+          ...new Set(
+            chipsIn(doc)
+              .filter((chip) => chip.pos >= match.from && chip.pos < match.to && chipKind(chip.kind) === null)
+              .map((chip) => chip.kind),
+          ),
+        ];
+        if (unknownKinds.length > 0) {
+          return refuse(
+            index,
+            "unknown_kind",
+            `That passage holds ${unknownKinds.map((kind) => `a "${kind}" chip`).join(" and ")}, which this server can't write back. Edit the words around it instead.`,
+            { kinds: unknownKinds, ...where(target, blocks, match) },
+          );
+        }
         const named = !edit.target.quote?.trim();
         if (named && !edit.target.acrossHeadings) {
           const at = blocksOfRange(blocks, match.from, match.to);

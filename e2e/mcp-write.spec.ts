@@ -332,6 +332,14 @@ test("edit_doc keeps a mention it writes back, adds one by handle, and refuses o
     });
     expect(asText.error).toMatchObject({ code: "chip_as_text", labels: [`@${ada.name}`] });
 
+    // Half a mention is not a passage an edit can replace.
+    const half = await agent.call("edit_doc", {
+      url,
+      edits: [{ old: `signed off by @${ada.name.slice(0, 3)}`, new: "signed off by someone" }],
+    });
+    expect(half.error).toMatchObject({ code: "splits_chip" });
+    expect(String(half.error.passage)).toContain(`@${ada.name}`);
+
     // A new mention, by handle, of someone the agent may mention.
     const added = await agent.call("edit_doc", { url, edits: [{ old: "A second paragraph.", new: `A second paragraph, for ${graceMd}.` }] });
     expect(added.isError, JSON.stringify(added.error)).toBe(false);

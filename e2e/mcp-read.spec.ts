@@ -653,9 +653,10 @@ test("a doc with a mention reads as its label in text and its syntax in Markdown
     const viaMarkdown = await agent.call("read", { url: `/doc/${doc.slug}`, around: `reviewed by [${label}](/authors/${author.slug}) last` });
     expect(viaMarkdown.isError, JSON.stringify(viaMarkdown.error)).toBe(false);
     expect(viaMarkdown.result).toMatchObject({ total: 1, matchedAs: "markdown" });
-    // One that ends inside the label names no passage.
-    const partial = await agent.call("read", { url: `/doc/${doc.slug}`, around: `reviewed by ${label.slice(0, 6)}` });
-    expect(partial.error.code).toBe("no_match");
+    // One that ends inside the label finds the passage with the whole mention: a chip can't be quoted in part.
+    const partial = await agent.call("read", { url: `/doc/${doc.slug}`, around: `reviewed by ${label.slice(0, 6)}`, format: "text" });
+    expect(partial.isError, JSON.stringify(partial.error)).toBe(false);
+    expect(partial.result.total).toBe(1);
 
     // A note anchored by such a quote stores the chip's anchor text, which no
     // rename changes, and answers with the passage as it reads.

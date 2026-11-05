@@ -165,7 +165,7 @@ export type EditInput = {
 
 /** What the edit touched, and what the endpoint refused, said as the model reads them. */
 function refusalError(refusal: { code: string; message: string; details?: Record<string, unknown>; edit: number }, count: number): ApiError {
-  const code = refusal.code === "conflict" ? "conflict" : (refusal.code as "no_match" | "ambiguous" | "invalid" | "chip_as_text");
+  const code = refusal.code as "no_match" | "ambiguous" | "invalid" | "conflict" | "chip_as_text" | "splits_chip" | "unknown_kind";
   // A refusal of the request as a whole names no edit.
   const numbered = count > 1 && refusal.edit >= 0;
   return new ApiError(code, numbered ? `Edit ${refusal.edit + 1}: ${refusal.message}` : refusal.message, {
@@ -277,6 +277,9 @@ export async function editDocFor(
           throw new ApiError("ambiguous", "That passage occurred more than once at the version you read; add a prefix or suffix.", {
             total: found.matches.length,
           });
+        }
+        if (found.matches[0].widened) {
+          throw new ApiError("splits_chip", "That passage begins or ends partway through a mention. Name the whole of it, or none.");
         }
         edit.target.expectText = quotedTextAt(then.node, found.matches[0].from, found.matches[0].to);
         edit.target.expectChips = chipIdentitiesBetween(then.node, found.matches[0].from, found.matches[0].to);

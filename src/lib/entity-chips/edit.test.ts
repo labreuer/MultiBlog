@@ -185,9 +185,29 @@ test("not refused: a revert that puts plain words back where a mention was", () 
   assert.deepEqual(result.ok && result.chips, { removed: ["@Ada Lovelace"], added: 0 });
 });
 
-test("refused: a quote that ends inside a label names no passage", () => {
-  const result = planEdits(DOC, [replace("Ask @Ada", md("Tell"))], options);
-  assert.ok(!result.ok && result.refusal.code === "no_match");
+test("refused: a passage that begins or ends partway through a mention", () => {
+  for (const quote of ["Ask @Ada", "Lovelace about the engine", "Ada"]) {
+    const result = planEdits(DOC, [replace(quote, md("Tell"))], options);
+    assert.ok(!result.ok && result.refusal.code === "splits_chip", quote);
+    // It says what the whole of it would be.
+    assert.ok(!result.ok && String(result.refusal.details?.passage).includes("@Ada Lovelace"), quote);
+  }
+  // Named by its ends, the same, when it is the passage's own edge that falls inside one.
+  const named: EditSpec = { kind: "replace", target: { start: "Lovelace about", end: "engine" }, blocks: md("about the loom") };
+  const result = planEdits(DOC, [named], options);
+  assert.ok(!result.ok && result.refusal.code === "splits_chip");
+});
+
+test("refused: replacing a passage that holds a chip of a kind this server doesn't know", () => {
+  const doc = docOf(para(text("See "), { type: "entityChip", attrs: { kind: "hologram", iid: "h1", data: { of: "x" } } }, text(" for details. And more.")));
+  const labels = chipLabelsIn(doc, INPUTS);
+  const over = planEdits(doc, [replace("See […] for details", md("See the appendix"))], { ...options, labels });
+  assert.ok(!over.ok && over.refusal.code === "unknown_kind");
+  assert.deepEqual(!over.ok && over.refusal.details?.kinds, ["hologram"]);
+  // The words beside it can be edited, and it stays where it was.
+  const beside = planEdits(doc, [replace("And more.", md("And much more."))], { ...options, labels });
+  assert.ok(beside.ok);
+  assert.deepEqual(beside.ok && chipsIn(beside.next).map((c) => c.kind), ["hologram"]);
 });
 
 test("refused: a passage whose mention became someone else's since it was read", () => {

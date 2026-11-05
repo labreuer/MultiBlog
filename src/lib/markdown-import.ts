@@ -255,7 +255,10 @@ const ChipParsingLink = Link.extend({
         return { type: ENTITY_CHIP, attrs: { kind: MENTION, iid: "", data: { slug, label } } };
       }
     }
-    return helpers.applyMark("link", helpers.parseInline(token.tokens || []), { href: token.href, title: token.title || null });
+    // No title: Markdown's `[text](url "title")` would store one as an
+    // attribute, which a read can't show and the merge would then see as a
+    // link that changed (docs/ENTITY_CHIPS.md, MCP item 5).
+    return helpers.applyMark("link", helpers.parseInline(token.tokens || []), { href: token.href });
   },
 });
 
