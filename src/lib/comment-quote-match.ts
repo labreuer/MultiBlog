@@ -1,4 +1,5 @@
 import type { Node as PMNode } from "@tiptap/pm/model";
+import { anchorLeafText, chipDisplayText, isChip, type ChipLabels } from "./entity-chips/text";
 
 // PLAN.md §23n — the quote matcher, pure and browser-safe: given a comment
 // body's quotations (typed as `> …` in the Markdown box, pasted as "…", or
@@ -93,6 +94,16 @@ export function normalizeForMatch(input: string): Normalized {
  * what `findQuoteOccurrences` cannot do (its `textBetween` window undercounts
  * a block boundary), and it is affordable because it runs once per candidate
  * per submission rather than per keystroke.
+ *
+ * **An entity chip is its label, when the caller has labels to give**
+ * (docs/ENTITY_CHIPS.md, MCP item 3): a reader quotes what they read, and
+ * what they read where a chip is is its label. Every character of the label
+ * sits at the chip's one position, so a match that takes in any of it takes
+ * in the whole chip, and one that takes in only part of it fails its
+ * verification below and is a miss: a quote can't end inside a chip. With no
+ * labels a chip is a newline like any other leaf, and no quote crosses it.
+ * What is *stored* for a match is unaffected: `quotedTextAt` over the range,
+ * where a chip is its anchor text.
  */
 export type FlatTarget = {
   node: PMNode;
@@ -100,12 +111,24 @@ export type FlatTarget = {
   text: string;
   /** Per normalized character, the ProseMirror position of the character it came from. */
   positions: number[];
+  /** The labels the chips were flattened with, which a hit is verified against. */
+  labels?: ChipLabels;
 };
 
-export function flattenForMatch(node: PMNode): FlatTarget {
+export function flattenForMatch(node: PMNode, labels?: ChipLabels): FlatTarget {
   const chars: string[] = [];
   const flatPositions: number[] = [];
   node.descendants((child, pos) => {
+    if (labels && isChip(child)) {
+      for (const char of chipDisplayText(child.attrs, labels)) {
+        // Per UTF-16 unit, as the text nodes above are, so the two maps agree.
+        for (let i = 0; i < char.length; i++) {
+          chars.push(char[i]);
+          flatPositions.push(pos);
+        }
+      }
+      return false;
+    }
     if (child.isText && child.text) {
       for (let i = 0; i < child.text.length; i++) {
         chars.push(child.text[i]);
@@ -130,6 +153,7 @@ export function flattenForMatch(node: PMNode): FlatTarget {
   const normalized = normalizeForMatch(chars.join(""));
   return {
     node,
+    ...(labels ? { labels } : {}),
     text: normalized.text,
     positions: normalized.map.map((flatIndex) => flatPositions[flatIndex]),
   };
@@ -145,25 +169,40 @@ export type QuoteMatch = QuoteRange & {
   quotedText: string;
 };
 
+const QUOTE_LEAF_TEXT = anchorLeafText(" ");
+
 /**
  * The derivation every comment quote's `quoted_text` uses: `textBetween`
  * with a space for a block boundary, like every other anchor in the
  * codebase, and a space for an inline leaf too — a hard break inside the
  * quoted words would otherwise contribute nothing and glue two words
- * together. The integrity check and the rewrite (§23f) derive with this
- * same function, so the three copies agree by construction.
+ * together. An entity chip is the one leaf that isn't a space: it keeps its
+ * anchor text, as in every other stored quote (entity-chips/text.ts). The
+ * integrity check and the rewrite (§23f) derive with this same function, so
+ * the three copies agree by construction.
  */
 export function quotedTextAt(node: PMNode, from: number, to: number): string {
-  return node.textBetween(from, to, " ", " ");
+  return node.textBetween(from, to, " ", QUOTE_LEAF_TEXT);
 }
 
-/** The one-line rule for "is this range the query": normalized quotedTextAt equals normalized query. */
+/**
+ * A range's text as the query is compared with it: `quotedTextAt`, except
+ * that a chip reads as its label when the target was flattened with labels,
+ * since that is what the query holds there. The text a match *stores* is
+ * always `quotedTextAt`'s.
+ */
+function matchTextAt(target: FlatTarget, from: number, to: number): string {
+  const { labels } = target;
+  if (!labels) return quotedTextAt(target.node, from, to);
+  return target.node.textBetween(from, to, " ", (leaf) => (isChip(leaf) ? chipDisplayText(leaf.attrs, labels) : " "));
+}
+
+/** The one-line rule for "is this range the query": its normalized text equals the normalized query. */
 function verifyExact(target: FlatTarget, range: QuoteRange, normalizedQuery: string): QuoteMatch | null {
   const size = target.node.content.size;
   if (range.from < 0 || range.to > size || range.to <= range.from) return null;
-  const quotedText = quotedTextAt(target.node, range.from, range.to);
-  if (normalizeForMatch(quotedText).text !== normalizedQuery) return null;
-  return { ...range, tier: "exact", quotedText };
+  if (normalizeForMatch(matchTextAt(target, range.from, range.to)).text !== normalizedQuery) return null;
+  return { ...range, tier: "exact", quotedText: quotedTextAt(target.node, range.from, range.to) };
 }
 
 /** A hit in the normalized flat text, [start, end), mapped back to ProseMirror positions. */
@@ -268,10 +307,9 @@ export function findQuoteInTarget(
       const range = rangeFromFlat(target, start, start + spans.get(start)!);
       // Verify what the tier claims — both ends — against textBetween, so a
       // flattening mistake at a boundary is a miss rather than a wrong anchor.
-      const quotedText = quotedTextAt(target.node, range.from, range.to);
-      const normalizedHit = normalizeForMatch(quotedText).text;
+      const normalizedHit = normalizeForMatch(matchTextAt(target, range.from, range.to)).text;
       if (normalizedHit.startsWith(head) && normalizedHit.endsWith(tail)) {
-        return { ...range, tier: "ends", quotedText };
+        return { ...range, tier: "ends", quotedText: quotedTextAt(target.node, range.from, range.to) };
       }
     }
   }
@@ -397,12 +435,11 @@ export function findByEnds(target: FlatTarget, start: string, end: string): Quot
     const tailAt = target.text.indexOf(tail, at + head.length);
     if (tailAt === -1) continue;
     const range = rangeFromFlat(target, at, tailAt + tail.length);
-    const quotedText = quotedTextAt(target.node, range.from, range.to);
-    const normalized = normalizeForMatch(quotedText).text;
+    const normalized = normalizeForMatch(matchTextAt(target, range.from, range.to)).text;
     if (!normalized.startsWith(head) || !normalized.endsWith(tail)) continue;
     // A later `start` inside a passage already found is the same passage.
     if (found.some((other) => other.from <= range.from && range.from < other.to)) continue;
-    found.push({ ...range, tier: "exact", quotedText });
+    found.push({ ...range, tier: "exact", quotedText: quotedTextAt(target.node, range.from, range.to) });
   }
   return found;
 }
@@ -428,7 +465,8 @@ export function nearMisses(target: FlatTarget, query: string, limit = 3): NearMi
   const add = (range: QuoteRange) => {
     if (misses.length >= limit) return;
     if (misses.some((other) => range.from < other.to && other.from < range.to)) return;
-    misses.push({ ...range, quotedText: quotedTextAt(target.node, range.from, range.to) });
+    // As a reader would see it: a suggestion is read, never stored.
+    misses.push({ ...range, quotedText: matchTextAt(target, range.from, range.to) });
   };
 
   if (normalizedQuery.length >= NEAR_MISS_ENDS_MIN) {

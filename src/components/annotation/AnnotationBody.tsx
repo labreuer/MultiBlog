@@ -7,6 +7,10 @@ import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { annotationEditorExtensions } from "@/lib/live-editor-extensions";
 import EditorToolbar, { ANNOTATION_TOOLS } from "../EditorToolbar";
 import DocRefMenu from "../DocRefMenu";
+import MentionMenu from "../MentionMenu";
+import { ChipSurfaceProvider, useChipSurface } from "@/lib/entity-chips/chip-surface";
+import type { ChipInputs } from "@/lib/entity-chips/types";
+import { useChipInputs } from "@/lib/entity-chips/use-chip-inputs";
 import proseStyles from "@/styles/prose.module.css";
 import readerStyles from "./AnnotationBodyReader.module.css";
 import styles from "./AnnotationBody.module.css";
@@ -14,6 +18,10 @@ import styles from "./AnnotationBody.module.css";
 const TOOLBAR_STORAGE_KEY = "multiblog.annotationToolbar";
 
 type Props = {
+  /** Whose body this is: what its entity chips are labelled for, and who its mention menu lists. */
+  annotationId: string;
+  /** What the card this editor replaces labelled its chips with, when there was one. */
+  chipInputs?: ChipInputs;
   provider: HocuspocusProvider;
   ydoc: Y.Doc;
   userId: string;
@@ -36,7 +44,19 @@ type Props = {
 // localStorage, and offers ANNOTATION_TOOLS' reduced set rather than
 // CollabEditorBody's full one — a margin note doesn't need headings or
 // numbered lists.
-export default function AnnotationBody({
+//
+// The body is its own chip surface (docs/ENTITY_CHIPS.md, step 1, item 13):
+// its chips are the annotation's, not those of the doc the page is showing,
+// so the provider here stands in for the page's.
+export default function AnnotationBody({ annotationId, chipInputs, ...props }: Props) {
+  return (
+    <ChipSurfaceProvider annotation={annotationId} initial={chipInputs}>
+      <AnnotationBodyEditor {...props} />
+    </ChipSurfaceProvider>
+  );
+}
+
+function AnnotationBodyEditor({
   provider,
   ydoc,
   userId,
@@ -45,7 +65,7 @@ export default function AnnotationBody({
   editable = true,
   bounded = false,
   onEditorReady,
-}: Props) {
+}: Omit<Props, "annotationId" | "chipInputs">) {
   const [toolbarVisible, setToolbarVisible] = useState(false);
 
   useEffect(() => {
@@ -85,6 +105,8 @@ export default function AnnotationBody({
     immediatelyRender: false,
   });
 
+  useChipInputs(editor, useChipSurface());
+
   useEffect(() => {
     onEditorReady?.(editor);
     return () => onEditorReady?.(null);
@@ -117,6 +139,7 @@ export default function AnnotationBody({
         className={`${styles.content} ${proseStyles.prose} ${readerStyles.type}`}
       />
       <DocRefMenu editor={editor} disabled={!editable} />
+      <MentionMenu editor={editor} disabled={!editable} />
       {editable && (
         <button type="button" onClick={toggleToolbar} className={styles.toolbarToggle}>
           {toolbarVisible ? "Hide formatting" : "Aa Formatting"}

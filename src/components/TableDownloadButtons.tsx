@@ -86,7 +86,7 @@ export default function TableDownloadButtons({ editor, ready }: { editor: Editor
     const table = tableForWrapper(editor, wrapper, index);
     if (!table) return;
     const filename = wrappers.length > 1 ? `table-${index + 1}${codec.extensions[0]}` : `table${codec.extensions[0]}`;
-    void downloadTableNode(table, codec, filename);
+    void downloadTableNode(editor, table, codec, filename);
   }
 
   return wrappers.map((wrapper, index) =>

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useSession } from "next-auth/react";
+import type { ChipInputs } from "@/lib/entity-chips/types";
 import AnnotationBody from "./AnnotationBody";
 import { OUT_OF_DATE_BODY, useAnnotationProvider } from "./use-annotation-provider";
 import { cancelAnnotationEdit, finishAnnotationEdit } from "@/app/actions/annotations";
@@ -11,6 +12,8 @@ import { displayNameOf } from "@/lib/display-name";
 
 type Props = {
   annotationId: string;
+  /** What the card's body labelled its entity chips with, so the editor opens labelled. */
+  chipInputs?: ChipInputs;
   // The bundle `beginAnnotationEdit` handed back (annotation-connection.ts).
   // It matters most here: this card is swapping a rendered body for an
   // editor, so a wait before the connection is a visibly emptier card than
@@ -37,7 +40,7 @@ type Props = {
 // let mutable bodies arrive without a live editor per card (docs/COLLAB.md's
 // 2026-08-13 entry weighed the alternative, awareness-driven mounting; it
 // stays available and is not needed for this).
-export default function AnnotationEditSession({ annotationId, connection, onFinished, onCancelled }: Props) {
+export default function AnnotationEditSession({ annotationId, chipInputs, connection, onFinished, onCancelled }: Props) {
   const { data: session } = useSession();
   const { provider, ydoc, readOnly, error: connectionError, outOfDate } = useAnnotationProvider(annotationId, connection);
   const [pending, setPending] = useState<null | "finish" | "cancel">(null);
@@ -85,6 +88,8 @@ export default function AnnotationEditSession({ annotationId, connection, onFini
   return (
     <div>
       <AnnotationBody
+        annotationId={annotationId}
+        chipInputs={chipInputs}
         provider={provider}
         ydoc={ydoc}
         userId={session.user.id}

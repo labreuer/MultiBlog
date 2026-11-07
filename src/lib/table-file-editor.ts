@@ -7,6 +7,7 @@
 
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
+import { chipLabelsOf } from "./entity-chips/node";
 import { gridToTableJson, tableJsonToGrid } from "./table-grid";
 import { readTableFile, type TableCodec } from "./table-codecs";
 import { downloadBlob } from "./download-blob";
@@ -47,8 +48,11 @@ export async function insertTableFromFile(editor: Editor, file: File, at?: numbe
   return null;
 }
 
-/** A table node written through `codec` and handed to the browser. */
-export async function downloadTableNode(node: PMNode, codec: TableCodec, filename: string): Promise<void> {
-  const grid = tableJsonToGrid(node.toJSON());
+/**
+ * A table node of `editor`'s document, written through `codec` and handed to
+ * the browser. The editor is where its entity chips' labels are.
+ */
+export async function downloadTableNode(editor: Editor, node: PMNode, codec: TableCodec, filename: string): Promise<void> {
+  const grid = tableJsonToGrid(node.toJSON(), chipLabelsOf(editor.state));
   downloadBlob(await codec.write(grid), filename);
 }

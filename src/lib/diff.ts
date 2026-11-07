@@ -1,7 +1,10 @@
+import { chipDisplayText, isChip, type ChipLabels } from "./entity-chips/text";
+
 type PMNode = {
   type: string;
   content?: PMNode[];
   text?: string;
+  attrs?: Record<string, unknown>;
 };
 
 const BLOCK_TYPES = new Set([
@@ -13,13 +16,15 @@ const BLOCK_TYPES = new Set([
   "horizontalRule",
 ]);
 
-function walk(node: PMNode, parts: string[]): void {
+function walk(node: PMNode, parts: string[], labels: ChipLabels | undefined): void {
   if (node.type === "text" && node.text) {
     parts.push(node.text);
+  } else if (isChip(node)) {
+    parts.push(chipDisplayText(node.attrs, labels));
   }
   if (node.content) {
     for (const child of node.content) {
-      walk(child, parts);
+      walk(child, parts, labels);
     }
   }
   if (BLOCK_TYPES.has(node.type)) {
@@ -29,9 +34,13 @@ function walk(node: PMNode, parts: string[]): void {
 
 // Flattens a ProseMirror JSON doc to plain text for diffing/display purposes.
 // Not meant to round-trip — block boundaries just become blank lines.
-export function extractText(doc: unknown): string {
+//
+// An entity chip gives its display text (entity-chips/text.ts): its label
+// from `labels`, for a body that holds none, such as an annotation's, or the
+// one materialized on the node.
+export function extractText(doc: unknown, labels?: ChipLabels): string {
   const parts: string[] = [];
-  walk(doc as PMNode, parts);
+  walk(doc as PMNode, parts, labels);
   return parts.join("").trim();
 }
 

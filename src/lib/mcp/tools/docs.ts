@@ -59,7 +59,9 @@ const passage = z.union([
 const editItem = z.union([
   z.strictObject({
     old: passage,
-    new: markdown.describe("Markdown; empty deletes the passage."),
+    new: markdown.describe(
+      `Markdown; empty deletes the passage. A mention is [@Name](/authors/<slug>), as a Markdown read shows one; the slug is ${listedName("find_users")}'s.`,
+    ),
     prefix: z.string().max(500).optional(),
     suffix: z.string().max(500).optional(),
     acrossHeadings: z.boolean().optional().describe("Let a passage named by its ends run across a heading."),

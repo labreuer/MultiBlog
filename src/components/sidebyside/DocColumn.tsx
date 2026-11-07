@@ -15,6 +15,7 @@ import { DocPresenceProvider } from "@/components/annotation/doc-presence-contex
 import { SignInAgainLink } from "@/components/SignedOutNotice";
 import { ReloadButton } from "@/components/OutOfDateNotice";
 import { isSchemaRefusal } from "@/lib/collab-socket";
+import { ChipSurfaceProvider } from "@/lib/entity-chips/chip-surface";
 import SideBySideDocBody from "./SideBySideDocBody";
 import CollabTitleField from "@/components/CollabTitleField";
 import CollabEditorBody from "@/components/CollabEditorBody";
@@ -188,107 +189,110 @@ export default function DocColumn({
 
   return (
     <DocPresenceProvider>
-      <div className={styles.column} data-side={side}>
-        <div className={styles.titleRow}>
-          {mode === "write" && provider ? (
-            <>
-              <CollabTitleField
-                ydoc={ydoc}
-                userId={userId}
-                userName={userName}
-                userColor={userColor}
-                className={styles.titleInput}
-                ariaLabel={aria.title}
-                editable={!outOfDate}
-                onTitleChange={setTitle}
-                onEditorReady={() => {}}
-              />
-              {/* PLAN.md §14g — "Doc Links" switches this column back to
-                  read mode, which is where a doc link is created (§14i);
-                  it is not a panel opener. */}
-              <button type="button" className={styles.titleButton} onClick={() => setMode("read")}>
-                Doc Links
-              </button>
-            </>
-          ) : (
-            <>
-              <h2 className={styles.titleText}>
-                <Link href={canEdit ? `/doc/${docId}/edit` : `/doc/${docId}`}>{docTitleOrFallback(title)}</Link>
-              </h2>
-              {canEdit && (
-                <button type="button" className={styles.titleButton} onClick={() => setMode("write")}>
-                  Edit
+      {/* Names this column's doc for its editors' entity chips (docs/ENTITY_CHIPS.md). */}
+      <ChipSurfaceProvider doc={docId}>
+        <div className={styles.column} data-side={side}>
+          <div className={styles.titleRow}>
+            {mode === "write" && provider ? (
+              <>
+                <CollabTitleField
+                  ydoc={ydoc}
+                  userId={userId}
+                  userName={userName}
+                  userColor={userColor}
+                  className={styles.titleInput}
+                  ariaLabel={aria.title}
+                  editable={!outOfDate}
+                  onTitleChange={setTitle}
+                  onEditorReady={() => {}}
+                />
+                {/* PLAN.md §14g — "Doc Links" switches this column back to
+                    read mode, which is where a doc link is created (§14i);
+                    it is not a panel opener. */}
+                <button type="button" className={styles.titleButton} onClick={() => setMode("read")}>
+                  Doc Links
                 </button>
-              )}
-            </>
-          )}
-        </div>
-        {mode === "write" && (
-          <p className={styles.statusLine}>
-            {outOfDate ? (
-              <>
-                🔴 Out of date — <ReloadButton /> to keep editing
               </>
-            ) : denial === "signed-out" ? (
-              <>
-                🔴 Signed out — <SignInAgainLink />
-              </>
-            ) : denial === "forbidden" ? (
-              "🔴 You no longer have access to this doc"
-            ) : connectionStatus === "connected" ? (
-              synced ? "🟢 Live" : "🔵 Connected"
-            ) : connectionStatus === "connecting" ? (
-              "🟡 Connecting…"
             ) : (
-              "🔴 Disconnected"
+              <>
+                <h2 className={styles.titleText}>
+                  <Link href={canEdit ? `/doc/${docId}/edit` : `/doc/${docId}`}>{docTitleOrFallback(title)}</Link>
+                </h2>
+                {canEdit && (
+                  <button type="button" className={styles.titleButton} onClick={() => setMode("write")}>
+                    Edit
+                  </button>
+                )}
+              </>
             )}
-          </p>
-        )}
-        <div className={styles.scroller}>
-          {mode === "write" ? (
-            provider ? (
-              <CollabEditorBody
-                provider={provider}
-                ydoc={ydoc}
-                userId={userId}
-                userName={userName}
+          </div>
+          {mode === "write" && (
+            <p className={styles.statusLine}>
+              {outOfDate ? (
+                <>
+                  🔴 Out of date — <ReloadButton /> to keep editing
+                </>
+              ) : denial === "signed-out" ? (
+                <>
+                  🔴 Signed out — <SignInAgainLink />
+                </>
+              ) : denial === "forbidden" ? (
+                "🔴 You no longer have access to this doc"
+              ) : connectionStatus === "connected" ? (
+                synced ? "🟢 Live" : "🔵 Connected"
+              ) : connectionStatus === "connecting" ? (
+                "🟡 Connecting…"
+              ) : (
+                "🔴 Disconnected"
+              )}
+            </p>
+          )}
+          <div className={styles.scroller}>
+            {mode === "write" ? (
+              provider ? (
+                <CollabEditorBody
+                  provider={provider}
+                  ydoc={ydoc}
+                  userId={userId}
+                  userName={userName}
+                  userColor={userColor}
+                  userInitials={userInitials}
+                  onEditorReady={() => {}}
+                  ariaLabel={aria.body}
+                  editable={!outOfDate}
+                  suppressAnnotations
+                />
+              ) : (
+                <p>Connecting to live editor…</p>
+              )
+            ) : provider ? (
+              <SideBySideDocBody
+                docId={docId}
+                initialBodyJSON={initialBodyJSON}
+                staticBody={staticBody}
                 userColor={userColor}
-                userInitials={userInitials}
-                onEditorReady={() => {}}
                 ariaLabel={aria.body}
-                editable={!outOfDate}
-                suppressAnnotations
+                ydoc={ydoc}
+                provider={provider}
+                onLiveTitle={setTitle}
+                docLinks={docLinks}
+                activeGroupId={activeGroupId}
+                onDocLinkCreated={onLinkCreated}
+                onDocLinkUpdated={onLinkUpdated}
+                onDocLinkDeleted={onLinkDeleted}
+                onDocLinkColorPreview={onLinkColorPreview}
+                onDocLinkClicked={onLinkClicked}
               />
             ) : (
-              <p>Connecting to live editor…</p>
-            )
-          ) : provider ? (
-            <SideBySideDocBody
-              docId={docId}
-              initialBodyJSON={initialBodyJSON}
-              staticBody={staticBody}
-              userColor={userColor}
-              ariaLabel={aria.body}
-              ydoc={ydoc}
-              provider={provider}
-              onLiveTitle={setTitle}
-              docLinks={docLinks}
-              activeGroupId={activeGroupId}
-              onDocLinkCreated={onLinkCreated}
-              onDocLinkUpdated={onLinkUpdated}
-              onDocLinkDeleted={onLinkDeleted}
-              onDocLinkColorPreview={onLinkColorPreview}
-              onDocLinkClicked={onLinkClicked}
-            />
-          ) : (
-            // Mirrors SideBySideDocBody's own pre-connection fallback — shown
-            // until this column's provider connects, rather than mounting
-            // SideBySideDocBody without one (which would make it open its own,
-            // separate, immediately-redundant connection — §14g).
-            <div className={`${proseStyles.prose} ${proseStyles.noAnnotations}`}>{staticBody}</div>
-          )}
+              // Mirrors SideBySideDocBody's own pre-connection fallback — shown
+              // until this column's provider connects, rather than mounting
+              // SideBySideDocBody without one (which would make it open its own,
+              // separate, immediately-redundant connection — §14g).
+              <div className={`${proseStyles.prose} ${proseStyles.noAnnotations}`}>{staticBody}</div>
+            )}
+          </div>
         </div>
-      </div>
+      </ChipSurfaceProvider>
     </DocPresenceProvider>
   );
 }

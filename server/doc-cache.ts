@@ -1,5 +1,5 @@
 import type * as Y from "yjs";
-import { docContentFromYdoc } from "../src/lib/doc-content";
+import { docCacheFromYdoc } from "../src/lib/doc-content";
 import { docIdFromYdocId } from "../src/lib/ydoc-names";
 import { prisma } from "../src/lib/prisma";
 import type { Prisma } from "../src/generated/prisma/client";
@@ -26,7 +26,7 @@ export async function updateDocCache(
   const docId = docIdFromYdocId(ydocId);
   if (!docId) return;
 
-  // The derivation lives in docContentFromYdoc so the two places that seed a
+  // The derivation lives in docCacheFromYdoc so the two places that seed a
   // doc's ydoc without a collab server in the loop — scripts/seed-sample-data.ts
   // and e2e/db-worker.ts's createTestDoc — can write exactly the same cache
   // this would have written, rather than approximating it. When they drifted,
@@ -34,7 +34,7 @@ export async function updateDocCache(
   let bodyJSON: unknown;
   let titleText: string;
   try {
-    ({ proseJson: bodyJSON, title: titleText } = docContentFromYdoc(document));
+    ({ proseJson: bodyJSON, title: titleText } = await docCacheFromYdoc(document));
   } catch (err) {
     console.error(`[doc-cache] ${ydocId} isn't TipTap-compatible, leaving prose_json unchanged:`, err);
     return;

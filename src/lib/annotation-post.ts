@@ -5,7 +5,7 @@ import type { Actor } from "@/lib/actor";
 import { viewerOf } from "@/lib/actor";
 import { seedAnnotationYdocFromJson } from "@/lib/annotation-ydoc-seed";
 import { settleAnnotationBody, writeSettledBody } from "@/lib/annotation-settle";
-import { extractText } from "@/lib/diff";
+import { annotationBodyText } from "@/lib/annotation-body";
 import type { PdfTarget } from "@/lib/pdf-anchor";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { invalid } from "@/lib/api/errors";
@@ -49,7 +49,7 @@ export async function createPostedAnnotation(
     anchor: PostedAnchor;
   },
 ): Promise<{ id: string; createdAt: Date; stamp: bigint | null }> {
-  const text = extractText(opts.body);
+  const text = await annotationBodyText(opts.body);
   if (!text.trim()) throw invalid("An annotation can't be empty.");
 
   const seed = seedAnnotationYdocFromJson(opts.body, actor.userId);

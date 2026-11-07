@@ -10,7 +10,7 @@ import { replaceAnnotationBody } from "@/lib/annotation-admin";
 import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
 import { canUserEditAnnotationBody } from "@/lib/annotation-authz";
 import { STALE_EDIT_SESSION_MS } from "@/lib/edit-grace";
-import { mergeDoc } from "@/lib/doc-edit";
+import { chipMergeFor, mergeDoc } from "@/lib/doc-edit";
 import { viewerOf } from "@/lib/actor";
 import * as Y from "yjs";
 import { captureAnchorInNode } from "@/lib/anchors/capture";
@@ -24,6 +24,9 @@ import { docLogTail, isDocVersion, loadDocStateAt } from "@/lib/doc-state";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { ApiError, ERROR_LIST_CAP, forbidden, invalid, notFound } from "@/lib/api/errors";
+import { chipInputsForBody } from "@/lib/entity-chips/context";
+import { resolveParsedChips } from "@/lib/entity-chips/parsed-chips";
+import { chipLabels, displayTextBetween, type ChipLabels } from "@/lib/entity-chips/text";
 import type { McpContext, ToolResult } from "./tool";
 import { parse, readableContainer, readableDocByParam, readableFileBySlug, type ResolvedContainer } from "./resolve";
 import { annotationByFragment } from "./read/threads";
@@ -79,9 +82,19 @@ async function resolveOn(ctx: McpContext, on: string): Promise<Target> {
   return { container, parent: { id: parent.id } };
 }
 
-/** A quote's one match in `node`, or the refusal: `no_match` with near misses, `ambiguous` with where. */
-function findOne(node: PMNode, spec: QuoteSpec, describeWhere: (from: number, to: number) => Record<string, unknown>) {
-  const target = flattenForMatch(node);
+/**
+ * A quote's one match in `node`, or the refusal: `no_match` with near misses,
+ * `ambiguous` with where. `labels` are the node's entity chips as the agent
+ * read them, so a quote that holds a label finds its chip; what is captured
+ * and stored is the node's own text, where a chip is its anchor text.
+ */
+function findOne(
+  node: PMNode,
+  labels: ChipLabels | undefined,
+  spec: QuoteSpec,
+  describeWhere: (from: number, to: number) => Record<string, unknown>,
+) {
+  const target = flattenForMatch(node, labels);
   const found = resolveQuote(target, spec, markdownToText);
   if (found.kind === "none") {
     throw new ApiError("no_match", "That quote isn't there as written.", {
@@ -97,7 +110,8 @@ function findOne(node: PMNode, spec: QuoteSpec, describeWhere: (from: number, to
   const match = found.matches[0];
   const captured = captureAnchorInNode(node, match.from, match.to, node.textBetween(match.from, match.to, " "));
   if (!captured) throw new ApiError("no_match", "That quote couldn't be anchored.");
-  return captured;
+  // `shown` is the passage as the agent reads it, for the answer; `quotedText` is what is stored.
+  return { ...captured, shown: displayTextBetween(node, captured.from, captured.to, labels) };
 }
 
 export type QuoteInput = QuoteSpec & { version?: string; page?: number; label?: string };
@@ -111,7 +125,7 @@ export type QuoteInput = QuoteSpec & { version?: string; page?: number; label?: 
 export async function anchorInDoc(
   docId: string,
   quote: QuoteInput,
-): Promise<{ stamp: bigint; from: number; to: number; quotedText: string; selector: DocRangeSelector }> {
+): Promise<{ stamp: bigint; from: number; to: number; quotedText: string; shown: string; selector: DocRangeSelector }> {
   const tail = await docLogTail(docId);
   if (tail === null) throw invalid("This doc has no history to anchor into yet.");
   let stamp = tail;
@@ -122,15 +136,15 @@ export async function anchorInDoc(
     }
   }
   const state = await loadDocStateAt(docId, stamp);
-  const blocks = docBlocks(state.node);
-  const captured = findOne(state.node, quote, (from, to) => {
+  const blocks = docBlocks(state.node, state.chips.labels);
+  const captured = findOne(state.node, state.chips.labels, quote, (from, to) => {
     const at = blocksOfRange(blocks, from, to);
     const heading = at ? headingAbove(blocks, at.from) : null;
     return at
       ? { blocks: at.from === at.to ? String(at.from) : `${at.from}-${at.to}`, ...(heading ? { heading: heading.heading!.text } : {}) }
       : {};
   });
-  return { stamp, from: captured.from, to: captured.to, quotedText: captured.quotedText, selector: captured.selector };
+  return { stamp, from: captured.from, to: captured.to, quotedText: captured.quotedText, shown: captured.shown, selector: captured.selector };
 }
 
 /** A reply's anchor in its parent's body, at the parent's newest settled version — what the replier was reading. */
@@ -140,8 +154,10 @@ async function anchorInParent(parentId: string, quote: QuoteInput) {
   const doc = await materializeYdocAt(ydocIdForAnnotation(parentId), stamp);
   try {
     const json = TiptapTransformer.extensions(annotationContentExtensions).fromYdoc(doc, "default") as JSONContent;
-    const captured = findOne(pmAnnotationContentSchema.nodeFromJSON(json), quote, () => ({}));
-    return { stamp, from: captured.from, to: captured.to, quotedText: captured.quotedText };
+    // The parent's chips as a thread read shows them, so a quote of one lands.
+    const labels = chipLabels(json, await chipInputsForBody(json));
+    const captured = findOne(pmAnnotationContentSchema.nodeFromJSON(json), labels, quote, () => ({}));
+    return { stamp, from: captured.from, to: captured.to, quotedText: captured.quotedText, shown: captured.shown };
   } finally {
     doc.destroy();
   }
@@ -151,10 +167,12 @@ export async function annotateFor(ctx: McpContext, input: QuoteInput & { on: str
   const { container, parent } = await resolveOn(ctx, input.on);
   let body: JSONContent;
   try {
-    body = markdownToAnnotationContent(input.body);
+    body = markdownToAnnotationContent(input.body, { chips: true });
   } catch (err) {
     throw invalid(`That Markdown doesn't make a valid annotation body: ${err instanceof Error ? err.message : String(err)}`);
   }
+  // A mention written in the body is one, under the rule the composer's menu lists by.
+  body = await resolveParsedChips(body, ctx.actor, { docId: container.kind === "doc" ? container.doc.id : null, held: null });
   const warnings = await checkFragmentLinks(ctx.actor, [body]);
 
   const quoted = hasQuote(input);
@@ -170,12 +188,12 @@ export async function annotateFor(ctx: McpContext, input: QuoteInput & { on: str
     anchor = { kind: "none", stamp: container.kind === "doc" ? await docLogTail(container.doc.id) : null };
   } else if (parent) {
     const at = await anchorInParent(parent.id, input);
-    anchor = { kind: "range", ...at };
-    passage = { text: at.quotedText };
+    anchor = { kind: "range", stamp: at.stamp, from: at.from, to: at.to, quotedText: at.quotedText };
+    passage = { text: at.shown };
   } else if (container.kind === "doc") {
     const at = await anchorInDoc(container.doc.id, input);
     anchor = { kind: "range", stamp: at.stamp, from: at.from, to: at.to, quotedText: at.quotedText };
-    passage = { text: at.quotedText };
+    passage = { text: at.shown };
   } else {
     const at = await anchorPdfQuote(container.file, input);
     anchor = { kind: "pdf", target: at.target, quotedText: at.quotedText };
@@ -248,11 +266,10 @@ export async function editAnnotationFor(ctx: McpContext, input: { id: string; bo
 
   let next: JSONContent;
   try {
-    next = markdownToAnnotationContent(input.body);
+    next = markdownToAnnotationContent(input.body, { chips: true });
   } catch (err) {
     throw invalid(`That Markdown doesn't make a valid annotation body: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const warnings = await checkFragmentLinks(ctx.actor, [next]);
 
   const ydocId = ydocIdForAnnotation(annotation.id);
   const [newest, row] = await Promise.all([
@@ -260,7 +277,10 @@ export async function editAnnotationFor(ctx: McpContext, input: { id: string; bo
     prisma.ydoc.findUnique({ where: { id: ydocId }, select: { ydoc: true } }),
   ]);
   if (!newest || !row) throw invalid("This annotation has no settled version to edit from.");
-  const settledBody = decodeAnnotationSnapshot(new Uint8Array(newest.ydoc));
+  const settledBody = await decodeAnnotationSnapshot(new Uint8Array(newest.ydoc));
+  // The body's own mentions may be written back whoever they name now.
+  next = await resolveParsedChips(next, ctx.actor, { docId: annotation.docId, held: settledBody.proseJson });
+  const warnings = await checkFragmentLinks(ctx.actor, [next]);
   const writers = new Set<string>([ctx.actor.userId]);
   const live = new Y.Doc();
   try {
@@ -270,11 +290,25 @@ export async function editAnnotationFor(ctx: McpContext, input: { id: string; bo
     live.destroy();
   }
   writers.add(annotation.userId);
-  const merged = mergeDoc(
-    pmAnnotationContentSchema.nodeFromJSON(settledBody.proseJson),
-    pmAnnotationContentSchema.nodeFromJSON(next),
-    { schema: pmAnnotationContentSchema, authorId: writers.size >= 2 ? ctx.actor.userId : null },
-  );
+  const oldNode = pmAnnotationContentSchema.nodeFromJSON(settledBody.proseJson);
+  const nextNode = pmAnnotationContentSchema.nodeFromJSON(next);
+  // The merge keeps a mention the new text still names, instance id and all,
+  // and says when one came back as its label in plain words.
+  const chipMerge = chipMergeFor(oldNode, nextNode, chipLabels(settledBody.proseJson, await chipInputsForBody(settledBody.proseJson)));
+  const merged = mergeDoc(oldNode, nextNode, {
+    schema: pmAnnotationContentSchema,
+    authorId: writers.size >= 2 ? ctx.actor.userId : null,
+    chipMerge,
+  });
+  if (chipMerge.asText.length > 0) {
+    const labels = [...new Set(chipMerge.asText)];
+    throw new ApiError(
+      "chip_as_text",
+      `The new body has ${labels.map((label) => `"${label}"`).join(", ")} as plain words where the note has a mention. ` +
+        "Write a mention as the Markdown read shows it, [@Name](/authors/handle), to keep it; leave the name out to remove it.",
+      { labels },
+    );
+  }
 
   const viewer = viewerOf(ctx.actor);
   const cancel = async () => {

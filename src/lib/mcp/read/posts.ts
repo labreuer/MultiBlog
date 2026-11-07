@@ -7,7 +7,7 @@ import { isCommentVisiblyEdited } from "@/lib/comment-data";
 import { loadCommentQuoteCitations } from "@/lib/comment-quote-data";
 import { commentAnchorName } from "@/lib/comment-anchor-name";
 import { commentHistoryFor, READABLE_COMMENT_INCLUDE } from "@/lib/comment-reading";
-import { commentContentToMarkdown, docContentToMarkdown } from "@/lib/markdown-import";
+import { commentContentToMarkdown, postContentToMarkdown } from "@/lib/markdown-import";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { extractText } from "@/lib/diff";
 import { tagsForTarget } from "@/lib/tag-data";
@@ -73,7 +73,7 @@ export async function readPost(
   const body = post.proseJson
     ? format === "text"
       ? extractText(post.proseJson)
-      : docContentToMarkdown(post.proseJson as JSONContent).trim()
+      : postContentToMarkdown(post.proseJson as JSONContent).trim()
     : null;
 
   return {

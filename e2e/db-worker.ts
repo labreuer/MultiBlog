@@ -55,7 +55,7 @@ import { captureAnchor } from "@/lib/doc-link-anchor";
 import { postContentFromYdoc } from "@/lib/post-content";
 import { registerClient, revokeClient } from "@/lib/oauth/clients";
 import { hashRefreshToken } from "@/lib/oauth/refresh";
-import { docContentFromYdoc } from "@/lib/doc-content";
+import { docCacheFromYdoc } from "@/lib/doc-content";
 import { ensureYdocSnapshotAt, materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
@@ -246,6 +246,8 @@ export async function createTestPost(opts: {
   authorEmail: string;
   title?: string;
   bodyText?: string;
+  /** The backing doc's body as TipTap JSON, in place of `bodyText`: for a post made from a doc holding entity chips. */
+  body?: JSONContent;
   policy?: ModerationPolicy;
   publish?: boolean;
   /**
@@ -267,6 +269,7 @@ export async function createTestPost(opts: {
     authorEmail,
     title = uniqueTitle("post"),
     bodyText = "The quick brown fox jumps over the lazy dog.",
+    body,
     policy = "AUTO",
     scheduledFor: scheduledForIso,
     publish = scheduledForIso !== undefined,
@@ -277,7 +280,7 @@ export async function createTestPost(opts: {
   const author = await prisma.user.findUnique({ where: { email: authorEmail } });
   if (!author) throw new Error(`No such test author: ${authorEmail}`);
 
-  const doc = await createTestDoc({ authorEmail, title: uniqueTitle("post-doc"), bodyText });
+  const doc = await createTestDoc({ authorEmail, title: uniqueTitle("post-doc"), ...(body ? { body } : { bodyText }) });
 
   const post = await prisma.post.create({
     data: {
@@ -299,7 +302,7 @@ export async function createTestPost(opts: {
       throughUpdateId,
       userId: author.id,
     });
-    const { proseJson, title: docTitle } = postContentFromYdoc(materialized);
+    const { proseJson, title: docTitle } = await postContentFromYdoc(materialized);
     materialized.destroy();
     const publishedTitle = title || docTitle || "Untitled";
     const scheduledFor = scheduledForIso ? new Date(scheduledForIso) : null;
@@ -473,7 +476,7 @@ export async function createTestDoc(opts: {
   // stays NULL and nothing recomputes it on read, so a fixture doc measures 0
   // characters on /docs however much body text it was given — which is a
   // fixture that quietly can't be used to test anything reading a doc's body.
-  const cached = docContentFromYdoc(seed);
+  const cached = await docCacheFromYdoc(seed);
   seed.destroy();
   await ydocStore.createIfAbsent(ydocIdForDoc(doc.id), ydoc, stateVector);
   // prose_json_length follows from the doc_sync_prose_json_length trigger.
@@ -1452,13 +1455,15 @@ export async function getAnnotationEditFacts(annotationId: string): Promise<Anno
     postedAt: annotation.postedAt?.toISOString() ?? null,
     editedAt: annotation.editedAt?.toISOString() ?? null,
     editingSince: annotation.editingSince?.toISOString() ?? null,
-    versions: snapshots.map((s, index) => ({
-      revisionNo: index + 1,
-      bodyText: decodeAnnotationSnapshot(new Uint8Array(s.ydoc)).bodyText,
-      authorEmail: s.user?.email ?? null,
-      mark: s.lastYdocUpdateId.toString(),
-      createdAt: s.createdAt.toISOString(),
-    })),
+    versions: await Promise.all(
+      snapshots.map(async (s, index) => ({
+        revisionNo: index + 1,
+        bodyText: (await decodeAnnotationSnapshot(new Uint8Array(s.ydoc))).bodyText,
+        authorEmail: s.user?.email ?? null,
+        mark: s.lastYdocUpdateId.toString(),
+        createdAt: s.createdAt.toISOString(),
+      })),
+    ),
   };
 }
 
@@ -1886,6 +1891,30 @@ export async function getPublicationEvents(postId: string): Promise<PublicationE
 export async function getPostContentText(postId: string): Promise<string | null> {
   const post = await prisma.post.findUnique({ where: { id: postId }, select: { proseJson: true } });
   return post?.proseJson ? extractText(post.proseJson) : null;
+}
+
+/**
+ * Where a person is mentioned, per the `mention` index (docs/ENTITY_CHIPS.md,
+ * step 1, item 12): one entry per row, naming the kind of source and its id.
+ * Sorted, so a test can compare the whole list.
+ */
+export async function getMentionSources(userId: string): Promise<string[]> {
+  const rows = await prisma.mention.findMany({ where: { userId }, select: { docId: true, postId: true, annotationId: true } });
+  return rows
+    .map((row) => (row.docId ? `doc:${row.docId}` : row.postId ? `post:${row.postId}` : `annotation:${row.annotationId}`))
+    .sort();
+}
+
+/**
+ * A doc's body as full-text search reads it: `prose_text(prose_json)`, the
+ * SQL function behind the search vector and its snippets. Null for a doc with
+ * no cache yet.
+ */
+export async function getDocSearchText(docId: string): Promise<string | null> {
+  const rows = await prisma.$queryRaw<{ text: string | null }[]>`
+    SELECT CASE WHEN prose_json IS NULL THEN NULL ELSE public.prose_text(prose_json) END AS text FROM "doc" WHERE id = ${docId}
+  `;
+  return rows[0]?.text ?? null;
 }
 
 /** ydoc_snapshot row count for a doc — the "publishing again reuses, doesn't duplicate" assertion (PLAN.md §15b). */
@@ -2626,7 +2655,7 @@ export async function appendTestDocParagraph(opts: { docId: string; text: string
   const update = Y.encodeStateAsUpdate(scratch, before);
   const created = await prisma.ydocUpdate.create({ data: { ydocId, update: Buffer.from(update) }, select: { id: true } });
   const { ydoc, stateVector } = encodeYdocState(scratch);
-  const cached = docContentFromYdoc(scratch);
+  const cached = await docCacheFromYdoc(scratch);
   scratch.destroy();
   await prisma.ydoc.update({
     where: { id: ydocId },
@@ -2742,6 +2771,8 @@ const handlers = {
   getThread,
   getPublicationEvents,
   getPostContentText,
+  getDocSearchText,
+  getMentionSources,
   countDocYdocSnapshots,
   getCommentStatus,
   createTestYdoc,

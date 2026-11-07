@@ -234,6 +234,30 @@
   background: color-mix(in srgb, var(--link) 28%, transparent);
 }
 
+/* An entity chip (docs/ENTITY_CHIPS.md): a mention, a citation. Its label is
+   computed, never stored, so an editor draws it with a node view and every
+   other surface with the static renderer, both under this one class. It
+   reads as a link because that is what it is wherever it is live. A deleted
+   or unknown target is struck through and takes the muted color, as the
+   plan's statuses say. */
+.prose :global(.entity-chip) {
+  color: var(--link);
+  border-radius: 2px;
+}
+
+.prose :global(.entity-chip[data-status="deleted"]),
+.prose :global(.entity-chip[data-status="unknown"]) {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+/* Selected as a node (a click, or an arrow key stepping onto it): the wash a
+   text selection gets, in place of ProseMirror's default outline. */
+.prose :global(.entity-chip.ProseMirror-selectednode) {
+  background: color-mix(in srgb, var(--link) 28%, transparent);
+  outline: none;
+}
+
 /* Not on top of a pending annotation: composing one blurs the editor too,
    and the same range would carry both classes — ProseMirror merges
    same-range inline decorations onto one span, class names concatenated —

@@ -4,7 +4,9 @@ import { canManageDocs, canUserEditDoc } from "@/lib/doc-authz";
 import { BYLINE_ELIGIBLE_ROLES } from "@/lib/role-checks";
 import { createDocWithContent } from "@/lib/doc-create";
 import { MAX_MARKDOWN_BYTES, markdownToBlocks, markdownToDocContent, markdownToText } from "@/lib/markdown-import";
-import { pmSchema } from "@/lib/tiptap-schema";
+import { pmDocContentSchema, pmSchema } from "@/lib/tiptap-schema";
+import { resolveParsedChips } from "@/lib/entity-chips/parsed-chips";
+import { chipIdentitiesBetween } from "@/lib/entity-chips/renderings";
 import { postedAnnotationWhere } from "@/lib/annotation-authz";
 import { linkPartsInto } from "@/lib/anchored-link-data";
 import { flattenForMatch, quotedTextAt } from "@/lib/comment-quote-match";
@@ -16,7 +18,7 @@ import { docLogTail, isDocVersion, loadDocState, loadDocStateAt } from "@/lib/do
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { displayNameOf } from "@/lib/display-name";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
-import { viewerOf } from "@/lib/actor";
+import { viewerOf, type Actor } from "@/lib/actor";
 import { ApiError, ERROR_LIST_CAP, forbidden, invalid } from "@/lib/api/errors";
 import type { McpContext, ToolResult } from "./tool";
 import { readableDoc, type ResolvedDoc } from "./resolve";
@@ -124,11 +126,18 @@ async function editableDoc(ctx: McpContext, url: string): Promise<ResolvedDoc> {
   return doc;
 }
 
-/** Markdown as edit blocks, checked against the doc schema. */
-function blocksOf(markdown: string): JSONContent[] {
-  const blocks = markdownToBlocks(markdown);
+/**
+ * Markdown as edit blocks, checked against the doc schema. A chip kind's
+ * syntax is read as a chip and resolved under that kind's rule for `actor`
+ * (`resolveParsedChips`); `held` is the doc as it stands, whose own chips an
+ * edit may always write back.
+ */
+async function blocksOfMarkdown(markdown: string, actor: Actor, docId: string, held: JSONContent): Promise<JSONContent[]> {
+  const parsed = markdownToBlocks(markdown, { chips: true });
+  const resolved = await resolveParsedChips({ type: "doc", content: parsed }, actor, { docId, held });
+  const blocks = resolved.content ?? [];
   try {
-    pmSchema.nodeFromJSON({ type: "doc", content: blocks }).check();
+    pmDocContentSchema.nodeFromJSON({ type: "doc", content: blocks }).check();
   } catch (err) {
     throw invalid(`That Markdown doesn't make valid doc content: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -149,9 +158,11 @@ export type EditInput = {
 
 /** What the edit touched, and what the endpoint refused, said as the model reads them. */
 function refusalError(refusal: { code: string; message: string; details?: Record<string, unknown>; edit: number }, count: number): ApiError {
-  const code = refusal.code === "conflict" ? "conflict" : (refusal.code as "no_match" | "ambiguous" | "invalid");
-  return new ApiError(code, count > 1 ? `Edit ${refusal.edit + 1}: ${refusal.message}` : refusal.message, {
-    ...(count > 1 ? { edit: refusal.edit + 1 } : {}),
+  const code = refusal.code === "conflict" ? "conflict" : (refusal.code as "no_match" | "ambiguous" | "invalid" | "chip_as_text");
+  // A refusal of the request as a whole names no edit.
+  const numbered = count > 1 && refusal.edit >= 0;
+  return new ApiError(code, numbered ? `Edit ${refusal.edit + 1}: ${refusal.message}` : refusal.message, {
+    ...(numbered ? { edit: refusal.edit + 1 } : {}),
     ...(refusal.details ?? {}),
   });
 }
@@ -187,6 +198,10 @@ export async function editDocFor(
   input: { url: string; version?: string; edits?: EditInput[]; title?: string },
 ): Promise<ToolResult> {
   const doc = await editableDoc(ctx, input.url);
+  // The doc as it stands: whose chips an edit may write back, and what its
+  // quotes are matched against on both servers.
+  const current = await loadDocState(doc.id);
+  const blocksOf = (markdown: string) => blocksOfMarkdown(markdown, ctx.actor, doc.id, current.json);
   const edits: EditSpec[] = [];
   const written: JSONContent[] = [];
   for (const [index, edit] of (input.edits ?? []).entries()) {
@@ -197,16 +212,16 @@ export async function editDocFor(
         typeof edit.old === "string"
           ? { quote: edit.old, prefix: edit.prefix, suffix: edit.suffix }
           : { start: edit.old.start, end: edit.old.end, prefix: edit.prefix, suffix: edit.suffix, acrossHeadings: edit.acrossHeadings };
-      const blocks = edit.new.trim() === "" ? [] : blocksOf(edit.new);
+      const blocks = edit.new.trim() === "" ? [] : await blocksOf(edit.new);
       edits.push({ kind: "replace", target, blocks: blocks.length > 0 ? blocks : [] });
       written.push(...blocks);
     } else if (edit.append !== undefined) {
-      const blocks = blocksOf(edit.append);
+      const blocks = await blocksOf(edit.append);
       edits.push({ kind: "append", blocks });
       written.push(...blocks);
     } else if (edit.insert !== undefined) {
       if (edit.after === undefined) throw invalid(`${label}insert needs after: a heading's text or block number.`);
-      const blocks = blocksOf(edit.insert);
+      const blocks = await blocksOf(edit.insert);
       edits.push({ kind: "insert", heading: edit.after, atEnd: edit.atEnd, blocks });
       written.push(...blocks);
     } else {
@@ -226,7 +241,7 @@ export async function editDocFor(
     const tail = await docLogTail(doc.id);
     if (tail !== null && version < tail) {
       const then = await loadDocStateAt(doc.id, version);
-      const target = flattenForMatch(then.node);
+      const target = flattenForMatch(then.node, then.chips.labels);
       for (const edit of named) {
         const found = resolveQuote(target, edit.target, markdownToText);
         if (found.kind === "none" || found.matches.length === 0) {
@@ -238,6 +253,7 @@ export async function editDocFor(
           });
         }
         edit.target.expectText = quotedTextAt(then.node, found.matches[0].from, found.matches[0].to);
+        edit.target.expectChips = chipIdentitiesBetween(then.node, found.matches[0].from, found.matches[0].to);
       }
     }
   }
@@ -253,6 +269,7 @@ export async function editDocFor(
     annotations: anchors.annotations,
     markAnnotations: anchors.markAnnotations,
     linkParts: anchors.linkParts,
+    chipInputs: current.chips.inputs,
   });
   if (!answer.ok) {
     if ("refusal" in answer) throw refusalError(answer.refusal, edits.length);
@@ -265,6 +282,9 @@ export async function editDocFor(
     version: answer.updateId,
     ...(answer.applied ? {} : { unchanged: true }),
     ...(answer.changed.length > 0 ? { changed: blockList(answer.changed) } : {}),
+    // Removing a mention on purpose is allowed, and never silent.
+    ...(answer.chips && answer.chips.removed.length > 0 ? { mentionsRemoved: answer.chips.removed } : {}),
+    ...(answer.chips && answer.chips.added > 0 ? { mentionsAdded: answer.chips.added } : {}),
     ...(touchedAnnotations.length > 0 || touchedLinks.length > 0
       ? {
           touched: {
@@ -376,6 +396,7 @@ export async function revertEditFor(
     annotations: anchors.annotations,
     markAnnotations: anchors.markAnnotations,
     linkParts: anchors.linkParts,
+    chipInputs: now.chips.inputs,
   });
   if (!answer.ok) {
     if ("refusal" in answer) throw refusalError(answer.refusal, edits.length);

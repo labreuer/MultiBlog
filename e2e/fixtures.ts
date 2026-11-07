@@ -594,6 +594,12 @@ export async function selectTextInBody(page: Page, needle: string): Promise<void
  * on the page, in DOM order.
  */
 export async function selectTextInAnnotation(page: Page, needle: string, nth = 0): Promise<void> {
+  // A card shows the server's static copy of its body until the read-only
+  // editor over it has mounted, and only the editor reports a selection. The
+  // text being on screen says nothing about which copy is showing it, so wait
+  // for the editor: before it exists there is nothing to select in, and while
+  // it is still hidden a selection in it is one nobody sees.
+  await expect(page.locator('[aria-label="Annotation"]').nth(nth)).toBeVisible();
   await selectTextIn(page, '[aria-label="Annotation"]', needle, nth);
 }
 

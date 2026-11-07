@@ -4,6 +4,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { flushAnnotationCache } from "@/lib/annotation-admin";
 import { decodeAnnotationBody } from "@/lib/annotation-body";
+import { chipIdentities } from "@/lib/entity-chips/renderings";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { ydocStore, encodeYdocState } from "../../server/ydoc-store";
@@ -26,6 +27,12 @@ export type SettledBody = {
   /** Whether the text is the cached (last settled) text — the no-op check. */
   unchanged: boolean;
 };
+
+function sameChips(a: JSONContent, b: JSONContent | null): boolean {
+  const before = b ? chipIdentities(b) : [];
+  const after = chipIdentities(a);
+  return after.length === before.length && after.every((identity, index) => identity === before[index]);
+}
 
 /**
  * PLAN.md §22e — a body's settled state, ready to record as a version.
@@ -55,6 +62,9 @@ export type SettledBody = {
  * settled states with identical text but a different mark structure are the
  * same thing to a reader, and a version nobody could tell from its
  * predecessor would still cost the author their grace window (§22b).
+ * The text holds a chip as its label, and two people can share one, so the
+ * chips are compared too, by what each stands for: a mention changed from one
+ * "Claude" to another is a change.
  *
  * Deliberately returns *data* rather than writing: every caller needs the
  * write to be part of its own transaction (post sets the status alongside it,
@@ -68,7 +78,7 @@ export async function settleAnnotationBody(
 ): Promise<SettledBody | { error: string }> {
   const annotation = await prisma.annotation.findUnique({
     where: { id: annotationId },
-    select: { bodyText: true },
+    select: { bodyText: true, proseJson: true },
   });
   if (!annotation) {
     return { error: "Annotation not found." };
@@ -91,13 +101,13 @@ export async function settleAnnotationBody(
       return { error: "Couldn't read the annotation's body right now — try again shortly." };
     }
     try {
-      const { proseJson, bodyText } = decodeAnnotationBody(doc);
+      const { proseJson, bodyText } = await decodeAnnotationBody(doc);
       settled = {
         mark,
         snapshot: encodeYdocState(doc),
         proseJson,
         bodyText,
-        unchanged: bodyText === annotation.bodyText,
+        unchanged: bodyText === annotation.bodyText && sameChips(proseJson, annotation.proseJson as JSONContent | null),
       };
     } catch (err) {
       console.error(`[annotations] ${ydocId} at ${mark} isn't TipTap-decodable:`, err);

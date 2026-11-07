@@ -1,5 +1,6 @@
 import type { Role } from "@/generated/prisma/enums";
 import type { EditRefusal, EditSpec } from "./doc-edit";
+import type { ChipInputs } from "./entity-chips/types";
 import { signYdocToken } from "./ydoc-token";
 import { collabHttpOrigin } from "./collab-http-origin";
 import { DOC_EDIT_PATH, ydocIdForDoc } from "./ydoc-names";
@@ -19,6 +20,8 @@ export type DocEditAnswer =
       /** The `ydoc_update` the edit was appended as; null for one that changed nothing. */
       updateId: string | null;
       changed: number[];
+      /** The entity chips the edit took out, by label, and how many it put in. Absent for an edit that changed nothing. */
+      chips?: { removed: string[]; added: number };
       blocks: number;
       touched: { annotations: { id: string; resolves: boolean }[]; linkParts: { id: string; resolves: boolean }[] };
     }
@@ -35,6 +38,13 @@ export async function requestDocEdit(opts: {
   annotations: AnchorRef[];
   markAnnotations: string[];
   linkParts: AnchorRef[];
+  /**
+   * What the doc's entity chips are labelled from, as the client's read
+   * labelled them (docs/ENTITY_CHIPS.md, MCP item 4): the collab server matches
+   * the edit's quotes against the same labels this process checked them with,
+   * so a rename between the two can't turn a good quote into a miss.
+   */
+  chipInputs: ChipInputs;
 }): Promise<DocEditAnswer> {
   const documentName = ydocIdForDoc(opts.docId);
   const token = await signYdocToken({ sub: opts.userId, documentName, role: opts.role });
@@ -52,6 +62,7 @@ export async function requestDocEdit(opts: {
         annotations: opts.annotations,
         markAnnotations: opts.markAnnotations,
         linkParts: opts.linkParts,
+        chipInputs: opts.chipInputs,
       }),
     });
   } catch (err) {

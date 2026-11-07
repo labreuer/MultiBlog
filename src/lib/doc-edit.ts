@@ -2,6 +2,8 @@ import { Fragment, Mark, Slice, type Node as PMNode, type Schema } from "@tiptap
 import { Transform } from "@tiptap/pm/transform";
 import type { JSONContent } from "@tiptap/core";
 import { diffText, tokenizeFine } from "./diff";
+import { chipIdentitiesBetween, chipIdentity, chipsIn } from "./entity-chips/renderings";
+import { chipDisplayText, displayTextBetween, isChip, type ChipLabels } from "./entity-chips/text";
 import { alignBlocks } from "./block-align";
 import { blockText, blocksOfRange, docBlocks, findHeading, sectionOf, type DocBlock } from "./doc-text";
 import { flattenForMatch, normalizeForMatch, quotedTextAt, type FlatTarget } from "./comment-quote-match";
@@ -49,6 +51,12 @@ export type EditTarget = QuoteSpec & {
    * refused with its text now rather than overwritten unseen.
    */
   expectText?: string;
+  /**
+   * The entity chips in the passage at that version, by identity
+   * (`chipIdentitiesBetween`). Every chip reads as the same anchor text in
+   * `expectText`, so one swapped for another since would pass that check.
+   */
+  expectChips?: string[];
 };
 
 /** One edit, as the edit endpoint takes it: blocks are TipTap JSON, already parsed from Markdown and validated. */
@@ -63,10 +71,10 @@ export type EditSpec =
   | { kind: "insertBlock"; afterText: string | null; block: JSONContent };
 
 export type EditRefusal = {
-  code: "no_match" | "ambiguous" | "invalid" | "conflict";
+  code: "no_match" | "ambiguous" | "invalid" | "conflict" | "chip_as_text";
   message: string;
   details?: Record<string, unknown>;
-  /** Which edit, 0-based. */
+  /** Which edit, 0-based; -1 for a refusal of the request as a whole. */
   edit: number;
 };
 
@@ -78,6 +86,8 @@ export type EditPlan =
       ranges: { from: number; to: number }[];
       /** Block numbers, in the doc after the edit, of every block the edit changed or added. */
       changed: number[];
+      /** The entity chips the edit took out, as their labels, and how many it put in. */
+      chips: { removed: string[]; added: number };
     }
   | { ok: false; refusal: EditRefusal };
 
@@ -87,21 +97,76 @@ export type MergeOptions = {
   authorId: string | null;
   /** Revert: new words keep the marks they arrive with, and gain neither the actor's mark nor any inherited one. */
   keepMarks?: boolean;
+  /** The old document's entity chips as the client read them: what a quote is matched against, and what `chip_as_text` looks for. */
+  labels?: ChipLabels;
+  /** One merge's chip bookkeeping (`chipMergeFor`). A caller that wants its findings makes one and passes it; otherwise each textblock makes its own. */
+  chipMerge?: ChipMerge;
 };
 
 type Atom = { text: string; marks: readonly Mark[]; leaf: PMNode | null };
 
-/** A textblock as one atom per UTF-16 code unit of its text form, a hard break as "\n". */
-function atomsOf(textblock: PMNode): Atom[] {
+// docs/ENTITY_CHIPS.md, MCP item 5 — the merge is a diff of text, and a chip
+// has to be in that text as something only the same chip equals. So each chip
+// *identity* (its chip kind and what it points at) gets one private-use
+// character of its own, in place of the "\n" every other inline leaf is.
+// Whatever label the new text gave a chip, it then lines up with the old chip
+// of the same identity and with nothing else: the old node survives, instance
+// id and all, and a chip that changed identity reads as one removed and one
+// added.
+//
+// The characters are allocated per merge, skipping any that either document
+// holds, since extracted PDF text can hold any private-use character.
+// `tokenizeFine` makes each a token of its own: it is neither a letter, a
+// digit nor whitespace.
+export type ChipMerge = {
+  codes: Map<string, string>;
+  /** Every character either document's text holds, so no code collides with one. */
+  taken: Set<string>;
+  next: number;
+  labels: ChipLabels | undefined;
+  /**
+   * Chips whose place the new text filled with their own label as plain
+   * words: the mark of text copied out of a text read and sent back, which
+   * would turn a mention into a name nobody is told about. Their labels.
+   */
+  asText: string[];
+};
+
+export function chipMergeFor(old: PMNode, next: PMNode, labels: ChipLabels | undefined): ChipMerge {
+  return { codes: new Map(), taken: new Set(old.textContent + next.textContent), next: 0xe000, labels, asText: [] };
+}
+
+function chipCode(merge: ChipMerge, leaf: PMNode): string {
+  const key = chipIdentity({
+    kind: String(leaf.attrs.kind ?? ""),
+    data: (leaf.attrs.data ?? {}) as Record<string, unknown>,
+  });
+  let code = merge.codes.get(key);
+  if (code === undefined) {
+    while (merge.taken.has(String.fromCharCode(merge.next))) merge.next += 1;
+    code = String.fromCharCode(merge.next);
+    merge.next += 1;
+    merge.codes.set(key, code);
+  }
+  return code;
+}
+
+/** A textblock as one atom per UTF-16 code unit of its text form: a chip as its identity's character, any other inline leaf as "\n". */
+function atomsOf(textblock: PMNode, merge: ChipMerge): Atom[] {
   const atoms: Atom[] = [];
   textblock.forEach((child) => {
     if (child.isText) {
       for (const unit of (child.text ?? "").split("")) atoms.push({ text: unit, marks: child.marks, leaf: null });
     } else if (child.isInline && child.isLeaf) {
-      atoms.push({ text: "\n", marks: child.marks, leaf: child });
+      atoms.push({ text: isChip(child) ? chipCode(merge, child) : "\n", marks: child.marks, leaf: child });
     }
   });
   return atoms;
+}
+
+/** A label as it would be typed back by hand: without its `@`, case and spacing folded. */
+function plainLabel(label: string): string {
+  return label.replace(/^@/, "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function annotationsOf(marks: readonly Mark[] | undefined): Mark[] {
@@ -184,8 +249,9 @@ function build(template: PMNode, atoms: readonly Atom[]): PMNode {
  * block's type and attributes, so a paragraph that became a heading is one.
  */
 export function mergeTextblock(old: PMNode, next: PMNode, options: MergeOptions): PMNode {
-  const oa = atomsOf(old);
-  const na = atomsOf(next);
+  const merge = options.chipMerge ?? chipMergeFor(old, next, options.labels);
+  const oa = atomsOf(old, merge);
+  const na = atomsOf(next, merge);
   const tokens = diffText(
     oa.map((a) => a.text).join(""),
     na.map((a) => a.text).join(""),
@@ -225,7 +291,37 @@ export function mergeTextblock(old: PMNode, next: PMNode, options: MergeOptions)
     for (const atom of inserted) out.push(fresh(atom, inherited, options));
     k = end;
   }
+  // Not on a revert, which puts back what was there, plain words included.
+  if (!options.keepMarks) noteChipsAsText(oa, na, merge);
   return build(next, out);
+}
+
+/**
+ * Records each chip this textblock lost whose label its new text gained as
+ * plain words (`ChipMerge.asText`). Counted over the whole textblock, not hunk
+ * by hunk: the diff is free to line a label's words up with their neighbours,
+ * and splits "@Ada Lovelace" across two hunks as readily as not.
+ */
+function noteChipsAsText(oa: readonly Atom[], na: readonly Atom[], merge: ChipMerge): void {
+  const plain = (atoms: readonly Atom[]) =>
+    atoms
+      .filter((atom) => !atom.leaf)
+      .map((atom) => atom.text)
+      .join("")
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+  const count = (haystack: string, needle: string) => haystack.split(needle).length - 1;
+  const chipsOf = (atoms: readonly Atom[], code: string) => atoms.filter((atom) => atom.leaf && atom.text === code).length;
+  const [was, now] = [plain(oa), plain(na)];
+  const seen = new Set<string>();
+  for (const atom of oa) {
+    if (!atom.leaf || !isChip(atom.leaf) || seen.has(atom.text)) continue;
+    seen.add(atom.text);
+    if (chipsOf(na, atom.text) >= chipsOf(oa, atom.text)) continue;
+    const label = chipDisplayText(atom.leaf.attrs, merge.labels);
+    const words = plainLabel(label);
+    if (words !== "" && count(now, words) > count(was, words)) merge.asText.push(label);
+  }
 }
 
 /** A block that has no counterpart: all of it is new, and by the actor. */
@@ -269,8 +365,8 @@ export function mergeBlock(old: PMNode, next: PMNode, options: MergeOptions): PM
     const oc = childrenOf(old);
     const nc = childrenOf(next);
     const pairs = alignBlocks(
-      oc.map(blockText),
-      nc.map(blockText),
+      oc.map((node) => blockText(node)),
+      nc.map((node) => blockText(node)),
       { old: oc.map(blockKey), new: nc.map(blockKey) },
     );
     const children = pairs.flatMap((pair) =>
@@ -291,10 +387,13 @@ export function mergeBlock(old: PMNode, next: PMNode, options: MergeOptions): PM
  * whole: the MCP server's edit_note, whose body is sent entire and whose
  * surviving words must still keep their marks.
  */
-export function mergeDoc(old: PMNode, next: PMNode, options: MergeOptions): PMNode {
+export function mergeDoc(old: PMNode, next: PMNode, given: MergeOptions): PMNode {
+  // One allocation of chip characters for the whole document; a caller that
+  // wants `asText` passes its own `chipMerge`.
+  const options: MergeOptions = given.chipMerge ? given : { ...given, chipMerge: chipMergeFor(old, next, given.labels) };
   const oc = childrenOf(old);
   const nc = childrenOf(next);
-  const pairs = alignBlocks(oc.map(blockText), nc.map(blockText), { old: oc.map(blockKey), new: nc.map(blockKey) });
+  const pairs = alignBlocks(oc.map((node) => blockText(node)), nc.map((node) => blockText(node)), { old: oc.map(blockKey), new: nc.map(blockKey) });
   const merged = pairs.flatMap((pair) =>
     pair.new === null ? [] : pair.old === null ? [markNew(nc[pair.new], options)] : [mergeBlock(oc[pair.old], nc[pair.new], options)],
   );
@@ -342,8 +441,10 @@ export function planEdits(
   options: MergeOptions & { asText: (markdown: string) => string },
 ): EditPlan {
   const schema = options.schema;
-  const blocks = docBlocks(doc);
-  const target = flattenForMatch(doc);
+  // The doc as the client read it: each entity chip as its label, in the
+  // blocks' text and in what a quote is matched against.
+  const blocks = docBlocks(doc, options.labels);
+  const target = flattenForMatch(doc, options.labels);
   const ops: Op[] = [];
   const ranges: { from: number; to: number }[] = [];
   const fragmentOf = (json: readonly JSONContent[]) =>
@@ -390,6 +491,15 @@ export function planEdits(
           const now = quotedTextAt(doc, match.from, match.to);
           if (normalizeForMatch(now).text !== normalizeForMatch(edit.target.expectText).text) {
             return refuse(index, "conflict", "That passage has changed since you read it.", { textNow: now });
+          }
+        }
+        if (edit.target.expectChips !== undefined) {
+          // Every chip is the same character in the text compared above.
+          const chipsNow = chipIdentitiesBetween(doc, match.from, match.to);
+          if (chipsNow.length !== edit.target.expectChips.length || chipsNow.some((id, i) => id !== edit.target.expectChips![i])) {
+            return refuse(index, "conflict", "That passage has changed since you read it: it mentions someone else now.", {
+              textNow: displayTextBetween(doc, match.from, match.to, options.labels),
+            });
           }
         }
         ranges.push({ from: match.from, to: match.to });
@@ -491,13 +601,17 @@ export function planEdits(
   // Step 2: the merge, top-level block by block.
   const oc = childrenOf(doc);
   const nc = childrenOf(shaped);
-  const pairs = alignBlocks(oc.map(blockText), nc.map(blockText), { old: oc.map(blockKey), new: nc.map(blockKey) });
+  const pairs = alignBlocks(oc.map((node) => blockText(node)), nc.map((node) => blockText(node)), { old: oc.map(blockKey), new: nc.map(blockKey) });
   const merged: PMNode[] = [];
   const changed: number[] = [];
+  // One allocation of chip characters for the whole merge, and one place its
+  // findings collect.
+  const chipMerge = chipMergeFor(doc, shaped, options.labels);
+  const merging: MergeOptions = { ...options, chipMerge };
   for (const pair of pairs) {
     if (pair.new === null) continue;
     const block =
-      pair.old === null ? markNew(nc[pair.new], options) : mergeBlock(oc[pair.old], nc[pair.new], options);
+      pair.old === null ? markNew(nc[pair.new], merging) : mergeBlock(oc[pair.old], nc[pair.new], merging);
     merged.push(block);
     if (pair.old === null || !block.eq(oc[pair.old])) changed.push(merged.length);
   }
@@ -508,7 +622,28 @@ export function planEdits(
   } catch (err) {
     return refuse(0, "invalid", `The edited doc isn't valid: ${err instanceof Error ? err.message : String(err)}`);
   }
-  return { ok: true, next, ranges, changed };
+  if (chipMerge.asText.length > 0) {
+    const labels = [...new Set(chipMerge.asText)];
+    return refuse(
+      -1,
+      "chip_as_text",
+      `The new text has ${labels.map((label) => `"${label}"`).join(", ")} as plain words where the doc has a mention. ` +
+        "Write a mention as the Markdown read shows it, [@Name](/authors/handle), to keep it; leave the name out to remove it.",
+      { labels },
+    );
+  }
+  return { ok: true, next, ranges, changed, chips: chipChanges(doc, next, options.labels) };
+}
+
+/** The chips an edit took out, by label, and how many it put in: instance ids that left, and ones that arrived. */
+function chipChanges(old: PMNode, next: PMNode, labels: ChipLabels | undefined): { removed: string[]; added: number } {
+  const before = chipsIn(old);
+  const after = new Set(chipsIn(next).map((chip) => chip.iid));
+  const had = new Set(before.map((chip) => chip.iid));
+  return {
+    removed: before.filter((chip) => !after.has(chip.iid)).map((chip) => labels?.get(chip.iid) ?? chipIdentity(chip)),
+    added: [...after].filter((iid) => !had.has(iid)).length,
+  };
 }
 
 /**

@@ -236,6 +236,25 @@ Run the annotation one after `check-ydoc-integrity.ts`, for this folder's usual 
 decodes snapshots, so a corrupt one makes it report cache faults that are really one ydoc fault
 wearing several hats. The comment one touches no ydoc and can run any time.
 
+## `check-mentions.ts` (docs/ENTITY_CHIPS.md, step 1, item 12)
+
+The `mention` table is written by triggers and read by things that would not notice it being
+wrong. The label refresh after a rename finds the docs to rewrite through it, so a missing row
+is a doc that goes on showing, and being found by, the old name.
+
+- `trigger`: each of the three triggers `mention_index` created exists and is enabled.
+- `missing`: a mention chip in a doc, a posted note or a post with no row. The expected rows
+  come from the functions the triggers call, so the two cannot disagree about what a document
+  mentions. A chip naming no account has no row by design.
+- `extra`: a row whose chip its document no longer holds, or one for a DRAFT note.
+
+`--repair` runs the triggers' own diff for each drifted source, so rows whose chips are still
+there keep their `first_seen_at`. It refuses while a trigger is missing or disabled.
+
+```
+npx tsx scripts/integrity/check-mentions.ts [--verbose] [--repair]
+```
+
 ## `check-search-index.ts` (docs/FULLTEXT.md §3)
 
 The six `search_vector` columns and the `search_lexeme` vocabulary are written by triggers and

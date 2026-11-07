@@ -1,6 +1,6 @@
 # Entity chips (planned)
 
-**Status: planned; only step 0 is built.** An *entity chip* is an inline node in a doc's text
+**Status: partly built; "Built so far" below says which parts.** An *entity chip* is an inline node in a doc's text
 that stands for an entity, such as a person or a work, and holds only *which* one. Its label is
 computed whenever it is shown, from the doc's style and the entity's current record. A rename, a
 corrected record or a change of style therefore changes every label at once, and no anchored
@@ -51,6 +51,89 @@ date is refused".
 
   Nothing exercises the kit without a chip kind, so steps 1 and 2 are built together. Section
   styles, comments, and each chip kind's own later work come after.
+
+## Built so far
+
+Steps 0 and 1 are under way on the `entity-chips` branch. Everything below not listed here is
+still a plan.
+
+- **Step 0, the gate:** all of it ([YDOC.md](YDOC.md)).
+- **Step 1, item 1:** the spike, with its result.
+- **Item 2, the node:** `entityChip` (`src/lib/entity-chips/node.ts`) in the doc and
+  annotation-body schemas, with `leafText`, the parse rule and its validation.
+- **Item 3, instance ids:** a random id at insertion, and a fresh one for a pasted copy
+  (`repairChipIids`). Not the id derived from a Yjs item, for a duplicate that concurrent changes
+  leave.
+- **Item 4, the rendering function:** `chipRenderings` (`renderings.ts`), the three statuses, and
+  the placeholder for a chip kind the build doesn't know. Not the `~~ ~~` in Markdown.
+- **Item 5, the chip context:** `loadChipContext`, `GET /api/chip-context` with its per-viewer
+  rule (`context-for.ts`), and `useChipInputs`, which refetches for a target it doesn't hold and
+  shows `…` meanwhile. The doc reading view's first paint gets its context as props.
+- **Item 6, node views and decorations:** in the doc editor, the doc reading view and
+  side-by-side. A static render goes through `renderWithChips` (`static.tsx`).
+- **Item 7, the display-text rule:** `src/lib/entity-chips/text.ts` holds it: a chip's anchor
+  text, and its display text from computed labels or from a label on the JSON node. Through it
+  go `extractText` (a note's `bodyText`, a collapsed card's excerpt and word count),
+  `extractMarkedText`, the table grid a CSV is written from, and `quotedTextAt`, with
+  `text.test.ts` running them over one body, and `blockText`, `flattenForMatch` and the
+  Markdown writer, which take labels from the MCP doc state (`quote.test.ts`).
+- **Item 8, `prose_json` materialization:** every writer of `Doc.proseJson` goes through
+  `docCacheFromYdoc`, which adds each chip's label (`materializeChipLabels`); `prose_text` reads
+  it (migration `chip_labels_in_prose_text`), so a doc's search vector and snippets hold the
+  label; and `check-doc-integrity.ts` compares without labels and reports a stale one as
+  `chip-labels`. No re-index was needed, since no doc could hold a chip before this.
+- **Item 9, posts and the landing preamble:** `docJsonForPostSide` (`post-content.ts`) replaces
+  each chip with its label as linked text, struck through when its target is gone, and records
+  the chip on the link's `chip` attribute. Not the republish remap.
+- **Item 10, the refresh, for mentions:** `refreshMentionLabels` (`refresh.ts`) finds the docs
+  and notes that mention a person through the `mention` table and rewrites a doc's
+  `prose_json` labels and a note's `bodyText`, each as a compare-and-set on the text it read,
+  in raw SQL so no date moves. `scheduleMentionRefresh` runs it in the background after a
+  change to a name, initials, a handle or a bot's person, and once more past the store
+  debounce's ceiling. Not the instance default style, which doesn't exist yet.
+- **Item 12, the index table, for mentions:** `mention` (migration `mention_index`), one row per
+  chip with its person, its instance id, its one source and when it was first seen. Triggers on
+  `doc.prose_json`, `annotation.prose_json` and `post.prose_json` keep it by a diff; a post's
+  rows come from its links' `chip` attribute, and a DRAFT note has none.
+  `scripts/integrity/check-mentions.ts` checks it, with `--repair`. Nothing reads who inserted
+  a chip yet.
+- **Item 13, annotation bodies:** the node is in their schema, and every surface that draws a
+  note's body labels its chips: the cards (`buildAnnotationEntries` loads one context for every
+  note on the page), the read-only editor over each card, the composer and the edit session,
+  and the earlier versions in the history panel. `bodyText` is written with labels
+  (`annotationBodyText`) and refreshed (item 10).
+- **Item 15:** `SCHEMA_VERSION` is 1.
+- **Item 14, MCP, the reading half:** reads show each chip as its label in text and in its chip
+  kind's Markdown (`ChipKind.markdown`, `chipMarkdowns`, `docContentToMarkdown`), in docs, notes
+  and thread passages, with a hand-written link of a mention's shape written `[\@…]`. A quote
+  is matched against the doc's display text and verified against it (`flattenForMatch` with
+  labels), and what is stored stays the anchor text; a quote ending inside a label is a miss
+  rather than widened.
+- **Item 14, MCP, the writing half:** `edit_doc`, `add_note` and `edit_note` read a chip kind's
+  syntax as a chip. The parse yields a placeholder holding what the Markdown named
+  (`markdownToBlocks` with `chips`), and `resolveParsedChips` makes it a chip under the kind's
+  insertion rule, or refuses `unknown_chip`; a chip the body already holds may always be
+  written back. The merge gives each chip identity one private-use character
+  (`ChipMerge`, doc-edit.ts), so a chip written back is the old node again, instance id and
+  all. A chip whose label came back as plain words is refused `chip_as_text`; one left out is
+  removed and reported (`mentionsRemoved`); the conflict check compares chip identities
+  (`expectChips`) beside the text. The collab server labels the live doc from the records the
+  client's read used (`chipInputs` in the edit request).
+
+  Not built of item 14: `create_doc` and `download` (a new doc's ydoc is seeded with a schema
+  that has no chip, so a mention in `create_doc`'s Markdown stays a link), the Markdown retry
+  against identity text (the retry matches the label a link's text gives, which is the same
+  for a mention), a quote edge inside a label widened for a note, `chip_changed` and
+  `unknown_kind` (a chip of a kind the server doesn't know reads as plain `[…]`, and an edit
+  that sends that back is refused as `chip_as_text`), the pairing of a chip that continues
+  another, link titles stripped on the way in, and styles in a read's header.
+- **Mentions:** the chip kind's fields, forms and labels, its context loader, the rule for who
+  may be mentioned, and the `@` menu in the doc editor and in a note's composer
+  ([MENTIONS.md](MENTIONS.md)).
+
+Until the rest of step 1 is built, a stored quote shown outside a ydoc shows U+FFFC where a chip
+is, and `create_doc` can't write one. `/docs`'
+Length counts a chip as no characters.
 
 ## Terms
 
@@ -143,23 +226,34 @@ doesn't cover are in [YDOC.md](YDOC.md).
 
 ## Step 1: the kit (schema version 1)
 
-1. **Performance spike, first.** The server-side cost is known. On the largest local doc, with
-   each of its 638 `/pdf/` links made a chip (563 citations and the reference list's 75 entries,
-   over 75 works):
+1. **Performance spike: done, and no cache is needed.** Measured on the largest local doc
+   (135,000 characters), with each of its 638 `/pdf/` links made a chip (563 citations and the
+   reference list's 75 entries, over 75 works).
+
+   Server-side, in Node:
    - a whole-doc label pass takes 0.13–0.15 ms, numbering included;
    - materializing labels into `prose_json` takes 0.06 ms;
    - an MCP Markdown read takes 4.6 ms, against 3.7 ms without chips;
+   - the chip-context query takes 2–4 ms (median; 75 distinct targets);
    - for scale, today's Yjs decode on that doc is about 1.2 ms.
 
-   Still to measure, with a large explore doc whose `/pdf/` links are converted into chips in a
-   copy:
-   - the chip-context query;
-   - the editor and reading view with hundreds of chip node views: first render, and keystroke
-     latency through PERFORMANCE.md's tool;
-   - a refresh across many docs.
+   In the browser, with 638 chip node views against the same doc with none (chromium, a
+   production build, 2026-11-04, on an AMD Ryzen 9 9950X under Fedora 44 whose load average was
+   20–30 from other work, so each figure is a range over four runs):
+   - the editor and the reading view load no slower: 0.3–0.5 s either way;
+   - a keystroke costs the same: a median of 0.9–1.5 ms at the doc's start and 1.3–2.4 ms at
+     its end, against 0.8–3.8 ms and 1.5–6.1 ms without chips;
+   - relabelling every chip at once (the context arriving, a restyle, a rename) takes 4–11 ms.
 
-   A database cache of labels or context is added only if these show a need. House styles are
-   not expected to need one. CSL styles probably will ([CITATIONS.md](CITATIONS.md), Later).
+   The keystroke figure depends on one thing. The plugin maps its decoration set through a
+   transaction that touches no chip, and rebuilds it only when a chip comes or goes or the
+   inputs change. Rebuilding on every keystroke doubled typing latency at the doc's end, because
+   ProseMirror then compares every block's decorations.
+
+   Not measured, because it isn't built: a refresh across many docs (item 10).
+
+   So no database cache of labels or context is planned for house styles. CSL styles probably
+   will need one ([CITATIONS.md](CITATIONS.md), Later).
 2. **The node**, `entityChip`, in `tiptap-schema.ts`'s `docContentExtensions`. It has three
    attributes, and they never change:
    - `kind`, the chip kind;

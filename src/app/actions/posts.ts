@@ -156,7 +156,7 @@ async function resolvePublishContent(opts: PublishFromDocOpts, userId: string) {
     throughUpdateId: BigInt(opts.throughUpdateId),
     userId,
   });
-  const { proseJson, title: docTitle } = postContentFromYdoc(doc);
+  const { proseJson, title: docTitle } = await postContentFromYdoc(doc);
   doc.destroy();
 
   const title = opts.title?.trim() || docTitle || "Untitled";

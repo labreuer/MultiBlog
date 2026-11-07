@@ -29,6 +29,8 @@ import {
 import { typedOrderedListInputRule } from "./ordered-list-input-rule";
 import { atLine, startingAtLine } from "./list-from-line";
 import { Annotation } from "./annotation-extension";
+import { EntityChip } from "./entity-chips/node";
+import { chipDisplayText, isChip } from "./entity-chips/text";
 
 // docs/TIPTAP.md "Inline code takes other marks" — TipTap's code mark
 // excludes every other mark (`excludes: "_"`). This one excludes only itself,
@@ -94,7 +96,25 @@ export const ListItem = BaseListItem.extend({
 // dropped by `[[`, or a word added after any link the caret lands behind.
 // This one never is, ProseMirror's own choice for links. Typing inside a
 // link still extends it; only its two edges stop.
-export const Link = BaseLink.extend({ inclusive: false });
+//
+// `chip` is what a published post's link keeps of the entity chip it stands
+// for (docs/ENTITY_CHIPS.md, step 1, item 9): a post holds a chip's label as
+// linked text, and this says which chip kind and which targets it was. Set
+// at publish and nowhere else, so it is never parsed from HTML: a pasted link
+// can't claim to be a mention.
+export const Link = BaseLink.extend({
+  inclusive: false,
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      chip: {
+        default: null,
+        parseHTML: () => null,
+        renderHTML: (attributes) => (attributes.chip ? { "data-chip-ref": JSON.stringify(attributes.chip) } : {}),
+      },
+    };
+  },
+});
 
 // StarterKit with the Code above in place of its own, moved to the end of its
 // list, and the Link above in place of its own, where it was. A mark's
@@ -239,7 +259,11 @@ export const authorHighlightExtensions = [...contentExtensions, AuthorHighlight]
 // authorHighlight already demonstrates for the reverse case. Used for
 // anything decoding/encoding a *doc's* ydoc: server/doc-cache.ts,
 // src/lib/ydoc-render.ts, and the doc-side live editor/reading view.
-export const docContentExtensions = [...authorHighlightExtensions, Annotation];
+//
+// EntityChip (docs/ENTITY_CHIPS.md) is doc-side only. A post never holds the
+// node: publishing replaces each chip with its label as linked text, so
+// contentExtensions has no chip and the post-side renderers never meet one.
+export const docContentExtensions = [...authorHighlightExtensions, Annotation, EntityChip];
 
 // The plain prosemirror-model Schema counterpart of docContentExtensions —
 // for server-side code that builds/walks a doc-shaped Node outside a live
@@ -261,7 +285,9 @@ export const pmDocContentSchema = getSchema(docContentExtensions);
 // no headings. annotationEditorExtensions (live-editor-extensions.ts) mirrors
 // this one, so the live annotation editor and every decoder of its ydoc agree
 // on the shape.
-export const annotationContentExtensions = [StarterKit, AuthorHighlight];
+// EntityChip is here as in a doc: a note is where a person is most often
+// mentioned.
+export const annotationContentExtensions = [StarterKit, AuthorHighlight, EntityChip];
 export const pmAnnotationContentSchema = getSchema(annotationContentExtensions);
 
 // The schema for a post's *title*, which lives in its own Yjs fragment
@@ -466,12 +492,25 @@ export function collectMarkAttrValues(doc: JSONContent, markName: string, attrNa
 // split into several adjacent text nodes (different bold/italic runs, etc.),
 // but never discontiguous — it was applied as one addMark(from, to) call —
 // so concatenation in document order always reconstructs the original span.
+//
+// An entity chip inside the span is the exception to "runs that carry the
+// mark": a ydoc stores no marks on an inline node, so the chip arrives here
+// unmarked between two marked runs. It is taken as part of the span when
+// marked text follows it, and gives its display text (entity-chips/text.ts),
+// which for `Doc.proseJson` is the label its cache write put on the node.
 export function extractMarkedText(doc: JSONContent, markName: string, attrName: string, attrValue: string): string {
   const parts: string[] = [];
+  // Chips met since the last marked run: inside the span only if another marked run follows.
+  let pending: string[] = [];
   function walk(node: JSONContent) {
     if (node.type === "text" && node.text) {
       const hasMark = node.marks?.some((mark) => mark.type === markName && mark.attrs?.[attrName] === attrValue);
-      if (hasMark) parts.push(node.text);
+      if (hasMark) {
+        parts.push(...pending, node.text);
+        pending = [];
+      }
+    } else if (isChip(node) && parts.length > 0) {
+      pending.push(chipDisplayText(node.attrs));
     }
     node.content?.forEach(walk);
   }

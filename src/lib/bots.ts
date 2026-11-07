@@ -1,3 +1,4 @@
+import { scheduleMentionRefresh } from "@/lib/entity-chips/refresh";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { ApiError, forbidden, invalid } from "@/lib/api/errors";
 import { botRoleRefusal, outranks } from "@/lib/bot-rules";
@@ -102,7 +103,7 @@ export async function moveBot(actor: Actor, botId: string, personId: string): Pr
   await requirePerson(personId, bot.role);
 
   const now = new Date();
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     // Conditional on the person it was read with, so two moves at once
     // can't both revoke against a stale one.
     const moved = await tx.user.updateMany({ where: { id: botId, worksForUserId: previous }, data: { worksForUserId: personId } });
@@ -113,6 +114,9 @@ export async function moveBot(actor: Actor, botId: string, personId: string): Pr
     });
     return { revoked: revoked.count };
   });
+  // A bot's mention can name the person it works for (docs/MENTIONS.md, "Same labels").
+  scheduleMentionRefresh([botId]);
+  return result;
 }
 
 /**

@@ -1,3 +1,4 @@
+import { scheduleMentionRefresh } from "@/lib/entity-chips/refresh";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { slugify, REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
@@ -46,7 +47,7 @@ export async function uniqueUserSlug(name: string | null, email: string, exclude
 export async function changeUserSlug(userId: string, newSlugInput: string): Promise<string> {
   const newSlug = slugify(newSlugInput, "user");
 
-  return prismaIncludingDeleted.$transaction(async (tx) => {
+  const slug = await prismaIncludingDeleted.$transaction(async (tx) => {
     const user = await tx.user.findUnique({ where: { id: userId }, select: { slug: true } });
     if (!user) {
       throw new Error("User not found.");
@@ -61,6 +62,11 @@ export async function changeUserSlug(userId: string, newSlugInput: string): Prom
     await tx.user.update({ where: { id: userId }, data: { slug: newSlug } });
     return newSlug;
   });
+  // A handle is what a mention shows for a nameless account, and what tells
+  // apart two people of one name (docs/MENTIONS.md, "Refresh"). After the
+  // transaction, so the refresh reads the new one.
+  scheduleMentionRefresh([userId]);
+  return slug;
 }
 
 // Swaps a user's slug back to its most recent past one — mirrors
@@ -68,7 +74,7 @@ export async function changeUserSlug(userId: string, newSlugInput: string): Prom
 // history row directly is unconditionally available, and the
 // REVERT_DISCARD_WINDOW_MS no-trace-if-recent behavior).
 export async function revertUserSlug(userId: string): Promise<string> {
-  return prismaIncludingDeleted.$transaction(async (tx) => {
+  const slug = await prismaIncludingDeleted.$transaction(async (tx) => {
     const user = await tx.user.findUnique({ where: { id: userId }, select: { slug: true } });
     if (!user) {
       throw new Error("User not found.");
@@ -84,4 +90,6 @@ export async function revertUserSlug(userId: string): Promise<string> {
     await tx.user.update({ where: { id: userId }, data: { slug: lastHistory.slug } });
     return lastHistory.slug;
   });
+  scheduleMentionRefresh([userId]);
+  return slug;
 }

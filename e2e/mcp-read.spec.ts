@@ -16,6 +16,7 @@ import {
   deleteTestTag,
   deleteTestUser,
   expireTestApiToken,
+  getAnnotationStates,
   renameTestTagSlug,
   restoreTestUser,
   softDeleteTestUser,
@@ -611,6 +612,70 @@ test("find_users names byline-eligible accounts, and a nameless one only by its 
     expect(bySlugFragment.result.users).toEqual([]);
   } finally {
     await deleteTestUser(namelessEmail);
+    await agent.dispose();
+  }
+});
+
+// docs/ENTITY_CHIPS.md, MCP items 1 and 3 — an entity chip as a machine
+// client reads it and quotes it back.
+test("a doc with a mention reads as its label in text and its syntax in Markdown, and a quote of either finds it", async ({ request }) => {
+  const agent = await createAgent(request);
+  const authorEmail = uniqueEmail("mcp-mentioned");
+  const author = await createTestUser({ email: authorEmail, name: `Mentioned ${authorEmail.split("@")[0]}`, role: "AUTHOR" });
+  const chip = { type: "entityChip", attrs: { kind: "mention", iid: "m1", data: { userId: author.id } } };
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: {
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "The engine was reviewed by " }, chip, { type: "text", text: " last week." }] },
+        { type: "paragraph", content: [{ type: "text", text: "A link by hand: " }, { type: "text", text: "@someone", marks: [{ type: "link", attrs: { href: "/authors/someone" } }] }] },
+      ],
+    },
+  });
+  const label = `@${author.name}`;
+  try {
+    const asText = await agent.call("read", { url: `/doc/${doc.slug}`, format: "text" });
+    expect(String(asText.result.text)).toContain(`The engine was reviewed by ${label} last week.`);
+
+    // In Markdown the chip is its kind's syntax, and the hand-written link
+    // of the same shape is escaped so it can't read back as one.
+    const asMarkdown = await agent.call("read", { url: `/doc/${doc.slug}` });
+    const markdown = String(asMarkdown.result.markdown);
+    expect(markdown).toContain(`reviewed by [${label}](/authors/${author.slug}) last week.`);
+    expect(markdown).toContain("[\\@someone](/authors/someone)");
+
+    // A quote of what was read, from either form, finds the passage.
+    const around = await agent.call("read", { url: `/doc/${doc.slug}`, around: `reviewed by ${label} last`, format: "text" });
+    expect(around.isError, JSON.stringify(around.error)).toBe(false);
+    expect(around.result.total).toBe(1);
+    const viaMarkdown = await agent.call("read", { url: `/doc/${doc.slug}`, around: `reviewed by [${label}](/authors/${author.slug}) last` });
+    expect(viaMarkdown.isError, JSON.stringify(viaMarkdown.error)).toBe(false);
+    expect(viaMarkdown.result).toMatchObject({ total: 1, matchedAs: "markdown" });
+    // One that ends inside the label names no passage.
+    const partial = await agent.call("read", { url: `/doc/${doc.slug}`, around: `reviewed by ${label.slice(0, 6)}` });
+    expect(partial.error.code).toBe("no_match");
+
+    // A note anchored by such a quote stores the chip's anchor text, which no
+    // rename changes, and answers with the passage as it reads.
+    const note = await agent.call("add_note", {
+      on: `/doc/${doc.slug}`,
+      body: `Thanks [${label}](/authors/${author.slug}).`,
+      quote: `reviewed by ${label}`,
+      version: String(asText.result.version),
+    });
+    expect(note.isError, JSON.stringify(note.error)).toBe(false);
+    expect(note.result).toMatchObject({ passage: { text: `reviewed by ${label}` } });
+    const [row] = await getAnnotationStates(doc.id);
+    expect(row).toMatchObject({ quotedText: "reviewed by ￼", quoteMatchesAtStamp: true });
+
+    // The thread reads back with the passage as its label too.
+    const threads = await agent.call("read", { url: `/doc/${doc.slug}`, include: ["annotations"], format: "text" });
+    expect(JSON.stringify(threads.result.threads)).toContain(`reviewed by ${label}`);
+  } finally {
+    await deleteTestDoc(doc.id);
+    await deleteTestUser(authorEmail);
     await agent.dispose();
   }
 });

@@ -312,6 +312,10 @@ export const getPublicationEvents = (
 
 export const getPostContentText = (...args: Parameters<DbHandlers["getPostContentText"]>): Promise<string | null> =>
   call("getPostContentText", ...args);
+export const getDocSearchText = (...args: Parameters<DbHandlers["getDocSearchText"]>): Promise<string | null> =>
+  call("getDocSearchText", ...args);
+export const getMentionSources = (...args: Parameters<DbHandlers["getMentionSources"]>): Promise<string[]> =>
+  call("getMentionSources", ...args);
 
 export const countDocYdocSnapshots = (...args: Parameters<DbHandlers["countDocYdocSnapshots"]>): Promise<number> =>
   call("countDocYdocSnapshots", ...args);

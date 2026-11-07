@@ -9,6 +9,10 @@ import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { docBlocks, type DocBlock } from "@/lib/doc-text";
+import { chipInputsForBody } from "@/lib/entity-chips/context";
+import { chipMarkdowns, chipsIn } from "@/lib/entity-chips/renderings";
+import { chipLabelsIn, type ChipLabels } from "@/lib/entity-chips/text";
+import type { ChipInputs } from "@/lib/entity-chips/types";
 
 // docs/MCP.md §6 — a doc as the MCP server reads it: from its stored `ydoc`
 // row, the state the collab server keeps, never a replay of the update log.
@@ -26,7 +30,17 @@ export type DocState = {
   /** The title fragment's text; "" for a doc with none. */
   title: string;
   node: PMNode;
+  /** The top-level blocks, each one's text with its entity chips as their labels. */
   blocks: DocBlock[];
+  /**
+   * The doc's entity chips as a reader of this state sees them
+   * (docs/ENTITY_CHIPS.md, MCP item 1), computed once over the whole doc, since
+   * a label can depend on the chips around it: `labels` for text and for
+   * matching a quote (`flattenForMatch(node, chips.labels)`), `markdown` for
+   * the Markdown writer, and the `inputs` both came from. All empty for a doc
+   * with no chip.
+   */
+  chips: { labels: ChipLabels; markdown: ReadonlyMap<string, string>; inputs: ChipInputs };
   /**
    * The exact version of the bytes read: the `ydoc_update` whose state they
    * are. Null only for a doc with no update log at all.
@@ -34,7 +48,7 @@ export type DocState = {
   version: bigint | null;
 };
 
-function stateOf(doc: Y.Doc): Omit<DocState, "version"> {
+async function stateOf(doc: Y.Doc): Promise<Omit<DocState, "version">> {
   const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(doc, "default") as JSONContent;
   const content = Array.isArray(json.content) && json.content.length > 0 ? json : { type: "doc", content: [{ type: "paragraph" }] };
   const node = pmDocContentSchema.nodeFromJSON(content);
@@ -43,7 +57,12 @@ function stateOf(doc: Y.Doc): Omit<DocState, "version"> {
     titleFragment.length > 0
       ? titleTextFromJSON(TiptapTransformer.extensions(titleAuthorHighlightExtensions).fromYdoc(doc, "title") as JSONContent)
       : "";
-  return { json: content, title, node, blocks: docBlocks(node) };
+  // The labels are the targets' current ones, whichever version of the doc
+  // this is: a label is not part of a version.
+  const inputs = await chipInputsForBody(content);
+  const labels = chipLabelsIn(node, inputs);
+  const markdown = chipMarkdowns(chipsIn(node), inputs.styles, inputs.context);
+  return { json: content, title, node, blocks: docBlocks(node, labels), chips: { labels, markdown, inputs } };
 }
 
 /**
@@ -60,7 +79,7 @@ export async function loadDocState(docId: string): Promise<DocState> {
   const doc = new Y.Doc();
   try {
     if (row) Y.applyUpdate(doc, new Uint8Array(row.ydoc));
-    const state = stateOf(doc);
+    const state = await stateOf(doc);
     const version = row ? (await resolveUpdateIdForSnapshot(ydocId, Y.encodeSnapshot(Y.snapshot(doc)))).updateId : null;
     return { ...state, version };
   } finally {
@@ -76,7 +95,7 @@ export async function loadDocState(docId: string): Promise<DocState> {
 export async function loadDocStateAt(docId: string, version: bigint): Promise<Omit<DocState, "version">> {
   const doc = await materializeYdocAt(ydocIdForDoc(docId), version);
   try {
-    return stateOf(doc);
+    return await stateOf(doc);
   } finally {
     doc.destroy();
   }

@@ -108,7 +108,7 @@ async function create(authorEmail: string, docRef: string | null, title: string,
       throughUpdateId,
       userId: author.id,
     });
-    const { proseJson, title: docContentTitle } = postContentFromYdoc(materialized);
+    const { proseJson, title: docContentTitle } = await postContentFromYdoc(materialized);
     materialized.destroy();
     const publishedTitle = postTitle || docContentTitle || "Untitled";
 

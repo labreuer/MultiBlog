@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { scheduleMentionRefresh } from "@/lib/entity-chips/refresh";
 import { canEditAuthorIdentity } from "@/lib/authz";
 
 // users.ts's shape, restated: a "use server" module may export only async
@@ -52,5 +53,7 @@ export async function updateAccountSettings(input: AccountSettingsInput): Promis
   }
 
   await prisma.user.update({ where: { id: session.user.id }, data });
+  // A name or initials are what a mention of this person shows (docs/MENTIONS.md, "Refresh").
+  scheduleMentionRefresh([session.user.id]);
   revalidatePath("/dashboard");
 }

@@ -16,6 +16,10 @@ import { searchActorOf } from "@/lib/actor";
 import { ApiError, ERROR_LIST_CAP, invalid, notFound } from "@/lib/api/errors";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserReadFile } from "@/lib/file-authz";
+import { chipInputsForBodies } from "@/lib/entity-chips/context";
+import { chipMarkdowns, chipsInJSON } from "@/lib/entity-chips/renderings";
+import { displayTextBetween } from "@/lib/entity-chips/text";
+import type { ChipInputs } from "@/lib/entity-chips/types";
 import type { McpContext, ToolResult } from "../tool";
 import { clip, decodeCursor, encodeCursor, minuteOf, pageOf } from "../shape";
 import type { ReadArgs } from "./args";
@@ -84,9 +88,16 @@ type Thread = {
   /** When each live member last did something readers are told about: posted, or visibly edited. */
   activity: Map<string, Date>;
   edited: Map<string, Date | null>;
+  /** What the members' entity chips are written from: one context for every row of the read. */
+  chipInputs: ChipInputs;
 };
 
-function groupThreads(rows: Row[], edited: Map<string, Date | null>): Thread[] {
+/** One chip context for every body in a read, and no query when none of them holds a chip. */
+function rowChips(rows: readonly Row[]): Promise<ChipInputs> {
+  return chipInputsForBodies(rows.map((row) => row.proseJson as JSONContent | null));
+}
+
+function groupThreads(rows: Row[], edited: Map<string, Date | null>, chipInputs: ChipInputs): Thread[] {
   const byId = new Map(rows.map((row) => [row.id, row]));
   const rootOf = (row: Row): Row => {
     let current = row;
@@ -104,7 +115,7 @@ function groupThreads(rows: Row[], edited: Map<string, Date | null>): Thread[] {
     const root = rootOf(row);
     let thread = threads.get(root.id);
     if (!thread) {
-      thread = { root, members: [], activity: new Map(), edited };
+      thread = { root, members: [], activity: new Map(), edited, chipInputs };
       threads.set(root.id, thread);
     }
     thread.members.push(row);
@@ -209,11 +220,20 @@ async function loadRows(where: { docId: string } | { fileId: string }): Promise<
   });
 }
 
-/** An entry's body: its settled text, as Markdown (§9: the cache is the last settled body). */
-function bodyOf(row: Row, format: "markdown" | "text"): string {
+/** A body's entity chips as Markdown, by instance id: the body is its own document to the pass. */
+function chipMarkdownOf(proseJson: JSONContent, inputs: ChipInputs): Map<string, string> {
+  return chipMarkdowns(chipsInJSON(proseJson), inputs.styles, inputs.context);
+}
+
+/**
+ * An entry's body: its settled text, as Markdown (§9: the cache is the last
+ * settled body). The text form is `body_text`, which holds each chip's label.
+ */
+function bodyOf(row: Row, format: "markdown" | "text", chipInputs: ChipInputs): string {
   if (format === "text" || !row.proseJson) return row.bodyText;
   try {
-    return annotationContentToMarkdown(row.proseJson as JSONContent).trim();
+    const json = row.proseJson as JSONContent;
+    return annotationContentToMarkdown(json, chipMarkdownOf(json, chipInputs)).trim();
   } catch {
     return row.bodyText;
   }
@@ -236,7 +256,7 @@ function entryOf(thread: Thread, row: Row, format: "markdown" | "text", full: bo
     ...(!isRoot && row.anchorFrom !== null && row.quotedText
       ? { quote: full ? row.quotedText : clip(row.quotedText, REPLY_QUOTE_CHARS) }
       : {}),
-    body: bodyOf(row, format),
+    body: bodyOf(row, format, thread.chipInputs),
   };
 }
 
@@ -280,7 +300,7 @@ function placeInDoc(threads: Thread[], state: DocState): Placed[] {
     return {
       thread,
       range,
-      passage: state.node.textBetween(range.from, range.to, " "),
+      passage: displayTextBetween(state.node, range.from, range.to, state.chips.labels),
       lost: false,
       order: range.from,
       group: heading?.heading?.text ?? null,
@@ -366,7 +386,7 @@ export async function containerThreads(
   const rows = await loadRows(container.kind === "doc" ? { docId: container.docId } : { fileId: container.fileId });
   const filter = await compileFilter(ctx, args, rows);
   const edited = await visibleAnnotationEditDates(rows.map((r) => r.id));
-  const threads = groupThreads(rows, edited).filter((thread) => passes(thread, filter));
+  const threads = groupThreads(rows, edited, await rowChips(rows)).filter((thread) => passes(thread, filter));
   let placed =
     container.kind === "doc"
       ? placeInDoc(threads, container.state)
@@ -397,7 +417,7 @@ export async function allThreads(ctx: McpContext, args: ReadArgs): Promise<ToolR
   const rows: Row[] = await prisma.annotation.findMany({ where, orderBy: { createdAt: "asc" }, select: ROW_SELECT });
   const filter = await compileFilter(ctx, args, rows);
   const edited = await visibleAnnotationEditDates(rows.map((r) => r.id));
-  const threads = groupThreads(rows, edited).filter((thread) => passes(thread, filter));
+  const threads = groupThreads(rows, edited, await rowChips(rows)).filter((thread) => passes(thread, filter));
 
   const byContainer = new Map<string, { kind: "doc" | "file"; id: string; threads: Thread[]; newest: number }>();
   for (const thread of threads) {
@@ -481,7 +501,7 @@ export async function oneThread(ctx: McpContext, annotationId: string, args: Rea
 
   const rows = await loadRows(target.docId ? { docId: target.docId } : { fileId: target.fileId! });
   const edited = await visibleAnnotationEditDates(rows.map((r) => r.id));
-  const thread = groupThreads(rows, edited).find((t) => t.members.some((m) => m.id === annotationId));
+  const thread = groupThreads(rows, edited, await rowChips(rows)).find((t) => t.members.some((m) => m.id === annotationId));
   if (!thread) throw notFound("That annotation");
   const format = args.format ?? "markdown";
 
@@ -510,12 +530,17 @@ export async function oneThread(ctx: McpContext, annotationId: string, args: Rea
   let history: Record<string, unknown>[] | undefined;
   if (args.history) {
     const versions = await annotationHistoryFor(ctx.actor, annotationId);
+    // An earlier version can name someone the current body doesn't.
+    const versionChips = await chipInputsForBodies(versions.map((v) => v.proseJson as JSONContent | null));
     history = versions.map((v) => ({
       version: v.revisionNo,
       at: minuteOf(new Date(v.createdAt)),
       ...(v.authorName ? { by: v.authorName } : {}),
       ...(v.current ? { current: true } : {}),
-      body: format === "text" || !v.proseJson ? v.bodyText : annotationContentToMarkdown(v.proseJson as JSONContent).trim(),
+      body:
+        format === "text" || !v.proseJson
+          ? v.bodyText
+          : annotationContentToMarkdown(v.proseJson as JSONContent, chipMarkdownOf(v.proseJson as JSONContent, versionChips)).trim(),
     }));
   }
 
@@ -534,7 +559,7 @@ async function passageAtStamp(docId: string, annotationId: string, stamp: bigint
   try {
     const state = await loadDocStateAt(docId, stamp);
     const range = collectAnnotationMarkRanges(state.node).get(annotationId);
-    return range ? state.node.textBetween(range.from, range.to, " ") : null;
+    return range ? displayTextBetween(state.node, range.from, range.to, state.chips.labels) : null;
   } catch (err) {
     console.error(`[mcp] couldn't rebuild ${docId} at ${stamp} for ${annotationId}:`, err);
     return null;

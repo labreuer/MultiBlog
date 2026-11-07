@@ -18,7 +18,7 @@ to re-derive the decision from.
 | [docs/ANNOTATIONS.md](docs/ANNOTATIONS.md) | Annotations as built: a body that is its own ydoc, three anchor mechanisms picked by surface, the version stamp, DRAFT → LIVE → RAISED, editing a posted body, composing from the editor, the PDF panel. |
 | [docs/MARGIN_NOTES.md](docs/MARGIN_NOTES.md) | The margin rails as built: only the anchored cards move, CSS owns the grid and JS the alignment, the 1180px threshold and the 340–680px range, the editor's queue mode, the PDF rail. |
 | [docs/TAGS.md](docs/TAGS.md) | Tags as built: term vs. assignment vs. anchor, one write layer for both front doors, "you may tag what you may read", chips that read no session and where they mount, `/tag/[slug]`'s per-type sections, `/tags`, and the Tags column in `/docs` and `/files` with what the ADMIN override withholds. |
-| [docs/ENTITY_CHIPS.md](docs/ENTITY_CHIPS.md) | Entity chips, **planned** (only its step 0, the schema gate, is built): one inline leaf node, `entityChip`, holding only which person or work it stands for, its label computed wherever it is shown — the rules, the kind contract, the build order (the schema-version gate in docs/YDOC.md first), styling, MCP, quoting and search. A file per chip kind: [docs/MENTIONS.md](docs/MENTIONS.md), and [docs/CITATIONS.md](docs/CITATIONS.md) with the reference library. |
+| [docs/ENTITY_CHIPS.md](docs/ENTITY_CHIPS.md) | Entity chips, **partly built** (its "Built so far" says which parts): one inline leaf node, `entityChip`, holding only which person or work it stands for, its label computed wherever it is shown — the rules, the kind contract, the build order (the schema-version gate in docs/YDOC.md first), styling, MCP, quoting and search. A file per chip kind: [docs/MENTIONS.md](docs/MENTIONS.md), and [docs/CITATIONS.md](docs/CITATIONS.md) with the reference library. |
 | [docs/research/multi-anchoring.md](docs/research/multi-anchoring.md) | Literature survey behind §20's multi-part anchors: flat part-sets vs. per-part roles, and the recommendations not yet folded into PLAN.md. Read before giving any consumer's parts roles or per-part text. |
 | [docs/TABLES.md](docs/TABLES.md) | Tables as built: the native nodes and where they are not, pasted column widths, CSV into an existing doc and out again (the grid, the format table, the cap, the policy calls), auto-size, and the three specs. |
 | [docs/research/tables.md](docs/research/tables.md) | Why doc tables are TipTap's native nodes and not an external block (anything else holds no text in the ydoc, so nothing in it can be quoted or annotated), the CSV design and where the build departed from it, and what xlsx and docx would add. |
@@ -232,19 +232,20 @@ before changing the behavior it describes.
   the browser-safe half. There is deliberately **no "avatar from URL" path** — a server-side
   fetch of a user-supplied URL is SSRF. PLAN.md §17n, §17o.
 - **A change to a ydoc-bound schema is a `SCHEMA_VERSION` bump, and a live editor's extension
-  list is one call into `src/lib/live-editor-extensions.ts`.** A tab still running the old
-  bundle deletes from the shared document whatever its schema can't build — a new node, the
-  whole paragraph under a new mark, a new attribute on anything it edits — so every collab
-  socket states its bundle's version and the server refuses any other
-  (`server/schema-gate.ts`). `schema-version.test.ts` fingerprints the schemas the three
-  editors build and fails until the version is bumped, which it can only do for a list it can
-  read: an extension added in `CollabEditorBody`, `AnnotationBody` or `CollabTitleField`
-  beside that call is invisible to it. A bump refuses every open tab until it reloads, so it
-  is never incidental; a socket you open yourself (a spec, a script) needs
-  `withSchemaVersion` on its URL; and a rollback past a bump is not covered. A tab's IndexedDB
-  copy of a ydoc is read with no server in between, so its name carries the version too
-  (`ydocDbName`), and a new bundle takes in an older version's database but never a newer
-  one's. docs/YDOC.md "A tab whose schema is out of date is refused".
+  list is one call into `src/lib/live-editor-extensions.ts`.** A tab on an older bundle deletes
+  from the shared document whatever its schema can't build, so the collab server refuses any
+  other version (`server/schema-gate.ts`). `schema-version.test.ts` catches a missed bump only
+  in that call, never in an extension added beside it in an editor component. A bump refuses
+  every open tab until it reloads, so it is never incidental; a socket you open yourself (a
+  spec, a script) needs `withSchemaVersion`; a rollback past a bump is not covered. docs/YDOC.md
+  "A tab whose schema is out of date is refused".
+- **An entity chip's label is computed, never stored, and a post never holds a chip.** Its
+  `leafText` is U+FFFC, which is what a stored quote holds where a chip is: never put the label
+  in a flattener, or a rename detaches the quote. Two paths fail no check when skipped: a static
+  render of a doc or note body goes through `renderWithChips`, and a doc's JSON on its way to a
+  post-side surface through `docJsonForPostSide`, whose renderer throws on a chip.
+  `Doc.proseJson` is the ydoc plus each chip's label: write it through `docCacheFromYdoc`, and
+  compare it with a ydoc through `withoutChipLabels`. docs/ENTITY_CHIPS.md.
 - **Tables are in `contentExtensions` and deliberately not in `annotationContentExtensions`.**
   The annotation list used to be an alias of `authorHighlightExtensions` and is now its own
   `[StarterKit, AuthorHighlight]`, mirrored by `annotationEditorExtensions`; don't re-derive one from
@@ -330,6 +331,8 @@ running `prisma migrate dev` on anything unusual.
   `npm run check:schema` is the fail-if-dirty version (`--write` to fix). Why it matters, why
   the obvious `git diff --exit-code` version of that check is wrong, and why `.gitattributes`
   pins this one file to LF: [docs/DATABASE.md](docs/DATABASE.md).
+- **`npx prisma migrate dev` does not regenerate the client** (Prisma 7): run
+  `npx prisma generate` after it. docs/DATABASE.md.
 - `npx prisma generate` fails with **EPERM while the dev server runs** (query-engine DLL is
   locked). Stop `dev:all`, generate, restart.
 - **Adding a new model needs the dev server restarted, not just regenerated** — and the failure
@@ -340,10 +343,11 @@ running `prisma migrate dev` on anything unusual.
   query line. Typecheck passes, which makes it read like a logic bug in the code you just
   wrote. Restarting web is the whole fix. Distinct from the EPERM case: that one is generate
   refusing to *write*, this one is a successful write the running process never picks up.
-- **Six `search_vector` columns and the `search_lexeme` table are written only by triggers**
-  (docs/FULLTEXT.md §3) — never assign to them, give a new trigger function its own
-  `SET search_path`, and leave `search_lexeme`'s data out of a data-only load, or its `COPY`
-  collides with what the triggers already refilled. docs/DATABASE.md.
+- **Six `search_vector` columns, the `search_lexeme` table and the `mention` table are written
+  only by triggers** (docs/FULLTEXT.md §3; docs/ENTITY_CHIPS.md, step 1, item 12) — never assign
+  to them, give a new trigger function its own `SET search_path`, and leave `search_lexeme`'s
+  and `mention`'s data out of a data-only load, or their `COPY` collides with what the triggers
+  already refilled. docs/DATABASE.md.
 - Generated Prisma client lives at `src/generated/prisma` (gitignored). Import from
   `@/generated/prisma/client` and `@/generated/prisma/enums`.
 - **One-off DB scripts can't `require()` the generated client with plain `node -e`** — it's TS
@@ -358,7 +362,7 @@ running `prisma migrate dev` on anything unusual.
 
 ### Automated
 
-- **`npm run check`** — schema format, sign-in redirects, Prisma write data, unit tests,
+- **`npm run check`** — schema format, sign-in redirects, Prisma write data, label refreshes, unit tests,
   typecheck and lint in one command, in that order (cheapest first). **This is the bar before reporting any change
   as done**, not `tsc` and `eslint` alone: neither of those sees a `schema.prisma` edit, and
   one drifted through that gap within days of the rule being written (TODO.md, "No CI").
@@ -377,6 +381,9 @@ running `prisma migrate dev` on anything unusual.
   } } }` through a doc-link group made its owner an ADMIN. It compiles and lints, because the
   type is a subset of Prisma's. Build the data from named fields, or from a parse that does
   (`src/lib/doc-link-edit.ts`). The script's header lists what it can't see.
+- `npm run check:label-refresh` (part of `check`) — fails if a function writes a field a chip's
+  label is computed from and never starts that chip kind's refresh (`scheduleMentionRefresh`). A
+  new chip kind adds its fields to the script. docs/ENTITY_CHIPS.md, step 1, item 10.
 - `npm run test:unit` — `node --import tsx --test` over `src/**/*.test.ts`. **No new
   dependency**: Node 24 strips types natively and `tsx` resolves the `@/` alias. Sub-second,
   and the right home for exactly one kind of thing — pure functions whose *rejection surface*

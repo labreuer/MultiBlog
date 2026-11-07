@@ -1,7 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import type { JSONContent } from "@tiptap/react";
-import { renderToReactElement } from "@tiptap/static-renderer";
 import * as Y from "yjs";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam, resolveDocSlugHistory } from "@/lib/resolve-doc-param";
@@ -9,7 +8,10 @@ import { gated, titleWhenOk } from "@/lib/route-access";
 import { canUserReadDoc, canUserEditDoc } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { docContentExtensions } from "@/lib/tiptap-schema";
-import { renderYdocDoc } from "@/lib/ydoc-render";
+import { readYdocContent } from "@/lib/ydoc-render";
+import { chipInputsForBody } from "@/lib/entity-chips/context";
+import { renderWithChips } from "@/lib/entity-chips/static";
+import { ChipSurfaceProvider } from "@/lib/entity-chips/chip-surface";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import DocView from "@/components/DocView";
 import AuthorByline from "@/components/AuthorByline";
@@ -179,7 +181,7 @@ export default async function PublicDocPage({
   // still be a conversation), so the highlight is filtered here by the rule
   // its card is: a stored-offset anchor has no mark for the delete to remove.
   const annotationAnchors = [
-    ...annotationAnchorInputs(buildAnnotationEntries(threads).filter(entryHasVisibleContent)),
+    ...annotationAnchorInputs((await buildAnnotationEntries(threads)).filter(entryHasVisibleContent)),
     ...(linkGroupHere ? anchoredLinkAnchorInputs(linkGroupHere.parts) : []),
   ];
 
@@ -187,10 +189,9 @@ export default async function PublicDocPage({
   // staticBody's SSR output (no hydration mismatch, no flash); staticBody is
   // what's shown until that editor reports ready.
   let bodyJSON: JSONContent = EMPTY_DOC;
-  let staticBody;
+  let bodyError: string | null = null;
   if (doc.proseJson) {
     bodyJSON = doc.proseJson as JSONContent;
-    staticBody = renderToReactElement({ content: bodyJSON, extensions: docContentExtensions });
   } else {
     // decode-from-ydoc fallback (§12d) — prose_json is still null because no
     // store debounce has fired yet, e.g. a doc that was created but never
@@ -199,15 +200,24 @@ export default async function PublicDocPage({
     const row = await prisma.ydoc.findUnique({ where: { id: ydocIdForDoc(doc.id) }, select: { ydoc: true } });
     const scratch = new Y.Doc();
     if (row) Y.applyUpdate(scratch, row.ydoc);
-    const result = renderYdocDoc(scratch);
+    const result = readYdocContent(scratch);
     if (result.ok) {
       bodyJSON = result.bodyJSON;
-      staticBody = result.body;
     } else {
-      staticBody = <p style={{ color: "var(--error)" }}>{result.error}</p>;
+      bodyError = result.error;
     }
     scratch.destroy();
   }
+
+  // Entity chips (docs/ENTITY_CHIPS.md): the context the static body's labels
+  // are computed from, loaded once and handed to the live editor too, so the
+  // swap from one to the other changes no label.
+  const chipInputs = await chipInputsForBody(bodyJSON);
+  const staticBody = bodyError ? (
+    <p style={{ color: "var(--error)" }}>{bodyError}</p>
+  ) : (
+    renderWithChips(bodyJSON, docContentExtensions, chipInputs)
+  );
 
   return (
     <main className={`${styles.container} ${canEdit ? styles.containerScrubbable : ""}`}>
@@ -251,66 +261,68 @@ export default async function PublicDocPage({
                       on the next anchor push (annotation-highlight-extension.ts),
                       which never comes. Remounting also retires the same-class
                       staleness in ready/synced and in DocView's scrub state. */}
-                  <DocView
-                    key={doc.id}
-                    docId={doc.id}
-                    initialTitle={docTitleOrFallback(doc.title)}
-                    initialBodyJSON={bodyJSON}
-                    staticBody={<div className={proseStyles.prose}>{staticBody}</div>}
-                    canEdit={canEdit}
-                    userColor={user.color}
-                    annotationAnchors={annotationAnchors}
-                    initialScrubUpdateId={scrubUpdateId}
-                    byline={
-                      // A <div>, not <p> — <form> isn't valid inside <p> (HTML
-                      // rejects it; React hydrates it anyway and then warns), same
-                      // reason docs/page.tsx's own create-doc form isn't wrapped in
-                      // one. .byline's styling (page.module.css) is purely visual,
-                      // so the tag swap changes nothing about how this renders.
-                      //
-                      // The `key` is load-bearing, like TagChips' below, for a
-                      // second reason: this element is a *prop* that DocView
-                      // renders among siblings. While TagChips is still awaiting
-                      // (a doc that has tags), the RSC stream hands the whole div
-                      // to the client as a lazy chunk, and the reconciler checks
-                      // the resolved element for a key at DocView's level —
-                      // "Check the top-level render call using <DocView>" — which
-                      // the static-JSX validation that normally exempts it never
-                      // ran on. CLAUDE.md's Gotchas has the fuller story.
-                      <div key="byline" className={styles.byline}>
-                        <AuthorByline
-                          authors={doc.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
-                          showPrefix={false}
-                        />
-                        {/* updatedAt, not createdAt: a doc has no publish step (PLAN.md
-                            §12k), so "last edited" is the only date that means anything.
-                            Short date visible, full timestamp on hover. */}
-                        <span title={doc.updatedAt.toLocaleString()}>{doc.updatedAt.toLocaleDateString()}</span>
-                        {/* PLAN.md §21i — "Publish as blog post" while the doc has
-                            no post (§15d's entry point into post creation), the
-                            doc's posts once it has any. Gated on canEdit, as the
-                            button always was: a scheduled post is not public
-                            information. The key is load-bearing for the same
-                            reason TagChips' below is. */}
-                        {canEdit && (
-                          <DocPostsLine key="posts" docId={doc.id} docTitle={doc.title} posts={doc.posts} />
-                        )}
-                        {/* PLAN.md §20k — a second line of the byline rather
-                            than a block below the text, and "bare" is what
-                            drops the "Tags" label. Gated by this page's own
-                            canUserReadDoc above (docs/PERMISSIONS.md, "Chips
-                            are as private as the thing they are on").
+                  <ChipSurfaceProvider doc={doc.id} initial={chipInputs}>
+                    <DocView
+                      key={doc.id}
+                      docId={doc.id}
+                      initialTitle={docTitleOrFallback(doc.title)}
+                      initialBodyJSON={bodyJSON}
+                      staticBody={<div className={proseStyles.prose}>{staticBody}</div>}
+                      canEdit={canEdit}
+                      userColor={user.color}
+                      annotationAnchors={annotationAnchors}
+                      initialScrubUpdateId={scrubUpdateId}
+                      byline={
+                        // A <div>, not <p> — <form> isn't valid inside <p> (HTML
+                        // rejects it; React hydrates it anyway and then warns), same
+                        // reason docs/page.tsx's own create-doc form isn't wrapped in
+                        // one. .byline's styling (page.module.css) is purely visual,
+                        // so the tag swap changes nothing about how this renders.
+                        //
+                        // The `key` is load-bearing, like TagChips' below, for a
+                        // second reason: this element is a *prop* that DocView
+                        // renders among siblings. While TagChips is still awaiting
+                        // (a doc that has tags), the RSC stream hands the whole div
+                        // to the client as a lazy chunk, and the reconciler checks
+                        // the resolved element for a key at DocView's level —
+                        // "Check the top-level render call using <DocView>" — which
+                        // the static-JSX validation that normally exempts it never
+                        // ran on. CLAUDE.md's Gotchas has the fuller story.
+                        <div key="byline" className={styles.byline}>
+                          <AuthorByline
+                            authors={doc.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
+                            showPrefix={false}
+                          />
+                          {/* updatedAt, not createdAt: a doc has no publish step (PLAN.md
+                              §12k), so "last edited" is the only date that means anything.
+                              Short date visible, full timestamp on hover. */}
+                          <span title={doc.updatedAt.toLocaleString()}>{doc.updatedAt.toLocaleDateString()}</span>
+                          {/* PLAN.md §21i — "Publish as blog post" while the doc has
+                              no post (§15d's entry point into post creation), the
+                              doc's posts once it has any. Gated on canEdit, as the
+                              button always was: a scheduled post is not public
+                              information. The key is load-bearing for the same
+                              reason TagChips' below is. */}
+                          {canEdit && (
+                            <DocPostsLine key="posts" docId={doc.id} docTitle={doc.title} posts={doc.posts} />
+                          )}
+                          {/* PLAN.md §20k — a second line of the byline rather
+                              than a block below the text, and "bare" is what
+                              drops the "Tags" label. Gated by this page's own
+                              canUserReadDoc above (docs/PERMISSIONS.md, "Chips
+                              are as private as the thing they are on").
 
-                            The `key` is load-bearing and this is not a list:
-                            it is a Server Component with element siblings
-                            inside a prop that crosses into DocView, a client
-                            component. Drop it and the page logs "Each child in
-                            a list should have a unique key prop" against this
-                            div — CLAUDE.md's Gotchas has why. */}
-                        <TagChips key="tags" target={{ kind: "doc", id: doc.id }} variant="bare" />
-                      </div>
-                    }
-                  />
+                              The `key` is load-bearing and this is not a list:
+                              it is a Server Component with element siblings
+                              inside a prop that crosses into DocView, a client
+                              component. Drop it and the page logs "Each child in
+                              a list should have a unique key prop" against this
+                              div — CLAUDE.md's Gotchas has why. */}
+                          <TagChips key="tags" target={{ kind: "doc", id: doc.id }} variant="bare" />
+                        </div>
+                      }
+                    />
+                  </ChipSurfaceProvider>
                   <AnnotationSection docId={doc.id} threads={threads} />
                 </div>
                 <MarginNotesRail className={styles.rail} />

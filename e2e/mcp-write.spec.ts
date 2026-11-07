@@ -3,11 +3,17 @@ import {
   ADMIN_EMAIL,
   addTestDocAuthor,
   createTestAnnotation,
+  createTestBot,
   createTestDoc,
+  createTestUser,
   deleteTestDoc,
+  deleteTestUser,
+  getAnnotationStates,
   getDocMarkFacts,
+  getMentionSources,
   getUserIdByEmail,
   setTestDocRecord,
+  uniqueEmail,
 } from "./db";
 import { createAgent } from "./mcp";
 
@@ -228,5 +234,175 @@ test("edit_doc refuses what it should: a missing or repeated passage, a record, 
     await deleteTestDoc(shared.id);
     await deleteTestDoc(hidden.id);
     await agent.dispose();
+  }
+});
+
+// docs/ENTITY_CHIPS.md, MCP items 2, 5 and 6 — an edit where the doc holds a
+// mention: written back as Markdown it stays the same mention, a new one is
+// resolved under the rule the menu lists by, and nothing is removed silently.
+test("edit_doc keeps a mention it writes back, adds one by handle, and refuses or reports the rest", async ({ request }) => {
+  const agent = await createAgent(request);
+  const adaEmail = uniqueEmail("mcp-ada");
+  const graceEmail = uniqueEmail("mcp-grace");
+  const readerEmail = uniqueEmail("mcp-reader");
+  const ada = await createTestUser({ email: adaEmail, name: `Ada ${adaEmail.split("@")[0]}`, role: "AUTHOR" });
+  const grace = await createTestUser({ email: graceEmail, name: `Grace ${graceEmail.split("@")[0]}`, role: "AUTHOR" });
+  const reader = await createTestUser({ email: readerEmail, name: `Reader ${readerEmail.split("@")[0]}`, role: "AUTHORIZED" });
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "The engine was reviewed by " },
+            { type: "entityChip", attrs: { kind: "mention", iid: "m1", data: { userId: ada.id } } },
+            { type: "text", text: " last week." },
+          ],
+        },
+        { type: "paragraph", content: [{ type: "text", text: "A second paragraph." }] },
+      ],
+    },
+  });
+  await addTestDocAuthor(doc.id, agent.user.email);
+  const url = `/doc/${doc.slug}`;
+  const adaMd = `[@${ada.name}](/authors/${ada.slug})`;
+  const graceMd = `[@${grace.name}](/authors/${grace.slug})`;
+  try {
+    // Rewritten around the mention, which is written as the read showed it.
+    const kept = await agent.call("edit_doc", {
+      url,
+      edits: [{ old: `reviewed by @${ada.name} last week`, new: `reviewed and signed off by ${adaMd} last month` }],
+    });
+    expect(kept.isError, JSON.stringify(kept.error)).toBe(false);
+    expect(kept.result.mentionsRemoved).toBeUndefined();
+    expect(kept.result.mentionsAdded).toBeUndefined();
+    let read = await agent.call("read", { url });
+    expect(String(read.result.markdown)).toContain(`reviewed and signed off by ${adaMd} last month.`);
+    // The same chip, not a new one: the index row is the one it had.
+    expect(await getMentionSources(ada.id)).toEqual([`doc:${doc.id}`]);
+
+    // The name in plain words where the mention was is refused, with how to say either thing.
+    const asText = await agent.call("edit_doc", {
+      url,
+      edits: [{ old: `signed off by @${ada.name} last month`, new: `signed off by ${ada.name} last month` }],
+    });
+    expect(asText.error).toMatchObject({ code: "chip_as_text", labels: [`@${ada.name}`] });
+
+    // A new mention, by handle, of someone the agent may mention.
+    const added = await agent.call("edit_doc", { url, edits: [{ old: "A second paragraph.", new: `A second paragraph, for ${graceMd}.` }] });
+    expect(added.isError, JSON.stringify(added.error)).toBe(false);
+    expect(added.result).toMatchObject({ mentionsAdded: 1 });
+    await expect.poll(() => getMentionSources(grace.id)).toEqual([`doc:${doc.id}`]);
+
+    // Not of someone the menu wouldn't list, nor of a handle nobody has.
+    const refused = await agent.call("edit_doc", {
+      url,
+      edits: [{ append: `Thanks to [@${reader.name}](/authors/${reader.slug}).` }],
+    });
+    expect(refused.error).toMatchObject({ code: "unknown_chip", handles: [reader.slug] });
+    const nobody = await agent.call("edit_doc", { url, edits: [{ append: "Thanks to [@Nobody](/authors/no-such-handle-e2e)." }] });
+    expect(nobody.error).toMatchObject({ code: "unknown_chip", handles: ["no-such-handle-e2e"] });
+    // An escaped @ is a link, whoever it points at.
+    const link = await agent.call("edit_doc", { url, edits: [{ append: `See [\\@${reader.name}](/authors/${reader.slug}).` }] });
+    expect(link.isError, JSON.stringify(link.error)).toBe(false);
+    expect(link.result.mentionsAdded).toBeUndefined();
+
+    // Leaving a mention out removes it, and the answer says which.
+    const removed = await agent.call("edit_doc", {
+      url,
+      edits: [{ old: `reviewed and signed off by @${ada.name} last month`, new: "reviewed last month" }],
+    });
+    expect(removed.isError, JSON.stringify(removed.error)).toBe(false);
+    expect(removed.result).toMatchObject({ mentionsRemoved: [`@${ada.name}`] });
+    await expect.poll(() => getMentionSources(ada.id)).toEqual([]);
+
+    read = await agent.call("read", { url });
+    const markdown = String(read.result.markdown);
+    expect(markdown).toContain("The engine was reviewed last month.");
+    expect(markdown).toContain(`A second paragraph, for ${graceMd}.`);
+    expect(markdown).toContain(`See [\\@${reader.name}](/authors/${reader.slug}).`);
+  } finally {
+    await deleteTestDoc(doc.id);
+    for (const email of [adaEmail, graceEmail, readerEmail]) await deleteTestUser(email);
+    await agent.dispose();
+  }
+});
+
+test("add_note and edit_note write a mention from Markdown, and keep it through an edit", async ({ request }) => {
+  const agent = await createAgent(request);
+  const adaEmail = uniqueEmail("mcp-note-ada");
+  const ada = await createTestUser({ email: adaEmail, name: `Ada ${adaEmail.split("@")[0]}`, role: "AUTHOR" });
+  const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "A doc to leave a note on." });
+  const adaMd = `[@${ada.name}](/authors/${ada.slug})`;
+  try {
+    const note = await agent.call("add_note", { on: `/doc/${doc.slug}`, body: `Could ${adaMd} check this?` });
+    expect(note.isError, JSON.stringify(note.error)).toBe(false);
+    await expect.poll(() => getMentionSources(ada.id)).toEqual([`annotation:${note.result.id}`]);
+    let [row] = await getAnnotationStates(doc.id);
+    expect(row.bodyText).toBe(`Could @${ada.name} check this?`);
+
+    const edited = await agent.call("edit_note", { id: String(note.result.id), body: `Could ${adaMd} check this today?` });
+    expect(edited.isError, JSON.stringify(edited.error)).toBe(false);
+    [row] = await getAnnotationStates(doc.id);
+    expect(row.bodyText).toBe(`Could @${ada.name} check this today?`);
+    expect(await getMentionSources(ada.id)).toEqual([`annotation:${note.result.id}`]);
+
+    // It reads back as it was written.
+    const thread = await agent.call("read", { url: `/doc/${doc.slug}`, include: ["annotations"] });
+    expect(JSON.stringify(thread.result.threads)).toContain(`Could ${adaMd} check this today?`);
+
+    const asText = await agent.call("edit_note", { id: String(note.result.id), body: `Could ${ada.name} check this today?` });
+    expect(asText.error).toMatchObject({ code: "chip_as_text" });
+  } finally {
+    await deleteTestDoc(doc.id);
+    await deleteTestUser(adaEmail);
+    await agent.dispose();
+  }
+});
+
+// docs/MENTIONS.md, "Who is listed" — the clauses about bots. The agent is a
+// bot itself, working for the suite's admin, so "its own bots" are that
+// person's.
+test("a bot may mention itself and its person's bots, and another person's bot only where that bot takes part", async ({ request }) => {
+  const agent = await createAgent(request);
+  const adaEmail = uniqueEmail("mcp-bots-ada");
+  const siblingEmail = uniqueEmail("mcp-bots-sibling");
+  const otherEmail = uniqueEmail("mcp-bots-other");
+  await createTestUser({ email: adaEmail, name: `Ada ${adaEmail.split("@")[0]}`, role: "AUTHOR" });
+  const sibling = await createTestBot({ email: siblingEmail, worksForEmail: ADMIN_EMAIL, name: `Sibling ${siblingEmail.split("@")[0]}` });
+  const other = await createTestBot({ email: otherEmail, worksForEmail: adaEmail, name: `Other ${otherEmail.split("@")[0]}` });
+  const noted = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "A doc the other bot leaves a note on." });
+  const bylined = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "A doc the other bot is an author of." });
+  const neither = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "A doc the other bot has nothing to do with." });
+  const md = (user: { name: string | null; slug: string }) => `[@${user.name}](/authors/${user.slug})`;
+  const note = (doc: { slug: string }, body: string) => agent.call("add_note", { on: `/doc/${doc.slug}`, body });
+  try {
+    // Itself, and its person's other bot, anywhere.
+    const own = await note(neither, `From ${md(agent.user)}, with ${md(sibling)}.`);
+    expect(own.isError, JSON.stringify(own.error)).toBe(false);
+    await expect.poll(() => getMentionSources(sibling.id)).toEqual([`annotation:${own.result.id}`]);
+
+    // Another person's bot: nowhere yet.
+    for (const doc of [noted, bylined, neither]) {
+      const refused = await note(doc, `Ask ${md(other)}.`);
+      expect(refused.error).toMatchObject({ code: "unknown_chip", handles: [other.slug] });
+    }
+
+    // Once it has written a note on a doc, or is on its byline, it can be mentioned there.
+    await createTestAnnotation({ docId: noted.id, authorEmail: otherEmail, bodyText: "A note from the other bot." });
+    await addTestDocAuthor(bylined.id, otherEmail);
+    for (const doc of [noted, bylined]) {
+      const allowed = await note(doc, `Ask ${md(other)}.`);
+      expect(allowed.isError, JSON.stringify(allowed.error)).toBe(false);
+    }
+    const still = await note(neither, `Ask ${md(other)}.`);
+    expect(still.error).toMatchObject({ code: "unknown_chip", handles: [other.slug] });
+  } finally {
+    for (const doc of [noted, bylined, neither]) await deleteTestDoc(doc.id);
+    await agent.dispose();
+    for (const email of [siblingEmail, otherEmail, adaEmail]) await deleteTestUser(email);
   }
 });

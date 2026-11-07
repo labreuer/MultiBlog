@@ -145,7 +145,9 @@ a `BEFORE` trigger owns. Migrate can't see the trigger, and the app never assign
   function, so they can't disagree about what the right vector is.
 - **`prose_text(jsonb)`** returns a ProseMirror document's text in document order. The text
   pieces within a block are joined directly, blocks are joined by a newline, and a `hardBreak`
-  becomes a newline.
+  becomes a newline. An entity chip contributes the label its node carries in `prose_json`
+  ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), step 1, item 8), so a doc is found by the name of someone
+  it mentions; a chip with no label contributes nothing.
   - **How.** A recursive walk down `content` arrays carrying each node's ordinal path; `int[]`
     compares element-wise, so ordering by the path is document order.
   - **Why order matters.** Phrase search and ranking read word positions, and `ts_headline` reads

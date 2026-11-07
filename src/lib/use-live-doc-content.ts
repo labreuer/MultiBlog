@@ -11,6 +11,8 @@ import { CollabTokenDenied, refreshCollabToken } from "./collab-token-request";
 import { renderYdocDoc, titleTextFromJSON } from "./ydoc-render";
 import { PendingAnnotation } from "./pending-annotation-extension";
 import { captureYdocVersion } from "./ydoc-version-client";
+import { useChipSurface } from "./entity-chips/chip-surface";
+import { useChipInputs } from "./entity-chips/use-chip-inputs";
 
 type Awareness = HocuspocusProvider["awareness"];
 
@@ -268,6 +270,10 @@ export function useLiveDocContent({
   useEffect(() => {
     editorRef.current = editor;
   }, [editor, editorRef]);
+
+  // Entity chips' labels (docs/ENTITY_CHIPS.md): the page names the doc and
+  // hands over the context its static body was rendered with.
+  useChipInputs(editor, useChipSurface());
 
 
   // Only constructed when nothing was hoisted in — see the options comment.

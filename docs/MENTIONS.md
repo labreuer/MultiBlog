@@ -1,6 +1,28 @@
 # Mentions (planned)
 
-**Status: planned; nothing here is built.** A *mention* is an entity chip
+**Status: partly built.** What exists:
+
+- the chip kind (`src/lib/entity-chips/kinds/mention.ts`): its fields, forms, labels and
+  same-label rule;
+- its context loader (`mention-context.ts`);
+- the rule for who may be mentioned (`mention-rule.ts`), and the menu's search over it
+  (`mention-search.ts`);
+- the `@` menu (`MentionMenu.tsx`) in the doc editor and in a note's composer and edit session,
+  on the suggestion menu it shares with `[[` (`SuggestionMenu.tsx`). A query is taken for a
+  name only while it is at most 40 characters and four words and doesn't start with a space, so
+  "meet @ 5pm" opens nothing. The menu isn't mounted for a viewer below AUTHOR, so a reader's
+  "@" opens nothing rather than a list of nobody. A row says when the person couldn't read the
+  doc, or the PDF a note is on.
+- the `mention` index table and the label refresh after a rename (the kit's items 12 and 10).
+
+- the Markdown, both ways: a read writes `[@Label](/authors/slug)`, with a deleted or unknown
+  account struck through and a hand-written link of that shape escaped; an MCP edit or note
+  reads it back as a mention, resolved by handle under the rule above (`resolveParsedChips`).
+
+Still a plan: ordering beyond "participants first", `create_doc`'s Markdown, `mentions=`
+search, the dashboard card and notifications.
+
+A *mention* is an entity chip
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md)) that stands for a person: a MultiBlog account. It is shown as
 `@Luke Breuer`, `LB` or `@luke-breuer`, depending on the doc's style, and it follows the
 person's renames. This file fills in the kit's kind contract. The kit says how every chip is
@@ -42,7 +64,14 @@ A nickname form would need a new user field.
 
 **Context:** each user's name, initials and slug, deleted users included.
 
-**Refresh** (the kit's step 1, item 10): a user's name, initials or slug changes.
+**Refresh** (the kit's step 1, item 10): a user's name, initials or slug changes, or a bot is
+moved to another person. Built: each of those writes calls `scheduleMentionRefresh` once it has
+committed, from `updateAccountSettings`, `updateUserName`, `updateUserAdminInitials`,
+`changeUserSlug`, `revertUserSlug` and `moveBot`. A new way to change one of those fields has
+to call it too, and `npm run check:label-refresh` fails for a Prisma write to one of them in a
+function that doesn't. What that check can't read (raw SQL, a script) is what
+`check-doc-integrity.ts`'s `chip-labels` finding reports. A person's refresh covers their bots,
+whose labels can name them.
 
 **Link:** the author page, `/authors/<slug>`, in docs and posts alike.
 
@@ -85,7 +114,8 @@ A nickname form would need a new user field.
     check, and the people the chip-context endpoint answers for beyond the object's own chips. So
     a slug typed into Markdown can't get round it. `find_users` itself lists every named ADMIN,
     EDITOR and AUTHOR, bots included, and keeps doing so for bylines.
-  - A row says "can't read this doc" for someone who wouldn't see the mention.
+  - A row says "can't read this doc" (or "this PDF", in a note on one) for someone who wouldn't
+    see the mention.
 - **Search.**
   - `mentions=<slug>`.
   - Typing `@me` or `@<slug>` in the search box applies it. `me` becomes a reserved slug;

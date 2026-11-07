@@ -45,6 +45,10 @@ import { displayNameOf } from "@/lib/display-name";
 import { parentSettledMark, settleAnnotationBody, writeSettledBody, type SettledBody } from "@/lib/annotation-settle";
 import { annotationHistoryFor, type AnnotationVersion } from "@/lib/annotation-history";
 import { actorFromSessionUser } from "@/lib/actor";
+import type { JSONContent } from "@tiptap/core";
+import { chipInputsForBodies, chipInputsForBody } from "@/lib/entity-chips/context";
+import { chipsInJSON } from "@/lib/entity-chips/renderings";
+import type { ChipInputs } from "@/lib/entity-chips/types";
 import { setAnnotationDeleted } from "@/lib/annotation-manage";
 
 /**
@@ -888,7 +892,7 @@ export async function cancelAnnotationEdit(annotationId: string): Promise<{ erro
     }
     let last;
     try {
-      last = decodeAnnotationSnapshot(new Uint8Array(newest.ydoc));
+      last = await decodeAnnotationSnapshot(new Uint8Array(newest.ydoc));
     } catch (err) {
       console.error(`[annotations] the newest version of ${annotationId} isn't TipTap-decodable:`, err);
       return { error: "Couldn't read the earlier version. Nothing was changed." };
@@ -921,12 +925,23 @@ export async function cancelAnnotationEdit(annotationId: string): Promise<{ erro
 // is src/lib/annotation-history.ts's, shared with the MCP server's thread read.
 export type { AnnotationVersion } from "@/lib/annotation-history";
 
-export async function getAnnotationHistory(annotationId: string): Promise<AnnotationVersion[]> {
+/** A version as the history panel draws it: with what labels its entity chips, when it holds any. */
+export type AnnotationVersionShown = AnnotationVersion & { chipInputs?: ChipInputs };
+
+export async function getAnnotationHistory(annotationId: string): Promise<AnnotationVersionShown[]> {
   const session = await auth();
   if (!session?.user) {
     return [];
   }
-  return annotationHistoryFor(actorFromSessionUser(session.user), annotationId);
+  const versions = await annotationHistoryFor(actorFromSessionUser(session.user), annotationId);
+  // One context for every version, by the reader's right to the versions
+  // themselves: each names only people its own text already shows.
+  const bodies = versions.map((version) => version.proseJson as JSONContent | null);
+  const chipInputs = await chipInputsForBodies(bodies);
+  return versions.map((version, index) => {
+    const body = bodies[index];
+    return body && chipsInJSON(body).length > 0 ? { ...version, chipInputs } : version;
+  });
 }
 
 // PLAN.md §22e — the state a reply's stored anchor was measured against, for
@@ -942,7 +957,7 @@ export async function getAnnotationHistory(annotationId: string): Promise<Annota
 // quoted, it does not try to repair the anchor.
 export async function getQuotedParentVersion(
   replyAnnotationId: string,
-): Promise<{ proseJson: unknown; quotedText: string } | null> {
+): Promise<{ proseJson: unknown; quotedText: string; chipInputs?: ChipInputs } | null> {
   const session = await auth();
   if (!session?.user) {
     return null;
@@ -982,8 +997,9 @@ export async function getQuotedParentVersion(
     return null;
   }
   try {
-    const { proseJson } = decodeAnnotationBody(materialized);
-    return { proseJson, quotedText: reply.quotedText };
+    const { proseJson } = await decodeAnnotationBody(materialized);
+    const hasChips = chipsInJSON(proseJson).length > 0;
+    return { proseJson, quotedText: reply.quotedText, ...(hasChips ? { chipInputs: await chipInputsForBody(proseJson) } : {}) };
   } catch (err) {
     console.error(`[annotations] ${ydocId} at ${reply.ydocUpdateId} isn't TipTap-decodable:`, err);
     return null;
