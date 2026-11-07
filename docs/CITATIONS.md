@@ -11,8 +11,7 @@ contract. The kit says how every chip is stored, rendered, quoted and searched. 
 
 The reference library (its data, its pages and its machine door), the citation chip itself
 with its popover, its Markdown both ways and a quote written in it, a doc's bibliography, and
-search by cited work. Everything below not listed here is still a plan: of the Markdown, the
-transcript importer's escape; and Later.
+search by cited work. Everything below not listed here is still a plan: Later.
 
 - **The chip kind:** `src/lib/entity-chips/kinds/citation.ts` holds its fields and
   validation, its identity (the works, in any order), when one citation continues another
@@ -215,11 +214,13 @@ call for no refresh.
   ordinary link rather than being refused as an unknown key. A chip can't carry a link, since
   y-tiptap stores no marks on inline nodes, so a citation there would cost the link. This departs
   from Pandoc, which reads citations inside link text. A mention is claimed before any link.
-- **`scripts/import-claude-chats.ts`** parses without chips today, so a transcript's `@` is text.
-  The plan, should it read chips: it escapes `@` in a transcript before the parse, outside code
-  and autolinks, as it already escapes a tag-like `<`. A transcript names packages rather than
-  works, such as `@playwright/test`, and 6 of 354 local docs hold one. `escapeInline`, for quoted
-  excerpts, file names and search queries, gains `@` too. Its `--markdown` files parse strictly.
+- **`scripts/import-claude-chats.ts`** parses with chips, as the `/docs` import does
+  ([CLAUDE_IMPORT.md](CLAUDE_IMPORT.md)). A transcript names packages rather than works, such as
+  `@playwright/test`, so each `@` in it that would read as a chip is escaped before the parse
+  (`escapeChipAts`, `markdown-import.ts`), as a tag-like `<` already is: outside code spans,
+  fenced code, autolinks and bare URLs, and not after a letter or digit unless a brace follows.
+  Its `--markdown` files are read strictly: an unknown key, or a handle the importing account
+  can't mention, refuses the file.
 - **A quote copied from a Markdown read** holds this syntax, not the label, and finds its chip
   by identity (the kit's MCP, item 3). Of several citations of one work, the one whose locator
   and words also agree wins. A quote naming the right work at a different locator matches, and
