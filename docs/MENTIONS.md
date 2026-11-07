@@ -150,7 +150,9 @@ whose labels can name them.
   - the menu lists only public names;
   - a PENDING comment notifies nobody;
   - rate limits apply.
-- **Notifications**, as described under the stub.
+- **Notifications**, as described under the stub (TODO.md).
+- **A control for a mention's `form`**, the per-chip override. Every label honours the field,
+  and nothing sets it.
 
 ## Checks
 

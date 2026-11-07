@@ -11,8 +11,7 @@ contract. The kit says how every chip is stored, rendered, quoted and searched. 
 
 The reference library (its data, its pages and its machine door), the citation chip itself
 with its popover, its Markdown both ways and a quote written in it, a doc's bibliography, and
-search by cited work. Everything below not listed here is still a plan: of the Markdown, the
-transcript importer's escape; and Later.
+search by cited work. Everything below not listed here is still a plan: Later.
 
 - **The chip kind:** `src/lib/entity-chips/kinds/citation.ts` holds its fields and
   validation, its identity (the works, in any order), when one citation continues another
@@ -215,11 +214,13 @@ call for no refresh.
   ordinary link rather than being refused as an unknown key. A chip can't carry a link, since
   y-tiptap stores no marks on inline nodes, so a citation there would cost the link. This departs
   from Pandoc, which reads citations inside link text. A mention is claimed before any link.
-- **`scripts/import-claude-chats.ts`** parses without chips today, so a transcript's `@` is text.
-  The plan, should it read chips: it escapes `@` in a transcript before the parse, outside code
-  and autolinks, as it already escapes a tag-like `<`. A transcript names packages rather than
-  works, such as `@playwright/test`, and 6 of 354 local docs hold one. `escapeInline`, for quoted
-  excerpts, file names and search queries, gains `@` too. Its `--markdown` files parse strictly.
+- **`scripts/import-claude-chats.ts`** parses with chips, as the `/docs` import does
+  ([CLAUDE_IMPORT.md](CLAUDE_IMPORT.md)). A transcript names packages rather than works, such as
+  `@playwright/test`, so each `@` in it that would read as a chip is escaped before the parse
+  (`escapeChipAts`, `markdown-import.ts`), as a tag-like `<` already is: outside code spans,
+  fenced code, autolinks and bare URLs, and not after a letter or digit unless a brace follows.
+  Its `--markdown` files are read strictly: an unknown key, or a handle the importing account
+  can't mention, refuses the file.
 - **A quote copied from a Markdown read** holds this syntax, not the label, and finds its chip
   by identity (the kit's MCP, item 3). Of several citations of one work, the one whose locator
   and words also agree wins. A quote naming the right work at a different locator matches, and
@@ -393,10 +394,21 @@ post's labels, and a republish refreshes both.
 
 ## Later
 
-- **CSL styles through citeproc-js** (CPAL-1.0 OR AGPL-1.0, about 1 MB).
-  - Never inline in the Hocuspocus process, which is single-threaded on a one-CPU box: a worker,
-    or the Next server.
-  - Probably with a cache of label maps keyed by the doc's version, its style and its context.
+- **CSL styles through citeproc-js** (CPAL-1.0 OR AGPL-1.0, about 1 MB). A doc's Citations
+  setting offers a CSL style beside the three house forms. For a doc set to one, citeproc-js
+  computes its labels and its bibliography from the `csl` records, in place of `citation.ts`'s
+  forms and `entry.ts`'s format, and the style decides numbering, telling works apart and
+  "ibid.". To settle here before it is built:
+  - **Where it runs.** Never inline in the Hocuspocus process, which is single-threaded on a
+    one-CPU box. Either every editor of such a doc loads the 1 MB and labels its chips itself,
+    as it does today, or the Next server labels them and editors fetch the labels, so a new
+    citation waits a round trip for its own. The second probably needs a cache of label maps
+    keyed by the doc's version, its style and its context.
+  - **The licence.** Both of citeproc-js's licences bind software used over a network.
+  - **Note styles.** A notes-and-bibliography style puts a citation in a footnote, and a doc
+    has no footnotes: leave such styles out, or build footnotes first.
+  - **Which styles.** A few bundled, or any from the CSL repository, which needs somewhere to
+    upload one, and the locale files the styles need.
 - **Converting the hand-written citations.**
   - The docs hold many links such as `[BU p. 49](/pdf/…#page=53&text=…)`, about 1,830 in a stale
     copy.
@@ -404,8 +416,10 @@ post's labels, and a republish refreshes both.
   - Every stored quote across one is re-stamped at the conversion, with its positions mapped
     through it and its quote re-derived. That was 58 of 140 annotation quotes in that copy.
   - An editor annotation whose mark covered only the label loses it.
-  - Opted into per doc.
-- **DOI lookup** on import.
+  - Opted into per doc, and done last, once the rest is built.
+- **DOI lookup** on import. A DOI pasted alone fetches its record as CSL-JSON from doi.org, by
+  content negotiation, and the record goes through `parseCslItem` like any other. The fetch
+  goes to doi.org alone, never to a URL the user gives.
 
 ## Checks
 

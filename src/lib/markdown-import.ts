@@ -374,6 +374,29 @@ const chipMarked = () => new Marked() as unknown as typeof marked;
 
 const docChipParser = new MarkdownManager({ marked: chipMarked(), extensions: [ChipParsingKit, CitationParsing, ...tableExtensions] });
 
+// What `escapeChipAts` leaves alone, then the `@`s it escapes. Nothing reads a
+// chip in a code span, an autolink or a bare URL, and a backslash there would
+// show, or change the URL. A code span closes on a run of as many backticks
+// and can cross a line break, though not a blank line. An escape is passed
+// over whole, so `\@` stays one.
+const CHIP_AT =
+  /(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[^])*?(?<!`)\1(?!`)|<[a-z][a-z0-9+.-]*:[^\s<>]*>|(?:https?:\/\/|ftp:\/\/|www\.)[^\s<]*|\\[^]|@(?=\{)|(?<![\p{L}\p{N}])@(?=[\p{L}\p{N}_])/giu;
+
+/**
+ * `markdown` with every `@` the chip parse could read as a chip escaped, for
+ * Markdown whose text stays text whatever it holds: a chat transcript names
+ * packages (`@playwright/test`) and people, not works or accounts. Every
+ * chip kind's syntax needs an `@` (a mention's link text opens with one), so
+ * escaping those is enough. An `@` straight after a letter or digit, as in an
+ * address, is left as it is unless a brace follows it, since only a braced key
+ * is read there (docs/CITATIONS.md, "Markdown").
+ *
+ * It doesn't know where a fenced code block is: the caller skips those.
+ */
+export function escapeChipAts(markdown: string): string {
+  return markdown.replace(CHIP_AT, (match) => (match === "@" ? "\\@" : match));
+}
+
 /** `json` with each chip carrying its Markdown as `md`, for `ChipMarkdown` to write. */
 function withChipMarkdown(json: JSONContent, chipMarkdown: ReadonlyMap<string, string>): JSONContent {
   if (isChip(json)) {

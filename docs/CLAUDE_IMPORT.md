@@ -38,8 +38,8 @@ Things about the data that the importer is built around:
    An extraction left over from an earlier export is otherwise indistinguishable from the
    current one.
 2. **Dry run** with `--dry-run --out <dir>`: every session's Markdown is written there and
-   nothing is imported. Parse the files with `markdownToDocContent`
-   (`src/lib/markdown-import.ts`) to check each one parses, takes its title from the leading
+   nothing is imported. Parse the files with `markdownToDocContent(md, { chips: true })`
+   (`src/lib/markdown-import.ts`) to check each one parses, holds no chip, takes its title from the leading
    heading, starts its body with the session's link, and stays under the import's size limit
    (DOC_IMPORT.md §6).
 3. **Import** without `--dry-run`. This needs only the database; the web server can be down.
@@ -122,6 +122,11 @@ them.
 - **A tag-like `<`** is escaped. The import shows HTML as literal text anyway (DOC_IMPORT.md
   §3), but as an HTML token it also swallows the line breaks around it. Autolinks and code
   spans are left alone.
+- **An `@` that would read as an entity chip** is escaped, everywhere text enters the
+  Markdown, so a transcript's `@playwright/test` or `@Andrew` stays text. The parse reads
+  chips, and would refuse an unknown key rather than keep it as text (CITATIONS.md,
+  "Markdown"). Code, autolinks, bare URLs and an address's `@` are left alone
+  (`escapeChipAts`).
 - **Attachments** become an italic "Attached:" line with the file name. A passage quoted from
   an earlier reply (an `excerpt_from_previous_claude_message` attachment) becomes a
   blockquote, escaped as plain text. Text pasted into a prompt, which claude.ai turns into an
@@ -162,8 +167,12 @@ again gets a new id. `--update` edits the doc instead:
 
 1. The stored body and a fresh conversion are aligned block by block (longest common
    subsequence over the blocks' JSON). Blocks that match stay as they are in the ydoc, Yjs
-   identity and all; each run of blocks that differs is replaced by the conversion's.
-2. The result must equal the conversion exactly, or nothing is written.
+   identity and all; each run of blocks that differs is replaced by the conversion's. A chip
+   is compared by what it stands for and its fields, never its instance id, which every parse
+   makes anew: a block holding one matches, and keeps its stored chip. The check that a doc is
+   up to date compares the same way.
+2. The result must equal the conversion exactly, its matching blocks as stored, or nothing is
+   written.
 3. The edit goes to the running collab server as one Yjs update
    (`/admin/doc-apply-update`, `server/ydoc-hooks.ts`), signed as the importing account. The
    server applies it to the live doc, so anyone with the doc open sees it arrive. It stores
@@ -174,8 +183,8 @@ again gets a new id. `--update` edits the doc instead:
    (`src/lib/anchors/capture.ts`), against the new version, as minting a link would. An anchor
    in a matching block moves with it. An anchor in a replaced run moves only if the run's
    positions still line up one for one — its text the same, with at most a newline become a
-   hard break, which is one position either way. Otherwise the doc is reported and left
-   alone, rather than the anchor guessed.
+   hard break, which is one position either way, and each chip standing for the same thing.
+   Otherwise the doc is reported and left alone, rather than the anchor guessed.
 
 The plan is made against the doc's stored state. The server applies the update only if the
 live doc is still at that state, and otherwise refuses it and writes nothing. That happens when
@@ -226,6 +235,12 @@ What differs from a session:
   `edit_doc` among others.
 - **The dates are the import's.** Created is when the file was imported and Updated moves with
   each update, since a file has no activity of its own to date the doc by.
+- **Its mentions and citations are chips.** `[@Name](/authors/<slug>)` is a mention and
+  `[@key, p. 49]` a citation, in the syntax the MCP server reads (MENTIONS.md, CITATIONS.md),
+  and nothing is escaped first. They are read strictly, as `create_doc` reads them: a handle
+  the importing account may not mention, or a key the library doesn't have, refuses the file,
+  with the word and the ways out named, and the run goes on to the next file. A literal `@` is
+  written `\@`.
 
 A revised file is best brought in with `--update`, like a grown session: anchored links into
 its doc survive the edit, and would not survive the doc being deleted and imported again.

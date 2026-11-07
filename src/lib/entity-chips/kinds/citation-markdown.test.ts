@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { JSONContent } from "@tiptap/core";
-import { docContentToMarkdown, markdownToAnnotationContent, markdownToBlocks, markdownToCommentContent, postContentToMarkdown } from "../../markdown-import";
+import { docContentToMarkdown, escapeChipAts, markdownToAnnotationContent, markdownToBlocks, markdownToCommentContent, postContentToMarkdown } from "../../markdown-import";
 import { mergeTextblock } from "../../doc-edit";
 import { pmDocContentSchema } from "../../tiptap-schema";
 import { chipMarkdowns, chipsIn } from "../renderings";
@@ -91,6 +91,27 @@ test("parse: a note's body reads citations too, and a comment's never does", () 
   // The comment parse has a marked instance of its own, with no citation tokenizer on it.
   assert.deepEqual(markdownToCommentContent("@Andrew, see [@x]").content?.[0].content, [{ type: "text", text: "@Andrew, see [@x]" }]);
   assert.deepEqual(shape(markdownToBlocks("@Andrew, see this")[0].content ?? []), ["@Andrew, see this"]);
+});
+
+test("escapeChipAts: no @ reads as a chip, and the text parses as it would without chips", () => {
+  // As a doc holds it: adjacent text nodes with the same marks joined.
+  const plain = (markdown: string, chips: boolean) =>
+    markdownToBlocks(markdown, { chips }).map((block) => pmDocContentSchema.nodeFromJSON(block).toJSON());
+  const cases = [
+    "npm i -D @playwright/test, then ask @Andrew",
+    "see [@radner2012, p. 49; -@barfield1957] and @radner2012 [p. 49]",
+    "Ask [@Ada Lovelace](/authors/ada) or see@{radner2012}",
+    "keep `@code` and \\@escaped, mail luke@example.com",
+    "<https://x.com/@a> and https://medium.com/@user/post and [a page](https://x.com/@b)",
+    "| @a | b |\n| - | - |\n| c | @d |",
+  ];
+  for (const markdown of cases) {
+    const escaped = escapeChipAts(markdown);
+    assert.deepEqual(plain(escaped, true), plain(markdown, false), markdown);
+  }
+  // Only what would read as a chip changes: an address, a URL and code don't.
+  assert.equal(escapeChipAts("keep `@code`, luke@example.com, https://x.com/@a"), "keep `@code`, luke@example.com, https://x.com/@a");
+  assert.equal(escapeChipAts("[-@k] see@{k} \\@k"), "[-\\@k] see\\@{k} \\@k");
 });
 
 // --- writing ---------------------------------------------------------------
