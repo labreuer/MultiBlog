@@ -232,34 +232,20 @@ before changing the behavior it describes.
   the browser-safe half. There is deliberately **no "avatar from URL" path** — a server-side
   fetch of a user-supplied URL is SSRF. PLAN.md §17n, §17o.
 - **A change to a ydoc-bound schema is a `SCHEMA_VERSION` bump, and a live editor's extension
-  list is one call into `src/lib/live-editor-extensions.ts`.** A tab still running the old
-  bundle deletes from the shared document whatever its schema can't build — a new node, the
-  whole paragraph under a new mark, a new attribute on anything it edits — so every collab
-  socket states its bundle's version and the server refuses any other
-  (`server/schema-gate.ts`). `schema-version.test.ts` fingerprints the schemas the three
-  editors build and fails until the version is bumped, which it can only do for a list it can
-  read: an extension added in `CollabEditorBody`, `AnnotationBody` or `CollabTitleField`
-  beside that call is invisible to it. A bump refuses every open tab until it reloads, so it
-  is never incidental; a socket you open yourself (a spec, a script) needs
-  `withSchemaVersion` on its URL; and a rollback past a bump is not covered. A tab's IndexedDB
-  copy of a ydoc is read with no server in between, so its name carries the version too
-  (`ydocDbName`), and a new bundle takes in an older version's database but never a newer
-  one's. docs/YDOC.md "A tab whose schema is out of date is refused".
-- **An entity chip's label is computed, never stored, and a post never holds a chip.** The
-  `entityChip` node (`src/lib/entity-chips/`) holds a chip kind, an instance id and the
-  kind's fields, and nothing a reader sees: `chipRenderings` computes every label, link and
-  status from the chips, the doc's style and the chip context, the same in the browser and
-  on both servers. Its `leafText` is U+FFFC, which is what a stored quote holds where a chip
-  is, so don't "fix" a flattener by putting the label there: the label is what a rename
-  changes, and the quote would detach. Two rules fail no check when broken. Every static
-  render of a doc or annotation body goes through `renderWithChips`, since the node's own
-  `renderHTML` has no label to give; and every path from a doc's JSON to a post-side surface
-  goes through `docJsonForPostSide`, since `contentExtensions` has no chip node and its
-  renderer throws on one. A new chip kind is a registry entry and adds no schema.
-  `Doc.proseJson` is the decoded ydoc *plus* each chip's label as of the write
-  (`docCacheFromYdoc`), for readers with no context to compute one from, such as search's
-  `prose_text`: write that column through it, and strip the labels (`withoutChipLabels`) before
-  comparing the column with a ydoc. docs/ENTITY_CHIPS.md.
+  list is one call into `src/lib/live-editor-extensions.ts`.** A tab on an older bundle deletes
+  from the shared document whatever its schema can't build, so the collab server refuses any
+  other version (`server/schema-gate.ts`). `schema-version.test.ts` catches a missed bump only
+  in that call, never in an extension added beside it in an editor component. A bump refuses
+  every open tab until it reloads, so it is never incidental; a socket you open yourself (a
+  spec, a script) needs `withSchemaVersion`; a rollback past a bump is not covered. docs/YDOC.md
+  "A tab whose schema is out of date is refused".
+- **An entity chip's label is computed, never stored, and a post never holds a chip.** Its
+  `leafText` is U+FFFC, which is what a stored quote holds where a chip is: never put the label
+  in a flattener, or a rename detaches the quote. Two paths fail no check when skipped: a static
+  render of a doc or note body goes through `renderWithChips`, and a doc's JSON on its way to a
+  post-side surface through `docJsonForPostSide`, whose renderer throws on a chip.
+  `Doc.proseJson` is the ydoc plus each chip's label: write it through `docCacheFromYdoc`, and
+  compare it with a ydoc through `withoutChipLabels`. docs/ENTITY_CHIPS.md.
 - **Tables are in `contentExtensions` and deliberately not in `annotationContentExtensions`.**
   The annotation list used to be an alias of `authorHighlightExtensions` and is now its own
   `[StarterKit, AuthorHighlight]`, mirrored by `annotationEditorExtensions`; don't re-derive one from
@@ -346,8 +332,7 @@ running `prisma migrate dev` on anything unusual.
   the obvious `git diff --exit-code` version of that check is wrong, and why `.gitattributes`
   pins this one file to LF: [docs/DATABASE.md](docs/DATABASE.md).
 - **`npx prisma migrate dev` does not regenerate the client** (Prisma 7): run
-  `npx prisma generate` after it, or `tsc` and the running server both still see the schema
-  from before the migration. docs/DATABASE.md.
+  `npx prisma generate` after it. docs/DATABASE.md.
 - `npx prisma generate` fails with **EPERM while the dev server runs** (query-engine DLL is
   locked). Stop `dev:all`, generate, restart.
 - **Adding a new model needs the dev server restarted, not just regenerated** — and the failure
@@ -396,12 +381,9 @@ running `prisma migrate dev` on anything unusual.
   } } }` through a doc-link group made its owner an ADMIN. It compiles and lints, because the
   type is a subset of Prisma's. Build the data from named fields, or from a parse that does
   (`src/lib/doc-link-edit.ts`). The script's header lists what it can't see.
-- `npm run check:label-refresh` (part of `check`) — fails if a write changes a field an entity
-  chip's label is computed from (a person's name, initials, handle, or the person a bot works
-  for) in a function that never calls that chip kind's refresh (`scheduleMentionRefresh`).
-  A rename is not an edit, so nothing else rewrites the labels stored in `Doc.proseJson` and
-  `Annotation.bodyText`, and the miss shows only in search and the RAISED email. A new chip
-  kind adds its table to the script. docs/ENTITY_CHIPS.md, step 1, item 10.
+- `npm run check:label-refresh` (part of `check`) — fails if a function writes a field a chip's
+  label is computed from and never starts that chip kind's refresh (`scheduleMentionRefresh`). A
+  new chip kind adds its fields to the script. docs/ENTITY_CHIPS.md, step 1, item 10.
 - `npm run test:unit` — `node --import tsx --test` over `src/**/*.test.ts`. **No new
   dependency**: Node 24 strips types natively and `tsx` resolves the `@/` alias. Sub-second,
   and the right home for exactly one kind of thing — pure functions whose *rejection surface*
