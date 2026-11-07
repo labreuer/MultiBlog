@@ -189,7 +189,10 @@ Steps 0 to 3 are built but for the items each entry says are not; step 3's are i
 
   An edit whose passage holds a chip of a kind the server doesn't know is refused as
   `unknown_kind`, since the new text can't write that chip back; the words beside it can
-  still be edited, and the merge keeps it. The chip-aware parse stores no link title.
+  still be edited, and the merge keeps it. The chip-aware parse stores no link title, and
+  leaves no whitespace inside a mark against a chip (`parseWithChips`): `**see [@k]**` reads
+  as bold "see", a plain space, then the chip, which is where the writer puts that space, so a
+  doc made from Markdown is the doc its own Markdown reads back as.
 
   The merge pairs a chip that continues another (`pairContinuations`, doc-edit.ts): where a
   textblock lost one chip and gained one its chip kind says continues it, and no other pairing

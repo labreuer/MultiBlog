@@ -206,6 +206,35 @@ test("round trip: text beside a citation can't change it", () => {
   assert.deepEqual(roundTrip(text("see"), bare, text("-style")).back, ["see", `citation:${JSON.stringify([{ key: "radner2012" }])}`, "-style"]);
 });
 
+test("round trip: a mark that stops at a chip leaves its space outside, where the writer puts it", () => {
+  // A chip carries no mark, so each of these marks stops at one with a space against it.
+  const merged = (markdown: string) => shape(pmDocContentSchema.nodeFromJSON(markdownToBlocks(markdown, { chips: true })[0]).toJSON().content ?? []);
+  const k = `citation:${JSON.stringify([{ key: "radner2012" }])}`;
+  const read = merged("**see [@radner2012]**, *[@radner2012] opens* and ~~[@radner2012] [@radner2012]~~.");
+  assert.deepEqual(read, ["see|bold", " ", k, ", ", k, " ", "opens|italic", " and ", k, " ", k, "."]);
+  // The doc that parse makes writes and reads back as itself.
+  const chip = (iid: string) => cite(iid, { items: [{ refId: "r1" }] });
+  const { markdown, back } = roundTrip(
+    text("see", [{ type: "bold" }]),
+    text(" "),
+    chip("a"),
+    text(", "),
+    chip("b"),
+    text(" "),
+    text("opens", [{ type: "italic" }]),
+    text(" and "),
+    chip("c"),
+    text(" "),
+    chip("d"),
+    text("."),
+  );
+  assert.equal(markdown, "**see** [@radner2012], [@radner2012] *opens* and [@radner2012] [@radner2012].");
+  assert.deepEqual(back, read);
+  // A note's body is parsed the same way.
+  const note = markdownToAnnotationContent("**see [@radner2012]**", { chips: true }).content?.[0].content ?? [];
+  assert.deepEqual(shape(note), ["see|bold", " ", k]);
+});
+
 test("a post's Markdown escapes a label's @, so create_doc reads it back as text", () => {
   const markdown = postContentToMarkdown({ type: "doc", content: [para(text("Ask @Ada Lovelace."))] });
   assert.equal(markdown, "Ask \\@Ada Lovelace.");

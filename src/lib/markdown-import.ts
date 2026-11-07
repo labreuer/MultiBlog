@@ -374,6 +374,40 @@ const chipMarked = () => new Marked() as unknown as typeof marked;
 
 const docChipParser = new MarkdownManager({ marked: chipMarked(), extensions: [ChipParsingKit, CitationParsing, ...tableExtensions] });
 
+/**
+ * `json` with no mark starting or ending in whitespace against a chip. A chip
+ * carries no mark (y-tiptap keeps none on an inline node), so in
+ * `**see [@k]**` the bold stops at the chip with the space still inside it.
+ * The writer puts whitespace outside a mark at every edge, `**see** [@k]`,
+ * so the parse does the same, and a doc made from Markdown is the doc its own
+ * Markdown reads back as.
+ */
+function spacesBesideChipsUnmarked(json: JSONContent): JSONContent {
+  if (!json.content) return json;
+  const content = json.content.map(spacesBesideChipsUnmarked);
+  if (!content.some((node) => isChip(node))) return { ...json, content };
+  const out: JSONContent[] = [];
+  content.forEach((node, index) => {
+    if (node.type !== "text" || typeof node.text !== "string" || !node.marks?.length) {
+      out.push(node);
+      return;
+    }
+    const lead = isChip(content[index - 1]) ? /^\s*/.exec(node.text)![0] : "";
+    const rest = node.text.slice(lead.length);
+    const trail = isChip(content[index + 1]) ? /\s*$/.exec(rest)![0] : "";
+    const core = rest.slice(0, rest.length - trail.length);
+    if (lead) out.push({ type: "text", text: lead });
+    if (core) out.push({ ...node, text: core });
+    if (trail) out.push({ type: "text", text: trail });
+  });
+  return { ...json, content: out };
+}
+
+/** `markdown` read by a chip parser: placeholders the caller resolves (`resolveParsedChips`). */
+function parseWithChips(manager: MarkdownManager, markdown: string): JSONContent {
+  return spacesBesideChipsUnmarked(decodeNodeEntities(manager.parse(markdown)));
+}
+
 // What `escapeChipAts` leaves alone, then the `@`s it escapes. Nothing reads a
 // chip in a code span, an autolink or a bare URL, and a backslash there would
 // show, or change the URL. A code span closes on a run of as many backticks
@@ -442,7 +476,7 @@ export function postContentToMarkdown(json: JSONContent): string {
 export function markdownToBlocks(markdown: string, opts: { chips?: boolean } = {}): JSONContent[] {
   // With `chips`, each chip kind's syntax becomes a chip placeholder (above),
   // which the caller must resolve before storing anything.
-  const parsed = decodeNodeEntities((opts.chips ? docChipParser : markdownManager).parse(markdown));
+  const parsed = opts.chips ? parseWithChips(docChipParser, markdown) : decodeNodeEntities(markdownManager.parse(markdown));
   return Array.isArray(parsed.content) && parsed.content.length > 0 ? parsed.content : [{ type: "paragraph" }];
 }
 
@@ -464,7 +498,7 @@ export function markdownToText(markdown: string): string {
 
 export function markdownToDocContent(markdown: string, opts: { chips?: boolean } = {}): MarkdownImport {
   // With `chips`, as `markdownToBlocks`: placeholders the caller resolves.
-  const parsed = decodeNodeEntities((opts.chips ? docChipParser : markdownManager).parse(markdown));
+  const parsed = opts.chips ? parseWithChips(docChipParser, markdown) : decodeNodeEntities(markdownManager.parse(markdown));
   const blocks = Array.isArray(parsed.content) ? [...parsed.content] : [];
 
   // Consume the first block as the title if it is a heading at the SHALLOWEST
@@ -646,8 +680,9 @@ export function annotationContentToMarkdown(json: JSONContent, chipMarkdown?: Re
  */
 export function markdownToAnnotationContent(markdown: string, opts: { chips?: boolean } = {}): JSONContent {
   // With `chips`, as `markdownToBlocks`: placeholders the caller resolves.
-  const manager = opts.chips ? annotationChipParser : annotationMarkdownManager;
-  const parsed = collapseSoftBreaks(decodeNodeEntities(manager.parse(markdown)));
+  const parsed = collapseSoftBreaks(
+    opts.chips ? parseWithChips(annotationChipParser, markdown) : decodeNodeEntities(annotationMarkdownManager.parse(markdown)),
+  );
   const blocks = Array.isArray(parsed.content) && parsed.content.length > 0 ? parsed.content : [{ type: "paragraph" }];
   const json: JSONContent = { type: "doc", content: blocks };
   pmAnnotationContentSchema.nodeFromJSON(json).check();
