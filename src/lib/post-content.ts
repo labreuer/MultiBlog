@@ -4,7 +4,8 @@ import { extractText } from "./diff";
 import { loadChipContext } from "./entity-chips/context";
 import { chipsToLinkedText } from "./entity-chips/linked-text";
 import { chipsInJSON } from "./entity-chips/renderings";
-import { DEFAULT_CHIP_STYLES } from "./entity-chips/types";
+import { chipStylesOf } from "./entity-chips/settings";
+import { DEFAULT_CHIP_STYLES, type ChipStyles } from "./entity-chips/types";
 import { stripMarksFromDoc } from "./tiptap-schema";
 import { readYdocContent } from "./ydoc-render";
 
@@ -13,13 +14,17 @@ import { readYdocContent } from "./ydoc-render";
 // entity chips, that no post-side reader (contentExtensions/pmSchema) knows
 // about; leaving any of them in would 500 the public post page the moment it
 // tries to render the doc.
-export async function postContentFromYdoc(doc: Y.Doc): Promise<{ proseJson: object; title: string }> {
+//
+// `postStyles` is the post's own choice of form per chip kind, where it
+// differs from its doc's (docs/ENTITY_CHIPS.md, "Styling"): each kind it
+// names wins over the doc's, which the ydoc holds as of this snapshot.
+export async function postContentFromYdoc(doc: Y.Doc, postStyles: ChipStyles = DEFAULT_CHIP_STYLES): Promise<{ proseJson: object; title: string }> {
   const content = readYdocContent(doc);
   if (!content.ok) {
     throw new Error(content.error);
   }
 
-  const proseJson = await docJsonForPostSide(content.bodyJSON);
+  const proseJson = await docJsonForPostSide(content.bodyJSON, { ...chipStylesOf(doc), ...postStyles });
   const title = content.titleJSON ? extractText(content.titleJSON) : "";
   return { proseJson, title };
 }
@@ -31,13 +36,14 @@ export async function postContentFromYdoc(doc: Y.Doc): Promise<{ proseJson: obje
  * snapshot and the landing page's preamble, the only two paths by which a
  * doc's JSON reaches a renderer that has no chip node.
  *
- * Labels are the ones current as this runs: frozen into a post at publish
+ * `styles` are the ones the labels are written in: the doc's own, with a
+ * post's over them. Labels are the ones current as this runs: frozen into a post at publish
  * and refreshed by republishing, computed anew at each render of the
  * preamble.
  */
-export async function docJsonForPostSide(bodyJSON: JSONContent): Promise<JSONContent> {
+export async function docJsonForPostSide(bodyJSON: JSONContent, styles: ChipStyles = DEFAULT_CHIP_STYLES): Promise<JSONContent> {
   const stripped = stripMarksFromDoc(bodyJSON, ["authorHighlight", "annotation"]);
   const chips = chipsInJSON(stripped);
   if (chips.length === 0) return stripped;
-  return chipsToLinkedText(stripped, DEFAULT_CHIP_STYLES, await loadChipContext(chips));
+  return chipsToLinkedText(stripped, styles, await loadChipContext(chips));
 }

@@ -1,6 +1,7 @@
 import type { JSONContent } from "@tiptap/core";
 import { prisma } from "./prisma";
 import { docJsonForPostSide } from "./post-content";
+import { parseChipStyles } from "./entity-chips/settings";
 
 export const FRONT_PAGE_DOC_TITLE = "FRONT PAGE";
 
@@ -15,13 +16,14 @@ export const FRONT_PAGE_DOC_TITLE = "FRONT PAGE";
 // letting the front page flip between two preambles depending on which row
 // Postgres happens to return.
 //
-// Only proseJson is selected — that's what makes "never show the title"
-// structural rather than a rule to remember, since the title is never read.
+// Only proseJson and the doc's chip styles are selected — that's what makes
+// "never show the title" structural rather than a rule to remember, since
+// the title is never read.
 export async function getFrontPagePreamble(): Promise<JSONContent | null> {
   const doc = await prisma.doc.findFirst({
     where: { title: { equals: FRONT_PAGE_DOC_TITLE, mode: "insensitive" } },
     orderBy: { createdAt: "asc" },
-    select: { proseJson: true },
+    select: { proseJson: true, chipStyles: true },
   });
 
   // proseJson is null for a doc created but never edited (the store
@@ -36,5 +38,5 @@ export async function getFrontPagePreamble(): Promise<JSONContent | null> {
   // (§15b): a doc's prose can carry authorHighlight/annotation marks and
   // entity chips the public renderer's contentExtensions doesn't know, and
   // rendering them unconverted would 500 this page.
-  return docJsonForPostSide(doc.proseJson as JSONContent);
+  return docJsonForPostSide(doc.proseJson as JSONContent, parseChipStyles(doc.chipStyles));
 }

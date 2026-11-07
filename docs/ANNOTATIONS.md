@@ -205,9 +205,35 @@ passage can see it was annotated. **No reading view writes a repair back**: it i
 least one update behind, and N readers correcting one field would be last-writer-wins on the
 one value whose job is precision.
 
+**A passage holding an entity chip** (a mention, [ENTITY_CHIPS.md](ENTITY_CHIPS.md)) needs
+more than its text, because every chip reads U+FFFC in a quote and a mark can't sit on one.
+`annotation.anchor_chips` holds a record per chip (`src/lib/anchors/chips.ts`): where its
+U+FFFC is in the quote, its chip kind, instance id and fields, and its label as of the write.
+
+- **A column anchor** records every chip in its range. `resolveAnchorInDoc` takes the records
+  and accepts a candidate only if its chips stand for the same people in the same order, so a
+  passage whose mention was swapped for another person's reads as lost though its text is
+  unchanged, and a rename moves nothing. Several candidates that pass are told apart by
+  instance id. A quote that is chips and nothing else resolves by instance alone: it has no
+  words to be re-found by, and another mention of the same person is not what was annotated.
+- **A mark anchor** records only its *edge* chips, the ones outside the passage's text: before
+  its first character, after its last, or all of them when the passage is a chip alone (which
+  has no mark at all). The collab server returns them from the mark endpoint and
+  `postAnnotation` stores them; the row still has no offsets and no quote. `AnnotationHighlight`
+  takes such a row as an `edge` anchor, finds each chip by instance id on every transaction,
+  and paints it; `resolveAnnotationRanges` gives the mark's hull stretched over them. An edge
+  chip counts only in the textblock the hull's nearer end is in, so a chip cut and pasted
+  elsewhere, which keeps its id, doesn't stretch the passage after it. A chip *between* marked
+  runs is inside the hull and needs no record.
+- **A stored quote is shown through `quoteWithChipLabels`** (a card's quote line,
+  `/annotations`, search hits, MCP), and a marked passage through `markAnchoredQuote`, which
+  adds its edge chips' labels. Neither opens a ydoc. The record's label is rewritten when its
+  person is renamed and when the doc is stored (the kit's item 10).
+
 **Degradation differs on purpose.** A lost mark leaves nothing behind, so the annotation
 becomes a document-level remark in the general discussion, derived per render from the marks
-present in `proseJson` — no stored status, so nothing can get stuck detached. A detached
+present in `proseJson` — no stored status, so nothing can get stuck detached. A marked passage
+that was a chip alone goes the same way when its chip is deleted. A detached
 column anchor keeps its blockquote, because it was derived against a reconstructible state.
 
 **PDF anchors** resolve quote-first (searching outward from the position hint), then quads,

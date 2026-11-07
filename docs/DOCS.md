@@ -163,6 +163,13 @@ seeded cache is exactly what the hook would have written — a seed that diverge
 hook stays wrong until the doc's first store, because nothing else rewrites it. A document
 that isn't TipTap-shaped is logged and dropped rather than thrown into the hook.
 
+**`chip_styles` is a third cache, of the ydoc's `settings` map**
+([ENTITY_CHIPS.md](ENTITY_CHIPS.md), "Styling"): how the doc shows its entity chips, such as
+mentions as initials. The same `updateMany` writes it, null for a doc that has set none. The
+style itself is in the ydoc, beside the `clients` map, so setting it is an edit like any
+other: it reaches every open view through the ordinary sync, and the store that follows
+relabels `prose_json` in it.
+
 **`prose_json` is the document, marks and all, plus each entity chip's label as of the
 write.** `authorHighlight` and the editor's
 annotation mark come through `fromYdoc` and are rendered, never filtered; nothing on the doc
@@ -450,8 +457,9 @@ view does not have.
 `/doc/[slug]/edit` is **`DocEditor.tsx`**: provider wiring through the page's shared socket,
 `attachIndexeddb` for offline durability, `CollabTitleField` and `CollabEditorBody` (shared
 with `/side-by-side`'s write mode and `/ydoc-debug`), a status line (`🟢 Live` waits for
-the initial sync, not merely a socket), and `DocSettingsPanel` for byline, visibility,
-delete and undelete. There is no save, publish or schedule — a doc auto-persists through
+the initial sync, not merely a socket), and `DocSettingsPanel` for byline, visibility, how
+mentions are shown (written into the doc's ydoc through this editor's connection, never by a
+server action), delete and undelete. There is no save, publish or schedule — a doc auto-persists through
 the collab server — no revision diff, and no title autosave, since the title is a cache
 written server-side from the fragment. The composing surface for annotations, and the rail
 beside the text, are ANNOTATIONS.md and MARGIN_NOTES.md.

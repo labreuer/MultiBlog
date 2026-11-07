@@ -2,7 +2,7 @@ import type { JSONContent } from "@tiptap/core";
 import type { Actor } from "@/lib/actor";
 import { ApiError } from "@/lib/api/errors";
 import { prismaIncludingDeleted } from "@/lib/prisma";
-import { MENTION } from "./kinds/mention";
+import { MENTION, MENTION_HREF_PREFIX } from "./kinds/mention";
 import { mentionableAmong } from "./kinds/mention-rule";
 import { newChipIid } from "./node";
 import { chipsInJSON, chipTargets } from "./renderings";
@@ -29,6 +29,16 @@ function placeholderSlug(node: JSONContent): string | null {
   return typeof data?.slug === "string" && typeof data.userId !== "string" ? data.slug : null;
 }
 
+/** A placeholder as the link its Markdown also is: the words it showed, linked to the author page it named. */
+function asLink(node: JSONContent, slug: string): JSONContent {
+  const label = (node.attrs?.data as Record<string, unknown> | undefined)?.label;
+  return {
+    type: "text",
+    text: typeof label === "string" && label ? label : `@${slug}`,
+    marks: [{ type: "link", attrs: { href: `${MENTION_HREF_PREFIX}${slug}` } }],
+  };
+}
+
 function walk(node: JSONContent, visit: (node: JSONContent) => JSONContent): JSONContent {
   const visited = visit(node);
   return visited.content ? { ...visited, content: visited.content.map((child) => walk(child, visit)) } : visited;
@@ -44,12 +54,15 @@ function walk(node: JSONContent, visit: (node: JSONContent) => JSONContent): JSO
  * itself, or the one a note is on, or null for a note on a PDF.
  *
  * Throws `unknown_chip` for a handle that names no account, or one this actor
- * may not mention here.
+ * may not mention here. With `unresolved: "link"` it leaves such a mention as
+ * the link its Markdown also is, and throws nothing: a person importing a
+ * file exported from another instance shouldn't lose the file to one handle
+ * this instance doesn't have.
  */
 export async function resolveParsedChips(
   content: JSONContent,
   actor: Actor,
-  opts: { docId: string | null; held: JSONContent | null },
+  opts: { docId: string | null; held: JSONContent | null; unresolved?: "refuse" | "link" },
 ): Promise<JSONContent> {
   const slugs = new Set<string>();
   walk(content, (node) => {
@@ -67,8 +80,9 @@ export async function resolveParsedChips(
   // the handle goes, and reads back by it, if the body still holds it.
   for (const slug of slugs) if (!idOf.has(slug) && heldIds.has(slug)) idOf.set(slug, slug);
 
+  const lenient = opts.unresolved === "link";
   const missing = [...slugs].filter((slug) => !idOf.has(slug));
-  if (missing.length > 0) {
+  if (missing.length > 0 && !lenient) {
     throw new ApiError(
       "unknown_chip",
       `No account has the handle ${missing.map((slug) => `"${slug}"`).join(", ")}. find_users lists who can be mentioned; to write an @ that isn't a mention, escape it: [\\@name](…).`,
@@ -79,10 +93,10 @@ export async function resolveParsedChips(
   const asked = [...new Set([...idOf.values()].filter((id) => !heldIds.has(id)))];
   const allowed = new Set(await mentionableAmong(actor, opts.docId, asked));
   const refused = [...slugs].filter((slug) => {
-    const id = idOf.get(slug)!;
-    return !heldIds.has(id) && !allowed.has(id);
+    const id = idOf.get(slug);
+    return id !== undefined && !heldIds.has(id) && !allowed.has(id);
   });
-  if (refused.length > 0) {
+  if (refused.length > 0 && !lenient) {
     throw new ApiError(
       "unknown_chip",
       `${refused.map((slug) => `"${slug}"`).join(", ")} can't be mentioned here. find_users lists who can be.`,
@@ -90,9 +104,11 @@ export async function resolveParsedChips(
     );
   }
 
+  const unresolved = new Set([...missing, ...refused]);
   return walk(content, (node) => {
     const slug = placeholderSlug(node);
     if (slug === null) return node;
+    if (unresolved.has(slug)) return asLink(node, slug);
     return { ...node, attrs: { kind: MENTION, iid: newChipIid(), data: { userId: idOf.get(slug)! } } };
   });
 }

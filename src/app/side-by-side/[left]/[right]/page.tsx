@@ -11,6 +11,7 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { readYdocContent } from "@/lib/ydoc-render";
 import { chipInputsForBody } from "@/lib/entity-chips/context";
+import { parseChipStyles } from "@/lib/entity-chips/settings";
 import { renderWithChips } from "@/lib/entity-chips/static";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { getDocLinkGroupsForPair, countOtherDocLinks } from "@/lib/doc-links-query";
@@ -34,6 +35,7 @@ const DOC_SELECT = {
   title: true,
   visibility: true,
   proseJson: true,
+  chipStyles: true,
   deletedByUserId: true,
 } as const;
 
@@ -42,7 +44,10 @@ type LoadedDoc = NonNullable<Awaited<ReturnType<typeof resolveDocParam<typeof DO
 async function loadBody(doc: LoadedDoc): Promise<{ bodyJSON: JSONContent; staticBody: ReactNode }> {
   if (doc.proseJson) {
     const bodyJSON = doc.proseJson as JSONContent;
-    return { bodyJSON, staticBody: renderWithChips(bodyJSON, docContentExtensions, await chipInputsForBody(bodyJSON)) };
+    return {
+      bodyJSON,
+      staticBody: renderWithChips(bodyJSON, docContentExtensions, await chipInputsForBody(bodyJSON, parseChipStyles(doc.chipStyles))),
+    };
   }
 
   // decode-from-ydoc fallback (§12d) — prose_json is still null because no
@@ -56,7 +61,7 @@ async function loadBody(doc: LoadedDoc): Promise<{ bodyJSON: JSONContent; static
   if (result.ok) {
     return {
       bodyJSON: result.bodyJSON,
-      staticBody: renderWithChips(result.bodyJSON, docContentExtensions, await chipInputsForBody(result.bodyJSON)),
+      staticBody: renderWithChips(result.bodyJSON, docContentExtensions, await chipInputsForBody(result.bodyJSON, parseChipStyles(doc.chipStyles))),
     };
   }
   return { bodyJSON: EMPTY_DOC, staticBody: <p style={{ color: "var(--error)" }}>{result.error}</p> };

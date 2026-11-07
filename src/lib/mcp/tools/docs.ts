@@ -28,7 +28,7 @@ export const createDocTool = defineTool({
     return `Write a new doc from Markdown: a research summary, notes, a draft. It is PRIVATE, with ${byline} on its byline, and its text shows in your author colour. The title is \`title\`, or the Markdown's leading heading. A summary opens with the prompt that asked for it, quoted. Link a whole doc as /doc/<slug>; a section or a claim in a doc with a /link/<id> from ${listedName("create_link")}, anchored on the heading's text or the claim's sentence; a PDF passage with a fragment link, /pdf/<slug>#page=N&text=start,end. Fragment links are checked, and a miss is refused as no_match. For a long draft in a local file, ${listedName("upload")} sends it without typing it here. Answers the doc's url and version.`;
   },
   input: z.strictObject({
-    markdown: markdown.min(1),
+    markdown: markdown.min(1).describe(`A mention is [@Name](/authors/<slug>), the slug from ${listedName("find_users")}.`),
     title: z.string().min(1).max(500).optional(),
     issuerOnly: z.boolean().optional().describe("Leave yourself off the byline: the issuer alone, when they ask."),
     idempotencyKey,
@@ -83,6 +83,19 @@ export const editDocTool = defineTool({
     version: versionString.optional().describe("The version you read the passages at; needed for any named by start and end."),
     edits: z.array(editItem).min(1).max(50).optional(),
     title: z.string().max(500).optional(),
+    settings: z
+      .strictObject({
+        mentions: z
+          .strictObject({
+            form: z.enum(["name", "initials", "handle"]),
+            at: z.boolean().nullable().optional().describe("Whether a label starts with @; by default yes, except for initials."),
+          })
+          .nullable()
+          .optional()
+          .describe("How this doc shows its mentions; null for the default, @Full Name."),
+      })
+      .optional()
+      .describe("The doc's own settings. A read's `styles` says what is set."),
     revert: versionString.optional().describe(`An edit's version, as ${listedName("edit_doc")} answered it: undo that edit.`),
     hunks: z.array(z.number().int().min(1)).max(500).optional().describe("With revert: just these hunks, numbered as dryRun lists them."),
     dryRun: z.boolean().optional().describe("With revert: list the hunks, change nothing."),
@@ -94,7 +107,7 @@ export const editDocTool = defineTool({
   searchHint: "edit revise rewrite replace append insert title doc revert",
   async run(args, ctx) {
     if (args.revert !== undefined) {
-      if (args.edits !== undefined || args.title !== undefined) throw invalid("revert undoes one edit; send it on its own.");
+      if (args.edits !== undefined || args.title !== undefined || args.settings !== undefined) throw invalid("revert undoes one edit; send it on its own.");
       if (args.dryRun) return revertEditFor(ctx, { url: args.url, revert: args.revert, dryRun: true });
       const { idempotencyKey: key, ...rest } = args;
       return onceWithin(ctx.token.id, "edit_doc", rest, key, () =>
@@ -104,7 +117,7 @@ export const editDocTool = defineTool({
     if (args.hunks !== undefined || args.dryRun !== undefined) throw invalid("hunks and dryRun go with revert.");
     const { idempotencyKey: key, ...rest } = args;
     return onceWithin(ctx.token.id, "edit_doc", rest, key, () =>
-      editDocFor(ctx, { url: args.url, version: args.version, edits: args.edits, title: args.title }),
+      editDocFor(ctx, { url: args.url, version: args.version, edits: args.edits, title: args.title, settings: args.settings }),
     );
   },
 });

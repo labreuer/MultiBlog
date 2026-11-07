@@ -1,7 +1,7 @@
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { EditorState } from "@tiptap/pm/state";
-import { getAnnotationAnchorRanges } from "./annotation-highlight-extension";
-import { resolveAnchorInDoc } from "./anchors";
+import { getAnnotationAnchorRanges, getAnnotationEdgeRanges } from "./annotation-highlight-extension";
+import { chipPositions, rangeWithEdgeChips, resolveAnchorInDoc, type ChipRecord } from "./anchors";
 
 export type AnnotationMarkRange = { from: number; to: number };
 
@@ -68,9 +68,18 @@ export function collectAnnotationMarkRanges(doc: PMNode): Map<string, Annotation
 // is stated rather than left to Map insertion order in case that invariant is
 // ever loosened — the mark is the anchor that cannot drift, so it is the one
 // to believe.
+//
+// A mark-anchored passage that reaches over an entity chip is the third
+// case, and wins over its own mark: a mark can't sit on a chip, so the mark's
+// hull stops short of one at the passage's edge, and a passage that is a
+// chip alone has no mark at all. The plugin resolves those by instance id
+// (docs/ENTITY_CHIPS.md, step 1, item 11).
 export function resolveAnnotationRanges(state: EditorState): Map<string, AnnotationMarkRange> {
   const ranges = new Map(getAnnotationAnchorRanges(state));
   for (const [id, range] of collectAnnotationMarkRanges(state.doc)) {
+    ranges.set(id, range);
+  }
+  for (const [id, range] of getAnnotationEdgeRanges(state)) {
     ranges.set(id, range);
   }
   return ranges;
@@ -86,16 +95,26 @@ export function resolveAnnotationRanges(state: EditorState): Map<string, Annotat
  */
 export function resolveAnnotationRangesInNode(
   doc: PMNode,
-  columnAnchors: readonly { id: string; anchorFrom: number | null; anchorTo: number | null; quotedText: string }[],
+  anchors: readonly { id: string; anchorFrom: number | null; anchorTo: number | null; quotedText: string; chips?: readonly ChipRecord[] }[],
 ): Map<string, AnnotationMarkRange> {
   const ranges = new Map<string, AnnotationMarkRange>();
-  for (const anchor of columnAnchors) {
+  for (const anchor of anchors) {
     if (anchor.anchorFrom === null || anchor.anchorTo === null || !anchor.quotedText) continue;
-    const range = resolveAnchorInDoc(doc, anchor.anchorFrom, anchor.anchorTo, anchor.quotedText);
+    const range = resolveAnchorInDoc(doc, anchor.anchorFrom, anchor.anchorTo, anchor.quotedText, undefined, anchor.chips);
     if (range) ranges.set(anchor.id, range);
   }
-  for (const [id, range] of collectAnnotationMarkRanges(doc)) {
+  const marks = collectAnnotationMarkRanges(doc);
+  for (const [id, range] of marks) {
     ranges.set(id, range);
+  }
+  // A mark-anchored passage's edge chips: no offsets, and chips on record.
+  const edges = anchors.filter((anchor) => anchor.anchorFrom === null && anchor.chips && anchor.chips.length > 0);
+  if (edges.length > 0) {
+    const chipAt = chipPositions(doc);
+    for (const anchor of edges) {
+      const range = rangeWithEdgeChips(doc, marks.get(anchor.id) ?? null, anchor.chips!, chipAt);
+      if (range) ranges.set(anchor.id, range);
+    }
   }
   return ranges;
 }

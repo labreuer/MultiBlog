@@ -3,7 +3,7 @@ import { MENTION } from "./kinds/mention";
 import type { JSONContent } from "@tiptap/core";
 import { relabelChips } from "./materialize";
 import { chipsInJSON, chipTargets } from "./renderings";
-import { DEFAULT_CHIP_STYLES, type ChipContext, type ChipInputs, type ChipOccurrence } from "./types";
+import { DEFAULT_CHIP_STYLES, type ChipContext, type ChipInputs, type ChipOccurrence, type ChipStyles } from "./types";
 
 // docs/ENTITY_CHIPS.md, step 1, item 5 — the chip context, server-side: the
 // records a set of chips' renderings are computed from, one query per chip
@@ -27,10 +27,14 @@ export async function loadChipContext(chips: readonly ChipOccurrence[]): Promise
 /**
  * The inputs for a body already loaded and already gated by its page: the
  * styles, and the context for exactly the chips the body holds.
+ *
+ * `styles` are the body's own (docs/ENTITY_CHIPS.md, "Styling"): a doc's,
+ * from its ydoc (`chipStylesOf`) or its cache column. A caller with none to
+ * give, which is every note's body, gets each chip kind's default.
  */
-export async function chipInputsForBody(body: JSONContent | null | undefined): Promise<ChipInputs> {
+export async function chipInputsForBody(body: JSONContent | null | undefined, styles: ChipStyles = DEFAULT_CHIP_STYLES): Promise<ChipInputs> {
   const chips = body ? chipsInJSON(body) : [];
-  return { styles: DEFAULT_CHIP_STYLES, context: chips.length > 0 ? await loadChipContext(chips) : {} };
+  return { styles, context: chips.length > 0 ? await loadChipContext(chips) : {} };
 }
 
 /**
@@ -45,10 +49,10 @@ export async function chipInputsForBodies(bodies: readonly (JSONContent | null |
 
 /**
  * `doc` as a cache column holds it (materialize.ts): each chip labelled from its target's
- * current record. No query for a body with no chip, which is returned as it
+ * current record, in `styles`, the doc's own. No query for a body with no chip, which is returned as it
  * came.
  */
-export async function materializeChipLabels(doc: JSONContent): Promise<JSONContent> {
+export async function materializeChipLabels(doc: JSONContent, styles: ChipStyles = DEFAULT_CHIP_STYLES): Promise<JSONContent> {
   if (chipsInJSON(doc).length === 0) return doc;
-  return relabelChips(doc, await chipInputsForBody(doc));
+  return relabelChips(doc, await chipInputsForBody(doc, styles));
 }

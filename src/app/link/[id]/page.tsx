@@ -1,3 +1,4 @@
+import { shownQuote } from "@/lib/anchors";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -143,7 +144,7 @@ export default async function AnchoredLinkPage({
           <ol className={styles.parts}>
             {group.parts.map((part) => (
               <li key={part.anchorId}>
-                <blockquote className={styles.quote}>{part.quotedText}</blockquote>
+                <blockquote className={styles.quote}>{shownQuote(part)}</blockquote>
               </li>
             ))}
           </ol>

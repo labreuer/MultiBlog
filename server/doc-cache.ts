@@ -1,8 +1,11 @@
 import type * as Y from "yjs";
+import type { JSONContent } from "@tiptap/core";
 import { docCacheFromYdoc } from "../src/lib/doc-content";
+import { materializedLabels } from "../src/lib/entity-chips/materialize";
+import { refreshAnchorRecords } from "../src/lib/entity-chips/refresh";
 import { docIdFromYdocId } from "../src/lib/ydoc-names";
 import { prisma } from "../src/lib/prisma";
-import type { Prisma } from "../src/generated/prisma/client";
+import { Prisma } from "../src/generated/prisma/client";
 
 // PLAN.md §12d — writes doc.title/prose_json from the live ydoc, called from
 // ydocOnStoreDocument's debounce for every ydoc-stack document, doc or not.
@@ -33,8 +36,9 @@ export async function updateDocCache(
   // the symptom was a doc reading 0 characters on /docs forever.
   let bodyJSON: unknown;
   let titleText: string;
+  let chipStyles: Awaited<ReturnType<typeof docCacheFromYdoc>>["chipStyles"];
   try {
-    ({ proseJson: bodyJSON, title: titleText } = await docCacheFromYdoc(document));
+    ({ proseJson: bodyJSON, title: titleText, chipStyles } = await docCacheFromYdoc(document));
   } catch (err) {
     console.error(`[doc-cache] ${ydocId} isn't TipTap-compatible, leaving prose_json unchanged:`, err);
     return;
@@ -56,6 +60,9 @@ export async function updateDocCache(
         // and no seeded title fragment, so this runs from the first store
         // debounce, not just on a later clear.
         title: titleText,
+        // The doc's chip styles, from the same ydoc (docs/ENTITY_CHIPS.md,
+        // "Styling"): a cache as `title` is, for readers with no ydoc open.
+        chipStyles: chipStyles ? (chipStyles as Prisma.InputJsonValue) : Prisma.DbNull,
         // Doc.updatedAt moves on this write regardless (Prisma applies
         // @updatedAt client-side), so updated_by_user_id is set here to say
         // who moved it. Omitted rather than nulled when the caller has no
@@ -67,5 +74,16 @@ export async function updateDocCache(
     });
   } catch (err) {
     console.error(`[doc-cache] failed to update prose_json for ${ydocId}:`, err);
+    return;
+  }
+
+  // docs/ENTITY_CHIPS.md, step 1, item 11 — the anchors into this doc keep
+  // each chip's label too, and follow the column just written. Not awaited:
+  // the store is done, and a doc with no chip costs nothing here.
+  const labels = materializedLabels(bodyJSON as JSONContent);
+  if (labels.size > 0) {
+    void refreshAnchorRecords({ kind: "doc", id: docId }, labels).catch((err) => {
+      console.error(`[doc-cache] failed to relabel the anchors into ${ydocId}:`, err);
+    });
   }
 }

@@ -242,6 +242,27 @@ test("pasted Markdown with no heading leaves the doc untitled", async ({ page })
   await deleteTestDoc(docId);
 });
 
+// docs/ENTITY_CHIPS.md, MCP item 7 — an import reads a mention's Markdown as a
+// mention, so a doc exported from one instance arrives on another with them.
+test("a mention's Markdown imports as a mention, and one that names nobody here stays a link", async ({ page }) => {
+  const title = `${E2E_TITLE_PREFIX}Pasted mentions ${Date.now()}`;
+  const box = await openPastePanel(page);
+  await box.fill(
+    `# ${title}\n\nAsk [@Whoever They Are Now](/authors/e2e-admin), or [@Someone Else](/authors/nobody-with-this-handle), ` +
+      `but not [\\@by hand](/authors/e2e-admin).\n`,
+  );
+  await page.getByRole("button", { name: "Create doc" }).click();
+  await page.waitForURL(/\/doc\/[^/]+\/edit$/, { timeout: 30_000 });
+  await waitForDocCollabReady(page);
+
+  // The handle is what was read; the label is the account's own, whatever the file called them.
+  const body = bodyEditor(page);
+  await expect(body.locator(".entity-chip")).toHaveText(["@E2E Admin"]);
+  // No such account: the link the Markdown also is, with its words. An escaped @ was never a mention.
+  await expect(body.locator('a[href="/authors/nobody-with-this-handle"]')).toHaveText("@Someone Else");
+  await expect(body.locator('a[href="/authors/e2e-admin"]')).toHaveText("@by hand");
+});
+
 test("a paste over the size cap is refused by us, not by a 413", async ({ page }) => {
   // 800 KB: above MAX_MARKDOWN_BYTES (768 KB), below Next's own 1 MB body
   // limit. The gap between those two is the point — docs/DOC_IMPORT.md §6.

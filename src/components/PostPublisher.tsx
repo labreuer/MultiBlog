@@ -27,6 +27,8 @@ type Props = {
   postStatus: PostStatus;
   publishedAt: Date | null;
   moderationPolicy: ModerationPolicy;
+  /** The post's own mention style: one of `MENTION_OPTIONS`' values, or "doc" (docs/ENTITY_CHIPS.md, "Styling"). */
+  mentionStyle: string;
   createdAt: Date;
   authorIds: string[];
   eligibleUsers: EligibleUser[];
@@ -82,6 +84,7 @@ export default function PostPublisher({
   postStatus,
   publishedAt,
   moderationPolicy,
+  mentionStyle,
   createdAt,
   authorIds,
   eligibleUsers,
@@ -156,6 +159,11 @@ export default function PostPublisher({
   const selectedEditable = selectedDocId !== docId || canEditSourceDoc;
   const selectedReadable = selectedDocId !== docId || canReadSourceDoc;
 
+  // Whether the post's own chip style changed since it was last published
+  // here: the one thing that makes the live version worth publishing again
+  // with nothing else different.
+  const [restyled, setRestyled] = useState(false);
+
   function handleDocChange(newDocId: string) {
     setSelectedDocId(newDocId);
     // Cleared eagerly rather than waiting for the remounted scrub bar's own
@@ -176,6 +184,7 @@ export default function PostPublisher({
           throughUpdateId: selection.throughUpdateId,
         });
         setStatus("Published.");
+        setRestyled(false);
         router.refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to publish.");
@@ -235,7 +244,9 @@ export default function PostPublisher({
     selectedDocId === docId &&
     initialThroughUpdateId !== null &&
     selection.throughUpdateId === initialThroughUpdateId &&
-    (title.trim() || docTitleForDefault) === postTitle;
+    (title.trim() || docTitleForDefault) === postTitle &&
+    // A new style for the post publishes the same version differently.
+    !restyled;
   const publishLabel = postStatus === "published" ? "Republish" : postStatus === "scheduled" ? "Publish Now" : "Publish";
 
   // PLAN.md §15i — why the button is disabled, in the order the reasons
@@ -446,6 +457,8 @@ export default function PostPublisher({
         eligibleUsers={eligibleUsers}
         deleted={deleted}
         onDeletedChange={setDeleted}
+        mentionStyle={mentionStyle}
+        onMentionStyleChange={() => setRestyled(true)}
       />
 
       {/* Mounted only when its own data route would answer. It is gated on

@@ -21,6 +21,7 @@ import {
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { markdownToDocContent, MAX_MARKDOWN_BYTES } from "@/lib/markdown-import";
 import { insertDocRow, createDocWithContent } from "@/lib/doc-create";
+import { resolveParsedChips } from "@/lib/entity-chips/parsed-chips";
 import { ydocStore, encodeYdocState } from "../../../server/ydoc-store";
 import { DocVisibility } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
@@ -183,7 +184,13 @@ export async function importMarkdownDocAction(
 
   let parsed;
   try {
-    parsed = markdownToDocContent(markdown);
+    // A mention's Markdown is a mention, under the rule the `@` menu lists
+    // by; one this account can't make stays the link it also is.
+    parsed = markdownToDocContent(markdown, { chips: true });
+    parsed = {
+      ...parsed,
+      body: await resolveParsedChips(parsed.body, actorFromSessionUser(session.user), { docId: null, held: null, unresolved: "link" }),
+    };
   } catch (err) {
     return { error: `Couldn't read that Markdown: ${err instanceof Error ? err.message : String(err)}` };
   }

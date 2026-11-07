@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { shownQuote } from "@/lib/anchors";
 import type { AnchoredLinkPart, AnchoredLinkView } from "@/lib/anchored-link-data";
 import { anchoredLinkTitle } from "@/lib/anchored-link-name";
 import EditLinkButton from "./EditLinkButton";
@@ -119,7 +120,7 @@ export default function AnchoredLinkBanner({ link, currentTarget, onJumpToPart, 
                 onClick={() => (onJumpToPart ? onJumpToPart(part) : void jumpViaDom(part.anchorId, true))}
                 title="Jump to this passage"
               >
-                <span className={styles.partQuote}>{part.quotedText}</span>
+                <span className={styles.partQuote}>{shownQuote(part)}</span>
               </button>
             </li>
           ))}

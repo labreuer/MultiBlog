@@ -167,6 +167,14 @@ export type QuoteMatch = QuoteRange & {
   tier: MatchTier;
   /** `quotedTextAt` the verified range — what is stored, never the query. */
   quotedText: string;
+  /**
+   * The query began or ended inside an entity chip's label, and the range
+   * was widened to the whole chip: a chip is one position, and can't be
+   * quoted in part. Right for an anchor, which then covers the mention the
+   * words were part of; an edit must refuse, since "replace half a mention"
+   * means nothing.
+   */
+  widened?: true;
 };
 
 const QUOTE_LEAF_TEXT = anchorLeafText(" ");
@@ -203,6 +211,38 @@ function verifyExact(target: FlatTarget, range: QuoteRange, normalizedQuery: str
   if (range.from < 0 || range.to > size || range.to <= range.from) return null;
   if (normalizeForMatch(matchTextAt(target, range.from, range.to)).text !== normalizedQuery) return null;
   return { ...range, tier: "exact", quotedText: quotedTextAt(target.node, range.from, range.to) };
+}
+
+/**
+ * A flat hit [start, end) stretched to take in the whole of any entity chip
+ * its ends cut through, and whether either did. Every character of a chip's
+ * label maps to the chip's one position, which is how a cut is seen: the
+ * character just outside the hit sits at the same position as the one just
+ * inside it.
+ */
+function widenToChips(target: FlatTarget, start: number, end: number): { start: number; end: number; cut: boolean } {
+  const chipAt = (index: number) => isChip(target.node.nodeAt(target.positions[index]));
+  let from = start;
+  let to = end;
+  if (chipAt(start)) while (from > 0 && target.positions[from - 1] === target.positions[start]) from--;
+  if (chipAt(end - 1)) while (to < target.positions.length && target.positions[to] === target.positions[end - 1]) to++;
+  return { start: from, end: to, cut: from !== start || to !== end };
+}
+
+/**
+ * A flat hit that verifies only once widened to whole chips, as a match
+ * marked `widened`, or null. For a target flattened with labels alone: with
+ * none, a chip is a newline and no query runs into it.
+ */
+function verifyWidened(target: FlatTarget, start: number, end: number): QuoteMatch | null {
+  if (!target.labels) return null;
+  const wide = widenToChips(target, start, end);
+  if (!wide.cut) return null;
+  const range = rangeFromFlat(target, wide.start, wide.end);
+  // Trimmed: a space is mapped to the position of the character after it, so
+  // the one before a chip sits at the chip's position and is swept in too.
+  if (normalizeForMatch(matchTextAt(target, range.from, range.to)).text !== target.text.slice(wide.start, wide.end).trim()) return null;
+  return { ...range, tier: "exact", quotedText: quotedTextAt(target.node, range.from, range.to), widened: true };
 }
 
 /** A hit in the normalized flat text, [start, end), mapped back to ProseMirror positions. */
@@ -374,7 +414,9 @@ export function findAllExact(target: FlatTarget, query: string): QuoteMatch[] {
   if (!normalizedQuery) return [];
   const found: QuoteMatch[] = [];
   for (const start of allIndexesOf(target.text, normalizedQuery)) {
-    const hit = verifyExact(target, rangeFromFlat(target, start, start + normalizedQuery.length), normalizedQuery);
+    const end = start + normalizedQuery.length;
+    // As written, or, where an end falls inside a chip's label, widened to the chip.
+    const hit = verifyExact(target, rangeFromFlat(target, start, end), normalizedQuery) ?? verifyWidened(target, start, end);
     if (hit && !found.some((other) => other.from === hit.from && other.to === hit.to)) found.push(hit);
   }
   return found;
@@ -436,10 +478,12 @@ export function findByEnds(target: FlatTarget, start: string, end: string): Quot
     if (tailAt === -1) continue;
     const range = rangeFromFlat(target, at, tailAt + tail.length);
     const normalized = normalizeForMatch(matchTextAt(target, range.from, range.to)).text;
-    if (!normalized.startsWith(head) || !normalized.endsWith(tail)) continue;
+    // An end that falls inside a chip's label takes the whole chip, as in `findAllExact`.
+    const widened = !normalized.startsWith(head) || !normalized.endsWith(tail);
+    if (widened && !verifyWidened(target, at, tailAt + tail.length)) continue;
     // A later `start` inside a passage already found is the same passage.
     if (found.some((other) => other.from <= range.from && range.from < other.to)) continue;
-    found.push({ ...range, tier: "exact", quotedText: quotedTextAt(target.node, range.from, range.to) });
+    found.push({ ...range, tier: "exact", quotedText: quotedTextAt(target.node, range.from, range.to), ...(widened ? { widened: true as const } : {}) });
   }
   return found;
 }

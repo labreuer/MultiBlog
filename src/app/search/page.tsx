@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { search } from "@/lib/search";
-import { parseSearchParams, searchQueryString, urlSearchParamsFrom, type SearchKind } from "@/lib/search/params";
+import { MENTIONS_ME, parseSearchParams, searchQueryString, urlSearchParamsFrom, type SearchKind } from "@/lib/search/params";
 import SearchForm from "./SearchForm";
 import SearchResults from "./SearchResults";
 import { kindList } from "./labels";
@@ -58,6 +58,13 @@ export default async function SearchPage({ searchParams }: { searchParams: Searc
             .filter(Boolean)
             .join(", and ")}
           .
+        </p>
+      )}
+
+      {result.mentions.length > 0 && (
+        <p className={styles.notice}>
+          Only what mentions {result.mentions.map((handle) => (handle === MENTIONS_ME ? "you" : `@${handle}`)).join(" or ")}
+          {result.withoutMentions.length > 0 && <>, which leaves out {kindList(result.withoutMentions)}</>}.
         </p>
       )}
 

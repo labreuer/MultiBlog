@@ -11,6 +11,7 @@ import {
   renameAnchoredLink,
   reorderAnchoredLinkParts,
 } from "@/app/actions/anchored-links";
+import { shownQuote } from "@/lib/anchors";
 import { LINK_NAME_MAX_LENGTH, normalizeLinkName } from "@/lib/anchored-link-name";
 import { clearOpenLink, refreshOpenLink, useOpenLink } from "./open-link-store";
 import styles from "./AnchoredLinkTray.module.css";
@@ -314,7 +315,7 @@ export default function AnchoredLinkTray() {
               </button>
               <span
                 className={styles.partText}
-                title={part.quotedText}
+                title={shownQuote(part)}
                 onPointerDown={(event) => {
                   // The text is a handle too; the default here would begin
                   // a text selection.
@@ -323,9 +324,7 @@ export default function AnchoredLinkTray() {
                 }}
               >
                 <span className={styles.partLabel}>{part.label}: </span>“
-                {part.quotedText.length > SNIPPET_CHARS
-                  ? `${part.quotedText.slice(0, SNIPPET_CHARS)}…`
-                  : part.quotedText}
+                {shownQuote(part).length > SNIPPET_CHARS ? `${shownQuote(part).slice(0, SNIPPET_CHARS)}…` : shownQuote(part)}
                 ”
               </span>
               <button

@@ -15,11 +15,16 @@ import { TiptapTransformer } from "@hocuspocus/transformer";
 import { prosemirrorToYXmlFragment } from "y-prosemirror";
 import { Transform } from "@tiptap/pm/transform";
 import type { Node as PMNode } from "@tiptap/pm/model";
+import type { JSONContent } from "@tiptap/core";
 import type { Role } from "../src/generated/prisma/enums";
 import { prisma } from "../src/lib/prisma";
 import { verifyYdocToken, type YdocTokenPayload } from "../src/lib/ydoc-token";
 import { docContentExtensions, pmDocContentSchema, annotationContentExtensions, pmAnnotationContentSchema } from "../src/lib/tiptap-schema";
-import { resolveAnchorInDoc } from "../src/lib/anchors";
+import { edgeChipRecords, relabelChipRecords, resolveAnchorInDoc, type ChipRecord } from "../src/lib/anchors";
+import { chipInputsForBody } from "../src/lib/entity-chips/context";
+import { chipStylesOf } from "../src/lib/entity-chips/settings";
+import type { ChipStyles } from "../src/lib/entity-chips/types";
+import { chipLabels } from "../src/lib/entity-chips/text";
 import { annotationIdFromYdocId, docIdFromYdocId } from "../src/lib/ydoc-names";
 import {
   ydocStore,
@@ -676,6 +681,11 @@ export async function handleApplyAnnotationMark(
 
   const connection = await instance.openDirectConnection(documentName);
   let applied = false;
+  // docs/ENTITY_CHIPS.md, step 1, item 11 — the passage's edge chips, which
+  // the mark below can't sit on, and the body they were read from.
+  let edgeChips: ChipRecord[] = [];
+  let marked: JSONContent | null = null;
+  let styles: ChipStyles = {};
   try {
     await connection.transact((document) => {
       const fragment = document.getXmlFragment("default");
@@ -694,8 +704,14 @@ export async function handleApplyAnnotationMark(
       const markType = pmDocContentSchema.marks.annotation;
       const tr = new Transform(node);
       tr.addMark(range.from, range.to, markType.create({ id: annotationId }));
+      // A chip takes no mark in the ydoc (y-tiptap writes an inline node's
+      // attributes only), so for a passage that is a chip alone this writes
+      // nothing, and the record below is the whole anchor.
       prosemirrorToYXmlFragment(tr.doc, fragment);
       applied = true;
+      edgeChips = edgeChipRecords(node, range.from, range.to);
+      marked = json as JSONContent;
+      styles = chipStylesOf(document);
     });
   } finally {
     await connection.disconnect();
@@ -717,7 +733,17 @@ export async function handleApplyAnnotationMark(
   // contains the mark, which is the whole property being bought.
   const markUpdateId = applied ? await drainAppends(documentName) : null;
 
-  send(response, 200, JSON.stringify({ applied, markUpdateId: markUpdateId?.toString() ?? null }));
+  // Each record with its chip's label as this doc reads now, as a captured
+  // quote's records carry theirs. A failure costs the labels, not the anchor.
+  if (edgeChips.length > 0 && marked) {
+    try {
+      edgeChips = relabelChipRecords(edgeChips, chipLabels(marked, await chipInputsForBody(marked, styles)));
+    } catch (err) {
+      console.error(`[annotation-mark] couldn't label the edge chips of ${annotationId} in ${documentName}:`, err);
+    }
+  }
+
+  send(response, 200, JSON.stringify({ applied, markUpdateId: markUpdateId?.toString() ?? null, chips: edgeChips }));
 }
 
 // Every contiguous run of text carrying markName/attrName === attrValue —

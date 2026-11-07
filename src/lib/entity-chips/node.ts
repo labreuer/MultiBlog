@@ -4,6 +4,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey, type EditorState, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { chipKind } from "./registry";
+import { repairSharedIids } from "./shared-iids";
 import { chipRenderings, chipsIn, UNKNOWN_CHIP } from "./renderings";
 import type { ChipLabels } from "./text";
 import {
@@ -258,7 +259,8 @@ export function entityChipPlugin(initial: ChipInputs): Plugin<ChipPluginState> {
     props: {
       decorations: (state) => entityChipKey.getState(state)?.decorations,
     },
-    appendTransaction: (transactions, _oldState, newState) => repairChipIids(transactions, newState),
+    appendTransaction: (transactions, _oldState, newState) =>
+      repairChipIids(transactions, newState) ?? repairSharedIids(transactions, newState),
   });
 }
 

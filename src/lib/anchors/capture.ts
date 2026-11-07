@@ -1,12 +1,28 @@
 import type * as Y from "yjs";
 import type { Extensions } from "@tiptap/core";
-import type { Node as PMNode, Schema } from "@tiptap/pm/model";
+import type { Schema } from "@tiptap/pm/model";
 import { TiptapTransformer } from "@hocuspocus/transformer";
+import { chipInputsForBody } from "../entity-chips/context";
+import { chipsInJSON } from "../entity-chips/renderings";
+import { chipStylesOf } from "../entity-chips/settings";
+import { chipLabels } from "../entity-chips/text";
 import { parsePdfTarget, type PdfTarget } from "../pdf-anchor";
 import { storedPageText } from "../pdf-page-text";
 import { materializeYdocAt } from "../ydoc-snapshot";
-import { resolveAnchorInDoc } from "./resolve";
-import { deriveDocRangeSelector, type DocRangeSelector } from "./selector";
+import { Prisma } from "@/generated/prisma/client";
+import type { ChipRecord } from "./chips";
+import { captureAnchorInNode } from "./capture-node";
+import type { DocRangeSelector } from "./selector";
+
+export { captureAnchorInNode } from "./capture-node";
+
+/**
+ * A chip record list as `annotation.anchor_chips` holds it: null for a
+ * passage with no chip, so "has a record" is one test in SQL.
+ */
+export function chipRecordsColumn(chips: readonly ChipRecord[] | null | undefined): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  return chips && chips.length > 0 ? (chips as unknown as Prisma.InputJsonValue) : Prisma.DbNull;
+}
 
 // PLAN.md §13o — what a ydoc-backed anchor actually stores, and the one place
 // a `quoted_text` is ever written.
@@ -75,7 +91,10 @@ export async function captureAnchorInYdoc(opts: {
   try {
     doc = await materializeYdocAt(ydocId, throughUpdateId);
     const json = TiptapTransformer.extensions(extensions).fromYdoc(doc, "default");
-    return captureAnchorInNode(schema.nodeFromJSON(json), from, to, quotedText);
+    // Each chip's label as of now, for the records the selector keeps
+    // (chips.ts). A body with no chip asks the database nothing.
+    const labels = chipsInJSON(json).length > 0 ? chipLabels(json, await chipInputsForBody(json, chipStylesOf(doc))) : undefined;
+    return captureAnchorInNode(schema.nodeFromJSON(json), from, to, quotedText, labels);
   } catch (err) {
     // Best-effort, same stance applyAnnotationMark takes on an unreachable
     // collab server: the annotation row is valid either way, and posting
@@ -87,30 +106,6 @@ export async function captureAnchorInYdoc(opts: {
   } finally {
     doc?.destroy();
   }
-}
-
-/**
- * `captureAnchorInYdoc` over a node already built at the stamp — what the MCP
- * server's anchoring uses (docs/MCP.md §7), since it has rebuilt the doc once
- * to find the quote and a second replay for the capture would be the same
- * work twice: one replay per doc and version, never one per part. The same
- * rule exactly: verify the range against `quotedText`, re-find it if it
- * moved, and store the node's own `textBetween` at what that resolves to.
- */
-export function captureAnchorInNode(
-  node: PMNode,
-  from: number,
-  to: number,
-  quotedText: string,
-): { from: number; to: number; quotedText: string; selector: DocRangeSelector } | null {
-  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to <= from || !quotedText.trim()) return null;
-  const range = resolveAnchorInDoc(node, from, to, quotedText);
-  if (!range) return null;
-  return {
-    ...range,
-    quotedText: node.textBetween(range.from, range.to, " "),
-    selector: deriveDocRangeSelector(node, range.from, range.to),
-  };
 }
 
 /**

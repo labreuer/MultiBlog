@@ -32,7 +32,7 @@ indexing or when searching.**
 |---|---|---|
 | Docs | `doc.title`, `doc.prose_json` | The live text, at most one store debounce behind ([DOCS.md](DOCS.md), "The caches") |
 | Posts | `post.title`, `post.prose_json` | The published or scheduled version, searched under the post's read rule, never the doc's. A draft that was never published has no text of its own: it is found by its title, and its words through its doc |
-| Annotations | `annotation.body_text`, `annotation.quoted_text` | The last settled body: an edit in progress isn't searchable, just as it isn't readable ([ANNOTATIONS.md](ANNOTATIONS.md), "Editing after posting"). The quoted passage is a column only for a reading-view or PDF annotation; the doc editor's keep theirs as a mark in the doc's body, so those words find the doc instead (§10, item 9) |
+| Annotations | `annotation.body_text`, `annotation.quoted_text` with each entity chip as the label its record holds (`anchor_quote_text`, [ENTITY_CHIPS.md](ENTITY_CHIPS.md) step 1, item 11) | The last settled body: an edit in progress isn't searchable, just as it isn't readable ([ANNOTATIONS.md](ANNOTATIONS.md), "Editing after posting"). The quoted passage is a column only for a reading-view or PDF annotation; the doc editor's keep theirs as a mark in the doc's body, so those words find the doc instead (§10, item 9) |
 | Comments | `comment.body_text` | The current revision |
 | PDFs | `file.title` and `file.filename`; `file_page_text.text`, one row per page | Fixed per text version; §4 covers files that have more than one |
 
@@ -128,7 +128,7 @@ find it.
 |---|---|---|
 | `doc` | the title (A), the body's text (D) | `INSERT`, `UPDATE OF title, prose_json` |
 | `post` | the title (A), the body's text (D) | `INSERT`, `UPDATE OF title, prose_json` |
-| `annotation` | the body (B), the quoted passage (D) | `INSERT`, `UPDATE OF body_text, quoted_text` |
+| `annotation` | the body (B), the quoted passage (D) | `INSERT`, `UPDATE OF body_text, quoted_text, anchor_chips` |
 | `comment` | the body | `INSERT`, `UPDATE OF body_text` |
 | `file` | the title (A), the filename as uploaded (B) | `INSERT`, `UPDATE OF title, filename` |
 | `file_page_text` | the page's text | `INSERT`, `UPDATE OF text` (only a backfill or a repair updates it) |
@@ -343,6 +343,7 @@ you mean" suggestions when a search did find something.
 | `q` | The text (§4) |
 | `kinds` | Any of `docs`, `posts`, `pdfs`, `annotations`, `comments`, comma-joined or repeated; by default every kind the viewer can read. A kind the viewer can't search is dropped |
 | `authors` | User slugs, comma-joined or repeated; a hit matches if any one of them is its author. A slug not on this viewer's picker is dropped |
+| `mentions` | User slugs, or `me` for the searcher, comma-joined or repeated; a hit matches if it mentions any one of them ([MENTIONS.md](MENTIONS.md), "Search"). An `@handle` word in `q` means the same. A handle nobody has narrows to nothing |
 | `created_from`, `created_to`, `updated_from`, `updated_to` | Dates as `YYYY-MM-DD`, inclusive |
 | `tz` | The IANA time zone those dates are in; UTC when absent or unknown |
 | `page` | Pagination, when exactly one kind is selected: 20 hits a page |
@@ -376,6 +377,18 @@ can read, or who wrote an annotation they can read, found through those kinds' r
   made, so filtering by an account would tie an old name to a renamed one. A PDF has owners
   rather than authors, and its page names none, so filtering by owner would disclose who owns
   which file. Neither contributes names to the picker, and the page says why they are left out.
+
+### Mentions
+
+A mention filter keeps a kind's readable ids to those with a row in the `mention` table for one
+of the people named ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), step 1, item 12), so it goes by who a
+mention stands for and not by what its label says. Docs, posts and annotations can hold one;
+PDFs and comments can't, and drop out while a filter is set (`withoutMentions`).
+
+The filter is not checked against a picker, as an author is, and doesn't need to be. It only
+narrows what the viewer may already read, a handle that names nobody gives the same empty
+answer as a person nobody has mentioned where the viewer can see, and the page echoes handles
+rather than names.
 
 ### Dates
 

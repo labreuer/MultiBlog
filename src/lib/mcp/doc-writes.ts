@@ -1,10 +1,12 @@
+import { MENTION } from "@/lib/entity-chips/kinds/mention";
+import { parseChipRecords } from "@/lib/anchors";
 import type { JSONContent } from "@tiptap/core";
 import { prisma } from "@/lib/prisma";
 import { canManageDocs, canUserEditDoc } from "@/lib/doc-authz";
 import { BYLINE_ELIGIBLE_ROLES } from "@/lib/role-checks";
 import { createDocWithContent } from "@/lib/doc-create";
 import { MAX_MARKDOWN_BYTES, markdownToBlocks, markdownToDocContent, markdownToText } from "@/lib/markdown-import";
-import { pmDocContentSchema, pmSchema } from "@/lib/tiptap-schema";
+import { pmDocContentSchema } from "@/lib/tiptap-schema";
 import { resolveParsedChips } from "@/lib/entity-chips/parsed-chips";
 import { chipIdentitiesBetween } from "@/lib/entity-chips/renderings";
 import { postedAnnotationWhere } from "@/lib/annotation-authz";
@@ -86,16 +88,21 @@ export async function createDocFor(
   if (bytes > MAX_MARKDOWN_BYTES) {
     throw new ApiError("too_large", `That's ${Math.round(bytes / 1024)} KB of Markdown; the limit is ${MAX_MARKDOWN_BYTES / 1024} KB.`);
   }
-  const parsed = markdownToDocContent(input.markdown);
+  // A chip kind's syntax is a chip here as in an edit (docs/ENTITY_CHIPS.md,
+  // MCP item 7), so a doc downloaded from one instance is created on another
+  // with its mentions, by handle.
+  const parsed = markdownToDocContent(input.markdown, { chips: true });
   let title = input.title?.replace(/\s+/g, " ").trim() || parsed.title || "";
   let body = parsed.body;
   // An explicit title that isn't the leading heading leaves the heading in the body.
   if (input.title?.trim() && parsed.title && parsed.title !== title) {
-    body = { type: "doc", content: markdownToBlocks(input.markdown) };
+    body = { type: "doc", content: markdownToBlocks(input.markdown, { chips: true }) };
   }
   title = title.slice(0, 500);
+  // No doc yet for the rule to ask about: whoever the actor may mention anywhere.
+  body = await resolveParsedChips(body, ctx.actor, { docId: null, held: null });
   try {
-    pmSchema.nodeFromJSON(body).check();
+    pmDocContentSchema.nodeFromJSON(body).check();
   } catch (err) {
     throw invalid(`That Markdown doesn't make a valid doc: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -158,7 +165,7 @@ export type EditInput = {
 
 /** What the edit touched, and what the endpoint refused, said as the model reads them. */
 function refusalError(refusal: { code: string; message: string; details?: Record<string, unknown>; edit: number }, count: number): ApiError {
-  const code = refusal.code === "conflict" ? "conflict" : (refusal.code as "no_match" | "ambiguous" | "invalid" | "chip_as_text");
+  const code = refusal.code as "no_match" | "ambiguous" | "invalid" | "conflict" | "chip_as_text" | "splits_chip" | "unknown_kind";
   // A refusal of the request as a whole names no edit.
   const numbered = count > 1 && refusal.edit >= 0;
   return new ApiError(code, numbered ? `Edit ${refusal.edit + 1}: ${refusal.message}` : refusal.message, {
@@ -171,16 +178,27 @@ function refusalError(refusal: { code: string; message: string; details?: Record
 async function anchorsOn(ctx: McpContext, docId: string) {
   const roots = await prisma.annotation.findMany({
     where: { docId, parentAnnotationId: null, deletedByUserId: null, ...postedAnnotationWhere() },
-    select: { id: true, anchorFrom: true, anchorTo: true, quotedText: true },
+    select: { id: true, anchorFrom: true, anchorTo: true, quotedText: true, anchorChips: true },
   });
   const parts = await linkPartsInto({ kind: "doc", id: docId }, viewerOf(ctx.actor));
   const linkOf = new Map(parts.map((part) => [part.anchorId, part.linkId]));
   return {
     annotations: roots
       .filter((r) => r.anchorFrom !== null)
-      .map((r): AnchorRef => ({ id: r.id, from: r.anchorFrom, to: r.anchorTo, quotedText: r.quotedText })),
+      .map((r): AnchorRef => ({ id: r.id, from: r.anchorFrom, to: r.anchorTo, quotedText: r.quotedText, chips: parseChipRecords(r.anchorChips) })),
     markAnnotations: roots.filter((r) => r.anchorFrom === null).map((r) => r.id),
-    linkParts: parts.map((p): AnchorRef => ({ id: p.anchorId, from: p.from, to: p.to, quotedText: p.quotedText })),
+    markChips: Object.fromEntries(
+      roots.filter((r) => r.anchorFrom === null && r.anchorChips !== null).map((r) => [r.id, parseChipRecords(r.anchorChips)]),
+    ),
+    linkParts: parts.map(
+      (p): AnchorRef => ({
+        id: p.anchorId,
+        from: p.from,
+        to: p.to,
+        quotedText: p.quotedText,
+        ...(p.selector?.kind === "DOC_RANGE" && p.selector.selector.chips ? { chips: p.selector.selector.chips } : {}),
+      }),
+    ),
     linkOf,
   };
 }
@@ -193,9 +211,12 @@ async function anchorsOn(ctx: McpContext, docId: string) {
  * the passage is found in the doc rebuilt there and its text sent along, for
  * the endpoint to compare with the text now.
  */
+/** edit_doc's `settings`: how the doc shows its mentions, or null for the default again. */
+export type DocSettingsInput = { mentions?: { form: "name" | "initials" | "handle"; at?: boolean | null } | null };
+
 export async function editDocFor(
   ctx: McpContext,
-  input: { url: string; version?: string; edits?: EditInput[]; title?: string },
+  input: { url: string; version?: string; edits?: EditInput[]; title?: string; settings?: DocSettingsInput },
 ): Promise<ToolResult> {
   const doc = await editableDoc(ctx, input.url);
   // The doc as it stands: whose chips an edit may write back, and what its
@@ -228,7 +249,12 @@ export async function editDocFor(
       throw invalid(`${label}an edit is {old, new}, {append} or {insert, after}.`);
     }
   }
-  if (edits.length === 0 && input.title === undefined) throw invalid("Give edits, a title, or both.");
+  // The doc's own settings ("Styling"): how its mentions are shown. Null puts the default back.
+  const chipStyles: Record<string, unknown> | undefined =
+    input.settings?.mentions === undefined
+      ? undefined
+      : { [MENTION]: input.settings.mentions === null ? null : { form: input.settings.mentions.form, at: input.settings.mentions.at ?? null } };
+  if (edits.length === 0 && input.title === undefined && !chipStyles) throw invalid("Give edits, a title, settings, or several of them.");
 
   // The middle of a passage named by its ends, checked against the version read.
   const named = edits.filter((e): e is Extract<EditSpec, { kind: "replace" }> => e.kind === "replace" && !e.target.quote);
@@ -252,6 +278,9 @@ export async function editDocFor(
             total: found.matches.length,
           });
         }
+        if (found.matches[0].widened) {
+          throw new ApiError("splits_chip", "That passage begins or ends partway through a mention. Name the whole of it, or none.");
+        }
         edit.target.expectText = quotedTextAt(then.node, found.matches[0].from, found.matches[0].to);
         edit.target.expectChips = chipIdentitiesBetween(then.node, found.matches[0].from, found.matches[0].to);
       }
@@ -268,8 +297,10 @@ export async function editDocFor(
     ...(input.title !== undefined ? { title: input.title } : {}),
     annotations: anchors.annotations,
     markAnnotations: anchors.markAnnotations,
+    markChips: anchors.markChips,
     linkParts: anchors.linkParts,
     chipInputs: current.chips.inputs,
+    ...(chipStyles ? { chipStyles } : {}),
   });
   if (!answer.ok) {
     if ("refusal" in answer) throw refusalError(answer.refusal, edits.length);
@@ -285,6 +316,7 @@ export async function editDocFor(
     // Removing a mention on purpose is allowed, and never silent.
     ...(answer.chips && answer.chips.removed.length > 0 ? { mentionsRemoved: answer.chips.removed } : {}),
     ...(answer.chips && answer.chips.added > 0 ? { mentionsAdded: answer.chips.added } : {}),
+    ...(answer.restyled ? { settings: "changed" } : {}),
     ...(touchedAnnotations.length > 0 || touchedLinks.length > 0
       ? {
           touched: {
@@ -395,6 +427,7 @@ export async function revertEditFor(
     ...(titleHunk ? { title: titleHunk.title } : {}),
     annotations: anchors.annotations,
     markAnnotations: anchors.markAnnotations,
+    markChips: anchors.markChips,
     linkParts: anchors.linkParts,
     chipInputs: now.chips.inputs,
   });

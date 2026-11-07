@@ -53,6 +53,7 @@ function buildTree(comments: AnnotationComment[], chipInputs: ChipInputs): Annot
       anchorFrom: a.anchorFrom,
       anchorTo: a.anchorTo,
       quotedText: a.quotedText,
+      anchorChips: a.anchorChips,
       color: a.color,
       createdAt: a.createdAt,
       postedAt: a.postedAt,
@@ -99,6 +100,7 @@ export async function buildAnnotationEntries(threads: AnnotationThread[]): Promi
       buildTree(thread.comments, chipInputs).map((root) => ({
         threadId: thread.id,
         quotedText: thread.quotedText,
+        anchorChips: thread.anchorChips,
         anchorFrom: thread.anchorFrom,
         anchorTo: thread.anchorTo,
         color: thread.color,
@@ -109,6 +111,9 @@ export async function buildAnnotationEntries(threads: AnnotationThread[]): Promi
       buildTree(thread.comments, chipInputs).map((root) => ({
         threadId: thread.id,
         quotedText: "",
+        // Kept for a mark-anchored thread whose passage is a chip alone: it
+        // has no text for a mark to hold, and the record is its whole anchor.
+        anchorChips: thread.anchorChips,
         anchorFrom: null,
         anchorTo: null,
         color: thread.color,

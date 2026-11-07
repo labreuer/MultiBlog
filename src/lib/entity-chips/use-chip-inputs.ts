@@ -2,9 +2,11 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
+import type * as Y from "yjs";
 import { entityChipKey, setChipInputs } from "./node";
 import { chipsIn, chipTargets } from "./renderings";
-import { NO_CHIP_INPUTS, type ChipContext, type ChipInputs } from "./types";
+import { observeChipStyles } from "./settings";
+import { NO_CHIP_INPUTS, type ChipContext, type ChipInputs, type ChipStyles } from "./types";
 
 // docs/ENTITY_CHIPS.md, step 1, item 5 — how a live editor gets what its
 // chips' labels are computed from. The page's first paint hands over the
@@ -36,9 +38,10 @@ function mergeContext(base: ChipContext, more: ChipContext): ChipContext {
 
 /**
  * Keeps `editor`'s chips labelled. A no-op without a surface, which is every
- * editor on a page that has not been given one.
+ * editor on a page that has not been given one. `ydoc` is the doc's own, on
+ * a surface that holds one: its styles are followed live.
  */
-export function useChipInputs(editor: Editor | null, surface: ChipSurface | null | undefined): void {
+export function useChipInputs(editor: Editor | null, surface: ChipSurface | null | undefined, ydoc?: Y.Doc | null): void {
   const targetKey = surface ? ("doc" in surface.target ? `doc=${surface.target.doc}` : `annotation=${surface.target.annotation}`) : null;
   const initial = surface?.initial;
   const seeded = surface?.seeded;
@@ -46,13 +49,18 @@ export function useChipInputs(editor: Editor | null, surface: ChipSurface | null
   // What this hook has fetched, kept apart from `initial` so that a refreshed
   // page's newer context joins it by derivation rather than by an effect.
   const [fetched, setFetched] = useState<Fetched>(NOTHING_FETCHED);
+  // The doc's own styles, straight from its ydoc ("Styling"): what makes a
+  // collaborator's change of style show here without a refresh. Null until
+  // the ydoc says something, and the server's answer stands meanwhile.
+  const [liveStyles, setLiveStyles] = useState<ChipStyles | null>(null);
+  useEffect(() => (ydoc ? observeChipStyles(ydoc, setLiveStyles) : undefined), [ydoc]);
   const inputs = useMemo<ChipInputs>(
     () => ({
-      styles: fetched.styles ?? initial?.styles ?? NO_CHIP_INPUTS.styles,
+      styles: liveStyles ?? fetched.styles ?? initial?.styles ?? NO_CHIP_INPUTS.styles,
       context: mergeContext(mergeContext(initial?.context ?? {}, fetched.context), seeded ?? {}),
       ...(fetched.pending ? { pending: fetched.pending } : {}),
     }),
-    [initial, fetched, seeded],
+    [initial, fetched, seeded, liveStyles],
   );
   // Every target id the server has been asked about, answered or not, per
   // chip kind: an id it didn't return doesn't exist for this viewer, and

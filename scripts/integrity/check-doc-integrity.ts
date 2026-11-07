@@ -83,6 +83,7 @@ import { docContentExtensions, titleAuthorHighlightExtensions } from "../../src/
 import { extractText } from "../../src/lib/diff";
 import type { JSONContent } from "@tiptap/core";
 import { materializeChipLabels } from "../../src/lib/entity-chips/context";
+import { chipStylesOf, parseChipStyles, sameChipStyles } from "../../src/lib/entity-chips/settings";
 import { withoutChipLabels } from "../../src/lib/entity-chips/materialize";
 import { chipDisplayText } from "../../src/lib/entity-chips/text";
 
@@ -151,7 +152,7 @@ async function main() {
   const docs = await prisma.doc.findMany({
     where: docArg ? { OR: [{ id: docArg }, { slug: docArg }] } : undefined,
     orderBy: { id: "asc" },
-    select: { id: true, slug: true, title: true, proseJson: true, proseJsonLength: true, deletedAt: true },
+    select: { id: true, slug: true, title: true, proseJson: true, proseJsonLength: true, chipStyles: true, deletedAt: true },
   });
 
   if (docs.length === 0) {
@@ -207,6 +208,22 @@ async function main() {
       });
       ydoc.destroy();
       continue;
+    }
+
+    // --- 0. style-cache ---------------------------------------------------
+    // Doc.chipStyles is the ydoc's `settings` map, cached by the store
+    // (docs/ENTITY_CHIPS.md, "Styling"). A stale one self-corrects at the next
+    // store, so it is a --verbose finding, as a stale title is.
+    if (verbose && !sameChipStyles(parseChipStyles(doc.chipStyles), chipStylesOf(ydoc))) {
+      findings.push({
+        level: "warn",
+        docId: doc.id,
+        slug: doc.slug,
+        check: "style-cache",
+        detail:
+          `Doc.chipStyles ${JSON.stringify(doc.chipStyles)} is stale against the ydoc's ` +
+          `${JSON.stringify(chipStylesOf(ydoc))} — the cache self-corrects on the next store.`,
+      });
     }
 
     // --- 1. title-cache ---------------------------------------------------
@@ -310,7 +327,7 @@ async function main() {
       // without --verbose: a store relabels a doc, but nothing stores a doc
       // nobody opens, so a label the refresh missed stays wrong, and search
       // goes on finding the doc by the old name.
-      const relabelled = await materializeChipLabels(bodyJSON as JSONContent);
+      const relabelled = await materializeChipLabels(bodyJSON as JSONContent, chipStylesOf(ydoc));
       if (canonical(doc.proseJson) !== canonical(relabelled)) {
         findings.push({
           level: "warn",

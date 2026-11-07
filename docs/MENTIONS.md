@@ -16,11 +16,15 @@
 - the `mention` index table and the label refresh after a rename (the kit's items 12 and 10).
 
 - the Markdown, both ways: a read writes `[@Label](/authors/slug)`, with a deleted or unknown
-  account struck through and a hand-written link of that shape escaped; an MCP edit or note
-  reads it back as a mention, resolved by handle under the rule above (`resolveParsedChips`).
+  account struck through and a hand-written link of that shape escaped; an MCP edit, note or
+  `create_doc`, and `/docs`' Markdown import, read it back as a mention, resolved by handle
+  under the rule above (`resolveParsedChips`). The import leaves one it can't resolve as a
+  link; MCP refuses it.
 
-Still a plan: ordering beyond "participants first", `create_doc`'s Markdown, `mentions=`
-search, the dashboard card and notifications.
+- search by who is mentioned, and the dashboard's "Mentions of you" card (below, "Search" and
+  "The dashboard").
+
+Still a plan: ordering beyond "participants first", and notifications.
 
 A *mention* is an entity chip
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md)) that stands for a person: a MultiBlog account. It is shown as
@@ -116,13 +120,24 @@ whose labels can name them.
     EDITOR and AUTHOR, bots included, and keeps doing so for bylines.
   - A row says "can't read this doc" (or "this PDF", in a note on one) for someone who wouldn't
     see the mention.
-- **Search.**
-  - `mentions=<slug>`.
-  - Typing `@me` or `@<slug>` in the search box applies it. `me` becomes a reserved slug;
-    `user-slug.ts` reserves none today.
-  - MCP's `search` gains `mentions`.
-- **The dashboard** gets a "Mentions of you" card: one query per kind through its read rule,
-  newest first.
+- **Search.** Built.
+  - `mentions=<slug>` keeps a search to the docs, posts and notes that mention that person,
+    by the `mention` table, inside each kind's readable ids (`mentionedWhere`,
+    `src/lib/search/context.ts`). Several handles mean any of them. PDFs and comments hold no
+    mention and are left out, and the page says so.
+  - `me` is the searcher, and no account may have that handle (`RESERVED_USER_SLUGS`,
+    `user-slug.ts`).
+  - Typing `@me` or `@<slug>` in the search box applies it: every `@handle` that is a word of
+    its own is a filter, and the rest is the text (`splitMentionTokens`). Every well-formed
+    one, whether or not anyone has the handle, so the box can't be used to ask who exists. A
+    `mentions=` in the URL is shown in the box as those words.
+  - **A handle nobody has narrows to nothing**, exactly as a real person with no mention the
+    searcher can read does, and the page names handles, never people. So the filter discloses
+    no account and no private doc.
+  - MCP's `search` and the export take `mentions`.
+- **The dashboard** has a "Mentions of you" card (`src/lib/mentions-of.ts`): one query per
+  kind through its read rule, newest first by when the mention was first seen, one line per
+  doc, note or post. Its heading is `/search?mentions=me`. Built.
 - **The notification stub** is the `mention` table's first-seen time, an outbox nothing reads
   yet. When notifications are built:
   - only new mentions count, at most once per person per item;

@@ -15,9 +15,11 @@ import {
 } from "../src/lib/tiptap-schema";
 import { planEdits, planTitle, type EditPlan, type EditSpec } from "../src/lib/doc-edit";
 import { chipLabelsIn } from "../src/lib/entity-chips/text";
+import { chipStylesOf, sameChipStyles, setChipStyle } from "../src/lib/entity-chips/settings";
 import { NO_CHIP_INPUTS, type ChipInputs } from "../src/lib/entity-chips/types";
 import { writeBackDoc } from "../src/lib/doc-edit-yjs";
 import { markdownToText } from "../src/lib/markdown-import";
+import { chipPositions, parseChipRecords, rangeWithEdgeChips } from "../src/lib/anchors/chips";
 import { resolveAnchorInDoc } from "../src/lib/anchors/resolve";
 import { collectAnnotationMarkRanges } from "../src/lib/annotation-marks";
 import { ydocStore, UNAVAILABLE, isDegraded } from "./ydoc-store";
@@ -58,7 +60,7 @@ import { expectAppend } from "./edit-appends";
 // the verified one. A flattening mistake costs a refused edit, never a wrong
 // one.
 
-type AnchorIn = { id: string; from: number | null; to: number | null; quotedText: string };
+type AnchorIn = { id: string; from: number | null; to: number | null; quotedText: string; chips?: unknown };
 
 type EditRequest = {
   token: string;
@@ -71,11 +73,33 @@ type EditRequest = {
   /** The annotations on the doc anchored by columns, and the ids of those anchored by marks, for what the edit touched. */
   annotations?: AnchorIn[];
   markAnnotations?: string[];
+  /** The edge chips of a mark-anchored annotation whose passage reaches over one, by annotation id (src/lib/anchors/chips.ts). */
+  markChips?: Record<string, unknown>;
   /** The anchored-link parts into the doc the actor can see. */
   linkParts?: AnchorIn[];
   /** What the doc's entity chips are labelled from, as the client read them (doc-edit-client.ts). */
   chipInputs?: ChipInputs;
+  /**
+   * The doc's style per chip kind, to set with the edit (docs/ENTITY_CHIPS.md,
+   * "Styling"): a kind's style, or null to clear it back to the default. It
+   * goes into the ydoc's `settings` map in the edit's own transaction.
+   */
+  chipStyles?: Record<string, unknown>;
 };
+
+/** Whether applying `styles` (above) to `doc` would change anything, tried on a copy. */
+function stylesWouldChange(doc: Y.Doc, styles: Record<string, unknown> | undefined): boolean {
+  if (!styles || Object.keys(styles).length === 0) return false;
+  const scratch = new Y.Doc();
+  try {
+    Y.applyUpdate(scratch, Y.encodeStateAsUpdate(doc));
+    const before = chipStylesOf(scratch);
+    for (const [kind, style] of Object.entries(styles)) setChipStyle(scratch, kind, style);
+    return !sameChipStyles(before, chipStylesOf(scratch));
+  } finally {
+    scratch.destroy();
+  }
+}
 
 function decode(doc: Y.Doc): { body: PMNode; title: PMNode | null } {
   const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(doc, "default") as JSONContent;
@@ -124,14 +148,24 @@ function touched(request: EditRequest, before: PMNode, after: PMNode, ranges: { 
   const columns = (items: AnchorIn[] | undefined) =>
     (items ?? []).flatMap((item) => {
       if (item.from === null || item.to === null || !item.quotedText) return [];
-      const was = resolveAnchorInDoc(before, item.from, item.to, item.quotedText);
+      // With its chip records, so a passage whose mention the edit swapped for another person's reads as lost.
+      const chips = parseChipRecords(item.chips);
+      const was = resolveAnchorInDoc(before, item.from, item.to, item.quotedText, undefined, chips);
       if (!overlaps(was)) return [];
-      return [{ id: item.id, resolves: resolveAnchorInDoc(after, item.from, item.to, item.quotedText) !== null }];
+      return [{ id: item.id, resolves: resolveAnchorInDoc(after, item.from, item.to, item.quotedText, undefined, chips) !== null }];
     });
-  const marksBefore = collectAnnotationMarkRanges(before);
-  const marksAfter = collectAnnotationMarkRanges(after);
+  // A marked passage is its mark's hull, stretched over the edge chips its row records.
+  const markedIn = (doc: PMNode) => {
+    const marks = collectAnnotationMarkRanges(doc);
+    const chipAt = chipPositions(doc);
+    return (id: string) => {
+      const chips = parseChipRecords(request.markChips?.[id]);
+      return chips.length > 0 ? rangeWithEdgeChips(doc, marks.get(id) ?? null, chips, chipAt) : (marks.get(id) ?? null);
+    };
+  };
+  const [markedBefore, markedAfter] = [markedIn(before), markedIn(after)];
   const marked = (request.markAnnotations ?? []).flatMap((id) =>
-    overlaps(marksBefore.get(id) ?? null) ? [{ id, resolves: marksAfter.has(id) }] : [],
+    overlaps(markedBefore(id)) ? [{ id, resolves: markedAfter(id) !== null }] : [],
   );
   return { annotations: [...columns(request.annotations), ...marked], linkParts: columns(request.linkParts) };
 }
@@ -173,13 +207,14 @@ export async function handleEditDoc(request: IncomingMessage, response: ServerRe
     Y.applyUpdate(probe, stored.ydoc);
   }
   const pre = planOn(probe, editRequest, payload.sub);
+  const restyles = stylesWouldChange(probe, editRequest.chipStyles);
   if (probe !== open) probe.destroy();
   if ("refusal" in pre) {
     send(response, 422, JSON.stringify({ refusal: pre.refusal }));
     return;
   }
   const unchanged = pre.plan.next.eq(pre.body) && (pre.nextTitle === null || (pre.title !== null && pre.nextTitle.eq(pre.title)));
-  if (unchanged) {
+  if (unchanged && !restyles) {
     send(response, 200, JSON.stringify({ applied: false, updateId: null, changed: [], touched: { annotations: [], linkParts: [] } }));
     return;
   }
@@ -208,6 +243,7 @@ export async function handleEditDoc(request: IncomingMessage, response: ServerRe
         scratch.transact(() => {
           writeBackDoc(scratch.getXmlFragment("default"), planned.body, planned.plan.next);
           if (planned.nextTitle) prosemirrorToYXmlFragment(planned.nextTitle, scratch.getXmlFragment("title"));
+          for (const [kind, style] of Object.entries(editRequest.chipStyles ?? {})) setChipStyle(scratch, kind, style);
         });
         const update = Y.encodeStateAsUpdate(scratch, before);
         Y.applyUpdate(document, update);
@@ -241,6 +277,7 @@ export async function handleEditDoc(request: IncomingMessage, response: ServerRe
       chips: outcome.result!.plan.chips,
       blocks: outcome.result!.plan.next.childCount,
       touched: outcome.touched,
+      ...(restyles ? { restyled: true } : {}),
     }),
   );
 }

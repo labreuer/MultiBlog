@@ -10,6 +10,7 @@ import {
   deleteTestUser,
   getAnnotationStates,
   getDocMarkFacts,
+  getDocSearchText,
   getMentionSources,
   getUserIdByEmail,
   setTestDocRecord,
@@ -237,6 +238,46 @@ test("edit_doc refuses what it should: a missing or repeated passage, a record, 
   }
 });
 
+// docs/ENTITY_CHIPS.md, MCP item 7 — create_doc speaks the Markdown a read
+// writes, mentions by handle, so a doc moves between instances with them.
+test("create_doc writes a mention from its Markdown, and refuses one that names nobody", async ({ request }) => {
+  const agent = await createAgent(request);
+  const adaEmail = uniqueEmail("mcp-create-ada");
+  const ada = await createTestUser({ email: adaEmail, name: `Ada ${adaEmail.split("@")[0]}`, role: "AUTHOR" });
+  const adaMd = `[@${ada.name}](/authors/${ada.slug})`;
+  const created: string[] = [];
+  try {
+    const refused = await agent.call("create_doc", { markdown: "# Notes\n\nAsk [@Nobody](/authors/no-such-handle-e2e)." });
+    expect(refused.error).toMatchObject({ code: "unknown_chip", handles: ["no-such-handle-e2e"] });
+
+    // The label in the Markdown is whatever the writer typed; the handle is what is read.
+    const made = await agent.call("create_doc", {
+      markdown: `# Review notes for [@Somebody](/authors/${ada.slug})\n\nReviewed by [@An Old Name](/authors/${ada.slug}) last week.`,
+    });
+    expect(made.isError, JSON.stringify(made.error)).toBe(false);
+    created.push(String(made.result.id));
+    // A title is plain text, and reads as the heading did.
+    expect(made.result).toMatchObject({ title: "Review notes for @Somebody" });
+    await expect.poll(() => getMentionSources(ada.id)).toEqual([`doc:${made.result.id}`]);
+
+    const read = await agent.call("read", { url: String(made.result.url) });
+    expect(read.result.markdown).toBe(`Reviewed by ${adaMd} last week.`);
+    // Found by the name from the moment it exists: the cache was written with its label.
+    expect(await getDocSearchText(String(made.result.id))).toBe(`Reviewed by @${ada.name} last week.`);
+
+    // And by who it mentions, whatever they are called (docs/MENTIONS.md, "Search").
+    const mentioning = await agent.call("search", { mentions: [ada.slug], kinds: ["docs"] });
+    expect(mentioning.isError, JSON.stringify(mentioning.error)).toBe(false);
+    expect(JSON.stringify(mentioning.result.sections)).toContain(String(made.result.url));
+    const nobody = await agent.call("search", { mentions: ["no-such-handle-e2e"], kinds: ["docs"] });
+    expect((nobody.result.sections as { total: number }[])[0].total).toBe(0);
+  } finally {
+    for (const id of created) await deleteTestDoc(id);
+    await deleteTestUser(adaEmail);
+    await agent.dispose();
+  }
+});
+
 // docs/ENTITY_CHIPS.md, MCP items 2, 5 and 6 — an edit where the doc holds a
 // mention: written back as Markdown it stays the same mention, a new one is
 // resolved under the rule the menu lists by, and nothing is removed silently.
@@ -290,6 +331,14 @@ test("edit_doc keeps a mention it writes back, adds one by handle, and refuses o
       edits: [{ old: `signed off by @${ada.name} last month`, new: `signed off by ${ada.name} last month` }],
     });
     expect(asText.error).toMatchObject({ code: "chip_as_text", labels: [`@${ada.name}`] });
+
+    // Half a mention is not a passage an edit can replace.
+    const half = await agent.call("edit_doc", {
+      url,
+      edits: [{ old: `signed off by @${ada.name.slice(0, 3)}`, new: "signed off by someone" }],
+    });
+    expect(half.error).toMatchObject({ code: "splits_chip" });
+    expect(String(half.error.passage)).toContain(`@${ada.name}`);
 
     // A new mention, by handle, of someone the agent may mention.
     const added = await agent.call("edit_doc", { url, edits: [{ old: "A second paragraph.", new: `A second paragraph, for ${graceMd}.` }] });
@@ -404,5 +453,137 @@ test("a bot may mention itself and its person's bots, and another person's bot o
     for (const doc of [noted, bylined, neither]) await deleteTestDoc(doc.id);
     await agent.dispose();
     for (const email of [siblingEmail, otherEmail, adaEmail]) await deleteTestUser(email);
+  }
+});
+
+// docs/ENTITY_CHIPS.md, step 1, item 11 — an anchor's chip record, from the
+// machine side: a note and a link on a passage holding a mention keep which
+// mention, are shown with its label where only the stored quote is read, and
+// stop resolving once the passage names someone else, though its stored text
+// (a placeholder where the chip is) reads the same.
+test("an anchor on a passage with a mention shows its label, and is lost when the mention becomes someone else's", async ({ request }) => {
+  const agent = await createAgent(request);
+  const adaEmail = uniqueEmail("mcp-anchor-ada");
+  const graceEmail = uniqueEmail("mcp-anchor-grace");
+  const ada = await createTestUser({ email: adaEmail, name: `Ada ${adaEmail.split("@")[0]}`, role: "AUTHOR" });
+  const grace = await createTestUser({ email: graceEmail, name: `Grace ${graceEmail.split("@")[0]}`, role: "AUTHOR" });
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "The engine was reviewed by " },
+            { type: "entityChip", attrs: { kind: "mention", iid: "m1", data: { userId: ada.id } } },
+            { type: "text", text: " last week." },
+          ],
+        },
+      ],
+    },
+  });
+  await addTestDocAuthor(doc.id, agent.user.email);
+  const url = `/doc/${doc.slug}`;
+  try {
+    const note = await agent.call("add_note", { on: url, body: "Which review?", quote: `reviewed by @${ada.name}` });
+    expect(note.isError, JSON.stringify(note.error)).toBe(false);
+    const [row] = await getAnnotationStates(doc.id);
+    expect(row).toMatchObject({
+      quotedText: "reviewed by ￼",
+      anchorChips: [{ at: 12, kind: "mention", iid: "m1", data: { userId: ada.id }, label: `@${ada.name}` }],
+    });
+    const minted = await agent.call("create_link", { links: [{ parts: [{ on: url, quote: `reviewed by @${ada.name} last week` }] }] });
+    expect(minted.isError, JSON.stringify(minted.error)).toBe(false);
+    const link = (minted.result.links as { url: string }[])[0].url;
+    const linkRead = await agent.call("read", { url: link });
+    expect(JSON.stringify(linkRead.result)).toContain(`reviewed by @${ada.name} last week`);
+    expect(JSON.stringify(linkRead.result)).not.toContain("￼");
+
+    // The same words around a different person. Both anchors' text still reads the same.
+    const swapped = await agent.call("edit_doc", {
+      url,
+      edits: [{ old: `reviewed by @${ada.name} last week`, new: `reviewed by [@${grace.name}](/authors/${grace.slug}) last week` }],
+    });
+    expect(swapped.isError, JSON.stringify(swapped.error)).toBe(false);
+    expect(swapped.result).toMatchObject({
+      mentionsRemoved: [`@${ada.name}`],
+      mentionsAdded: 1,
+      touched: { annotations: [{ id: note.result.id, resolves: false }], links: [{ link, resolves: false }] },
+    });
+
+    // Each keeps what it was about, by name, as a lost anchor does.
+    const threads = await agent.call("read", { url, include: ["annotations"], format: "text" });
+    expect(JSON.stringify(threads.result.threads)).toContain(`reviewed by @${ada.name}`);
+    const linkAfter = await agent.call("read", { url: link });
+    expect(JSON.stringify(linkAfter.result)).toContain(`reviewed by @${ada.name} last week`);
+    expect(JSON.stringify(linkAfter.result)).toContain('"lost":true');
+  } finally {
+    await deleteTestDoc(doc.id);
+    for (const email of [adaEmail, graceEmail]) await deleteTestUser(email);
+    await agent.dispose();
+  }
+});
+
+// docs/ENTITY_CHIPS.md, "Styling" — a doc's style, from the machine side:
+// edit_doc sets it, a read says what is set and shows every mention in it,
+// and what changed since a version names it.
+test("edit_doc sets how a doc shows its mentions, and reads report and follow it", async ({ request }) => {
+  const agent = await createAgent(request);
+  const adaEmail = uniqueEmail("mcp-style-ada");
+  const ada = await createTestUser({ email: adaEmail, name: `Ada ${adaEmail.split("@")[0]}`, role: "AUTHOR" });
+  const doc = await createTestDoc({
+    authorEmail: ADMIN_EMAIL,
+    visibility: "SHARED",
+    body: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "Reviewed by " },
+            { type: "entityChip", attrs: { kind: "mention", iid: "m1", data: { userId: ada.id } } },
+            { type: "text", text: "." },
+          ],
+        },
+      ],
+    },
+  });
+  await addTestDocAuthor(doc.id, agent.user.email);
+  const url = `/doc/${doc.slug}`;
+  try {
+    const before = await agent.call("read", { url, format: "text" });
+    expect(before.result.styles).toBeUndefined();
+    expect(String(before.result.text)).toContain(`Reviewed by @${ada.name}.`);
+
+    const styled = await agent.call("edit_doc", { url, settings: { mentions: { form: "handle" } } });
+    expect(styled.isError, JSON.stringify(styled.error)).toBe(false);
+    expect(styled.result).toMatchObject({ settings: "changed" });
+
+    const after = await agent.call("read", { url, format: "text" });
+    expect(after.result.styles).toEqual({ mentions: { form: "handle" } });
+    expect(String(after.result.text)).toContain(`Reviewed by @${ada.slug}.`);
+    // A quote of what is read now finds the mention, as one of the old label no longer does.
+    const around = await agent.call("read", { url, around: `Reviewed by @${ada.slug}`, format: "text" });
+    expect(around.result.total).toBe(1);
+    // What search and every static render read follows.
+    await expect.poll(() => getDocSearchText(doc.id), { timeout: 15_000 }).toBe(`Reviewed by @${ada.slug}.`);
+
+    // The style is a change of its own in the history, beside the block that reads differently for it.
+    const since = await agent.call("read", { url, since: String(before.result.version) });
+    expect(since.result).toMatchObject({ settings: { was: null, now: { mentions: { form: "handle" } } }, changes: [{ block: 1 }] });
+
+    // Setting what is already set changes nothing, and null puts the default back.
+    // (Spelled another way: the very same call again is answered as a repeat, before it is looked at.)
+    const again = await agent.call("edit_doc", { url, settings: { mentions: { form: "handle", at: null } } });
+    expect(again.result).toMatchObject({ unchanged: true });
+    const cleared = await agent.call("edit_doc", { url, settings: { mentions: null } });
+    expect(cleared.result).toMatchObject({ settings: "changed" });
+    expect((await agent.call("read", { url })).result.styles).toBeUndefined();
+  } finally {
+    await deleteTestDoc(doc.id);
+    await deleteTestUser(adaEmail);
+    await agent.dispose();
   }
 });

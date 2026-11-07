@@ -15,7 +15,8 @@
 
 import { canViewDocs, canViewFiles } from "@/lib/role-checks";
 import { dayRangeToInstants } from "./dates";
-import { hasFilters, SEARCH_KINDS, type SearchKind, type SearchParams } from "./params";
+import { hasFilters, MENTIONS_ME, SEARCH_KINDS, splitMentionTokens, type SearchKind, type SearchParams } from "./params";
+import { prisma } from "@/lib/prisma";
 import { isEmptyQuery, websearchQuery, windowOf, type TsQuery } from "./sql";
 import { asYouTypeQuery } from "./as-you-type";
 import { correctQuery } from "./correct";
@@ -81,6 +82,25 @@ async function sectionFor(
   return { kind, total: ordered.length, hits } as SearchSection;
 }
 
+/** The kinds that can hold a mention; the rest drop out while a mention filter is set. */
+export const MENTION_KINDS: readonly SearchKind[] = ["docs", "posts", "annotations"];
+
+/**
+ * The user ids a mention filter's handles name. `me` is the searcher, and
+ * nobody for a signed-out one. A handle nobody has adds no id, so a filter
+ * made only of those passes nothing, which is also what a real person with
+ * no mention this viewer can read gives: the two can't be told apart.
+ */
+export async function mentionIdsFor(actor: SearchActor, handles: string[]): Promise<string[]> {
+  const ids = new Set<string>();
+  if (handles.includes(MENTIONS_ME) && actor) ids.add(actor.userId);
+  const slugs = handles.filter((handle) => handle !== MENTIONS_ME);
+  if (slugs.length > 0) {
+    for (const user of await prisma.user.findMany({ where: { slug: { in: slugs } }, select: { id: true } })) ids.add(user.id);
+  }
+  return [...ids];
+}
+
 export type SearchOptions = {
   scope?: SearchScope;
   /**
@@ -114,9 +134,17 @@ export async function search(
   const authors = options.filter((option) => requested.authors.includes(option.slug));
   const params: SearchParams = { ...requested, authors: authors.map((author) => author.slug) };
 
+  // `@handle` words in the box are mention filters, and the rest is the
+  // text. Not for the quote picker, whose last word is still being typed.
+  const box = opts.asYouType ? { mentions: [], text: params.q } : splitMentionTokens(params.q);
+  const mentions = [...new Set([...params.mentions, ...box.mentions])];
+  const text = box.text;
+
   const selected = (params.kinds ?? readable).filter((kind) => readable.includes(kind));
   const withoutAuthors = authors.length > 0 ? selected.filter((kind) => !AUTHORED_KINDS.includes(kind)) : [];
-  const kinds = selected.filter((kind) => !withoutAuthors.includes(kind));
+  const withoutMentions =
+    mentions.length > 0 ? selected.filter((kind) => !MENTION_KINDS.includes(kind) && !withoutAuthors.includes(kind)) : [];
+  const kinds = selected.filter((kind) => !withoutAuthors.includes(kind) && !withoutMentions.includes(kind));
   // Pagination when exactly one kind was asked for (§6), even if an author
   // filter then leaves it out.
   const paginated = params.kinds !== null && params.kinds.length === 1;
@@ -127,6 +155,8 @@ export async function search(
     readableKinds: readable,
     kinds,
     withoutAuthors,
+    mentions,
+    withoutMentions,
     authorOptions: options.map(({ slug, name }) => ({ slug, name })),
     sections: [] as SearchSection[],
     corrected: false,
@@ -135,14 +165,14 @@ export async function search(
   };
 
   const tagIds = opts.tagIds ?? [];
-  if (!params.q && !hasFilters(params) && tagIds.length === 0) return { ...result, status: "idle" };
+  if (!text && mentions.length === 0 && !hasFilters(params) && tagIds.length === 0) return { ...result, status: "idle" };
   // Every kind asked for is one this viewer can't search: nothing to run, and
   // nothing for typo correction to look through.
   if (kinds.length === 0) return { ...result, status: "ok" };
 
   let query: TsQuery | null = null;
-  if (params.q) {
-    query = opts.asYouType ? await asYouTypeQuery(params.q) : websearchQuery(params.q);
+  if (text) {
+    query = opts.asYouType ? await asYouTypeQuery(text) : websearchQuery(text);
     if (!query || (await isEmptyQuery(query))) return { ...result, status: "stop-words" };
   }
 
@@ -150,6 +180,7 @@ export async function search(
     actor,
     scope,
     authorIds: authors.map((author) => author.id),
+    mentionIds: mentions.length > 0 ? await mentionIdsFor(actor, mentions) : null,
     created: dayRangeToInstants(params.created, params.tz),
     updated: dayRangeToInstants(params.updated, params.tz),
     excludePostId: opts.excludePostId ?? null,
@@ -170,7 +201,7 @@ export async function search(
   if (query && !opts.asYouType && !params.exact && sections.every((section) => section.total === 0)) {
     const countHits = async (q: TsQuery) =>
       (await Promise.all(kinds.map((kind) => SEARCHES[kind].match(ctx, q)))).reduce((n, ids) => n + ids.length, 0);
-    const corrected = await correctQuery(params.q, query, countHits);
+    const corrected = await correctQuery(text, query, countHits);
     if (corrected) {
       const retried = await run(corrected);
       if (retried.some((section) => section.total > 0)) return { ...result, status: "ok", sections: retried, corrected: true };

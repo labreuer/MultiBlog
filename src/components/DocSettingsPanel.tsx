@@ -2,10 +2,12 @@
 
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import type * as Y from "yjs";
 import Link from "next/link";
 import { updateDocVisibility, updateDocAuthor, updateDocAuthorOrder, deleteDoc, restoreDoc } from "@/app/actions/docs";
 import { loadTaggerState, type TaggerState } from "@/app/actions/tags";
 import TagStrip from "@/components/tags/TagStrip";
+import { MentionStyleSelect } from "@/components/ChipStyleSettings";
 import { DocVisibility, type Role } from "@/generated/prisma/enums";
 import styles from "./DocSettingsPanel.module.css";
 
@@ -24,6 +26,12 @@ type Props = {
   eligibleUsers: EligibleUser[];
   deleted: boolean;
   onDeletedChange: (deleted: boolean) => void;
+  /**
+   * The doc's own ydoc, once the editor is connected: where its chip styles
+   * live (docs/ENTITY_CHIPS.md, "Styling"). Null before that, and the style
+   * row waits for it.
+   */
+  ydoc: Y.Doc | null;
 };
 
 // A smaller sibling of PostSettingsPanel (PLAN.md §12k) — no revisions
@@ -38,6 +46,7 @@ export default function DocSettingsPanel({
   eligibleUsers,
   deleted,
   onDeletedChange,
+  ydoc,
 }: Props) {
   const router = useRouter();
   const detailsRef = useRef<HTMLDetailsElement>(null);
@@ -252,6 +261,16 @@ export default function DocSettingsPanel({
                 </select>
               </td>
             </tr>
+            {ydoc && (
+              <tr>
+                <td className={styles.label}>Mentions</td>
+                <td>
+                  {/* Written into the doc itself, through the editor's
+                      connection: every open view relabels at once. */}
+                  <MentionStyleSelect ydoc={ydoc} disabled={deleted} className={styles.visibilitySelect} />
+                </td>
+              </tr>
+            )}
             <tr>
               <td className={styles.label}>Url</td>
               <td>

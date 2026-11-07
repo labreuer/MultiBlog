@@ -3,16 +3,25 @@ import { prismaIncludingDeleted } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { slugify, REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
 
-// A slug counts as "in use" if it's any user's *current* slug, or sitting in
-// any user's history as a redirect source — mirrors post-slug.ts's postSlugInUse for
-// Post. No reserved-word set: unlike post slugs (top-level /[slug] route),
-// author slugs live under /authors/[slug], which has no sibling static
-// routes to collide with. excludeUserId: see postSlugInUse's excludePostId.
+/**
+ * Handles no account may have. `me` is the searcher in a mention filter
+ * (`mentions=me`, or `@me` in the search box: docs/MENTIONS.md, "Search"), and
+ * an account called that could never be searched for. Nothing else is
+ * reserved: author slugs live under /authors/[slug], which has no sibling
+ * static routes to collide with, unlike a post's top-level /[slug].
+ */
+const RESERVED_USER_SLUGS: ReadonlySet<string> = new Set(["me"]);
+
+// A slug counts as "in use" if it's reserved (above), any user's *current*
+// slug, or sitting in any user's history as a redirect source — mirrors
+// post-slug.ts's postSlugInUse for Post. excludeUserId: see postSlugInUse's
+// excludePostId.
 async function userSlugInUse(
   slug: string,
   client: Prisma.TransactionClient = prismaIncludingDeleted,
   excludeUserId?: string,
 ): Promise<boolean> {
+  if (RESERVED_USER_SLUGS.has(slug)) return true;
   const [live, historic] = await Promise.all([
     client.user.findFirst({
       where: excludeUserId ? { slug, id: { not: excludeUserId } } : { slug },
@@ -54,6 +63,9 @@ export async function changeUserSlug(userId: string, newSlugInput: string): Prom
     }
     if (user.slug === newSlug) {
       return newSlug;
+    }
+    if (RESERVED_USER_SLUGS.has(newSlug)) {
+      throw new Error(`Url "${newSlug}" is reserved.`);
     }
     if (await userSlugInUse(newSlug, tx)) {
       throw new Error(`Url "${newSlug}" is already in use.`);

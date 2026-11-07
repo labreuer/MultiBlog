@@ -62,8 +62,10 @@ still a plan.
 - **Item 2, the node:** `entityChip` (`src/lib/entity-chips/node.ts`) in the doc and
   annotation-body schemas, with `leafText`, the parse rule and its validation.
 - **Item 3, instance ids:** a random id at insertion, and a fresh one for a pasted copy
-  (`repairChipIids`). Not the id derived from a Yjs item, for a duplicate that concurrent changes
-  leave.
+  (`repairChipIids`). A duplicate that concurrent changes leave is repaired by every editor
+  that receives it, with an id derived from the later chip's Yjs item (`repairSharedIids`,
+  `shared-iids.ts`), so their repairs agree. It runs only right after a remote change, when
+  the editor's document and the Yjs one hold the same chips, and is kept out of undo.
 - **Item 4, the rendering function:** `chipRenderings` (`renderings.ts`), the three statuses, and
   the placeholder for a chip kind the build doesn't know. Not the `~~ ~~` in Markdown.
 - **Item 5, the chip context:** `loadChipContext`, `GET /api/chip-context` with its per-viewer
@@ -84,13 +86,45 @@ still a plan.
   `chip-labels`. No re-index was needed, since no doc could hold a chip before this.
 - **Item 9, posts and the landing preamble:** `docJsonForPostSide` (`post-content.ts`) replaces
   each chip with its label as linked text, struck through when its target is gone, and records
-  the chip on the link's `chip` attribute. Not the republish remap.
+  the chip on the link's `chip` attribute. On a republish, `remapThreadsToEvent` compares a
+  quote that holds a label whole by who its chips stand for (`post-chip-runs.ts`), follows a
+  chip at the quote's edge by instance id, and rewrites the thread's `quotedText` to the new
+  label, so a rename between publishes detaches no comment thread. A quote that cuts through
+  a label is compared as text.
 - **Item 10, the refresh, for mentions:** `refreshMentionLabels` (`refresh.ts`) finds the docs
   and notes that mention a person through the `mention` table and rewrites a doc's
-  `prose_json` labels and a note's `bodyText`, each as a compare-and-set on the text it read,
-  in raw SQL so no date moves. `scheduleMentionRefresh` runs it in the background after a
+  `prose_json` labels, a note's `bodyText`, and the chip records of the anchors into either
+  (item 11), each as a compare-and-set on the text it read, in raw SQL so no date moves. `scheduleMentionRefresh` runs it in the background after a
   change to a name, initials, a handle or a bot's person, and once more past the store
   debounce's ceiling. Not the instance default style, which doesn't exist yet.
+- **Item 11, anchors:** `src/lib/anchors/chips.ts`.
+  - **The chip record** is written by the one capture (`captureAnchorInNode`), into the
+    DOC_RANGE selector's `chips` and, for an annotation, into `annotation.anchor_chips`
+    (migration `anchor_chip_records`). A record holds where the chip's U+FFFC is in the quote,
+    its chip kind, its instance id, the chip's *fields* rather than only its identity, and its
+    *label as of the write*. The fields are what a label is computed from, and the identity
+    is derived from them. The stored label is what lets a table of a hundred quotes, and the
+    annotation search vector (`anchor_quote_text`), show a name without a chip context per
+    row. It is kept as `prose_json`'s labels are: the rename refresh rewrites it, and so does
+    every store of the doc the anchor points into (`refreshAnchorRecords`), from that doc's
+    own labels by instance id.
+  - **Shown with labels:** a card's quote line, the annotation popover, "Your private notes",
+    `/annotations`, `/links`, `/link/[id]` with its banner and tray, search hits and MCP's
+    thread and link reads go through `quoteWithChipLabels` or `shownQuote`.
+  - **Identity checks:** `resolveAnchorInDoc` takes the records. A candidate counts only if
+    its chips stand for the recorded entities in order, and several that pass are told apart
+    by instance id. The highlight plugin, MCP's reads and the edit endpoint's "what it
+    touched" all pass them. An anchor with no record resolves by its text.
+  - **Instance anchoring:** a quote that is chips and nothing else resolves by instance
+    alone. In the doc editor, whose anchor is a mark, the row records the passage's *edge*
+    chips (before its first character, after its last, or all of them for a chip alone), and
+    the plugin finds them by instance id and stretches the mark's hull over them, only
+    within the hull's own textblock ([ANNOTATIONS.md](ANNOTATIONS.md), "Anchoring").
+  - `check-annotation-anchors.ts` checks each record against the stamped state
+    (`chips-at-stamp`).
+
+  Not built of item 11: the selector's `before`/`after` context still holds U+FFFC for a
+  chip beside the passage, and a tag's anchor is whole-object, so it has no record to keep.
 - **Item 12, the index table, for mentions:** `mention` (migration `mention_index`), one row per
   chip with its person, its instance id, its one source and when it was first seen. Triggers on
   `doc.prose_json`, `annotation.prose_json` and `post.prose_json` keep it by a diff; a post's
@@ -107,8 +141,9 @@ still a plan.
   kind's Markdown (`ChipKind.markdown`, `chipMarkdowns`, `docContentToMarkdown`), in docs, notes
   and thread passages, with a hand-written link of a mention's shape written `[\@…]`. A quote
   is matched against the doc's display text and verified against it (`flattenForMatch` with
-  labels), and what is stored stays the anchor text; a quote ending inside a label is a miss
-  rather than widened.
+  labels), and what is stored stays the anchor text. A quote that begins or ends inside a
+  label takes the whole chip (`QuoteMatch.widened`): a note, a link and `around` anchor on
+  it, and an edit refuses it as `splits_chip`.
 - **Item 14, MCP, the writing half:** `edit_doc`, `add_note` and `edit_note` read a chip kind's
   syntax as a chip. The parse yields a placeholder holding what the Markdown named
   (`markdownToBlocks` with `chips`), and `resolveParsedChips` makes it a chip under the kind's
@@ -120,20 +155,49 @@ still a plan.
   (`expectChips`) beside the text. The collab server labels the live doc from the records the
   client's read used (`chipInputs` in the edit request).
 
-  Not built of item 14: `create_doc` and `download` (a new doc's ydoc is seeded with a schema
-  that has no chip, so a mention in `create_doc`'s Markdown stays a link), the Markdown retry
-  against identity text (the retry matches the label a link's text gives, which is the same
-  for a mention), a quote edge inside a label widened for a note, `chip_changed` and
-  `unknown_kind` (a chip of a kind the server doesn't know reads as plain `[…]`, and an edit
-  that sends that back is refused as `chip_as_text`), the pairing of a chip that continues
-  another, link titles stripped on the way in, and styles in a read's header.
+  `create_doc` reads the same syntax (`markdownToDocContent` with `chips`), under the rule
+  for a doc that doesn't exist yet, and `download` writes it, so a doc moves between
+  instances by handle. `/docs`' Markdown import reads it too, and leaves a mention it can't
+  resolve as the link its Markdown also is (`unresolved: "link"`), where MCP refuses.
+
+  An edit whose passage holds a chip of a kind the server doesn't know is refused as
+  `unknown_kind`, since the new text can't write that chip back; the words beside it can
+  still be edited, and the merge keeps it. The chip-aware parse stores no link title.
+
+  Not built of item 14, each needing a chip kind whose Markdown carries fields, which a
+  mention's doesn't: the Markdown retry against identity text (the retry matches the label a
+  link's text gives, which is the same for a mention), `chip_changed`, and the pairing of a
+  chip that continues another.
+- **Styling, per doc and per post:**
+  - **The doc's style** is in a `Y.Map("settings")` in its ydoc, one key per chip kind
+    (`settings.ts`), cached to `Doc.chipStyles` by the store. `DocSettingsPanel` writes it
+    through the editor's connection; open editors and reading views follow it live
+    (`useChipInputs` observes the map), and the next store relabels `prose_json` and the
+    anchors' chip records. Every server path that labels a doc's body takes the doc's style:
+    the cache write, the first paint, the chip-context endpoint, MCP's doc state, anchor
+    capture, the refresh and the integrity check.
+  - **MCP:** a doc read carries `styles` when the doc has set any, `edit_doc` takes
+    `settings` and writes it inside `/admin/doc-edit` with the edit, and `since` reports a
+    change of style.
+  - **A post's own style** is `Post.chipStyles`, set in `PostSettingsPanel`, each kind it
+    names winning over the doc's when the post's chips become linked text. Changing it makes
+    the live version publishable again, and the server's no-op check now compares the
+    content a publish would write, so a rename alone is also something to republish.
+  - **A note's body has no style of its own**, and shows each chip kind's default wherever
+    it is read. A note is shown away from its doc as often as beside it (`/annotations`,
+    search, the RAISED email), and its stored `bodyText` would otherwise depend on another
+    object's setting, with a refresh of every note for each change of a doc's style.
+
+  Not built of Styling: an instance default (each chip kind's own default stands in), a
+  control for a single chip's override (a mention's `form` field is honoured and nothing
+  sets it), the scrub bar showing each version in the style it had (it shows the current
+  one), and sections.
 - **Mentions:** the chip kind's fields, forms and labels, its context loader, the rule for who
-  may be mentioned, and the `@` menu in the doc editor and in a note's composer
+  may be mentioned, the `@` menu in the doc editor and in a note's composer, the `mentions=`
+  search filter with `@handle` in the search box, and the dashboard's "Mentions of you" card
   ([MENTIONS.md](MENTIONS.md)).
 
-Until the rest of step 1 is built, a stored quote shown outside a ydoc shows U+FFFC where a chip
-is, and `create_doc` can't write one. `/docs`'
-Length counts a chip as no characters.
+`/docs`' Length counts a chip as no characters.
 
 ## Terms
 

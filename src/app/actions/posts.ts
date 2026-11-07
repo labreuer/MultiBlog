@@ -10,6 +10,9 @@ import { canUserEditDoc } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { remapThreadsToEvent } from "@/lib/anchor-remap";
 import { postContentFromYdoc } from "@/lib/post-content";
+import { MENTION } from "@/lib/entity-chips/kinds/mention";
+import { mentionOption } from "@/lib/entity-chips/kinds/mention-options";
+import { parseChipStyles } from "@/lib/entity-chips/settings";
 import { ensureYdocSnapshotAt } from "@/lib/ydoc-snapshot";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { derivePostStatus } from "@/lib/post-status";
@@ -44,6 +47,22 @@ async function revalidatePublicPaths(postId: string, post: { slug: string; publi
   for (const { user } of authors) {
     revalidatePath(`/authors/${user.slug}`);
   }
+}
+
+/** Whether two JSON values are the same, key order aside: a jsonb column keeps its own order. */
+function sameJson(a: unknown, b: unknown): boolean {
+  const canon = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(canon)
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.entries(value)
+              .filter(([, inner]) => inner !== undefined)
+              .sort(([x], [y]) => (x < y ? -1 : 1))
+              .map(([key, inner]) => [key, canon(inner)]),
+          )
+        : value;
+  return JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 }
 
 async function requireEditableSession(postId: string) {
@@ -150,13 +169,16 @@ type PublishFromDocOpts = {
 // no post-side reader knows about), and returns everything a publish/schedule
 // transaction needs to write. Shared by publishPostFromDoc/schedulePostFromDoc
 // — PLAN.md §15b/§15d.
-async function resolvePublishContent(opts: PublishFromDocOpts, userId: string) {
+//
+// `postStyles` is `Post.chipStyles`: how this post shows its entity chips
+// where that differs from its doc (docs/ENTITY_CHIPS.md, "Styling").
+async function resolvePublishContent(opts: PublishFromDocOpts, userId: string, postStyles: unknown) {
   const { snapshotId, doc } = await ensureYdocSnapshotAt({
     ydocId: ydocIdForDoc(opts.docId),
     throughUpdateId: BigInt(opts.throughUpdateId),
     userId,
   });
-  const { proseJson, title: docTitle } = await postContentFromYdoc(doc);
+  const { proseJson, title: docTitle } = await postContentFromYdoc(doc, parseChipStyles(postStyles));
   doc.destroy();
 
   const title = opts.title?.trim() || docTitle || "Untitled";
@@ -169,7 +191,7 @@ export async function publishPostFromDoc(postId: string, opts: PublishFromDocOpt
     throw new Error("You don't have permission to publish from this doc.");
   }
 
-  const { snapshotId, proseJson, title } = await resolvePublishContent(opts, session.user.id);
+  const { snapshotId, proseJson, title } = await resolvePublishContent(opts, session.user.id, post.chipStyles);
 
   // PLAN.md §15c — a republish that changes nothing is refused rather than
   // minting a PostPublicationEvent that says nothing. PostPublisher
@@ -183,9 +205,19 @@ export async function publishPostFromDoc(postId: string, opts: PublishFromDocOpt
   if (derivePostStatus(post) === "published" && post.publishEventId) {
     const live = await prisma.postPublicationEvent.findUnique({
       where: { id: post.publishEventId },
-      select: { docId: true, ydocSnapshotId: true },
+      select: { docId: true, ydocSnapshotId: true, proseJson: true },
     });
-    if (live && live.docId === opts.docId && live.ydocSnapshotId === snapshotId && post.title === title) {
+    // The same version can still publish differently: a post's entity chips
+    // are frozen as their labels (docs/ENTITY_CHIPS.md, step 1, item 9), so a
+    // person renamed since, or a new style for the post, is a change with no
+    // edit behind it. Only identical content is a no-op.
+    if (
+      live &&
+      live.docId === opts.docId &&
+      live.ydocSnapshotId === snapshotId &&
+      post.title === title &&
+      sameJson(live.proseJson, proseJson)
+    ) {
       throw new Error("Already published at this version with the present title.");
     }
   }
@@ -252,7 +284,7 @@ export async function schedulePostFromDoc(
     throw new Error("Scheduled time must be in the future.");
   }
 
-  const { snapshotId, proseJson, title } = await resolvePublishContent(opts, session.user.id);
+  const { snapshotId, proseJson, title } = await resolvePublishContent(opts, session.user.id, post.chipStyles);
 
   const event = await prisma.$transaction(async (tx: TransactionClient) => {
     const created = await tx.postPublicationEvent.create({
@@ -363,6 +395,25 @@ export async function updatePostModerationPolicy(postId: string, moderationPolic
     throw new Error("Invalid moderation policy.");
   }
   await prisma.post.update({ where: { id: postId }, data: { moderationPolicy } });
+  revalidatePath(`/post/${postId}/edit`);
+}
+
+/**
+ * How this post shows its mentions: one of the options a doc's own setting
+ * offers, or "doc" to follow its doc (docs/ENTITY_CHIPS.md, "Styling"). It
+ * takes effect at the next publish, which is when a post's chips are turned
+ * into their labels.
+ */
+export async function updatePostMentionStyle(postId: string, choice: string): Promise<void> {
+  await requireEditableSession(postId);
+  const option = choice === "doc" ? null : mentionOption(choice);
+  if (choice !== "doc" && !option) {
+    throw new Error("Invalid mention style.");
+  }
+  await prisma.post.update({
+    where: { id: postId },
+    data: { chipStyles: option ? { [MENTION]: { form: option.style.form, at: option.style.at } } : Prisma.DbNull },
+  });
   revalidatePath(`/post/${postId}/edit`);
 }
 

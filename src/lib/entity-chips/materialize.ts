@@ -50,3 +50,21 @@ export function withoutChipLabels(doc: JSONContent): JSONContent {
 export function relabelChips(doc: JSONContent, inputs: ChipInputs): JSONContent {
   return withChipLabels(withoutChipLabels(doc), chipLabels(doc, inputs));
 }
+
+/**
+ * The labels a cache column holds, by instance id: what `withChipLabels`
+ * wrote, read back. A chip with no label is left out, and of two chips
+ * sharing an id the earlier stands for both, as everywhere.
+ */
+export function materializedLabels(doc: JSONContent): ChipLabels {
+  const labels = new Map<string, string>();
+  const walk = (node: JSONContent) => {
+    if (isChip(node)) {
+      const { iid, label } = node.attrs ?? {};
+      if (typeof iid === "string" && typeof label === "string" && !labels.has(iid)) labels.set(iid, label);
+    }
+    node.content?.forEach(walk);
+  };
+  walk(doc);
+  return labels;
+}

@@ -120,6 +120,15 @@ export type SearchResult = {
   kinds: SearchKind[];
   /** Kinds an author filter left out, because they have no author to filter by. */
   withoutAuthors: SearchKind[];
+  /**
+   * The mention filter as applied (docs/MENTIONS.md, "Search"): the handles
+   * from `mentions=` and from `@handle` words in the box, `me` among them as
+   * written. Handles only, never names: a handle may name nobody, and the
+   * page must not say whether it does.
+   */
+  mentions: string[];
+  /** Kinds a mention filter left out, because nothing in them is a mention. */
+  withoutMentions: SearchKind[];
   authorOptions: SearchAuthorOption[];
   /**
    * `idle`: no text and no filter, so nothing was searched. `stop-words`: the

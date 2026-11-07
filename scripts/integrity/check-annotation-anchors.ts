@@ -52,6 +52,13 @@
 //      provably not attached to (§13n). Only checked when the mark exists
 //      *somewhere* — one that never landed is document-level, which is a
 //      state the system renders rather than a fault.
+//   6. chips-at-stamp  — an anchor's chip record (docs/ENTITY_CHIPS.md, step 1,
+//      item 11) against the entity chips its range holds at the stamp: the
+//      same chips, at the same places in the quote, with the same fields. The
+//      quote can't show a wrong record, since every chip reads U+FFFC there,
+//      and the record is what a resolver believes about which chip was meant.
+//      Labels are not compared: a label is as of the last write or refresh,
+//      and `check-doc-integrity.ts` is where a stale one is reported.
 //
 // AND, SINCE PLAN.md §20g, THE SAME INVARIANT OVER `tag_anchor` — AND, SINCE
 // docs/ANCHORED_LINKS.md, OVER `anchored_link_anchor`.
@@ -91,7 +98,7 @@ import { prismaIncludingDeleted as prisma } from "../../src/lib/prisma";
 import { materializeYdocAt } from "../../src/lib/ydoc-snapshot";
 import { ydocIdForDoc, ydocIdForAnnotation } from "../../src/lib/ydoc-names";
 import { requireDocAnnotationId } from "../../src/lib/annotation-container";
-import { targetFromColumns } from "../../src/lib/anchors";
+import { chipRecordsBetween, parseChipRecords, parseSelector, targetFromColumns, type ChipRecord } from "../../src/lib/anchors";
 import {
   annotationContentExtensions,
   docContentExtensions,
@@ -147,6 +154,34 @@ function nodeAt(ydocId: string, throughUpdateId: bigint, isAnnotationBody: boole
 }
 
 // The shared §20b column shape, as the one select both part-anchor walks use.
+/** Records as compared: no label, and each chip's fields in one key order, since jsonb keeps its own. */
+function comparable(chips: readonly ChipRecord[]): string {
+  const sorted = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(sorted)
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.entries(value)
+              .sort(([a], [b]) => (a < b ? -1 : 1))
+              .map(([key, inner]) => [key, sorted(inner)]),
+          )
+        : value;
+  return JSON.stringify(chips.map(({ at, kind, iid, data }) => ({ at, kind, iid, data: sorted(data) })));
+}
+
+/** Check 6: the stored chip record against the chips `[from, to)` holds in the stamped document. */
+function checkChipsAtStamp(subject: string, node: PMNode, from: number, to: number, stored: readonly ChipRecord[]): void {
+  const actual = chipRecordsBetween(node, from, to);
+  if (comparable(actual) !== comparable(stored)) {
+    report(
+      "error",
+      subject,
+      "chips-at-stamp",
+      `records ${stored.length} chip(s) ${comparable(stored)} but the range at that stamp holds ${actual.length}: ${comparable(actual)}`,
+    );
+  }
+}
+
 const PART_ANCHOR_SELECT = {
   id: true,
   docId: true,
@@ -155,6 +190,7 @@ const PART_ANCHOR_SELECT = {
   targetAnnotationId: true,
   targetCommentId: true,
   selectorKind: true,
+  selector: true,
   anchorFrom: true,
   anchorTo: true,
   quotedText: true,
@@ -169,6 +205,7 @@ type PartAnchorRow = {
   targetAnnotationId: string | null;
   targetCommentId: string | null;
   selectorKind: "DOC_RANGE" | "PDF_TEXT" | null;
+  selector: unknown;
   anchorFrom: number | null;
   anchorTo: number | null;
   quotedText: string;
@@ -267,8 +304,10 @@ async function checkPartAnchors(rows: PartAnchorRow[]): Promise<{ checked: numbe
         "quote-at-stamp",
         `stored ${JSON.stringify(row.quotedText)} but the document at that stamp reads ${JSON.stringify(actual)}`,
       );
-    } else if (verbose) {
-      console.log(`  ok  ${row.id}  ${JSON.stringify(row.quotedText.slice(0, 40))} @ ${row.ydocUpdateId}`);
+    } else {
+      const selector = parseSelector(row.selectorKind, row.selector);
+      checkChipsAtStamp(row.id, node, row.anchorFrom, row.anchorTo, selector?.kind === "DOC_RANGE" ? (selector.selector.chips ?? []) : []);
+      if (verbose) console.log(`  ok  ${row.id}  ${JSON.stringify(row.quotedText.slice(0, 40))} @ ${row.ydocUpdateId}`);
     }
   }
 
@@ -301,6 +340,7 @@ async function main() {
       anchorFrom: true,
       anchorTo: true,
       quotedText: true,
+      anchorChips: true,
       ydocUpdateId: true,
       status: true,
     },
@@ -417,8 +457,9 @@ async function main() {
         "quote-at-stamp",
         `stored ${JSON.stringify(a.quotedText)} but the document at that stamp reads ${JSON.stringify(actual)}`,
       );
-    } else if (verbose) {
-      console.log(`  ok  ${a.id}  ${JSON.stringify(a.quotedText.slice(0, 40))} @ ${a.ydocUpdateId}`);
+    } else {
+      checkChipsAtStamp(a.id, node, a.anchorFrom!, a.anchorTo!, parseChipRecords(a.anchorChips));
+      if (verbose) console.log(`  ok  ${a.id}  ${JSON.stringify(a.quotedText.slice(0, 40))} @ ${a.ydocUpdateId}`);
     }
   }
 

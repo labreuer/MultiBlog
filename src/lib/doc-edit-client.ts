@@ -1,3 +1,4 @@
+import type { ChipRecord } from "./anchors";
 import type { Role } from "@/generated/prisma/enums";
 import type { EditRefusal, EditSpec } from "./doc-edit";
 import type { ChipInputs } from "./entity-chips/types";
@@ -11,7 +12,8 @@ import { DOC_EDIT_PATH, ydocIdForDoc } from "./ydoc-names";
 // — the annotation-admin.ts idiom, sharing its origin. No ydoc token ever
 // leaves the server.
 
-export type AnchorRef = { id: string; from: number | null; to: number | null; quotedText: string };
+/** A column anchor as an edit reports on it. `chips` are its entity chips' records (src/lib/anchors/chips.ts), which a resolve checks beside the text. */
+export type AnchorRef = { id: string; from: number | null; to: number | null; quotedText: string; chips?: ChipRecord[] };
 
 export type DocEditAnswer =
   | {
@@ -24,6 +26,8 @@ export type DocEditAnswer =
       chips?: { removed: string[]; added: number };
       blocks: number;
       touched: { annotations: { id: string; resolves: boolean }[]; linkParts: { id: string; resolves: boolean }[] };
+      /** Whether the edit changed the doc's chip styles. */
+      restyled?: boolean;
     }
   | { ok: false; refusal: EditRefusal }
   | { ok: false; unavailable: string };
@@ -37,7 +41,11 @@ export async function requestDocEdit(opts: {
   keepMarks?: boolean;
   annotations: AnchorRef[];
   markAnnotations: string[];
+  /** Of those, the ones whose passage reaches over an entity chip its mark can't sit on: their edge chips, by annotation id. */
+  markChips: Record<string, ChipRecord[]>;
   linkParts: AnchorRef[];
+  /** The doc's style per chip kind, to set with the edit: a style, or null to clear it (docs/ENTITY_CHIPS.md, "Styling"). */
+  chipStyles?: Record<string, unknown>;
   /**
    * What the doc's entity chips are labelled from, as the client's read
    * labelled them (docs/ENTITY_CHIPS.md, MCP item 4): the collab server matches
@@ -61,8 +69,10 @@ export async function requestDocEdit(opts: {
         ...(opts.keepMarks ? { keepMarks: true } : {}),
         annotations: opts.annotations,
         markAnnotations: opts.markAnnotations,
+        markChips: opts.markChips,
         linkParts: opts.linkParts,
         chipInputs: opts.chipInputs,
+        ...(opts.chipStyles ? { chipStyles: opts.chipStyles } : {}),
       }),
     });
   } catch (err) {

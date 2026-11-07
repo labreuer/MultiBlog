@@ -72,7 +72,7 @@ const KINDS: Kind[] = [
   {
     table: "annotation",
     key: "id",
-    vector: "annotation_search_vector(body_text, quoted_text)",
+    vector: "annotation_search_vector(body_text, anchor_quote_text(quoted_text, anchor_chips))",
     touch: "body_text",
   },
   { table: "comment", key: "id", vector: "comment_search_vector(body_text)", touch: "body_text" },

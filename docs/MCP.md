@@ -266,8 +266,11 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
     and how many there are, and `no_match` for one that occurs nowhere, with up to three near
     misses (§7), or for a fragment link whose passage isn't on its page (§8);
   - `unknown_chip` for a mention written in Markdown whose handle names no account, or one the
-    actor may not mention there, with the handles; and `chip_as_text` for an edit whose new
-    text has a mention's name as plain words where the mention was, with the labels
+    actor may not mention there, with the handles; `chip_as_text` for an edit whose new
+    text has a mention's name as plain words where the mention was, with the labels;
+    `splits_chip` for an edit whose passage begins or ends partway through a mention, with
+    the passage as it would be whole; and `unknown_kind` for an edit whose passage holds a
+    chip of a kind this server doesn't know, with the kinds
     ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), MCP item 6);
   - `read_only` for an edit to a record (§6);
   - `already_done` for a write that repeats one made within a day, with that one's time and
@@ -948,7 +951,9 @@ every anchored-link part into it before applying and again after: the marks from
 and the columns and parts from rows the operation passes in.
 
 - **The answer lists each annotation and part an edit overlapped**, and whether it still
-  resolves.
+  resolves. Resolving checks an anchor's chip records beside its text, so a passage whose
+  mention the edit replaced with another person's is reported as no longer resolving, though
+  the text an anchor stores for it is the same.
 - **That is how a client knows which notes it addressed**, so it can reply to them (§9), and
   which links into a passage it broke.
 - **It names only what the actor could read** through `read`'s `include` (§9, §10).
@@ -1115,10 +1120,19 @@ below), so the words between the ends need no checking here; an edit's do (§6).
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), MCP items 1 and 3). A mention reads `@Luke Breuer` in a text
 read and `[@Luke Breuer](/authors/luke-breuer)` in a Markdown one, and a quote of either finds
 it: `flattenForMatch` is given the doc's labels (`DocState.chips.labels`), puts a chip's label
-at the chip's one position, and verifies a hit against the same display text. A quote that ends
-inside a label is `no_match`. The capture in step 3 is unchanged, so the stored quote holds
-U+FFFC where the chip is and a rename can't detach it. An answer that echoes a passage shows it
+at the chip's one position, and verifies a hit against the same display text. A quote that begins
+or ends inside a label takes the whole mention, since a chip is one position: an anchor or a
+read lands on it, and an edit is refused as `splits_chip` (§4). The capture in step 3 is unchanged, so the stored quote holds
+U+FFFC where the chip is and a rename can't detach it, and beside it the capture records which
+chip that is (the kit's step 1, item 11): a note's `anchor_chips`, a link part's
+`selector.chips`. A read that shows a stored quote (a lost passage, a link's part, a reply's
+quote) puts each chip's label back from that record. An answer that echoes a passage shows it
 as read.
+
+A chip kind's Markdown is read as a chip wherever an agent writes Markdown: `edit_doc`,
+`add_note`, `edit_note` and `create_doc` (and so `POST /api/mcp/docs`). A mention is resolved
+by its handle under the rule the `@` menu lists by, and `unknown_chip` refuses one it can't
+resolve (§4).
 
 That is COLLAB.md §9's matcher pointed at its §2b stamped state: the state is immutable, the
 work is server-side, every hit is verified, and the stored text is derived rather than taken
@@ -1884,6 +1898,15 @@ So `kinds=docs&authors=<slug>` is "this person's docs", and with the `tags` filt
   every matching page (§8). The object's own read gate runs first.
 - **A `tags` filter** (§11). Each kind's ids are narrowed to those carrying any of the named
   terms, as `authors` takes any of its slugs.
+- **A doc's settings.** A whole or outline read of a doc carries `styles` when the doc has set
+  how its entity chips are shown (`{ mentions: { form: "initials" } }`), and every label in
+  the read is in that style. `edit_doc` takes the same shape as `settings`, alone or with
+  edits; the collab server writes it into the doc's ydoc in the edit's transaction
+  ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), "Styling"). `since` names a change of style beside the
+  blocks that read differently for it.
+- **A `mentions` filter** (MENTIONS.md, "Search"). Each kind's ids are narrowed to those that
+  mention any of the named people, `me` being the actor. PDFs and comments hold no mention,
+  and the response names them as left out (`withoutMentions`).
 - **Correction is reported, never hidden.** The response carries `corrected` (FULLTEXT.md §5).
   - **Checking whether something exists needs `exact=1`.** Before creating a doc or minting a
     link, an agent asks whether one is already there. Without `exact=1`, typo correction
@@ -1991,7 +2014,7 @@ comment's writer and the post's moderators. So a hit never leads to `not_found`.
 
 | Tool | Scope | Does |
 |---|---|---|
-| `search` | read | Search, and filtered listing, across kinds; `within` one doc ranks its sections, within one PDF its pages; `tags`, `authors`, dates, `exact` (§14) |
+| `search` | read | Search, and filtered listing, across kinds; `within` one doc ranks its sections, within one PDF its pages; `tags`, `authors`, `mentions`, dates, `exact` (§14) |
 | `read` | read | Any MultiBlog URL (below): whole, as its outline, as a range or `around` a quote; changes `since` a version, on a doc the actor can edit; and `include` for what hangs off the object, each list paged on its own, threads filtered under `threads` (§6, §9, §10) |
 | `find_users` | read | Byline-eligible users by name or slug, or one by exact email (§12) |
 | `find_tags` | read | Tag terms by name (§11) |

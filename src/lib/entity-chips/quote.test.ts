@@ -78,10 +78,32 @@ test("quote: a label alone finds every chip that wears it", () => {
   assert.equal(second.kind === "found" && second.matches.length, 1);
 });
 
-test("quote: one that ends inside a label is a miss, and what is suggested reads as the doc does", () => {
+test("quote: one that begins or ends inside a label takes the whole chip, and says so", () => {
   const target = flattenForMatch(DOC, LABELS);
-  assert.deepEqual(findAllExact(target, "Ask @Ada"), []);
-  assert.deepEqual(findAllExact(target, "Lovelace about the engine"), []);
+  const [head] = findAllExact(target, "Ask @Ada");
+  assert.deepEqual({ quotedText: head.quotedText, widened: head.widened }, { quotedText: `Ask ${CHIP_ANCHOR_TEXT}`, widened: true });
+  const [tail] = findAllExact(target, "Lovelace about the engine");
+  assert.deepEqual({ quotedText: tail.quotedText, widened: tail.widened }, { quotedText: `${CHIP_ANCHOR_TEXT} about the engine`, widened: true });
+  // A name alone finds each mention of it, once each, however many letters of the label it matches.
+  const named = findAllExact(target, "Ada");
+  assert.deepEqual(
+    named.map((match) => [match.quotedText, match.widened]),
+    [
+      [CHIP_ANCHOR_TEXT, true],
+      [CHIP_ANCHOR_TEXT, true],
+    ],
+  );
+  // The whole label is a match as written, and not marked.
+  assert.equal(findAllExact(target, "Ask @Ada Lovelace")[0].widened, undefined);
+  // By its ends, the same, when the passage's own edge is the one inside a label.
+  const [byEnds] = findByEnds(target, "Lovelace about", "the engine");
+  assert.deepEqual({ quotedText: byEnds.quotedText, widened: byEnds.widened }, { quotedText: `${CHIP_ANCHOR_TEXT} about the engine`, widened: true });
+  // An end of `start` that falls inside one is in the passage's middle, and cuts nothing.
+  assert.equal(findByEnds(target, "Ask @Ada", "the engine")[0].widened, undefined);
+});
+
+test("quote: a miss suggests what reads as the doc does", () => {
+  const target = flattenForMatch(DOC, LABELS);
   const missed = resolveQuote(target, { quote: "Ask @Ada about the engine, then" }, asText);
   assert.equal(missed.kind, "none");
   assert.ok(missed.kind === "none" && missed.nearMisses.length > 0);

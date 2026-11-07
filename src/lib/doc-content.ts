@@ -1,6 +1,8 @@
 import type * as Y from "yjs";
 import type { JSONContent } from "@tiptap/core";
 import { materializeChipLabels } from "./entity-chips/context";
+import { chipStylesOf } from "./entity-chips/settings";
+import type { ChipStyles } from "./entity-chips/types";
 import { readYdocContent, titleTextFromJSON } from "./ydoc-render";
 
 // PLAN.md §12d — derives what a Doc row *caches* from its ydoc, which is the
@@ -37,13 +39,22 @@ export function docContentFromYdoc(doc: Y.Doc): { proseJson: JSONContent; title:
 /**
  * What a Doc row's cache columns hold: `docContentFromYdoc`, with each entity
  * chip in the body carrying its current label (docs/ENTITY_CHIPS.md, step 1,
- * item 8). Every writer of `Doc.proseJson` goes through this, so the column
- * is one thing whoever wrote it. Async for the labels' records alone, and it
+ * item 8), in the doc's own style, which is returned beside it for
+ * `Doc.chipStyles`. Every writer of `Doc.proseJson` goes through this, so the
+ * column is one thing whoever wrote it. Async for the labels' records alone, and it
  * asks the database nothing for a body with no chip.
  *
  * Throws as `docContentFromYdoc` does.
  */
-export async function docCacheFromYdoc(doc: Y.Doc): Promise<{ proseJson: JSONContent; title: string }> {
+export async function docCacheFromYdoc(doc: Y.Doc): Promise<{ proseJson: JSONContent; title: string; chipStyles: ChipStyles | null }> {
   const content = docContentFromYdoc(doc);
-  return { proseJson: await materializeChipLabels(content.proseJson), title: content.title };
+  // The doc's own choice of form per chip kind ("Styling"): what its labels
+  // are written in, and a cache column of its own. Null for a doc that has
+  // set none, so the column says so without a comparison.
+  const styles = chipStylesOf(doc);
+  return {
+    proseJson: await materializeChipLabels(content.proseJson, styles),
+    title: content.title,
+    chipStyles: Object.keys(styles).length > 0 ? styles : null,
+  };
 }

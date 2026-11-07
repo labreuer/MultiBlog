@@ -18,6 +18,8 @@ type Props = {
   from: number;
   to: number;
   quotedText: string;
+  /** The passage as its reader sees it, each entity chip as its label. `quotedText` is what an anchor compares, and holds U+FFFC there. */
+  quoteShown: string;
   // PLAN.md §13o — passed straight through to LiveAnnotationComposer; "mark"
   // only from the doc editor, which is also the only caller of the three
   // props below.
@@ -74,6 +76,7 @@ export default function AnnotationPopover({
   from,
   to,
   quotedText,
+  quoteShown,
   anchorMode = "columns",
   atVersion = null,
   ydocUpdateId = null,
@@ -156,7 +159,7 @@ export default function AnnotationPopover({
   return (
     <div ref={elementRef} data-testid="annotation-popup" className={styles.popover}>
       <p className={styles.quotedText}>
-        Annotating: “{quotedText.length > 80 ? `${quotedText.slice(0, 80)}…` : quotedText}”
+        Annotating: “{quoteShown.length > 80 ? `${quoteShown.slice(0, 80)}…` : quoteShown}”
       </p>
       {draft ? (
         <LiveAnnotationComposer

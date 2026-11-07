@@ -23,7 +23,8 @@ import {
   requireDocAnnotationId,
   type AnnotationTarget,
 } from "@/lib/annotation-container";
-import { captureAnchorInYdoc, capturePdfTextAnchor } from "@/lib/anchors/capture";
+import { captureAnchorInYdoc, capturePdfTextAnchor, chipRecordsColumn } from "@/lib/anchors/capture";
+import type { ChipRecord } from "@/lib/anchors";
 import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
 import { pdfAnnotationEntriesFor } from "@/lib/pdf-annotation-entries";
 import { getOwnFileDraftAnnotations, type OwnDraft } from "@/lib/annotation-data";
@@ -38,7 +39,7 @@ import {
 } from "@/lib/tiptap-schema";
 import { ydocIdForAnnotation, ydocIdForDoc } from "@/lib/ydoc-names";
 import { ydocStore } from "../../../server/ydoc-store";
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import { displayNameOf } from "@/lib/display-name";
@@ -147,7 +148,7 @@ async function stampRangeAnchor(
   target: RangeTarget,
   request: RangeRequest,
   capture: boolean,
-): Promise<{ stamp: bigint | null; range: { from: number; to: number; quotedText: string } | null }> {
+): Promise<{ stamp: bigint | null; range: { from: number; to: number; quotedText: string; chips: ChipRecord[] } | null }> {
   // Which ydoc the anchor is measured into — and therefore which update log
   // stamps it (§13o: the stamp is the coordinate system, so the two cannot be
   // chosen independently).
@@ -231,7 +232,7 @@ async function stampRangeAnchor(
     to: request.to,
     quotedText: request.quotedText,
   });
-  return { stamp, range: range && { from: range.from, to: range.to, quotedText: range.quotedText } };
+  return { stamp, range: range && { from: range.from, to: range.to, quotedText: range.quotedText, chips: range.selector.chips ?? [] } };
 }
 
 // PLAN.md §13d/§13j Phase 2 — a composer needs a row to attach a live
@@ -392,6 +393,7 @@ export async function updateDraftAnchor(annotationId: string, anchor: DraftRange
       anchorFrom: range?.from ?? null,
       anchorTo: range?.to ?? null,
       quotedText: range?.quotedText ?? "",
+      anchorChips: chipRecordsColumn(range?.chips),
       ydocUpdateId: range ? stamp : null,
     },
   });
@@ -576,7 +578,7 @@ export async function postAnnotation(opts: {
   // window in which a LIVE annotation exists without the anchor it was
   // posted with.
   let ydocUpdateId: bigint | null = null;
-  let capturedAnchor: { from: number; to: number; quotedText: string } | null = null;
+  let capturedAnchor: { from: number; to: number; quotedText: string; chips: ChipRecord[] } | null = null;
   if (anchorRequested) {
     ({ stamp: ydocUpdateId, range: capturedAnchor } = await stampRangeAnchor(
       parentId !== null ? { kind: "reply", parentId } : { kind: "doc", docId },
@@ -620,6 +622,7 @@ export async function postAnnotation(opts: {
             anchorFrom: capturedAnchor?.from ?? null,
             anchorTo: capturedAnchor?.to ?? null,
             quotedText: capturedAnchor?.quotedText ?? "",
+            anchorChips: chipRecordsColumn(capturedAnchor?.chips),
           }),
     },
   });
@@ -628,7 +631,7 @@ export async function postAnnotation(opts: {
   // which is what makes this branch's use of `docId` safe without a second
   // root check of its own.
   if (anchorRequested && anchorMode === "mark") {
-    const { applied, markUpdateId } = await applyAnnotationMark({
+    const { applied, markUpdateId, chips: edgeChips } = await applyAnnotationMark({
       docId,
       userId: session.user.id,
       role: session.user.role,
@@ -652,11 +655,19 @@ export async function postAnnotation(opts: {
     // Only on success. A mark that never landed leaves the annotation
     // document-level, and its original stamp ("what the author was looking
     // at") stays the most honest thing available.
-    if (applied && markUpdateId) {
+    //
+    // docs/ENTITY_CHIPS.md, step 1, item 11 — and with it, the passage's edge
+    // chips: a mark can't sit on a chip, so one at the passage's edge, or a
+    // passage that is a chip alone, is anchored by this record and found by
+    // instance id. The row still has one mechanism: no offsets, no quote.
+    if (applied && (markUpdateId || edgeChips.length > 0)) {
       try {
         await prisma.annotation.update({
           where: { id: annotation.id },
-          data: { ydocUpdateId: BigInt(markUpdateId) },
+          data: {
+            ...(markUpdateId ? { ydocUpdateId: BigInt(markUpdateId) } : {}),
+            ...(edgeChips.length > 0 ? { anchorChips: chipRecordsColumn(edgeChips) } : {}),
+          },
         });
       } catch (err) {
         console.error(`[annotations] couldn't re-stamp ${annotation.id} to its mark's update:`, err);
@@ -1145,6 +1156,7 @@ async function postFileAnnotation(opts: {
             anchorFrom: capturedReply.from,
             anchorTo: capturedReply.to,
             quotedText: capturedReply.quotedText,
+            anchorChips: chipRecordsColumn(capturedReply.selector.chips),
             // PLAN.md §22e — the same stamp the doc side's anchored reply
             // gets, and for the same reason: an annotation body is a ydoc
             // whatever it hangs off, so once bodies are mutable a reply into
@@ -1157,7 +1169,7 @@ async function postFileAnnotation(opts: {
             ydocUpdateId: parentStamp,
           }
         : replyAnchor !== null
-          ? { anchorFrom: null, anchorTo: null, quotedText: "", ydocUpdateId: null }
+          ? { anchorFrom: null, anchorTo: null, quotedText: "", anchorChips: Prisma.DbNull, ydocUpdateId: null }
           : {}),
     },
   });

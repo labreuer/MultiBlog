@@ -2,7 +2,8 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, type EditorState, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { resolveAnchorInDoc, type AnchorRange } from "./anchors";
+import { anchorHolds, chipPositions, rangeWithEdgeChips, resolveAnchorInDoc, type AnchorRange, type ChipRecord } from "./anchors";
+import type { AnchorSelector } from "./anchors";
 import { buildSegments } from "./decoration-segments";
 
 // PLAN.md §13o — the inline highlight for a **column-anchored** annotation
@@ -44,18 +45,40 @@ export type AnnotationAnchorInput = {
   // differently and queried differently: only a *followed* part is a banner
   // jump target, so only it gets `data-anchored-link-ids` (a part that is
   // both, the creator editing the link they follow, gets both attributes).
-  kind?: "annotation" | "link" | "draft-link";
+  //
+  // `edge` is a **mark-anchored** annotation whose passage has entity chips a
+  // mark can't sit on (docs/ENTITY_CHIPS.md, step 1, item 11): one before its
+  // first character or after its last, or a passage that is a chip alone. It
+  // has no offsets and no quote (`from`/`to` are -1, `quotedText` ""); its
+  // `chips` are found by instance id, and what resolves is the mark's hull
+  // stretched over them.
+  kind?: "annotation" | "link" | "draft-link" | "edge";
+  /**
+   * The entity chips in the passage (src/lib/anchors/chips.ts). For a stored
+   * quote, what the resolve checks beside the text: every chip reads U+FFFC
+   * there. For an `edge`, the chips themselves.
+   */
+  chips?: ChipRecord[];
 };
 
 type TrackedAnchor = AnnotationAnchorInput & {
   /** Where it is *now*, or null once it has failed a full-document search. */
   resolved: AnchorRange | null;
+  /** An `edge` anchor's chips that are part of its passage now: what its decoration covers. */
+  edgeChips?: number[];
 };
 
 export type AnnotationHighlightState = {
   anchors: TrackedAnchor[];
   /** Annotation ids only — the map every §13o consumer already reads. */
   ranges: Map<string, AnchorRange>;
+  /**
+   * Mark-anchored annotations whose passage reaches past its mark, over a
+   * chip: the whole passage, mark and chips. Apart from `ranges` because a
+   * mark otherwise wins over a column anchor (annotation-marks.ts), and here
+   * the wider range is the right one.
+   */
+  edgeRanges: Map<string, AnchorRange>;
   /**
    * `anchored_link_anchor` row ids — one id family, whether the link is
    * followed or the viewer's own open one — kept apart from `ranges` so a rail
@@ -81,6 +104,11 @@ export function getAnnotationAnchorRanges(state: EditorState): Map<string, Ancho
   return annotationHighlightKey.getState(state)?.ranges ?? new Map();
 }
 
+/** Where each mark-anchored passage that reaches over a chip currently is, mark and chips together. */
+export function getAnnotationEdgeRanges(state: EditorState): Map<string, AnchorRange> {
+  return annotationHighlightKey.getState(state)?.edgeRanges ?? new Map();
+}
+
 /** Where each anchored-link part currently sits (docs/ANCHORED_LINKS.md), keyed by anchor row id. */
 export function getAnchoredLinkRanges(state: EditorState): Map<string, AnchorRange> {
   return annotationHighlightKey.getState(state)?.linkRanges ?? new Map();
@@ -99,17 +127,26 @@ export function getAnchoredLinkRanges(state: EditorState): Map<string, AnchorRan
  * without either side naming the other.
  */
 export function annotationAnchorInputs(
-  entries: { threadId: string; quotedText: string; anchorFrom: number | null; anchorTo: number | null; color: string }[],
+  entries: {
+    threadId: string;
+    quotedText: string;
+    anchorFrom: number | null;
+    anchorTo: number | null;
+    anchorChips?: ChipRecord[];
+    color: string;
+  }[],
 ): AnnotationAnchorInput[] {
-  return entries
-    .filter((entry) => entry.anchorFrom !== null && entry.anchorTo !== null && entry.quotedText !== "")
-    .map((entry) => ({
-      id: entry.threadId,
-      from: entry.anchorFrom!,
-      to: entry.anchorTo!,
-      quotedText: entry.quotedText,
-      color: entry.color,
-    }));
+  return entries.flatMap((entry): AnnotationAnchorInput[] => {
+    const chips = entry.anchorChips && entry.anchorChips.length > 0 ? { chips: entry.anchorChips } : {};
+    if (entry.anchorFrom !== null && entry.anchorTo !== null && entry.quotedText !== "") {
+      return [{ id: entry.threadId, from: entry.anchorFrom, to: entry.anchorTo, quotedText: entry.quotedText, color: entry.color, ...chips }];
+    }
+    // No offsets, and chips on record: a mark-anchored passage's edge chips.
+    if (entry.anchorFrom === null && entry.anchorChips && entry.anchorChips.length > 0) {
+      return [{ id: entry.threadId, from: -1, to: -1, quotedText: "", color: entry.color, kind: "edge", ...chips }];
+    }
+    return [];
+  });
 }
 
 /**
@@ -125,7 +162,7 @@ export function annotationAnchorInputs(
  * — see open-link-store.ts).
  */
 export function anchoredLinkAnchorInputs(
-  parts: { anchorId: string; from: number | null; to: number | null; quotedText: string }[],
+  parts: { anchorId: string; from: number | null; to: number | null; quotedText: string; selector?: AnchorSelector | null }[],
   kind: "link" | "draft-link" = "link",
 ): AnnotationAnchorInput[] {
   return parts
@@ -136,7 +173,46 @@ export function anchoredLinkAnchorInputs(
       to: part.to!,
       quotedText: part.quotedText,
       kind,
+      ...(part.selector?.kind === "DOC_RANGE" && part.selector.selector.chips ? { chips: part.selector.selector.chips } : {}),
     }));
+}
+
+/** The hull of each of `ids`' annotation marks in `doc`: where a mark-anchored passage's text is. */
+function markHulls(doc: PMNode, ids: ReadonlySet<string>): Map<string, AnchorRange> {
+  const hulls = new Map<string, AnchorRange>();
+  doc.descendants((node, pos) => {
+    if (!node.isText) return;
+    for (const mark of node.marks) {
+      if (mark.type.name !== "annotation" || !ids.has(mark.attrs.id as string)) continue;
+      const hull = hulls.get(mark.attrs.id as string);
+      if (hull) {
+        hull.from = Math.min(hull.from, pos);
+        hull.to = Math.max(hull.to, pos + node.nodeSize);
+      } else {
+        hulls.set(mark.attrs.id as string, { from: pos, to: pos + node.nodeSize });
+      }
+    }
+  });
+  return hulls;
+}
+
+// Every `edge` anchor, resolved: its mark's hull stretched over the recorded
+// chips still beside it (`rangeWithEdgeChips`), and which of those chips are
+// inside the result. One pass over the document for all of them, and none
+// when no anchor is an edge, which is every doc with no chip annotated.
+function resolveEdges<A extends AnnotationAnchorInput>(anchors: A[], doc: PMNode): (A & Pick<TrackedAnchor, "resolved" | "edgeChips">)[] | null {
+  if (!anchors.some((anchor) => anchor.kind === "edge")) return null;
+  const chipAt = chipPositions(doc);
+  const hulls = markHulls(doc, new Set(anchors.filter((anchor) => anchor.kind === "edge").map((anchor) => anchor.id)));
+  return anchors.map((anchor) => {
+    if (anchor.kind !== "edge") return { ...anchor, resolved: null };
+    const resolved = rangeWithEdgeChips(doc, hulls.get(anchor.id) ?? null, anchor.chips ?? [], chipAt);
+    const edgeChips = (anchor.chips ?? []).flatMap((chip) => {
+      const pos = chipAt(chip.iid);
+      return resolved && pos !== undefined && pos >= resolved.from && pos < resolved.to ? [pos] : [];
+    });
+    return { ...anchor, resolved, edgeChips };
+  });
 }
 
 // A full re-resolve: the initial pass, and every explicit anchor push.
@@ -153,11 +229,13 @@ function resolveAll(anchors: AnnotationAnchorInput[], doc: PMNode, tracked: Trac
   // Kind as well as id: one anchored-link part can arrive under both `link`
   // and `draft-link`.
   const current = new Map(tracked.map((anchor) => [`${anchor.kind ?? "annotation"}:${anchor.id}`, anchor]));
-  return anchors.map((anchor) => {
+  const edges = resolveEdges(anchors, doc);
+  return anchors.map((anchor, index) => {
+    if (anchor.kind === "edge") return edges![index];
     const was = current.get(`${anchor.kind ?? "annotation"}:${anchor.id}`);
     // Same text, or the tracked range describes something else.
     const start = was?.resolved && was.quotedText === anchor.quotedText ? was.resolved : anchor;
-    return { ...anchor, resolved: resolveAnchorInDoc(doc, start.from, start.to, anchor.quotedText) };
+    return { ...anchor, resolved: resolveAnchorInDoc(doc, start.from, start.to, anchor.quotedText, undefined, anchor.chips) };
   });
 }
 
@@ -194,7 +272,11 @@ function reresolve(
   retryDetached: boolean,
 ): TrackedAnchor[] {
   const radius = Math.abs(newDoc.content.size - oldSize) + NEARBY_PAD;
-  return anchors.map((anchor) => {
+  // An edge anchor has no quote to map or search for: its chips are looked
+  // up by instance id in the new document, every time.
+  const edges = resolveEdges(anchors, newDoc);
+  return anchors.map((anchor, index) => {
+    if (anchor.kind === "edge") return edges![index];
     if (!anchor.resolved) {
       // PLAN.md §22e / docs/COLLAB.md's 2026-08-13 entry — tier 3's
       // detached-is-sticky rule, relaxed for an **annotation body**.
@@ -214,11 +296,11 @@ function reresolve(
       // `null` stays null when the text really is gone; what changes is only
       // that the question is asked again.
       if (!retryDetached) return anchor;
-      return { ...anchor, resolved: resolveAnchorInDoc(newDoc, anchor.from, anchor.to, anchor.quotedText) };
+      return { ...anchor, resolved: resolveAnchorInDoc(newDoc, anchor.from, anchor.to, anchor.quotedText, undefined, anchor.chips) };
     }
     const from = tr.mapping.map(anchor.resolved.from, 1);
     const to = tr.mapping.map(anchor.resolved.to, -1);
-    if (to > from && to <= newDoc.content.size && newDoc.textBetween(from, to, " ") === anchor.quotedText) {
+    if (anchorHolds(newDoc, from, to, anchor.quotedText, anchor.chips)) {
       return { ...anchor, resolved: { from, to } };
     }
     // The *previous* range, not the mapped one: after a `setContent` the
@@ -228,10 +310,14 @@ function reresolve(
     // spanning a block boundary when something did.
     return {
       ...anchor,
-      resolved: resolveAnchorInDoc(newDoc, anchor.resolved.from, anchor.resolved.to, anchor.quotedText, {
-        pos: anchor.resolved.from,
-        radius,
-      }),
+      resolved: resolveAnchorInDoc(
+        newDoc,
+        anchor.resolved.from,
+        anchor.resolved.to,
+        anchor.quotedText,
+        { pos: anchor.resolved.from, radius },
+        anchor.chips,
+      ),
     };
   });
 }
@@ -239,14 +325,16 @@ function reresolve(
 /** Slack around the size-delta window, so a same-length edit still has somewhere to look. */
 const NEARBY_PAD = 64;
 
-function rangeMaps(anchors: TrackedAnchor[]): Pick<AnnotationHighlightState, "ranges" | "linkRanges"> {
+function rangeMaps(anchors: TrackedAnchor[]): Pick<AnnotationHighlightState, "ranges" | "linkRanges" | "edgeRanges"> {
   const ranges = new Map<string, AnchorRange>();
   const linkRanges = new Map<string, AnchorRange>();
+  const edgeRanges = new Map<string, AnchorRange>();
   for (const anchor of anchors) {
     if (!anchor.resolved) continue;
-    (anchor.kind === "link" || anchor.kind === "draft-link" ? linkRanges : ranges).set(anchor.id, anchor.resolved);
+    const map = anchor.kind === "edge" ? edgeRanges : anchor.kind === "link" || anchor.kind === "draft-link" ? linkRanges : ranges;
+    map.set(anchor.id, anchor.resolved);
   }
-  return { ranges, linkRanges };
+  return { ranges, linkRanges, edgeRanges };
 }
 
 export const AnnotationHighlight = Extension.create<{
@@ -308,16 +396,25 @@ export const AnnotationHighlight = Extension.create<{
             // has to become one segment carrying both classes — a background
             // wash *and* an outline compose; two overlapping inline
             // decorations don't.
+            //
+            // An `edge` anchor paints only its chips: its text carries a mark,
+            // which draws itself.
             const decorations = buildSegments(
               current.anchors
                 .filter((a) => a.resolved)
-                .map((a) => ({
-                  id: a.id,
-                  from: a.resolved!.from,
-                  to: a.resolved!.to,
-                  color: a.kind === "link" || a.kind === "draft-link" ? null : (a.color ?? null),
-                  kind: a.kind ?? ("annotation" as const),
-                })),
+                .flatMap((a) =>
+                  a.kind === "edge"
+                    ? (a.edgeChips ?? []).map((pos) => ({ id: a.id, from: pos, to: pos + 1, color: a.color ?? null, kind: "annotation" as const }))
+                    : [
+                        {
+                          id: a.id,
+                          from: a.resolved!.from,
+                          to: a.resolved!.to,
+                          color: a.kind === "link" || a.kind === "draft-link" ? null : (a.color ?? null),
+                          kind: a.kind ?? ("annotation" as const),
+                        },
+                      ],
+                ),
               state.doc.content.size,
             ).map((segment) => {
               const annotationSources = segment.sources.filter((s) => s.kind === "annotation");

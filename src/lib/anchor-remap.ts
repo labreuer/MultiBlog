@@ -1,4 +1,5 @@
 import { recreateTransform } from "@fellow/prosemirror-recreate-transform";
+import { identityTextBetween, mapChipEdge, postChipRuns } from "./entity-chips/post-chip-runs";
 import { pmSchema } from "./tiptap-schema";
 import { prisma } from "./prisma";
 
@@ -20,6 +21,15 @@ import { prisma } from "./prisma";
 // the thread reattaches. Before this, DETACHED was a terminal state: excluded
 // from the query entirely, so nothing ever gave a detached thread a second
 // look, no matter what a later publish said.
+//
+// **A chip that is only called something else is not a change**
+// (docs/ENTITY_CHIPS.md, step 1, item 9). A post holds each entity chip as
+// its label, frozen at publish, so a person renamed between two publishes
+// reads differently in each though the doc's chip never changed. A quote
+// holding such a label whole is compared by who the chips stand for
+// (`identityTextBetween`), survives, and has its `quotedText` rewritten to
+// what the passage says now. A quote that cuts through a label is compared
+// as text, as before.
 export async function remapThreadsToEvent(postId: string, newEventId: string): Promise<void> {
   const threads = await prisma.commentThread.findMany({
     where: { postId, status: { in: ["ACTIVE", "DETACHED"] }, quotedText: { not: "" } },
@@ -36,6 +46,7 @@ export async function remapThreadsToEvent(postId: string, newEventId: string): P
 
   const newEvent = await prisma.postPublicationEvent.findUniqueOrThrow({ where: { id: newEventId } });
   const newNode = pmSchema.nodeFromJSON((newEvent.proseJson ?? { type: "doc", content: [] }) as object);
+  const newRuns = postChipRuns(newNode);
 
   for (const [oldEventId, group] of byEvent) {
     const oldEvent = await prisma.postPublicationEvent.findUnique({ where: { id: oldEventId } });
@@ -47,17 +58,31 @@ export async function remapThreadsToEvent(postId: string, newEventId: string): P
 
     const oldNode = pmSchema.nodeFromJSON(oldEvent.proseJson as object);
     const { mapping } = recreateTransform(oldNode, newNode);
+    const oldRuns = postChipRuns(oldNode);
 
     for (const thread of group) {
       // Bias each end away from the range (start forward, end backward) so
       // text inserted exactly at a boundary doesn't get pulled into what's
       // supposed to be a stable quote — same convention ProseMirror itself
       // uses for mapping decorations/marks across a transform.
-      const mappedFrom = mapping.map(thread.anchorFrom, 1);
-      const mappedTo = mapping.map(thread.anchorTo, -1);
-      const survived =
-        mappedTo > mappedFrom &&
-        newNode.textBetween(mappedFrom, mappedTo, " ").trim() === thread.quotedText.trim();
+      //
+      // An end sitting on a chip's edge follows that chip instead: its label
+      // may be the very text that changed.
+      const mappedFrom = mapChipEdge(thread.anchorFrom, "from", oldRuns, newRuns) ?? mapping.map(thread.anchorFrom, 1);
+      const mappedTo = mapChipEdge(thread.anchorTo, "to", oldRuns, newRuns) ?? mapping.map(thread.anchorTo, -1);
+      const inRange = mappedTo > mappedFrom && mappedTo <= newNode.content.size;
+      const nowText = inRange ? newNode.textBetween(mappedFrom, mappedTo, " ") : "";
+      const sameText = inRange && nowText.trim() === thread.quotedText.trim();
+      const wasIdentity = identityTextBetween(oldNode, thread.anchorFrom, thread.anchorTo, oldRuns);
+      // Only for a quote that still is what its old publish says there; a
+      // DETACHED thread's frozen range may describe something else by now.
+      const sameChips =
+        inRange &&
+        !sameText &&
+        wasIdentity !== null &&
+        oldNode.textBetween(thread.anchorFrom, thread.anchorTo, " ").trim() === thread.quotedText.trim() &&
+        wasIdentity === identityTextBetween(newNode, mappedFrom, mappedTo, newRuns);
+      const survived = sameText || sameChips;
 
       // A DETACHED thread that's still not found: nothing to write. Its
       // anchor stays frozen at oldEventId exactly as it already was — a
@@ -68,7 +93,14 @@ export async function remapThreadsToEvent(postId: string, newEventId: string): P
       await prisma.commentThread.update({
         where: { id: thread.id },
         data: survived
-          ? { anchorFrom: mappedFrom, anchorTo: mappedTo, anchoredEventId: newEventId, status: "ACTIVE" }
+          ? {
+              anchorFrom: mappedFrom,
+              anchorTo: mappedTo,
+              anchoredEventId: newEventId,
+              status: "ACTIVE",
+              // The same passage under its chips' current labels.
+              ...(sameChips ? { quotedText: nowText } : {}),
+            }
           : { status: "DETACHED" },
       });
     }

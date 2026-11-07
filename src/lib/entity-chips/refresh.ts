@@ -2,15 +2,20 @@ import type { JSONContent } from "@tiptap/core";
 import { Prisma } from "@/generated/prisma/client";
 import { annotationBodyText } from "@/lib/annotation-body";
 import { prismaIncludingDeleted as prisma } from "@/lib/prisma";
+import { parseChipRecords, relabelChipRecords } from "@/lib/anchors";
 import { chipInputsForBody } from "./context";
 import { relabelChips } from "./materialize";
+import { chipsInJSON } from "./renderings";
+import { parseChipStyles } from "./settings";
+import { chipLabels, type ChipLabels } from "./text";
 
 // docs/ENTITY_CHIPS.md, step 1, item 10 — the refresh. A label is computed
-// from its target's record, and two places hold a computed label as text: a
-// doc's `prose_json` (item 8) and a note's `body_text` (item 13). An edit
-// rewrites both through the ordinary store. A rename is not an edit, so
-// nothing would rewrite them, and a doc nobody opens would be found, and
-// excerpted, under the old name for good.
+// from its target's record, and three places hold a computed label as text:
+// a doc's `prose_json` (item 8), a note's `body_text` (item 13), and the chip
+// record of an anchor whose passage holds the chip (item 11). An edit
+// rewrites the first two through the ordinary store. A rename is not an
+// edit, so nothing would rewrite them, and a doc nobody opens would be
+// found, and excerpted, under the old name for good.
 //
 // So whatever changes a record a label reads calls this with the target's
 // id. It finds the docs and notes through the kind's index table and
@@ -23,6 +28,10 @@ import { relabelChips } from "./materialize";
 //  - **A note** gets `body_text` recomputed from its `prose_json`, which is
 //    label-free. No date moves either: a note's "updated" date is the edit
 //    its card tells readers about (docs/FULLTEXT.md §6).
+//  - **An anchor into either** (a note's stored quote, a link's or a tag's
+//    part) gets its chip records' labels from the body they point into, by
+//    instance id, so a quote shown with no ydoc open reads as that body now
+//    does. The annotation search vector follows through its trigger.
 //  - **A post** is left alone. It froze its labels at publish, and
 //    republishing is what refreshes them.
 //
@@ -46,14 +55,14 @@ import { relabelChips } from "./materialize";
 /** Hocuspocus's store debounce waits ten seconds at most (docs/DOCS.md); this is past it. */
 const SECOND_PASS_MS = 15_000;
 
-export type RefreshResult = { docs: number; annotations: number };
+export type RefreshResult = { docs: number; annotations: number; anchors: number };
 
 /**
  * Relabels every doc and note that mentions one of `userIds`, or one of
  * their bots: a bot's label can name the person it works for.
  */
 export async function refreshMentionLabels(userIds: readonly string[]): Promise<RefreshResult> {
-  if (userIds.length === 0) return { docs: 0, annotations: 0 };
+  if (userIds.length === 0) return { docs: 0, annotations: 0, anchors: 0 };
   const bots = await prisma.user.findMany({ where: { worksForUserId: { in: [...userIds] } }, select: { id: true } });
   const targets = [...new Set([...userIds, ...bots.map((bot) => bot.id)])];
 
@@ -67,17 +76,24 @@ export async function refreshMentionLabels(userIds: readonly string[]): Promise<
   // One at a time: a prolific person's rename is hundreds of documents, and
   // nothing is waiting on any one of them.
   let docs = 0;
-  for (const id of docIds) if (await refreshDoc(id)) docs += 1;
   let annotations = 0;
-  for (const id of annotationIds) if (await refreshAnnotation(id)) annotations += 1;
-  return { docs, annotations };
+  let anchors = 0;
+  for (const id of docIds) {
+    if (await refreshDoc(id)) docs += 1;
+    anchors += await refreshAnchorsInto({ kind: "doc", id });
+  }
+  for (const id of annotationIds) {
+    if (await refreshAnnotation(id)) annotations += 1;
+    anchors += await refreshAnchorsInto({ kind: "annotation", id });
+  }
+  return { docs, annotations, anchors };
 }
 
 async function refreshDoc(docId: string): Promise<boolean> {
-  const doc = await prisma.doc.findUnique({ where: { id: docId }, select: { proseJson: true } });
+  const doc = await prisma.doc.findUnique({ where: { id: docId }, select: { proseJson: true, chipStyles: true } });
   if (!doc?.proseJson) return false;
   const before = doc.proseJson as JSONContent;
-  const after = relabelChips(before, await chipInputsForBody(before));
+  const after = relabelChips(before, await chipInputsForBody(before, parseChipStyles(doc.chipStyles)));
   const [was, now] = [JSON.stringify(before), JSON.stringify(after)];
   if (was === now) return false;
   const written = await prisma.$executeRaw(
@@ -98,6 +114,73 @@ async function refreshAnnotation(annotationId: string): Promise<boolean> {
     Prisma.sql`UPDATE "annotation" SET body_text = ${bodyText} WHERE id = ${annotationId} AND body_text = ${annotation.bodyText}`,
   );
   return written > 0;
+}
+
+/** The three anchor tables that keep a chip record inside their `selector` (src/lib/anchors/selector.ts). */
+const SELECTOR_TABLES = ["tag_anchor", "anchored_link_anchor", "comment_quote_anchor"] as const;
+
+/** The chip records of every anchor into one body, a doc's or a note's, relabelled as that body reads now. */
+async function refreshAnchorsInto(target: { kind: "doc" | "annotation"; id: string }): Promise<number> {
+  // A doc's labels are in its own style; a note's body has none of its own.
+  const body =
+    target.kind === "doc"
+      ? await prisma.doc.findUnique({ where: { id: target.id }, select: { proseJson: true, chipStyles: true } })
+      : { ...(await prisma.annotation.findUnique({ where: { id: target.id }, select: { proseJson: true } })), chipStyles: null };
+  if (!body?.proseJson) return 0;
+  const json = body.proseJson as JSONContent;
+  if (chipsInJSON(json).length === 0) return 0;
+  return refreshAnchorRecords(target, chipLabels(json, await chipInputsForBody(json, parseChipStyles(body.chipStyles))));
+}
+
+/**
+ * Rewrites the chip records of every anchor into one body with `labels`,
+ * that body's own by instance id. So a record reads as the doc-order pass
+ * labelled its chip there, with whatever told two same-named people apart.
+ * A record whose chip the body no longer holds keeps the label it had.
+ *
+ * The doc store calls this too (server/doc-cache.ts), with the labels it has
+ * just written to `prose_json`: an edit can change a label it never touched,
+ * by adding a second person of the same name, and the records follow the
+ * column.
+ */
+export async function refreshAnchorRecords(target: { kind: "doc" | "annotation"; id: string }, labels: ChipLabels): Promise<number> {
+  if (labels.size === 0) return 0;
+  let written = 0;
+
+  // Notes: a root's quote of the doc, or a reply's quote of the note it answers.
+  const notes = await prisma.annotation.findMany({
+    where: {
+      ...(target.kind === "doc" ? { docId: target.id, parentAnnotationId: null } : { parentAnnotationId: target.id }),
+      anchorChips: { not: Prisma.DbNull },
+    },
+    select: { id: true, anchorChips: true },
+  });
+  for (const note of notes) {
+    const was = parseChipRecords(note.anchorChips);
+    const now = relabelChipRecords(was, labels);
+    if (was.length === 0 || JSON.stringify(was) === JSON.stringify(now)) continue;
+    written += await prisma.$executeRaw(
+      Prisma.sql`UPDATE "annotation" SET anchor_chips = ${JSON.stringify(now)}::jsonb WHERE id = ${note.id} AND anchor_chips = ${JSON.stringify(note.anchorChips)}::jsonb`,
+    );
+  }
+
+  const column = Prisma.raw(target.kind === "doc" ? "doc_id" : "target_annotation_id");
+  for (const name of SELECTOR_TABLES) {
+    const table = Prisma.raw(`"${name}"`);
+    const rows = await prisma.$queryRaw<{ id: string; selector: unknown }[]>(
+      Prisma.sql`SELECT id, selector FROM ${table} WHERE ${column} = ${target.id} AND selector_kind = 'DOC_RANGE' AND selector ? 'chips'`,
+    );
+    for (const row of rows) {
+      const selector = row.selector as Record<string, unknown>;
+      const was = parseChipRecords(selector.chips);
+      const now = relabelChipRecords(was, labels);
+      if (was.length === 0 || JSON.stringify(was) === JSON.stringify(now)) continue;
+      written += await prisma.$executeRaw(
+        Prisma.sql`UPDATE ${table} SET selector = ${JSON.stringify({ ...selector, chips: now })}::jsonb WHERE id = ${row.id} AND selector = ${JSON.stringify(selector)}::jsonb`,
+      );
+    }
+  }
+  return written;
 }
 
 /**

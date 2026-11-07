@@ -37,6 +37,7 @@ import {
   collapseToBodyStart,
   deleteTextInBody,
   freshGoto,
+  openDashboardCard,
   visibleText,
   waitForDocCollabReady,
   QUOTED_BODY,
@@ -44,7 +45,16 @@ import {
   QUOTE_FROM,
   QUOTE_TO,
 } from "./fixtures";
-import { getThread, getPublicationEvents, getPostContentText } from "./db";
+import {
+  ADMIN_EMAIL,
+  createQuoteThread,
+  createTestPost,
+  deleteTestPost,
+  getThread,
+  getPublicationEvents,
+  getPostContentText,
+  uniqueEmail,
+} from "./db";
 
 // quotedPost is live from the fixture, so its button reads "Republish" (PLAN.md §15c).
 const REPUBLISH = { name: "Republish", exact: true } as const;
@@ -259,5 +269,70 @@ test.describe("quote anchoring across publishes", () => {
     await freshGoto(page, quotedPost.path);
     await expect(page.locator(`[data-thread-ids~="${quotedPost.threadId}"]`).first()).toBeVisible();
     await expect(page.getByText(DETACHED_NOTICE)).toHaveCount(0);
+  });
+
+  // docs/ENTITY_CHIPS.md, step 1, item 9 — a post holds a mention as its
+  // label, frozen at publish. A person renamed between two publishes reads
+  // differently in each, and a quote holding the mention is still the same
+  // passage: it follows the chip, and its stored text follows the label.
+  test("a quote holding a mention survives a republish after the person is renamed", async ({ page, secondUser }) => {
+    const { user: author, page: authorPage } = await secondUser({ role: "AUTHOR" });
+    const lastName = author.name.split(" ").at(-1);
+    const post = await createTestPost({
+      authorEmail: ADMIN_EMAIL,
+      publish: true,
+      body: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "The engine was reviewed by " },
+              { type: "entityChip", attrs: { kind: "mention", iid: "m1", data: { userId: author.id } } },
+              { type: "text", text: " last week." },
+            ],
+          },
+        ],
+      },
+    });
+    try {
+      expect(await getPostContentText(post.id)).toBe(`The engine was reviewed by @${author.name} last week.`);
+      // "reviewed by @<name>": the quote ends on the mention's last character.
+      const quoted = `reviewed by @${author.name}`;
+      const from = 1 + "The engine was ".length;
+      const { threadId } = await createQuoteThread({
+        postId: post.id,
+        anchoredEventId: post.eventId!,
+        anchorFrom: from,
+        anchorTo: from + quoted.length,
+        quotedText: quoted,
+        email: uniqueEmail("chip-quoter"),
+        displayName: "Quoting Reader",
+        body: "Which review?",
+      });
+
+      const renamed = `Renamed ${lastName}`;
+      await authorPage.goto("/dashboard");
+      await openDashboardCard(authorPage, "Settings");
+      await authorPage.getByLabel("Name").fill(renamed);
+      await authorPage.getByRole("button", { name: "Save" }).click();
+      await expect(authorPage.getByText("Saved.")).toBeVisible();
+
+      // An edit elsewhere, so there is something to republish.
+      await editDoc(page, post.docId);
+      await expect(bodyEditor(page).locator(".entity-chip")).toHaveText(`@${renamed}`);
+      await bodyEditor(page).click();
+      await page.keyboard.press("Control+End");
+      await page.keyboard.type(" Twice.");
+      const newEventId = await republish(page, post.id);
+      expect(await getPostContentText(post.id)).toBe(`The engine was reviewed by @${renamed} last week. Twice.`);
+
+      await expect.poll(async () => (await getThread(threadId))?.anchoredEventId).toBe(newEventId);
+      const now = `reviewed by @${renamed}`;
+      expect(await getThread(threadId)).toMatchObject({ status: "ACTIVE", anchorFrom: from, anchorTo: from + now.length, quotedText: now });
+    } finally {
+      await page.goto("about:blank");
+      await deleteTestPost(post.id);
+    }
   });
 });

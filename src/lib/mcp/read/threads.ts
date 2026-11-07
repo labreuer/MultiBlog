@@ -1,8 +1,9 @@
+import { parseChipRecords, quoteWithChipLabels } from "@/lib/anchors";
 import type { JSONContent } from "@tiptap/core";
 import { prisma } from "@/lib/prisma";
 import { readableAnnotationsWhere, postedAnnotationWhere } from "@/lib/annotation-authz";
 import { visibleAnnotationEditDates } from "@/lib/annotation-data";
-import { resolveAnnotationRangesInNode, collectAnnotationMarkRanges } from "@/lib/annotation-marks";
+import { resolveAnnotationRangesInNode } from "@/lib/annotation-marks";
 import { annotationAnchorName } from "@/lib/annotation-anchor-name";
 import { annotationHistoryFor } from "@/lib/annotation-history";
 import { annotationContentToMarkdown } from "@/lib/markdown-import";
@@ -55,6 +56,7 @@ const ROW_SELECT = {
   anchorFrom: true,
   anchorTo: true,
   quotedText: true,
+  anchorChips: true,
   ydocUpdateId: true,
   pdfTarget: true,
   proseJson: true,
@@ -75,6 +77,7 @@ type Row = {
   anchorFrom: number | null;
   anchorTo: number | null;
   quotedText: string;
+  anchorChips: unknown;
   ydocUpdateId: bigint | null;
   pdfTarget: unknown;
   proseJson: unknown;
@@ -239,6 +242,11 @@ function bodyOf(row: Row, format: "markdown" | "text", chipInputs: ChipInputs): 
   }
 }
 
+/** A row's stored quote as a reader sees it: each entity chip as the label its record holds. */
+function storedQuote(row: Row): string {
+  return quoteWithChipLabels(row.quotedText, parseChipRecords(row.anchorChips));
+}
+
 function entryOf(thread: Thread, row: Row, format: "markdown" | "text", full: boolean): Record<string, unknown> {
   const isRoot = row.id === thread.root.id;
   if (row.deletedByUserId !== null) {
@@ -254,7 +262,7 @@ function entryOf(thread: Thread, row: Row, format: "markdown" | "text", full: bo
     ...(!isRoot && row.parentAnnotationId !== thread.root.id ? { replyTo: row.parentAnnotationId } : {}),
     // A reply anchored into its parent's body carries what it quoted there.
     ...(!isRoot && row.anchorFrom !== null && row.quotedText
-      ? { quote: full ? row.quotedText : clip(row.quotedText, REPLY_QUOTE_CHARS) }
+      ? { quote: full ? storedQuote(row) : clip(storedQuote(row), REPLY_QUOTE_CHARS) }
       : {}),
     body: bodyOf(row, format, thread.chipInputs),
   };
@@ -279,7 +287,13 @@ type Placed = {
 function placeInDoc(threads: Thread[], state: DocState): Placed[] {
   const ranges = resolveAnnotationRangesInNode(
     state.node,
-    threads.map((t) => ({ id: t.root.id, anchorFrom: t.root.anchorFrom, anchorTo: t.root.anchorTo, quotedText: t.root.quotedText })),
+    threads.map((t) => ({
+      id: t.root.id,
+      anchorFrom: t.root.anchorFrom,
+      anchorTo: t.root.anchorTo,
+      quotedText: t.root.quotedText,
+      chips: parseChipRecords(t.root.anchorChips),
+    })),
   );
   return threads.map((thread) => {
     const range = ranges.get(thread.root.id) ?? null;
@@ -287,7 +301,7 @@ function placeInDoc(threads: Thread[], state: DocState): Placed[] {
       return {
         thread,
         range: null,
-        passage: thread.root.quotedText,
+        passage: storedQuote(thread.root),
         // A column anchor keeps its quote once it stops resolving; a mark
         // keeps nothing, and a note on the whole doc never had a passage.
         lost: thread.root.quotedText !== "",
@@ -511,7 +525,7 @@ export async function oneThread(ctx: McpContext, annotationId: string, args: Rea
     const state = await loadDocState(target.doc.id);
     placed = placeInDoc([thread], state)[0];
     if (!placed.range && thread.root.anchorFrom === null && thread.root.ydocUpdateId !== null) {
-      const atStamp = await passageAtStamp(target.doc.id, thread.root.id, thread.root.ydocUpdateId);
+      const atStamp = await passageAtStamp(target.doc.id, thread.root.id, thread.root.anchorChips, thread.root.ydocUpdateId);
       if (atStamp) placed = { ...placed, passage: atStamp, lost: true };
     }
     container = { url: `/doc/${target.doc.slug}`, title: docTitleOrFallback(target.doc.title) };
@@ -555,10 +569,13 @@ export async function oneThread(ctx: McpContext, annotationId: string, args: Rea
 }
 
 /** A mark-anchored note's passage at its stamp, where its mark is by construction; null if it isn't there either. */
-async function passageAtStamp(docId: string, annotationId: string, stamp: bigint): Promise<string | null> {
+async function passageAtStamp(docId: string, annotationId: string, anchorChips: unknown, stamp: bigint): Promise<string | null> {
   try {
     const state = await loadDocStateAt(docId, stamp);
-    const range = collectAnnotationMarkRanges(state.node).get(annotationId);
+    // The mark's hull, stretched over the edge chips the row records.
+    const range = resolveAnnotationRangesInNode(state.node, [
+      { id: annotationId, anchorFrom: null, anchorTo: null, quotedText: "", chips: parseChipRecords(anchorChips) },
+    ]).get(annotationId);
     return range ? displayTextBetween(state.node, range.from, range.to, state.chips.labels) : null;
   } catch (err) {
     console.error(`[mcp] couldn't rebuild ${docId} at ${stamp} for ${annotationId}:`, err);

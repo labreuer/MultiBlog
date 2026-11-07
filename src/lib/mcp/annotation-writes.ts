@@ -108,7 +108,7 @@ function findOne(
     });
   }
   const match = found.matches[0];
-  const captured = captureAnchorInNode(node, match.from, match.to, node.textBetween(match.from, match.to, " "));
+  const captured = captureAnchorInNode(node, match.from, match.to, node.textBetween(match.from, match.to, " "), labels);
   if (!captured) throw new ApiError("no_match", "That quote couldn't be anchored.");
   // `shown` is the passage as the agent reads it, for the answer; `quotedText` is what is stored.
   return { ...captured, shown: displayTextBetween(node, captured.from, captured.to, labels) };
@@ -157,7 +157,7 @@ async function anchorInParent(parentId: string, quote: QuoteInput) {
     // The parent's chips as a thread read shows them, so a quote of one lands.
     const labels = chipLabels(json, await chipInputsForBody(json));
     const captured = findOne(pmAnnotationContentSchema.nodeFromJSON(json), labels, quote, () => ({}));
-    return { stamp, from: captured.from, to: captured.to, quotedText: captured.quotedText, shown: captured.shown };
+    return { stamp, from: captured.from, to: captured.to, quotedText: captured.quotedText, shown: captured.shown, selector: captured.selector };
   } finally {
     doc.destroy();
   }
@@ -188,11 +188,11 @@ export async function annotateFor(ctx: McpContext, input: QuoteInput & { on: str
     anchor = { kind: "none", stamp: container.kind === "doc" ? await docLogTail(container.doc.id) : null };
   } else if (parent) {
     const at = await anchorInParent(parent.id, input);
-    anchor = { kind: "range", stamp: at.stamp, from: at.from, to: at.to, quotedText: at.quotedText };
+    anchor = { kind: "range", stamp: at.stamp, from: at.from, to: at.to, quotedText: at.quotedText, chips: at.selector.chips };
     passage = { text: at.shown };
   } else if (container.kind === "doc") {
     const at = await anchorInDoc(container.doc.id, input);
-    anchor = { kind: "range", stamp: at.stamp, from: at.from, to: at.to, quotedText: at.quotedText };
+    anchor = { kind: "range", stamp: at.stamp, from: at.from, to: at.to, quotedText: at.quotedText, chips: at.selector.chips };
     passage = { text: at.shown };
   } else {
     const at = await anchorPdfQuote(container.file, input);
