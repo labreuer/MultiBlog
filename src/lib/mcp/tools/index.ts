@@ -9,6 +9,7 @@ import { addNoteTool, editNoteTool } from "./annotations";
 import { createLinkTool, editLinkTool, extendLinkTool } from "./links";
 import { tagTool, untagTool } from "./tags";
 import { renameFileTool } from "./files";
+import { createReferenceTool, findReferencesTool } from "./references";
 
 // docs/MCP.md §15 — every tool, in the order a client lists them. The server
 // (../server.ts) shows a token only the ones its scopes and client allow.
@@ -17,6 +18,7 @@ export const TOOLS: McpTool[] = [
   readTool,
   findUsersTool,
   findTagsTool,
+  findReferencesTool,
   downloadTool,
   uploadTool,
   createDocTool,
@@ -29,5 +31,6 @@ export const TOOLS: McpTool[] = [
   editLinkTool,
   tagTool,
   untagTool,
+  createReferenceTool,
   manageTool,
 ];

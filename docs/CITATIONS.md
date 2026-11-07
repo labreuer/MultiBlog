@@ -1,11 +1,50 @@
 # Citations and references (planned)
 
-**Status: planned; nothing here is built.** A *citation* is an entity chip
+**Status: partly built; "Built so far" below says which parts.** A *citation* is an entity chip
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md)) that stands for one or more works at a page. It is shown as
 `(BU p. 49)`, `(Radner 2012, p. 49)` or `[3, p. 49]`, depending on the doc's style. The works are
 *references*: records in a library, which this file also plans. This file fills in the kit's kind
 contract. The kit says how every chip is stored, rendered, quoted and searched. Citations are step
 3 of the kit's order.
+
+## Built so far
+
+The reference library: its data, its pages and its machine door. Everything below not listed
+here is still a plan: the citation chip kind, its menu, the bibliography, the search filters,
+and what a reference's page shows of who cites it.
+
+- **Records:** the `reference` table (migration `reference_library`), its `csl` built field by
+  field by `parseCslItem` (`src/lib/references/csl.ts`) on every way in and read back through
+  `cslOf`. Its `search_vector` is trigger-written from the key, the abbreviation and the
+  record.
+- **Identifiers:** `reference_identifier`, unique per scheme, written with the record in one
+  transaction. `src/lib/references/identifiers.ts` normalizes a DOI and an ISBN and verifies
+  an ISBN's check digit; ISBNs are read only for a whole book.
+- **Keys:** made from the first creator and the year (`radner2012`, then `radner2012b`) when
+  none is given, and permanent once used: `reference_key_history` keeps a renamed key
+  answering, and no other reference may take it.
+- **The writes:** `src/lib/reference-write.ts`, taking an `Actor`: `createReference`,
+  `updateReference`, `setReferenceDeleted`, `importReferences`. AUTHOR and above
+  (`canWriteReferences`). A duplicate is refused as `duplicate`, naming the record that holds
+  the identifier, a deleted one included.
+- **Import:** `src/lib/references/import.ts` reads pasted BibTeX, RIS or CSL-JSON, one record
+  or many, written by hand rather than taken as a dependency. `/references` has the box
+  (`ReferenceImport.tsx`): each record is added, shown as already in the library with the key
+  it has there, or refused with why.
+- **`/references`**, through the admin table kit, for signed-in members
+  (`canViewReferences`); AUTHOR and above rename a key, set an abbreviation, delete and
+  restore. Author(s), Year and Title sort through the `reference_listing` view (migration
+  `reference_listing_view`), since they are fields of the record's jsonb.
+- **`/references/[key]`** is public and reads no session: the entry as a bibliography sets
+  it, the abbreviation, and the DOI, ISBN and URL. A key the reference used to have redirects
+  to its current one. Not yet: the posts that cite it, and the client island for what only
+  some viewers may see.
+- **The entry format:** `src/lib/references/entry.ts`, the one bibliography entry the house
+  styles share.
+- **MCP:** `find_refs` and `create_ref` (`src/lib/mcp/tools/references.ts`). The names are
+  short because a listed name is `multiblog_` and at most eleven characters more, claude.ai's
+  limit ([MCP.md](MCP.md) §21, "The names"); the spec that holds every tool to it refused the
+  longer pair.
 
 ## Terms
 
@@ -154,7 +193,7 @@ call for no refresh.
 - A token acts with its account's role (PERMISSIONS.md, "API tokens"), so the same rule binds
   people and agents.
 - In the UI, import is by pasting BibTeX, RIS or CSL-JSON, one item or many.
-- MCP agents create references through `create_reference` (MCP, below). Editing a reference stays
+- MCP agents create references through `create_ref` (MCP, below). Editing a reference stays
   in the UI.
 
 **Duplicates are caught by DOI and ISBN.**
@@ -180,7 +219,7 @@ call for no refresh.
   - An import shows each matching item as "already in the library as <key>", with a link, and
     imports the rest.
   - Adding an identifier that another record holds is refused, naming that record.
-  - `create_reference` refuses with `duplicate`, returning the existing key and URL so the agent
+  - `create_ref` refuses with `duplicate`, returning the existing key and URL so the agent
     cites that record instead.
 
 **Pages.**
@@ -232,9 +271,9 @@ publish, alongside the post's labels, and refreshed on republish.
 
 **MCP.**
 
-- `find_references`, by key, title, author, DOI or ISBN, beside `find_users` and `find_tags`.
-- `create_reference` (the `write` scope; AUTHOR and above, by the token's account).
-  - Its description tells the agent to search with `find_references` first, as `find_tags` does
+- `find_refs`, by key, title, author, DOI or ISBN, beside `find_users` and `find_tags`.
+- `create_ref` (the `write` scope; AUTHOR and above, by the token's account).
+  - Its description tells the agent to search with `find_refs` first, as `find_tags` does
     for tag terms.
   - It refuses `duplicate` with the existing key, and `invalid` for an identifier that fails its
     check.
@@ -272,5 +311,5 @@ publish, alongside the post's labels, and refreshed on republish.
     and key characters after it, a letter before a bare one, and `@radner2012.` ending a sentence;
   - `[@handle](https://x.com/handle)` staying a link.
 - **e2e:**
-  - a duplicate refused, from an import and through `create_reference`;
+  - a duplicate refused, from an import and through `create_ref`;
   - a post's citation linking to the reference page, and the page offering the PDF to a member.

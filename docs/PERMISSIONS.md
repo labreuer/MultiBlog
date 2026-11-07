@@ -660,9 +660,11 @@ rules take more away:
 | A bot's, issued for `claude-code` | with `read` | with `write` | with `write` | ❌ |
 | Any `claude-ai` or `other` token, a header token or a connection | with `read` | with `write` | ❌ | ❌ |
 
-- **The reads** are `search`, `read`, `find_users`, `find_tags` and `download`; **the writes**
-  `upload`, `create_doc`, `edit_doc`, `add_note`, `edit_note`, `create_link`, `extend_link`,
-  `tag` and `untag`.
+- **The reads** are `search`, `read`, `find_users`, `find_tags`, `find_refs` and
+  `download`; **the writes** `upload`, `create_doc`, `edit_doc`, `add_note`, `edit_note`,
+  `create_link`, `extend_link`, `tag`, `untag` and `create_ref`. A token acts with its
+  account's role, so `create_ref` adds a work only for an AUTHOR or above, as in the UI
+  (`canWriteReferences`, `src/lib/reference-write.ts`).
 - **The tools that force a prompt** (`edit_link`, `rename_file`, `manage`) are listed only to a
   token issued for Claude Code, the one client documented to honor the flag, and `manage` to
   no bot's token, whatever its scopes. No connection is ever `claude-code`: a claim to be
@@ -748,6 +750,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | `/links` row scoping (readable-target `where`) + per-target cell filter | `src/app/links/page.tsx` |
 | Search: which kinds a viewer may search, each kind's scoping | `src/lib/search/index.ts`, `src/lib/search/{docs,posts,pdfs,annotations,comments}.ts` |
 | Search's author picker, and which kinds an author filter leaves out | `src/lib/search/authors.ts` |
+| The reference library: members list it (`canViewReferences`), AUTHOR and above write it (`canWriteReferences`), and a reference's own page is public | `src/lib/role-checks.ts`, `src/lib/reference-write.ts`, `src/app/references/` |
 | Search's mention filter (`mentions=`, `@handle`), and the dashboard's "Mentions of you": inside each kind's readable ids | `src/lib/search/index.ts` (`mentionIdsFor`), `src/lib/search/context.ts` (`mentionedWhere`), `src/lib/mentions-of.ts` |
 | Post editing and history | `src/lib/authz.ts`, `src/app/posts/**` |
 | Publishing needs doc-edit as well as post-edit | `publishPostFromDoc`/`schedulePostFromDoc` in `src/app/actions/posts.ts`; `/api/doc/[id]/replay` |

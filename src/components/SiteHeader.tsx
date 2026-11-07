@@ -188,6 +188,16 @@ export default function SiteHeader() {
               >
                 Tags
               </Link>
+              {/* docs/CITATIONS.md — the reference library, beside Tags: a
+                  vocabulary of works, as that one is of terms, and somewhere
+                  one goes to curate rather than to read. */}
+              <Link
+                href="/references"
+                className={styles.dropdownItem}
+                onClick={() => closeMenu(docsMenuRef.current)}
+              >
+                References
+              </Link>
             </div>
           </details>
         </span>

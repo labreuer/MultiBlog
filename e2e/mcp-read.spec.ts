@@ -57,7 +57,7 @@ test("a token authenticates, names its actor and issuer, and lists only what its
       _meta: Record<string, unknown>;
       annotations: Record<string, unknown>;
     }[];
-    expect(readerTools.map((t) => t.name)).toEqual(["multiblog_search", "multiblog_read", "multiblog_find_users", "multiblog_find_tags", "multiblog_download"]);
+    expect(readerTools.map((t) => t.name)).toEqual(["multiblog_search", "multiblog_read", "multiblog_find_users", "multiblog_find_tags", "multiblog_find_refs", "multiblog_download"]);
     const read = readerTools.find((t) => t.name === "multiblog_read")!;
     expect(read._meta["anthropic/alwaysLoad"]).toBe(true);
     expect(read._meta["anthropic/maxResultSizeChars"]).toBe(200000);
@@ -145,6 +145,7 @@ test("every listed name fits claude.ai's limit, and every description and the in
       "multiblog_read",
       "multiblog_find_users",
       "multiblog_find_tags",
+      "multiblog_find_refs",
       "multiblog_download",
       "multiblog_upload",
       "multiblog_create_doc",
@@ -157,6 +158,7 @@ test("every listed name fits claude.ai's limit, and every description and the in
       "multiblog_edit_link",
       "multiblog_tag",
       "multiblog_untag",
+      "multiblog_create_ref",
       "multiblog_manage",
     ]);
     for (const tool of tools) {

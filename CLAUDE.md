@@ -18,6 +18,7 @@ to re-derive the decision from.
 | [docs/ANNOTATIONS.md](docs/ANNOTATIONS.md) | Annotations as built: a body that is its own ydoc, three anchor mechanisms picked by surface, the version stamp, DRAFT → LIVE → RAISED, editing a posted body, composing from the editor, the PDF panel. |
 | [docs/MARGIN_NOTES.md](docs/MARGIN_NOTES.md) | The margin rails as built: only the anchored cards move, CSS owns the grid and JS the alignment, the 1180px threshold and the 340–680px range, the editor's queue mode, the PDF rail. |
 | [docs/TAGS.md](docs/TAGS.md) | Tags as built: term vs. assignment vs. anchor, one write layer for both front doors, "you may tag what you may read", chips that read no session and where they mount, `/tag/[slug]`'s per-type sections, `/tags`, and the Tags column in `/docs` and `/files` with what the ADMIN override withholds. |
+| [docs/CITATIONS.md](docs/CITATIONS.md) | Citations and the reference library, **partly built** (its "Built so far" says which parts): the library's records, keys, import and pages; the citation chip, its forms and its Markdown; a doc's bibliography; search by cited work; CSL styles. |
 | [docs/ENTITY_CHIPS.md](docs/ENTITY_CHIPS.md) | Entity chips, **partly built** (its "Built so far" says which parts): one inline leaf node, `entityChip`, holding only which person or work it stands for, its label computed wherever it is shown — the rules, the kind contract, the build order (the schema-version gate in docs/YDOC.md first), styling, MCP, quoting and search. A file per chip kind: [docs/MENTIONS.md](docs/MENTIONS.md), and [docs/CITATIONS.md](docs/CITATIONS.md) with the reference library. |
 | [docs/research/multi-anchoring.md](docs/research/multi-anchoring.md) | Literature survey behind §20's multi-part anchors: flat part-sets vs. per-part roles, and the recommendations not yet folded into PLAN.md. Read before giving any consumer's parts roles or per-part text. |
 | [docs/TABLES.md](docs/TABLES.md) | Tables as built: the native nodes and where they are not, pasted column widths, CSV into an existing doc and out again (the grid, the format table, the cap, the policy calls), auto-size, and the three specs. |
@@ -56,13 +57,13 @@ Each of these has been decided once and is easy to undo by accident. Read the li
 before changing the behavior it describes.
 
 - **Admin tables are one kit.** `/posts`, `/docs`, `/files`, `/users`, `/comments`,
-  `/annotations`, `/tags` and `/links` all
+  `/annotations`, `/tags`, `/links` and `/references` all
   render through `src/components/table/` plus a per-table `*-query.ts` over
   `src/lib/table-query.ts`. Filters, sort, pagination and the show-deleted toggle live in the
   querystring and are applied in Postgres, never client-side; a new admin table means a
   `*-query.ts` and the kit's hooks, not a fresh `<table>`. Every column sorts — the ones
   Prisma's `orderBy` can't reach go through a **database view keyed 1:1 on the primary key**
-  (`post_activity`, `post_metrics`, `doc_metrics`), which Prisma then treats as an ordinary
+  (`post_activity`, `post_metrics`, `doc_metrics`, `reference_listing`), which Prisma then treats as an ordinary
   to-one relation. Reach for that before denormalizing or re-sorting in JS. The exception is a
   value expensive to *compute* rather than awkward to reach: a view has no `WHERE` to push
   down when sorted through, so it evaluates for every row on every page load — hence `/docs`'
@@ -348,11 +349,11 @@ running `prisma migrate dev` on anything unusual.
   query line. Typecheck passes, which makes it read like a logic bug in the code you just
   wrote. Restarting web is the whole fix. Distinct from the EPERM case: that one is generate
   refusing to *write*, this one is a successful write the running process never picks up.
-- **Six `search_vector` columns, the `search_lexeme` table and the `mention` table are written
-  only by triggers** (docs/FULLTEXT.md §3; docs/ENTITY_CHIPS.md, step 1, item 12) — never assign
-  to them, give a new trigger function its own `SET search_path`, and leave `search_lexeme`'s
-  and `mention`'s data out of a data-only load, or their `COPY` collides with what the triggers
-  already refilled. docs/DATABASE.md.
+- **Seven `search_vector` columns (the reference library's is the seventh), the `search_lexeme`
+  table and the `mention` table are written only by triggers** (docs/FULLTEXT.md §3;
+  docs/ENTITY_CHIPS.md, step 1, item 12) — never assign to them, give a new trigger function its
+  own `SET search_path`, and leave `search_lexeme`'s and `mention`'s data out of a data-only
+  load, or their `COPY` collides with what the triggers already refilled. docs/DATABASE.md.
 - Generated Prisma client lives at `src/generated/prisma` (gitignored). Import from
   `@/generated/prisma/client` and `@/generated/prisma/enums`.
 - **One-off DB scripts can't `require()` the generated client with plain `node -e`** — it's TS
