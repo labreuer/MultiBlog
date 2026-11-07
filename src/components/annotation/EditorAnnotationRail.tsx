@@ -8,6 +8,7 @@ import QuoteThreadHeader from "../QuoteThreadHeader";
 import { isCollapsed, useCollapseState } from "@/lib/collapsed-annotations";
 import { useMarginNotesLayout } from "../margin-notes/use-margin-notes-layout";
 import { useMarginNotes } from "../margin-notes/margin-notes-context";
+import { useLiveChipLabels } from "../margin-notes/use-live-chip-labels";
 import { EDITOR_SCROLL_ATTRIBUTE } from "../editor-scroll";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { EDITOR_FOCUS_MEDIA_QUERY } from "@/lib/margin-notes-layout";
@@ -77,6 +78,8 @@ export default function EditorAnnotationRail({ entries, docId }: Props) {
 
   const ids = useMemo(() => entries.map((entry) => entry.root.id), [entries]);
   const collapseState = useCollapseState();
+  // The labels the editor is drawing, for the chips in the cards' quotes.
+  const liveLabels = useLiveChipLabels();
   // Phone-landscape focus mode turns this rail into a queue (STYLE.md's
   // fourth breakpoint). Read here rather than taken from the provider's
   // `wide`, which is the *union* of the two clauses that can put a rail on
@@ -171,7 +174,7 @@ export default function EditorAnnotationRail({ entries, docId }: Props) {
     >
       <QuoteThreadHeader
         threadId={entry.threadId}
-        quotedText={quoteWithChipLabels(entry.quotedText, entry.anchorChips)}
+        quotedText={quoteWithChipLabels(entry.quotedText, entry.anchorChips, liveLabels)}
         status="ACTIVE"
         context={null}
         color={entry.color}

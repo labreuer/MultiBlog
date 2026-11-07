@@ -54,8 +54,9 @@ date is refused".
 
 ## Built so far
 
-Steps 0 and 1 are under way on the `entity-chips` branch. Everything below not listed here is
-still a plan.
+Steps 0 to 2 are built on the `entity-chips` branch but for the items each entry says are
+not, and step 3 is under way ([CITATIONS.md](CITATIONS.md), "Built so far"). Everything below
+not listed here is still a plan.
 
 - **Step 0, the gate:** all of it ([YDOC.md](YDOC.md)).
 - **Step 1, item 1:** the spike, with its result.
@@ -97,6 +98,13 @@ still a plan.
   (item 11), each as a compare-and-set on the text it read, in raw SQL so no date moves. `scheduleMentionRefresh` runs it in the background after a
   change to a name, initials, a handle or a bot's person, and once more past the store
   debounce's ceiling. Not the instance default style, which doesn't exist yet.
+
+  A record whose chip has left the body its anchor points into (the mention was deleted, and
+  the note on it stayed) has no label there to take, and its doc may not be in the index at
+  all. `refreshOrphanRecords` finds such a record by what its fields name (the chip kind's
+  `naming`, read by jsonb containment) and labels it alone, in the kind's default style: a
+  number, or the extra that tells two same-named people apart, needs a body's doc-order pass.
+  No index serves the containment, so the pass reads every anchor row that has records.
 - **Item 11, anchors:** `src/lib/anchors/chips.ts`.
   - **The chip record** is written by the one capture (`captureAnchorInNode`), into the
     DOC_RANGE selector's `chips` and, for an annotation, into `annotation.anchor_chips`
@@ -107,21 +115,40 @@ still a plan.
     annotation search vector (`anchor_quote_text`), show a name without a chip context per
     row. It is kept as `prose_json`'s labels are: the rename refresh rewrites it, and so does
     every store of the doc the anchor points into (`refreshAnchorRecords`), from that doc's
-    own labels by instance id.
+    own labels by instance id. An anchor into a note's body (a reply's quote, a tag or link
+    on the note) is relabelled when that body is settled (`writeSettledBody` calls
+    `refreshAnchorsIntoNote`), since a note's readers see only settled text. A record whose
+    chip that body no longer holds is relabelled only by the refresh (item 10), when its
+    target changes.
+
+    So a record has two clocks. Its fields are the chip's as of the anchor's version and are
+    never rewritten, which is what `chips-at-stamp` checks and what the continues rule below
+    is asked of. Its label is as of the last write. Show a record by its label, never by a
+    label computed from its fields.
   - **Shown with labels:** a card's quote line, the annotation popover, "Your private notes",
     `/annotations`, `/links`, `/link/[id]` with its banner and tray, search hits and MCP's
-    thread and link reads go through `quoteWithChipLabels` or `shownQuote`.
+    thread and link reads go through `quoteWithChipLabels` or `shownQuote`. The cards beside
+    a doc (the reading view's list and the editor's rail) hand it the labels that page's
+    editor is drawing (`useLiveChipLabels`), which win over the stored ones, so a card and
+    the passage beside it agree before a rename's refresh has run. Except a doc-editor note's
+    quote line: the server builds it from `prose_json`'s labels (`markAnchoredQuote`), so it
+    lags by the seconds until the refresh or the doc's next store, which is tolerated.
   - **Identity checks:** `resolveAnchorInDoc` takes the records. A candidate counts only if
     its chips stand for the recorded entities in order, and several that pass are told apart
     by instance id. The highlight plugin, MCP's reads and the edit endpoint's "what it
     touched" all pass them. An anchor with no record resolves by its text.
+  - **A chip that was edited is still the recorded chip.** Where the chip's identity is no
+    longer the recorded one, `chipMatch` asks its chip kind whether the chip there continues
+    the record (`chipContinues`), and takes a yes only from the recorded instance: another
+    chip that happens to hold the same works and more is not what the anchor was put on.
   - **Instance anchoring:** a quote that is chips and nothing else resolves by instance
     alone. In the doc editor, whose anchor is a mark, the row records the passage's *edge*
     chips (before its first character, after its last, or all of them for a chip alone), and
     the plugin finds them by instance id and stretches the mark's hull over them, only
     within the hull's own textblock ([ANNOTATIONS.md](ANNOTATIONS.md), "Anchoring").
-  - `check-annotation-anchors.ts` checks each record against the stamped state
-    (`chips-at-stamp`).
+  - `check-annotation-anchors.ts` checks each record's fields against the stamped state
+    (`chips-at-stamp`), and its label against the label its chip has now in the body the
+    anchor points into (`record-labels`, a warning: a refresh that was lost).
 
   Not built of item 11: the selector's `before`/`after` context still holds U+FFFC for a
   chip beside the passage, and a tag's anchor is whole-object, so it has no record to keep.
@@ -164,10 +191,14 @@ still a plan.
   `unknown_kind`, since the new text can't write that chip back; the words beside it can
   still be edited, and the merge keeps it. The chip-aware parse stores no link title.
 
+  The merge pairs a chip that continues another (`pairContinuations`, doc-edit.ts): where a
+  textblock lost one chip and gained one its chip kind says continues it, and no other pairing
+  is possible either way, the new chip takes the old one's instance id. No edit reaches this
+  yet, since only a citation continues anything and no Markdown reads a citation back.
+
   Not built of item 14, each needing a chip kind whose Markdown carries fields, which a
   mention's doesn't: the Markdown retry against identity text (the retry matches the label a
-  link's text gives, which is the same for a mention), `chip_changed`, and the pairing of a
-  chip that continues another.
+  link's text gives, which is the same for a mention), and `chip_changed`.
 - **Styling, per doc and per post:**
   - **The doc's style** is in a `Y.Map("settings")` in its ydoc, one key per chip kind
     (`settings.ts`), cached to `Doc.chipStyles` by the store. `DocSettingsPanel` writes it
@@ -262,7 +293,9 @@ Each chip kind supplies the following, as one entry in the kit's registry
 2. **What its identity points at:** a row (a user, a reference), a key, or a place in the same
    doc. Also when two chips count as the same entity, which the anchors' identity check and the
    MCP merge's alignment use, and when a new chip continues an old one, which the merge's pairing
-   uses (MCP, item 5).
+   (MCP, item 5) and the anchors on that instance (step 1, item 11) use. And the fragment of
+   its fields that names one target, which a stored chip record is found by when that target
+   changes (step 1, item 10).
 3. **Its context:** which records it loads, deleted ones included, and which changes to them call
    for a refresh.
 4. **Its forms**, its default, its per-chip overrides, and what it takes from the doc-order pass:

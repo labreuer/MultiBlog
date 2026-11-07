@@ -1,3 +1,5 @@
+import { loadCitationContext } from "./kinds/citation-context";
+import { CITATION } from "./kinds/citation";
 import { loadMentionContext } from "./kinds/mention-context";
 import { MENTION } from "./kinds/mention";
 import type { JSONContent } from "@tiptap/core";
@@ -12,6 +14,7 @@ import { DEFAULT_CHIP_STYLES, type ChipContext, type ChipInputs, type ChipOccurr
 
 const LOADERS: Record<string, (ids: readonly string[]) => Promise<unknown>> = {
   [MENTION]: loadMentionContext,
+  [CITATION]: loadCitationContext,
 };
 
 /** The context for `chips`: each kind's records for the targets its chips name, deleted ones included. */

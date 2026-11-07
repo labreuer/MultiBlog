@@ -100,7 +100,8 @@ every trigger as the rows go in. Two things follow:
   vocabulary triggers refill it as the content tables load, and its own `COPY` would then
   collide on the primary key and abort the load. Run
   `scripts/integrity/check-search-index.ts` afterwards.
-- **Leave `mention`'s data out too** (`--exclude-table-data=mention`), for the same reason:
+- **Leave `mention`'s and `citation`'s data out too** (`--exclude-table-data=mention
+  --exclude-table-data=citation`), for the same reason:
   the triggers write its rows as the docs, notes and posts load, and its own `COPY` would
   collide with them. The cost is that every `first_seen_at` becomes the load's time. Run
   `scripts/integrity/check-mentions.ts` afterwards.

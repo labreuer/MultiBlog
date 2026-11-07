@@ -1,6 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import type { Actor } from "@/lib/actor";
 import { ApiError, forbidden, invalid, notFound } from "@/lib/api/errors";
+import { scheduleCitationRefresh } from "@/lib/entity-chips/refresh";
 import { canUserReadFile } from "@/lib/file-authz";
 import { prisma, prismaIncludingDeleted as base } from "@/lib/prisma";
 import { canWriteReferences } from "@/lib/role-checks";
@@ -164,7 +165,7 @@ export async function updateReference(actor: Actor, id: string, input: Partial<R
   if (input.fileId) await requireFile(actor, input.fileId);
 
   try {
-    return await base.$transaction(async (tx) => {
+    const updated = await base.$transaction(async (tx) => {
       if (record) await refuseDuplicate(tx, record.identifiers, id);
       const rekeyed = asked !== null && asked !== current.key;
       if (rekeyed && (await keyTaken(tx, asked, id))) {
@@ -195,6 +196,11 @@ export async function updateReference(actor: Actor, id: string, input: Partial<R
         select: { id: true, key: true },
       });
     });
+    // A citation's label is computed from the record and the abbreviation
+    // (docs/CITATIONS.md, "Refresh"): once committed, the docs and notes
+    // citing this work are relabelled.
+    scheduleCitationRefresh([id]);
+    return updated;
   } catch (err) {
     if (!isIdentifierRace(err)) throw err;
     if (record) await base.$transaction((tx) => refuseDuplicate(tx, record.identifiers, id));

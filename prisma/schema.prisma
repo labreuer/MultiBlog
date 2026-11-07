@@ -386,6 +386,7 @@ model Post {
   activity            PostActivity?
   metrics             PostMetrics?
   mentions            Mention[]
+  citations           Citation[]
 
   @@index([docId])
   // docs/BLOG.md — the listing's order, `/page/N`'s offset and a post's
@@ -851,6 +852,7 @@ model Doc {
   anchoredLinkAnchors AnchoredLinkAnchor[]   @relation("AnchoredLinkAnchorDoc")
   commentQuoteAnchors CommentQuoteAnchor[]   @relation("CommentQuoteAnchorDoc")
   mentions            Mention[]
+  citations           Citation[]
 
   @@index([searchVector], type: Gin)
   @@index([importKey])
@@ -1141,6 +1143,7 @@ model Annotation {
   anchoredLinkAnchors AnchoredLinkAnchor[] @relation("AnchoredLinkAnchorAnnotation")
   commentQuoteAnchors CommentQuoteAnchor[] @relation("CommentQuoteAnchorAnnotation")
   mentions            Mention[]
+  citations           Citation[]
 
   @@index([docId])
   @@index([fileId])
@@ -2107,6 +2110,39 @@ model Mention {
   @@map("mention")
 }
 
+// docs/ENTITY_CHIPS.md, step 1, item 12 — the citation chip kind's index
+// table, the shape `mention` has: one row per work a citation chip names,
+// with the chip's instance id, its one source, and when it was first seen.
+// **Written only by triggers** (migration `citation_index`), by a diff, from
+// the chips in a doc's or a posted note's `prose_json` and from the `chip`
+// attribute on a post's links. Never assign to it, and leave its data out of
+// a data-only load (docs/DATABASE.md).
+model Citation {
+  id          BigInt @id @default(autoincrement())
+  /// The work cited. A deleted reference keeps its rows.
+  referenceId String @map("reference_id")
+  /// The chip's instance id within its source.
+  iid         String
+
+  // The source — exactly one non-null (CHECK in the migration).
+  docId        String? @map("doc_id")
+  postId       String? @map("post_id")
+  annotationId String? @map("annotation_id")
+
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+
+  reference  Reference   @relation(fields: [referenceId], references: [id], onDelete: Cascade)
+  doc        Doc?        @relation(fields: [docId], references: [id], onDelete: Cascade)
+  post       Post?       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  annotation Annotation? @relation(fields: [annotationId], references: [id], onDelete: Cascade)
+
+  @@unique([docId, iid, referenceId])
+  @@unique([postId, iid, referenceId])
+  @@unique([annotationId, iid, referenceId])
+  @@index([referenceId])
+  @@map("citation")
+}
+
 // docs/CITATIONS.md, "Records" — the reference library: one row per work
 // that a citation can stand for.
 //
@@ -2152,6 +2188,7 @@ model Reference {
   identifiers ReferenceIdentifier[]
   keyHistory  ReferenceKeyHistory[]
   listing     ReferenceListing?
+  citations   Citation[]
 
   @@index([fileId])
   @@index([createdById])

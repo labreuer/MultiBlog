@@ -1,5 +1,18 @@
-import { test, expect } from "./fixtures";
-import { deleteTestReferences, getTestReference } from "./db";
+import { test, expect, bodyEditor, waitForDocCollabReady } from "./fixtures";
+import {
+  ADMIN_EMAIL,
+  addTestDocAuthor,
+  createTestDoc,
+  createTestPost,
+  deleteTestDoc,
+  deleteTestPost,
+  deleteTestReferences,
+  getCitationSources,
+  getDocSearchText,
+  getPostContentText,
+  getReferenceId,
+  getTestReference,
+} from "./db";
 import { createAgent } from "./mcp";
 
 // docs/CITATIONS.md — the reference library: one record per work, recognised
@@ -143,5 +156,107 @@ test("the library's page: pasted BibTeX is imported once, listed, and a second p
   } finally {
     await page.goto("about:blank");
     await deleteTestReferences(prefix);
+  }
+});
+
+// docs/CITATIONS.md — the citation chip: a work at a page, inserted from the
+// library by "[@", labelled from the reference's record wherever it is shown.
+test("[@ cites a work from the library: the chip is labelled, indexed, published as a link, and follows the reference", async ({
+  page,
+  request,
+}) => {
+  const agent = await createAgent(request);
+  const prefix = `e2ecite${Date.now().toString(36)}`;
+  const short = `B${Date.now() % 100000}`;
+  const key = `${prefix}-barfield1957`;
+  const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Appearances are collective representations." });
+  await addTestDocAuthor(doc.id, agent.user.email);
+  let post: Awaited<ReturnType<typeof createTestPost>> | null = null;
+  try {
+    const made = await agent.call("create_ref", {
+      csl: { type: "book", title: `Saving the Appearances ${prefix}`, author: [{ family: `Barfield${prefix}`, given: "Owen" }], issued: { "date-parts": [[1957]] } },
+      key,
+      short,
+    });
+    expect(made.isError, JSON.stringify(made.error)).toBe(false);
+    const refId = (await getReferenceId(key))!;
+
+    await page.goto(`/doc/${doc.id}/edit`);
+    await waitForDocCollabReady(page);
+    await bodyEditor(page).click();
+    await page.keyboard.press("Control+End");
+    // The work by a word of its author's name, and the page after it.
+    await page.keyboard.type(` [@Barfield${prefix} 49`);
+    const option = page.getByRole("listbox", { name: "References" }).getByRole("option").first();
+    await expect(option).toContainText(`Saving the Appearances ${prefix}`);
+    await page.keyboard.press("Enter");
+
+    // Labelled as it lands, in the doc's style: the abbreviation and the page.
+    const chip = bodyEditor(page).locator(".entity-chip");
+    await expect(chip).toHaveText([`(${short} p. 49)`]);
+    // The doc's own style changes every citation's label at once, delimiters and all.
+    await page.locator("[data-doc-settings] > summary").click();
+    await page.getByRole("combobox", { name: "How citations are shown" }).selectOption("numeric");
+    await expect(chip).toHaveText(["[1, p. 49]"]);
+    await page.getByRole("combobox", { name: "How citations are shown" }).selectOption("author-date");
+    await expect(chip).toHaveText([`(Barfield${prefix} 1957, p. 49)`]);
+    await page.getByRole("combobox", { name: "How citations are shown" }).selectOption("short");
+    await expect(chip).toHaveText([`(${short} p. 49)`]);
+    // What search reads, and where the work is now cited.
+    await expect.poll(() => getDocSearchText(doc.id), { timeout: 15_000 }).toContain(`representations. (${short} p. 49)`);
+    await expect.poll(() => getCitationSources(key)).toEqual([`doc:${doc.id}`]);
+
+    // The reading view links it to the reference's page.
+    await page.goto(`/doc/${doc.slug}`);
+    await expect(page.locator("a.entity-chip").filter({ visible: true })).toHaveText([`(${short} p. 49)`]);
+    await expect(page.locator("a.entity-chip").filter({ visible: true })).toHaveAttribute("href", `/references/${key}`);
+
+    // A machine reader gets Pandoc's syntax, by key, and can't replace a passage over it.
+    const read = await agent.call("read", { url: `/doc/${doc.slug}` });
+    expect(String(read.result.markdown)).toContain(`[@${key}, p. 49]`);
+    const over = await agent.call("edit_doc", { url: `/doc/${doc.slug}`, edits: [{ old: `representations. (${short} p. 49)`, new: "representations." }] });
+    expect(over.error).toMatchObject({ code: "unknown_kind", kinds: ["citation"] });
+    const beside = await agent.call("edit_doc", { url: `/doc/${doc.slug}`, edits: [{ old: "Appearances are", new: "Appearances, he says, are" }] });
+    expect(beside.isError, JSON.stringify(beside.error)).toBe(false);
+    expect(await getCitationSources(key)).toEqual([`doc:${doc.id}`]);
+
+    // Correcting the reference relabels the doc with nobody opening it.
+    await page.goto(`/references?q=${prefix}`);
+    page.once("dialog", (dialog) => void dialog.accept(`${short}X`));
+    await page.getByRole("button", { name: `Set abbreviation of ${key}` }).click();
+    await expect.poll(() => getDocSearchText(doc.id), { timeout: 15_000 }).toContain(`(${short}X p. 49)`);
+
+    // A post holds it as linked text, to the reference's public page with the page cited.
+    post = await createTestPost({
+      authorEmail: ADMIN_EMAIL,
+      publish: true,
+      body: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "As argued " },
+              { type: "entityChip", attrs: { kind: "citation", iid: "c1", data: { items: [{ refId, locator: "49–51" }] } } },
+              { type: "text", text: "." },
+            ],
+          },
+        ],
+      },
+    });
+    expect(await getPostContentText(post.id)).toBe(`As argued (${short}X pp. 49–51).`);
+    await expect.poll(() => getCitationSources(key)).toEqual([`doc:${doc.id}`, `doc:${post!.docId}`, `post:${post!.id}`].sort());
+    const response = await page.goto(post.path!);
+    expect(response?.status()).toBe(200);
+    await expect(page.getByRole("link", { name: `(${short}X pp. 49–51)`, exact: true }).filter({ visible: true })).toHaveAttribute(
+      "href",
+      `/references/${key}#p=49`,
+    );
+  } finally {
+    await page.goto("about:blank");
+    if (post) await deleteTestPost(post.id);
+    await deleteTestDoc(doc.id);
+    await deleteTestReferences(prefix);
+    await agent.dispose();
   }
 });

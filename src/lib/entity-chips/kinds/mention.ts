@@ -100,6 +100,7 @@ function escapeLinkText(text: string): string {
 
 export const mentionKind: ChipKind<MentionData, MentionStyle, MentionContext> = {
   name: MENTION,
+  readsMarkdown: true,
 
   validate(data) {
     if (!isRecord(data)) return null;
@@ -114,6 +115,8 @@ export const mentionKind: ChipKind<MentionData, MentionStyle, MentionContext> = 
   continues: () => false,
 
   targets: (data) => [data.userId],
+
+  naming: (userId) => ({ userId }),
 
   parseStyle(raw) {
     const style = isRecord(raw) ? raw : {};

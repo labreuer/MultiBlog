@@ -57,8 +57,17 @@
 //      same chips, at the same places in the quote, with the same fields. The
 //      quote can't show a wrong record, since every chip reads U+FFFC there,
 //      and the record is what a resolver believes about which chip was meant.
-//      Labels are not compared: a label is as of the last write or refresh,
-//      and `check-doc-integrity.ts` is where a stale one is reported.
+//      Labels are not compared here: a label is as of the last write or
+//      refresh, not of the stamp. Check 7 is theirs.
+//   7. record-labels   — each record's label against the label its chip has
+//      now in the body the anchor points into, by instance id: a doc's
+//      `prose_json`, which carries them (`check-doc-integrity.ts`'s
+//      `chip-labels` is where *that* column is held to the chips' targets), or
+//      a note's body labelled afresh. A WARN, since it does not settle by
+//      itself: the refresh after a rename writes it, and so does the doc's
+//      next store, but nothing stores a doc nobody opens. A record whose chip
+//      the body no longer holds is not compared. It rightly keeps the label
+//      its chip last had there, until its target changes.
 //
 // AND, SINCE PLAN.md §20g, THE SAME INVARIANT OVER `tag_anchor` — AND, SINCE
 // docs/ANCHORED_LINKS.md, OVER `anchored_link_anchor`.
@@ -107,6 +116,9 @@ import {
   collectMarkAttrValues,
 } from "../../src/lib/tiptap-schema";
 import type { JSONContent } from "@tiptap/core";
+import { chipInputsForBody } from "../../src/lib/entity-chips/context";
+import { materializedLabels } from "../../src/lib/entity-chips/materialize";
+import { chipLabels, type ChipLabels } from "../../src/lib/entity-chips/text";
 
 type Level = "error" | "warn";
 // `subject` rather than `annotationId` since §20g: a finding now names either
@@ -182,6 +194,46 @@ function checkChipsAtStamp(subject: string, node: PMNode, from: number, to: numb
   }
 }
 
+// One read per body, however many anchors point into it.
+const labelsByBody = new Map<string, Promise<ChipLabels>>();
+
+/** The label each chip has now in a doc's or a note's body, by instance id: what an anchor's records are kept to. */
+function bodyLabels(body: { kind: "doc" | "annotation"; id: string }): Promise<ChipLabels> {
+  const key = `${body.kind}:${body.id}`;
+  const hit = labelsByBody.get(key);
+  if (hit) return hit;
+  const pending = (async (): Promise<ChipLabels> => {
+    if (body.kind === "doc") {
+      const doc = await prisma.doc.findUnique({ where: { id: body.id }, select: { proseJson: true } });
+      return doc?.proseJson ? materializedLabels(doc.proseJson as JSONContent) : new Map();
+    }
+    // A note's `prose_json` carries no label, and its body has no style of its own.
+    const note = await prisma.annotation.findUnique({ where: { id: body.id }, select: { proseJson: true } });
+    if (!note?.proseJson) return new Map();
+    const json = note.proseJson as JSONContent;
+    return chipLabels(json, await chipInputsForBody(json));
+  })();
+  labelsByBody.set(key, pending);
+  return pending;
+}
+
+/** Check 7: each record's label against its chip's label in the body now. */
+async function checkRecordLabels(subject: string, stored: readonly ChipRecord[], body: { kind: "doc" | "annotation"; id: string }): Promise<void> {
+  if (stored.length === 0) return;
+  const labels = await bodyLabels(body);
+  const stale = stored.filter((record) => labels.has(record.iid) && labels.get(record.iid) !== record.label);
+  if (stale.length === 0) return;
+  report(
+    "warn",
+    subject,
+    "record-labels",
+    stale.map((record) => `${record.iid} reads ${JSON.stringify(record.label ?? null)} but its chip is ${JSON.stringify(labels.get(record.iid))}`).join("; ") +
+      ` — a rename or a restyle hasn't reached this anchor, so its quote shows the old label where no doc is open, until ${
+        body.kind === "doc" ? "the doc's next store" : "the note is next edited"
+      }`,
+  );
+}
+
 const PART_ANCHOR_SELECT = {
   id: true,
   docId: true,
@@ -250,6 +302,12 @@ async function checkPartAnchors(rows: PartAnchorRow[]): Promise<{ checked: numbe
           `and a file's anchor is a PDF_TEXT blob (§19)`,
       );
       continue;
+    }
+
+    // Check 7, which reads the body as it is now and so needs no stamp.
+    const recorded = parseSelector(row.selectorKind, row.selector);
+    if (target.kind === "doc" || target.kind === "annotation") {
+      await checkRecordLabels(row.id, recorded?.kind === "DOC_RANGE" ? (recorded.selector.chips ?? []) : [], { kind: target.kind, id: target.id });
     }
 
     if (row.ydocUpdateId === null) {
@@ -400,6 +458,14 @@ async function main() {
         }
       }
     }
+
+    // Check 7. For a mark-anchored row too, whose records are its edge chips,
+    // and against the body as it is now, so before anything that needs a stamp.
+    await checkRecordLabels(
+      a.id,
+      parseChipRecords(a.anchorChips),
+      a.parentAnnotationId !== null ? { kind: "annotation", id: a.parentAnnotationId } : { kind: "doc", id: annotationDocId },
+    );
 
     if (!anchored) continue;
     checked++;

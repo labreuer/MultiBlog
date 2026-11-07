@@ -102,11 +102,19 @@ export type ChipKind<Data = unknown, Style = unknown, Context = unknown> = {
   identity(data: Data): string;
   /**
    * Whether a chip holding `next` continues one that held `prev`, when their
-   * identities differ: the merge then keeps the old chip's instance id.
+   * identities differ. The merge then keeps the old chip's instance id, and
+   * an anchor that recorded `prev` stays on that instance (`chipContinues`).
    */
   continues(prev: Data, next: Data): boolean;
   /** The ids of the records this chip's rendering reads from the context. */
   targets(data: Data): string[];
+  /**
+   * A fragment of `data` that every chip of this kind pointing at `targetId`
+   * contains, as jsonb containment reads it, and no chip pointing elsewhere
+   * does. The refresh finds stored chip records by it (refresh.ts), where no
+   * index table can: a record outlives its chip.
+   */
+  naming(targetId: string): Record<string, unknown>;
   /** This kind's style from a doc's raw entry, defaults filled in. */
   parseStyle(raw: unknown): Style;
   /** The context's entry for this kind, or an empty one when it is missing or malformed. */
@@ -125,4 +133,11 @@ export type ChipKind<Data = unknown, Style = unknown, Context = unknown> = {
    * with its stored id where a slug or key would go, so a round trip keeps it.
    */
   markdown(data: Data, rendering: ChipRendering, context: Context): string;
+  /**
+   * Whether the server's Markdown parse reads this kind's syntax back as a
+   * chip. Where it doesn't, an edit can't write the chip back, and refuses
+   * to replace a passage that holds one rather than drop it
+   * (`unknown_kind`), as for a kind the server doesn't know at all.
+   */
+  readsMarkdown: boolean;
 };

@@ -5,7 +5,11 @@ import { auth } from "@/lib/auth";
 import { actorFromSessionUser, type Actor } from "@/lib/actor";
 import { ApiError } from "@/lib/api/errors";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
+import type { CitedWork } from "@/lib/entity-chips/kinds/citation";
+import { loadCitationContext } from "@/lib/entity-chips/kinds/citation-context";
+import { findReferences } from "@/lib/reference-data";
 import { importReferences, referencePath, setReferenceDeleted, updateReference, type ImportOutcome } from "@/lib/reference-write";
+import { entryText } from "@/lib/references/entry";
 
 // docs/CITATIONS.md — the reference library's server actions. Each is a
 // wrapper: the gate and every rule are in src/lib/reference-write.ts, which
@@ -69,4 +73,24 @@ export async function updateReferenceKey(id: string, key: string): Promise<{ key
   revalidatePath("/references");
   revalidatePath(referencePath(updated.key));
   return { key: updated.key };
+}
+
+export type CiteCandidate = {
+  /** What a citation of this work is labelled from: the record a menu hands the editor as it inserts the chip. */
+  work: CitedWork;
+  /** The work's bibliography entry, for the menu's row. */
+  entry: string;
+};
+
+/**
+ * The citation menu's search (docs/CITATIONS.md, "The menu"): works by key,
+ * abbreviation, title or author. For anyone signed in, since a reference's
+ * record is public; what a citation may be put *in* is the editor's own gate.
+ */
+export async function searchCitable(query: string): Promise<CiteCandidate[]> {
+  const session = await auth();
+  if (!session?.user || typeof query !== "string") return [];
+  const found = await findReferences(query.slice(0, 100), 8);
+  const context = await loadCitationContext(found.map((reference) => reference.id));
+  return found.flatMap((reference) => (context[reference.id] ? [{ work: context[reference.id], entry: entryText(reference.item) }] : []));
 }

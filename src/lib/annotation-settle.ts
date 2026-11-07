@@ -4,6 +4,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { flushAnnotationCache } from "@/lib/annotation-admin";
 import { decodeAnnotationBody } from "@/lib/annotation-body";
+import { refreshAnchorsIntoNote } from "@/lib/entity-chips/refresh";
 import { chipIdentities } from "@/lib/entity-chips/renderings";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { ydocIdForAnnotation } from "@/lib/ydoc-names";
@@ -145,6 +146,9 @@ export async function settleAnnotationBody(
  * A snapshot already sitting at the mark is reused rather than duplicated —
  * nothing legitimate produces one (the debug button refuses annotation ydocs
  * and an unchanged body settles nothing), so this is a guard, not a path.
+ *
+ * Then, outside the transaction, the chip records of the anchors into the
+ * body follow its labels (`refreshAnchorsIntoNote`).
  */
 export async function writeSettledBody(opts: {
   annotationId: string;
@@ -182,6 +186,17 @@ export async function writeSettledBody(opts: {
       },
     });
   });
+
+  // docs/ENTITY_CHIPS.md, step 1, item 11 — a reply quoting this body, or
+  // any other anchor into it, keeps each chip's label as the body reads it
+  // now: an edit that adds a second person of one name relabels the first.
+  // Awaited, so the page a settle revalidates shows it; after the
+  // transaction, so a failure here never undoes the edit.
+  try {
+    await refreshAnchorsIntoNote(annotationId, settled.proseJson);
+  } catch (err) {
+    console.error(`[annotation-settle] failed to relabel the anchors into ${annotationId}:`, err);
+  }
 }
 
 /**

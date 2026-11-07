@@ -18,6 +18,7 @@ import AuthorHighlightStyles from "./AuthorHighlightStyles";
 import EditorToolbar from "./EditorToolbar";
 import DocRefMenu from "./DocRefMenu";
 import MentionMenu from "./MentionMenu";
+import CiteMenu from "./CiteMenu";
 import { EDITOR_SCROLL_ATTRIBUTE } from "./editor-scroll";
 import styles from "./EditorChrome.module.css";
 import proseStyles from "@/styles/prose.module.css";
@@ -344,6 +345,7 @@ export default function CollabEditorBody({
           editor's toolbar is hidden by default and this shouldn't be. */}
       <DocRefMenu editor={editor} disabled={!editable} />
       <MentionMenu editor={editor} disabled={!editable} />
+      <CiteMenu editor={editor} disabled={!editable} />
     </div>
   );
 }

@@ -251,3 +251,48 @@ test("an instance id two chips share finds neither", () => {
   assert.equal(at("b"), 13);
   assert.equal(at("nobody"), undefined);
 });
+
+// --- a chip that was edited, not swapped (docs/CITATIONS.md, "Identity") -----
+
+const cite = (iid: string, ...refIds: string[]): JSONContent => ({
+  type: "entityChip",
+  attrs: { kind: "citation", iid, data: { items: refIds.map((refId) => ({ refId })) } },
+});
+const citing = (...chips: JSONContent[]) => docOf(para(text("As argued in "), ...chips.flatMap((c) => [c, text(" ")]), text("at length.")));
+
+test("a citation that gains a work is still the chip its anchor recorded; one that loses a recorded work is not", () => {
+  const was = citing(cite("c1", "radner"));
+  const from = 1;
+  const to = was.child(0).nodeSize - 1;
+  const quoted = was.textBetween(from, to, " ");
+  const records = chipRecordsBetween(was, from, to);
+
+  // A work added to the same chip: the identity is no longer the recorded one, and the anchor holds.
+  assert.equal(anchorHolds(citing(cite("c1", "radner", "barfield")), from, to, quoted, records), true);
+  assert.deepEqual(resolveAnchorInDoc(citing(cite("c1", "radner", "barfield")), from, to, quoted, undefined, records), { from, to });
+  // And goes on holding as it gains more: the record is the chip as the anchor found it.
+  assert.equal(anchorHolds(citing(cite("c1", "barfield", "radner", "polanyi")), from, to, quoted, records), true);
+  // The recorded work taken out, or another work put in its place: a different citation.
+  assert.equal(anchorHolds(citing(cite("c1", "barfield")), from, to, quoted, records), false);
+
+  // An anchor on a citation of two works needs both to stay.
+  const two = citing(cite("c1", "radner", "barfield"));
+  const twoRecords = chipRecordsBetween(two, from, to);
+  assert.equal(anchorHolds(citing(cite("c1", "radner", "barfield", "polanyi")), from, to, quoted, twoRecords), true);
+  assert.equal(anchorHolds(citing(cite("c1", "radner")), from, to, quoted, twoRecords), false);
+});
+
+test("only the recorded instance continues a record: another citation holding the same works and more does not", () => {
+  const was = citing(cite("c1", "radner"));
+  const from = 1;
+  const to = was.child(0).nodeSize - 1;
+  const quoted = was.textBetween(from, to, " ");
+  const records = chipRecordsBetween(was, from, to);
+  // The chip was replaced by a new one that also cites the recorded work.
+  assert.equal(anchorHolds(citing(cite("c2", "radner", "barfield")), from, to, quoted, records), false);
+  // A mention never continues another: a different person is a different mention.
+  const mentioned = docOf(para(text("Ask "), chip("i1", "u1"), text(" today.")));
+  const mentionRecords = chipRecordsBetween(mentioned, 1, mentioned.child(0).nodeSize - 1);
+  const swapped = docOf(para(text("Ask "), chip("i1", "u2"), text(" today.")));
+  assert.equal(anchorHolds(swapped, 1, swapped.child(0).nodeSize - 1, `Ask ${C} today.`, mentionRecords), false);
+});

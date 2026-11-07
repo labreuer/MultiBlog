@@ -2,12 +2,16 @@ import type { JSONContent } from "@tiptap/core";
 import { Prisma } from "@/generated/prisma/client";
 import { annotationBodyText } from "@/lib/annotation-body";
 import { prismaIncludingDeleted as prisma } from "@/lib/prisma";
-import { parseChipRecords, relabelChipRecords } from "@/lib/anchors";
-import { chipInputsForBody } from "./context";
+import { parseChipRecords, relabelChipRecords, type ChipRecord } from "@/lib/anchors";
+import { chipInputsForBody, loadChipContext } from "./context";
+import { CITATION } from "./kinds/citation";
+import { MENTION } from "./kinds/mention";
 import { relabelChips } from "./materialize";
-import { chipsInJSON } from "./renderings";
+import { chipKind } from "./registry";
+import { chipRenderings, chipsInJSON } from "./renderings";
 import { parseChipStyles } from "./settings";
 import { chipLabels, type ChipLabels } from "./text";
+import { DEFAULT_CHIP_STYLES } from "./types";
 
 // docs/ENTITY_CHIPS.md, step 1, item 10 — the refresh. A label is computed
 // from its target's record, and three places hold a computed label as text:
@@ -32,6 +36,9 @@ import { chipLabels, type ChipLabels } from "./text";
 //    part) gets its chip records' labels from the body they point into, by
 //    instance id, so a quote shown with no ydoc open reads as that body now
 //    does. The annotation search vector follows through its trigger.
+//  - **A record whose chip that body no longer holds** has no label there to
+//    take, and its doc may not be in the index at all. It is found by what
+//    its fields name, and relabelled alone (`refreshOrphanRecords`).
 //  - **A post** is left alone. It froze its labels at publish, and
 //    republishing is what refreshes them.
 //
@@ -46,9 +53,9 @@ import { chipLabels, type ChipLabels } from "./text";
 // the rename and writes just after this pass puts the old label back. The
 // second pass below, a little later than the store debounce's ceiling,
 // closes it for a server that is still up; `check-doc-integrity.ts`'s
-// `chip-labels` finding and `check-annotation-snapshots.ts`'s
-// `settled-cache` report whatever is left, and the next store of that doc
-// repairs it.
+// `chip-labels` finding, `check-annotation-snapshots.ts`'s `settled-cache`
+// and `check-annotation-anchors.ts`'s `record-labels` report whatever is
+// left, and the next store of that doc repairs it.
 //
 // Server-only.
 
@@ -68,8 +75,29 @@ export async function refreshMentionLabels(userIds: readonly string[]): Promise<
 
   const rows = await prisma.mention.findMany({
     where: { userId: { in: targets }, postId: null },
-    select: { docId: true, annotationId: true },
+    select: { docId: true, annotationId: true, iid: true },
   });
+  const result = await refreshSources(rows);
+  return { ...result, anchors: result.anchors + (await refreshOrphanRecords(MENTION, targets, rows)) };
+}
+
+/**
+ * Relabels every doc and note that cites one of `refIds`: a reference's
+ * record or abbreviation changed (docs/CITATIONS.md, "Refresh"). Found
+ * through the `citation` table, as a mention's are through `mention`.
+ */
+export async function refreshCitationLabels(refIds: readonly string[]): Promise<RefreshResult> {
+  if (refIds.length === 0) return { docs: 0, annotations: 0, anchors: 0 };
+  const rows = await prisma.citation.findMany({
+    where: { referenceId: { in: [...refIds] }, postId: null },
+    select: { docId: true, annotationId: true, iid: true },
+  });
+  const result = await refreshSources(rows);
+  return { ...result, anchors: result.anchors + (await refreshOrphanRecords(CITATION, refIds, rows)) };
+}
+
+/** The refresh proper, over the docs and notes an index table named. */
+async function refreshSources(rows: readonly { docId: string | null; annotationId: string | null }[]): Promise<RefreshResult> {
   const docIds = [...new Set(rows.flatMap((row) => (row.docId ? [row.docId] : [])))];
   const annotationIds = [...new Set(rows.flatMap((row) => (row.annotationId ? [row.annotationId] : [])))];
 
@@ -139,9 +167,10 @@ async function refreshAnchorsInto(target: { kind: "doc" | "annotation"; id: stri
  * A record whose chip the body no longer holds keeps the label it had.
  *
  * The doc store calls this too (server/doc-cache.ts), with the labels it has
- * just written to `prose_json`: an edit can change a label it never touched,
+ * just written to `prose_json`, and so does a note's settle
+ * (`refreshAnchorsIntoNote`): an edit can change a label it never touched,
  * by adding a second person of the same name, and the records follow the
- * column.
+ * body.
  */
 export async function refreshAnchorRecords(target: { kind: "doc" | "annotation"; id: string }, labels: ChipLabels): Promise<number> {
   if (labels.size === 0) return 0;
@@ -156,29 +185,135 @@ export async function refreshAnchorRecords(target: { kind: "doc" | "annotation";
     select: { id: true, anchorChips: true },
   });
   for (const note of notes) {
-    const was = parseChipRecords(note.anchorChips);
-    const now = relabelChipRecords(was, labels);
-    if (was.length === 0 || JSON.stringify(was) === JSON.stringify(now)) continue;
-    written += await prisma.$executeRaw(
-      Prisma.sql`UPDATE "annotation" SET anchor_chips = ${JSON.stringify(now)}::jsonb WHERE id = ${note.id} AND anchor_chips = ${JSON.stringify(note.anchorChips)}::jsonb`,
-    );
+    written += await writeRecords({ table: "annotation", id: note.id, stored: note.anchorChips }, (was) => relabelChipRecords(was, labels));
   }
 
   const column = Prisma.raw(target.kind === "doc" ? "doc_id" : "target_annotation_id");
-  for (const name of SELECTOR_TABLES) {
-    const table = Prisma.raw(`"${name}"`);
+  for (const table of SELECTOR_TABLES) {
     const rows = await prisma.$queryRaw<{ id: string; selector: unknown }[]>(
-      Prisma.sql`SELECT id, selector FROM ${table} WHERE ${column} = ${target.id} AND selector_kind = 'DOC_RANGE' AND selector ? 'chips'`,
+      Prisma.sql`SELECT id, selector FROM ${Prisma.raw(`"${table}"`)} WHERE ${column} = ${target.id} AND selector_kind = 'DOC_RANGE' AND selector ? 'chips'`,
     );
     for (const row of rows) {
-      const selector = row.selector as Record<string, unknown>;
-      const was = parseChipRecords(selector.chips);
-      const now = relabelChipRecords(was, labels);
-      if (was.length === 0 || JSON.stringify(was) === JSON.stringify(now)) continue;
-      written += await prisma.$executeRaw(
-        Prisma.sql`UPDATE ${table} SET selector = ${JSON.stringify({ ...selector, chips: now })}::jsonb WHERE id = ${row.id} AND selector = ${JSON.stringify(selector)}::jsonb`,
-      );
+      written += await writeRecords({ table, id: row.id, stored: row.selector }, (was) => relabelChipRecords(was, labels));
     }
+  }
+  return written;
+}
+
+/**
+ * The chip records of every anchor into a note's body, relabelled as that
+ * body was just settled: its replies' quotes, and any tag, link or comment
+ * quote on it. A note's body is settled, never stored, as the version its
+ * readers see (src/lib/annotation-settle.ts), so this is the note's
+ * counterpart of the doc store's call. A body with no chip costs nothing.
+ */
+export async function refreshAnchorsIntoNote(annotationId: string, body: JSONContent): Promise<number> {
+  if (chipsInJSON(body).length === 0) return 0;
+  // A note's body has no style of its own.
+  return refreshAnchorRecords({ kind: "annotation", id: annotationId }, chipLabels(body, await chipInputsForBody(body)));
+}
+
+/** One anchor row's chip records as stored: `anchor_chips` itself on a note, the whole `selector` elsewhere. */
+type StoredRecords = { table: "annotation" | (typeof SELECTOR_TABLES)[number]; id: string; stored: unknown };
+
+/** The records inside a stored value. */
+function recordsOf(row: StoredRecords): ChipRecord[] {
+  return parseChipRecords(row.table === "annotation" ? row.stored : (row.stored as Record<string, unknown> | null)?.chips);
+}
+
+/**
+ * Writes one row's records as `relabel` makes them, if that changes them and
+ * the row still holds what was read. Answers how many rows it wrote.
+ */
+async function writeRecords(row: StoredRecords, relabel: (was: ChipRecord[]) => ChipRecord[]): Promise<number> {
+  const was = recordsOf(row);
+  if (was.length === 0) return 0;
+  const now = relabel(was);
+  if (JSON.stringify(was) === JSON.stringify(now)) return 0;
+  if (row.table === "annotation") {
+    return prisma.$executeRaw(
+      Prisma.sql`UPDATE "annotation" SET anchor_chips = ${JSON.stringify(now)}::jsonb WHERE id = ${row.id} AND anchor_chips = ${JSON.stringify(row.stored)}::jsonb`,
+    );
+  }
+  const selector = row.stored as Record<string, unknown>;
+  return prisma.$executeRaw(
+    Prisma.sql`UPDATE ${Prisma.raw(`"${row.table}"`)} SET selector = ${JSON.stringify({ ...selector, chips: now })}::jsonb WHERE id = ${row.id} AND selector = ${JSON.stringify(selector)}::jsonb`,
+  );
+}
+
+/**
+ * Relabels the chip records that name one of `targetIds` and whose chip is
+ * gone from the body their anchor points into: the mention was deleted, or
+ * its passage rewritten, and the note on it stayed.
+ *
+ * No body has a label for such a record, so the pass above leaves it, and a
+ * doc that no longer names the target is not in the index to be visited at
+ * all. Without this a detached note would show a person's old name for good.
+ * The record's own fields say what it names, which is how it is found (the
+ * chip kind's `naming`, by jsonb containment) and what its label is computed
+ * from.
+ *
+ * It is labelled alone, in its chip kind's default style. A number, or the
+ * extra that tells two same-named people apart, comes from a doc-order pass
+ * over a body, and this chip is in none. A record whose target no longer
+ * exists keeps the label it had.
+ *
+ * `held` is the index's rows for the same targets: a record whose instance
+ * its body still holds is not an orphan, and has its label from the body.
+ *
+ * No index serves the containment, so each call reads every anchor row that
+ * has records. A change to a name or a reference is rare, and nothing waits
+ * on this.
+ */
+export async function refreshOrphanRecords(
+  kindName: string,
+  targetIds: readonly string[],
+  held: readonly { docId: string | null; annotationId: string | null; iid: string }[],
+): Promise<number> {
+  const kind = chipKind(kindName);
+  if (!kind || targetIds.length === 0) return 0;
+  const patterns = targetIds.map((id) => JSON.stringify([{ kind: kindName, data: kind.naming(id) }]));
+  const bodyKey = (docId: string | null, annotationId: string | null) => (annotationId ? `annotation:${annotationId}` : `doc:${docId}`);
+  const inBody = new Set(held.map((row) => `${bodyKey(row.docId, row.annotationId)}:${row.iid}`));
+
+  // Each row with the body its anchor points into: a reply's is the note it answers.
+  const rows: (StoredRecords & { body: string })[] = [];
+  const notes = await prisma.$queryRaw<{ id: string; doc_id: string | null; parent_annotation_id: string | null; anchor_chips: unknown }[]>(
+    Prisma.sql`SELECT id, doc_id, parent_annotation_id, anchor_chips FROM "annotation" WHERE anchor_chips IS NOT NULL AND anchor_chips @> ANY (${patterns}::jsonb[])`,
+  );
+  for (const note of notes) {
+    rows.push({ table: "annotation", id: note.id, stored: note.anchor_chips, body: bodyKey(note.doc_id, note.parent_annotation_id) });
+  }
+  for (const table of SELECTOR_TABLES) {
+    const parts = await prisma.$queryRaw<{ id: string; doc_id: string | null; target_annotation_id: string | null; selector: unknown }[]>(
+      Prisma.sql`SELECT id, doc_id, target_annotation_id, selector FROM ${Prisma.raw(`"${table}"`)} WHERE selector_kind = 'DOC_RANGE' AND selector -> 'chips' @> ANY (${patterns}::jsonb[])`,
+    );
+    for (const part of parts) rows.push({ table, id: part.id, stored: part.selector, body: bodyKey(part.doc_id, part.target_annotation_id) });
+  }
+  if (rows.length === 0) return 0;
+
+  const wanted = new Set(targetIds);
+  const isOrphan = (record: ChipRecord, body: string) => {
+    if (record.kind !== kindName || inBody.has(`${body}:${record.iid}`)) return false;
+    const data = kind.validate(record.data);
+    return data !== null && kind.targets(data).some((id) => wanted.has(id));
+  };
+  const orphans = rows.flatMap((row) => recordsOf(row).filter((record) => isOrphan(record, row.body)));
+  if (orphans.length === 0) return 0;
+  const context = await loadChipContext(orphans.map((record) => ({ ...record, pos: 0 })));
+  const labelOf = (record: ChipRecord): string | undefined => {
+    const [rendering] = chipRenderings([{ kind: record.kind, iid: record.iid, data: record.data, pos: 0 }], DEFAULT_CHIP_STYLES, context);
+    return rendering.status === "unknown" ? undefined : rendering.label;
+  };
+
+  let written = 0;
+  for (const row of rows) {
+    written += await writeRecords(row, (was) =>
+      was.map((record) => {
+        const label = isOrphan(record, row.body) ? labelOf(record) : undefined;
+        return label === undefined ? record : { ...record, label };
+      }),
+    );
   }
   return written;
 }
@@ -193,9 +328,17 @@ export async function refreshAnchorRecords(target: { kind: "doc" | "annotation";
  * refresh reads the record as it was.
  */
 export function scheduleMentionRefresh(userIds: readonly string[]): void {
-  const ids = [...userIds];
+  schedule([...userIds], refreshMentionLabels);
+}
+
+/** The same for references whose record or abbreviation changed: every doc and note citing one is relabelled. */
+export function scheduleCitationRefresh(refIds: readonly string[]): void {
+  schedule([...refIds], refreshCitationLabels);
+}
+
+function schedule(ids: string[], refresh: (ids: readonly string[]) => Promise<RefreshResult>): void {
   const run = (pass: string) =>
-    refreshMentionLabels(ids).catch((err) => {
+    refresh(ids).catch((err) => {
       console.error(`[entity-chips] the ${pass} label refresh for ${ids.join(", ")} failed:`, err);
     });
   void run("first");

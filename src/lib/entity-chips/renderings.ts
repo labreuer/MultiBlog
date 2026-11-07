@@ -148,6 +148,21 @@ export function chipIdentity(chip: Pick<ChipOccurrence, "kind" | "data">): strin
   return `${chip.kind}:${kind && data !== null ? kind.identity(data) : JSON.stringify(chip.data)}`;
 }
 
+/**
+ * Whether a chip holding `next` is a later form of one that held `prev`,
+ * though the two no longer stand for the same thing: its chip kind's
+ * `continues`. False for chips of the same identity, which need no rule to
+ * be the same chip, and for a chip either kind's validator refuses.
+ */
+export function chipContinues(prev: Pick<ChipOccurrence, "kind" | "data">, next: Pick<ChipOccurrence, "kind" | "data">): boolean {
+  if (prev.kind !== next.kind) return false;
+  const kind = chipKind(prev.kind);
+  if (!kind) return false;
+  const [was, now] = [kind.validate(prev.data), kind.validate(next.data)];
+  if (was === null || now === null || kind.identity(was) === kind.identity(now)) return false;
+  return kind.continues(was, now);
+}
+
 /** The identities of the chips inside a range of `node`, in order: what a conflict check compares beside the text. */
 export function chipIdentitiesBetween(node: PMNode, from: number, to: number): string[] {
   const found: string[] = [];
