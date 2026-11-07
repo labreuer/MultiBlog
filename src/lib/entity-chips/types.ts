@@ -1,6 +1,8 @@
 // docs/ENTITY_CHIPS.md — the shapes every chip kind and every surface share.
 // Browser-safe and dependency-free.
 
+import type { InlineRun } from "../inline-markdown";
+
 /** The node's name in every schema that has one. */
 export const ENTITY_CHIP = "entityChip";
 
@@ -32,7 +34,15 @@ export type ChipStatus = "live" | "deleted" | "unknown";
 
 /** What a chip shows: computed wherever it is shown, never stored in a ydoc. */
 export type ChipRendering = {
+  /** The text a chip shows, with no formatting: what every surface reading a chip as text takes. */
   label: string;
+  /**
+   * The label again as runs of formatted text, when any of it is formatted (a
+   * citation's words before and after a work are inline Markdown): what the
+   * surfaces that draw a chip draw, the editor, a static render and a post's
+   * linked text. Absent, the label is the whole of it.
+   */
+  runs?: InlineRun[];
   /** Where the label links, in the doc's own views. Null unless `live`. */
   href: string | null;
   /**

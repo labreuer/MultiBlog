@@ -138,3 +138,36 @@ test("Markdown is Pandoc's syntax, by key, with every field", () => {
   assert.equal(md(cite("gone")), "~~[@gone1999]~~");
   assert.equal(md(cite("nobody")), "~~[@nobody]~~");
 });
+
+// docs/CITATIONS.md, "Markdown inside a citation".
+
+test("words before and after a work are Markdown: the label is their text, the runs their formatting", () => {
+  const [rendering] = citationKind.render([cite("bu", { prefix: "see *especially*", locator: "49", suffix: "**emphasis** added" })], { form: "short" }, CONTEXT);
+  assert.equal(rendering.label, "(see especially BU p. 49, emphasis added)");
+  assert.deepEqual(rendering.runs, [
+    { text: "(see " },
+    { text: "especially", marks: ["italic"] },
+    { text: " BU p. 49, " },
+    { text: "emphasis", marks: ["bold"] },
+    { text: " added)" },
+  ]);
+  // Every form reads them so, the narrative one's words after included.
+  const numeric = citationKind.render([cite("bu", { prefix: "`cf.`" })], { form: "numeric" }, CONTEXT)[0];
+  assert.deepEqual(numeric.runs, [{ text: "[" }, { text: "cf.", marks: ["code"] }, { text: " 1]" }]);
+  assert.equal(citationKind.render([narrative("radner", { suffix: "~~not~~ so" })], { form: "author-date" }, CONTEXT)[0].label, "Radner (2012, not so)");
+  // With no formatting there are no runs: the label says it all.
+  assert.equal(citationKind.render([cite("bu", { prefix: "see" })], { form: "short" }, CONTEXT)[0].runs, undefined);
+  // An escape shows its character, and each field's Markdown is its own: an unclosed `*` doesn't reach the next.
+  assert.equal(label(cite("bu", { prefix: "\\*not\\* *a", suffix: "b*" })), "(*not* *a BU, b*)");
+});
+
+test("a word field is stored as Markdown with every escape but a delimiter's", () => {
+  const stored = (prefix: string) => citationKind.validate({ items: [{ refId: "bu", prefix }] })?.items[0].prefix;
+  // A delimiter means nothing inside the field, so it is kept bare; Markdown's own escapes stay.
+  assert.equal(stored("see \\[sic\\] \; also \\@x"), "see [sic] ; also @x");
+  assert.equal(stored("\\*literal\\* and *em*"), "\\*literal\\* and *em*");
+  // A trailing backslash is doubled, so it can't escape what the writer puts after the field.
+  assert.equal(stored("ends in \\"), "ends in \\\\");
+  // Stored twice, the same.
+  assert.equal(citationKind.validate(citationKind.validate({ items: [{ refId: "bu", prefix: "a\; b \\\\ c\\" }] })!)?.items[0].prefix, "a; b \\\\ c\\\\");
+});

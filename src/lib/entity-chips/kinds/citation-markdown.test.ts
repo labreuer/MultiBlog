@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { JSONContent } from "@tiptap/core";
-import { docContentToMarkdown, markdownToAnnotationContent, markdownToBlocks, markdownToCommentContent, postContentToMarkdown } from "../../markdown-import";
+import { docContentToMarkdown, escapeChipAts, markdownToAnnotationContent, markdownToBlocks, markdownToCommentContent, postContentToMarkdown } from "../../markdown-import";
 import { mergeTextblock } from "../../doc-edit";
 import { pmDocContentSchema } from "../../tiptap-schema";
 import { chipMarkdowns, chipsIn } from "../renderings";
 import { DEFAULT_CHIP_STYLES } from "../types";
-import { CITATION, type CitationContext, type CitedWork } from "./citation";
+import { CITATION, citationKind, type CitationContext, type CitedWork } from "./citation";
 import { citationShapedAts, guardBareKey, readCitation, writeKey } from "./citation-markdown";
 
 // docs/CITATIONS.md, "Markdown" — a citation in Pandoc's syntax: what the
@@ -91,6 +91,27 @@ test("parse: a note's body reads citations too, and a comment's never does", () 
   // The comment parse has a marked instance of its own, with no citation tokenizer on it.
   assert.deepEqual(markdownToCommentContent("@Andrew, see [@x]").content?.[0].content, [{ type: "text", text: "@Andrew, see [@x]" }]);
   assert.deepEqual(shape(markdownToBlocks("@Andrew, see this")[0].content ?? []), ["@Andrew, see this"]);
+});
+
+test("escapeChipAts: no @ reads as a chip, and the text parses as it would without chips", () => {
+  // As a doc holds it: adjacent text nodes with the same marks joined.
+  const plain = (markdown: string, chips: boolean) =>
+    markdownToBlocks(markdown, { chips }).map((block) => pmDocContentSchema.nodeFromJSON(block).toJSON());
+  const cases = [
+    "npm i -D @playwright/test, then ask @Andrew",
+    "see [@radner2012, p. 49; -@barfield1957] and @radner2012 [p. 49]",
+    "Ask [@Ada Lovelace](/authors/ada) or see@{radner2012}",
+    "keep `@code` and \\@escaped, mail luke@example.com",
+    "<https://x.com/@a> and https://medium.com/@user/post and [a page](https://x.com/@b)",
+    "| @a | b |\n| - | - |\n| c | @d |",
+  ];
+  for (const markdown of cases) {
+    const escaped = escapeChipAts(markdown);
+    assert.deepEqual(plain(escaped, true), plain(markdown, false), markdown);
+  }
+  // Only what would read as a chip changes: an address, a URL and code don't.
+  assert.equal(escapeChipAts("keep `@code`, luke@example.com, https://x.com/@a"), "keep `@code`, luke@example.com, https://x.com/@a");
+  assert.equal(escapeChipAts("[-@k] see@{k} \\@k"), "[-\\@k] see\\@{k} \\@k");
 });
 
 // --- writing ---------------------------------------------------------------
@@ -183,6 +204,55 @@ test("round trip: text beside a citation can't change it", () => {
   assert.deepEqual(definition.back, [`citation:${JSON.stringify([{ key: "radner2012" }])}`, ": agreed."]);
   // A letter before a bare key, or key characters after it.
   assert.deepEqual(roundTrip(text("see"), bare, text("-style")).back, ["see", `citation:${JSON.stringify([{ key: "radner2012" }])}`, "-style"]);
+});
+
+test("round trip: a mark that stops at a chip leaves its space outside, where the writer puts it", () => {
+  // A chip carries no mark, so each of these marks stops at one with a space against it.
+  const merged = (markdown: string) => shape(pmDocContentSchema.nodeFromJSON(markdownToBlocks(markdown, { chips: true })[0]).toJSON().content ?? []);
+  const k = `citation:${JSON.stringify([{ key: "radner2012" }])}`;
+  const read = merged("**see [@radner2012]**, *[@radner2012] opens* and ~~[@radner2012] [@radner2012]~~.");
+  assert.deepEqual(read, ["see|bold", " ", k, ", ", k, " ", "opens|italic", " and ", k, " ", k, "."]);
+  // The doc that parse makes writes and reads back as itself.
+  const chip = (iid: string) => cite(iid, { items: [{ refId: "r1" }] });
+  const { markdown, back } = roundTrip(
+    text("see", [{ type: "bold" }]),
+    text(" "),
+    chip("a"),
+    text(", "),
+    chip("b"),
+    text(" "),
+    text("opens", [{ type: "italic" }]),
+    text(" and "),
+    chip("c"),
+    text(" "),
+    chip("d"),
+    text("."),
+  );
+  assert.equal(markdown, "**see** [@radner2012], [@radner2012] *opens* and [@radner2012] [@radner2012].");
+  assert.deepEqual(back, read);
+  // A note's body is parsed the same way.
+  const note = markdownToAnnotationContent("**see [@radner2012]**", { chips: true }).content?.[0].content ?? [];
+  assert.deepEqual(shape(note), ["see|bold", " ", k]);
+});
+
+test("round trip: Markdown inside a citation's words, escapes and delimiters included", () => {
+  const fields = [
+    { prefix: "see *especially*", suffix: "**emphasis** added" },
+    { prefix: "\\*not italic\\*", suffix: "a `code; span` and [sic]" },
+    { prefix: "x; y @z", suffix: "ends in \\\\" },
+    { prefix: "a \\\\ b" },
+  ];
+  for (const field of fields) {
+    const stored = citationKind.validate({ items: [{ refId: "r1", ...field }] })!;
+    const doc = pmDocContentSchema.nodeFromJSON({ type: "doc", content: [para(cite("a", stored))] });
+    const markdown = docContentToMarkdown(doc.toJSON(), chipMarkdowns(chipsIn(doc), DEFAULT_CHIP_STYLES, { [CITATION]: CONTEXT }));
+    const [read] = inline(markdown);
+    assert.equal(read.type, "entityChip", markdown);
+    // The placeholder holds what the Markdown wrote; the validator stores it as the chip did.
+    const [item] = (read.attrs?.data as { items: Record<string, unknown>[] }).items;
+    const back = citationKind.validate({ items: [{ refId: "r1", prefix: item.prefix, suffix: item.suffix }] })!;
+    assert.deepEqual(back, stored, markdown);
+  }
 });
 
 test("a post's Markdown escapes a label's @, so create_doc reads it back as text", () => {

@@ -38,10 +38,33 @@ const BARE_KEY = /^[\p{L}\p{N}_](?:[\p{L}\p{N}_]|[:.#$%&\-+?<>~/](?=[\p{L}\p{N}_
 // Braced, a key is whatever the braces hold.
 const BRACED_KEY = /^\{([^{}\n]{1,200})\}/;
 
-// A backslash escape, as CommonMark reads one: any ASCII punctuation.
-const ESCAPED = /\\([!-/:-@[-`{-~])/g;
+// What delimits a citation, so a word before or after a work holds it escaped
+// in the Markdown and bare in the chip, where it means nothing.
+const DELIMITERS = "[];@";
 
-const unescape = (text: string) => text.replace(ESCAPED, "$1");
+/**
+ * A word before or after a work as the chip stores it: inline Markdown
+ * (docs/CITATIONS.md, "Markdown inside a citation"), every escape kept but a
+ * delimiter's, and a trailing backslash doubled so that nothing written
+ * after the field can be escaped by it. The parse, the validator and the
+ * popover all store this form, so the writer's escapes are its inverse.
+ */
+export function citationField(text: string): string {
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char !== "\\") {
+      out += char;
+      continue;
+    }
+    const next = text[i + 1];
+    if (next === undefined) out += "\\\\";
+    else if (DELIMITERS.includes(next)) out += next;
+    else out += char + next;
+    i += 1;
+  }
+  return out;
+}
 
 /** The key at the start of `src` (just after its `@`), and how much of `src` it took. */
 function readKey(src: string): { key: string; length: number; braced: boolean } | null {
@@ -85,9 +108,9 @@ function splitItems(text: string): string[] {
   return parts;
 }
 
-/** Whitespace folded, ends trimmed, escapes undone; absent when nothing is left. */
+/** Whitespace folded, ends trimmed, in the form a chip stores (`citationField`); absent when nothing is left. */
 function field(text: string): string | undefined {
-  const value = unescape(text).replace(/\s+/g, " ").trim();
+  const value = citationField(text.replace(/\s+/g, " ").trim());
   return value || undefined;
 }
 
@@ -168,9 +191,20 @@ export function writeKey(key: string, braced = false): string {
   return braced || BARE_KEY.exec(key)?.[0] !== key ? `@{${key}}` : `@${key}`;
 }
 
-/** A prefix, locator or suffix inside a citation, its delimiters escaped. */
+/**
+ * A prefix, locator or suffix inside a citation, its delimiters escaped. The
+ * field is Markdown (`citationField`), so its own escapes stay as they are.
+ */
 export function escapeCitationField(text: string): string {
-  return text.replace(/[\\[\];@]/g, "\\$&");
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === "\\") {
+      out += i + 1 < text.length ? char + text[i + 1] : "\\\\";
+      i += 1;
+    } else out += DELIMITERS.includes(char) ? `\\${char}` : char;
+  }
+  return out;
 }
 
 /**

@@ -11,8 +11,7 @@ contract. The kit says how every chip is stored, rendered, quoted and searched. 
 
 The reference library (its data, its pages and its machine door), the citation chip itself
 with its popover, its Markdown both ways and a quote written in it, a doc's bibliography, and
-search by cited work. Everything below not listed here is still a plan: of the Markdown, the
-transcript importer's escape; and Later.
+search by cited work. Everything below not listed here is still a plan: Later.
 
 - **The chip kind:** `src/lib/entity-chips/kinds/citation.ts` holds its fields and
   validation, its identity (the works, in any order), when one citation continues another
@@ -111,6 +110,8 @@ transcript importer's escape; and Later.
     for the others, so "Radner (2012) and Barfield (1957)" is two chips.
   - A suffix that reads as a locator becomes one: `p. 5, note` with no locator is stored as
     locator `5`, suffix `note`.
+  - The words before and after a work are inline Markdown, stored as Markdown (Markdown,
+    "Markdown inside a citation").
   - A hyphen in a page range becomes an en dash.
 
 ## Labels
@@ -211,15 +212,38 @@ call for no refresh.
     as the key `radner2012-style`, or a letter or digit before it, since `see@radner2012` reads as
     text. Pandoc has no form for the second case, which is why the braced form is read after a
     letter here.
+- **Markdown inside a citation.** The words before and after a work are inline Markdown, as
+  Pandoc reads them: `[see *especially* @buber1923, p. 49, **emphasis** added]`.
+  - **What is read:** emphasis, strong emphasis, `~~strikethrough~~` and code spans, with
+    backslash escapes (`inlineRuns`, `src/lib/inline-markdown.ts`). Anything else is text: a
+    link, since a chip is one link already; raw HTML; and a single `~`, which is Pandoc's
+    subscript. Each field is read on its own, so an unclosed `*` before a work doesn't reach the
+    words after it.
+  - **The parser is its own**, since the live editor runs it, and would otherwise ship marked
+    for a few characters of a chip. It follows CommonMark's rules for which delimiter runs
+    open and close, and its tests hold it to marked's answers, except where marked departs from
+    CommonMark.
+  - **How it is stored:** as the Markdown, every escape kept but a delimiter's. `[`, `]`, `;` and
+    `@` mean nothing inside a field, so the chip holds them bare and the writer escapes them,
+    and a trailing backslash is doubled so it can't escape what follows the field
+    (`citationField`). The parse, the validator and the popover all store this form, so a field
+    reads back as it was written.
+  - **How it is shown:** a rendering's `label` is the text alone. Everything that reads a chip
+    as text takes that: search, quotes, the cards, an MCP text read, the bibliography's lead.
+    Its `runs` are the same text with its formatting, for what draws a chip: the editor, a
+    static render, and a post, which gets a linked text node per run. A post's schema lets
+    code carry no other mark, so there a code run is plain, still linked.
 - **Link text holds no citation**, so `[@handle](https://x.com/handle)` in an upload stays an
   ordinary link rather than being refused as an unknown key. A chip can't carry a link, since
   y-tiptap stores no marks on inline nodes, so a citation there would cost the link. This departs
   from Pandoc, which reads citations inside link text. A mention is claimed before any link.
-- **`scripts/import-claude-chats.ts`** parses without chips today, so a transcript's `@` is text.
-  The plan, should it read chips: it escapes `@` in a transcript before the parse, outside code
-  and autolinks, as it already escapes a tag-like `<`. A transcript names packages rather than
-  works, such as `@playwright/test`, and 6 of 354 local docs hold one. `escapeInline`, for quoted
-  excerpts, file names and search queries, gains `@` too. Its `--markdown` files parse strictly.
+- **`scripts/import-claude-chats.ts`** parses with chips, as the `/docs` import does
+  ([CLAUDE_IMPORT.md](CLAUDE_IMPORT.md)). A transcript names packages rather than works, such as
+  `@playwright/test`, so each `@` in it that would read as a chip is escaped before the parse
+  (`escapeChipAts`, `markdown-import.ts`), as a tag-like `<` already is: outside code spans,
+  fenced code, autolinks and bare URLs, and not after a letter or digit unless a brace follows.
+  Its `--markdown` files are read strictly: an unknown key, or a handle the importing account
+  can't mention, refuses the file.
 - **A quote copied from a Markdown read** holds this syntax, not the label, and finds its chip
   by identity (the kit's MCP, item 3). Of several citations of one work, the one whose locator
   and words also agree wins. A quote naming the right work at a different locator matches, and
@@ -300,8 +324,8 @@ prefixes.
 - "radner 49" sets the locator.
 
 **The popover** (`CitePopover.tsx`) edits what validation allows (The chip, above): each work's
-page, the words before and after it, and whether its author is left out; the form; and further
-works, found as the menu finds them, "radner 7" included.
+page, the words before and after it (inline Markdown, as in the Markdown), and whether its author
+is left out; the form; and further works, found as the menu finds them, "radner 7" included.
 
 - **Where.** Beside the menu, in the doc editor and the annotation composer, and only in an
   editor that can be typed in. Selecting a citation opens it, by a click or the arrow keys, and
@@ -393,10 +417,21 @@ post's labels, and a republish refreshes both.
 
 ## Later
 
-- **CSL styles through citeproc-js** (CPAL-1.0 OR AGPL-1.0, about 1 MB).
-  - Never inline in the Hocuspocus process, which is single-threaded on a one-CPU box: a worker,
-    or the Next server.
-  - Probably with a cache of label maps keyed by the doc's version, its style and its context.
+- **CSL styles through citeproc-js** (CPAL-1.0 OR AGPL-1.0, about 1 MB). A doc's Citations
+  setting offers a CSL style beside the three house forms. For a doc set to one, citeproc-js
+  computes its labels and its bibliography from the `csl` records, in place of `citation.ts`'s
+  forms and `entry.ts`'s format, and the style decides numbering, telling works apart and
+  "ibid.". To settle here before it is built:
+  - **Where it runs.** Never inline in the Hocuspocus process, which is single-threaded on a
+    one-CPU box. Either every editor of such a doc loads the 1 MB and labels its chips itself,
+    as it does today, or the Next server labels them and editors fetch the labels, so a new
+    citation waits a round trip for its own. The second probably needs a cache of label maps
+    keyed by the doc's version, its style and its context.
+  - **The licence.** Both of citeproc-js's licences bind software used over a network.
+  - **Note styles.** A notes-and-bibliography style puts a citation in a footnote, and a doc
+    has no footnotes: leave such styles out, or build footnotes first.
+  - **Which styles.** A few bundled, or any from the CSL repository, which needs somewhere to
+    upload one, and the locale files the styles need.
 - **Converting the hand-written citations.**
   - The docs hold many links such as `[BU p. 49](/pdf/…#page=53&text=…)`, about 1,830 in a stale
     copy.
@@ -404,8 +439,10 @@ post's labels, and a republish refreshes both.
   - Every stored quote across one is re-stamped at the conversion, with its positions mapped
     through it and its quote re-derived. That was 58 of 140 annotation quotes in that copy.
   - An editor annotation whose mark covered only the label loses it.
-  - Opted into per doc.
-- **DOI lookup** on import.
+  - Opted into per doc, and done last, once the rest is built.
+- **DOI lookup** on import. A DOI pasted alone fetches its record as CSL-JSON from doi.org, by
+  content negotiation, and the record goes through `parseCslItem` like any other. The fetch
+  goes to doi.org alone, never to a URL the user gives.
 
 ## Checks
 

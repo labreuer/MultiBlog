@@ -67,7 +67,10 @@ Steps 0 to 3 are built but for the items each entry says are not; step 3's are i
   `shared-iids.ts`), so their repairs agree. It runs only right after a remote change, when
   the editor's document and the Yjs one hold the same chips, and is kept out of undo.
 - **Item 4, the rendering function:** `chipRenderings` (`renderings.ts`), the three statuses, and
-  the placeholder for a chip kind the build doesn't know. Not the `~~ ~~` in Markdown.
+  the placeholder for a chip kind the build doesn't know. Not the `~~ ~~` in Markdown. A
+  rendering's `label` is plain text. When a chip kind's label carries formatting (a citation's
+  words before and after a work, CITATIONS.md "Markdown inside a citation"), its `runs` hold
+  the same text formatted, and the node view, `StaticChip` and `chipsToLinkedText` draw those.
 - **Item 5, the chip context:** `loadChipContext`, `GET /api/chip-context` with its per-viewer
   rule (`context-for.ts`), and `useChipInputs`, which refetches for a target it doesn't hold and
   shows `…` meanwhile. The doc reading view's first paint gets its context as props.
@@ -189,7 +192,10 @@ Steps 0 to 3 are built but for the items each entry says are not; step 3's are i
 
   An edit whose passage holds a chip of a kind the server doesn't know is refused as
   `unknown_kind`, since the new text can't write that chip back; the words beside it can
-  still be edited, and the merge keeps it. The chip-aware parse stores no link title.
+  still be edited, and the merge keeps it. The chip-aware parse stores no link title, and
+  leaves no whitespace inside a mark against a chip (`parseWithChips`): `**see [@k]**` reads
+  as bold "see", a plain space, then the chip, which is where the writer puts that space, so a
+  doc made from Markdown is the doc its own Markdown reads back as.
 
   The merge pairs a chip that continues another (`pairContinuations`, doc-edit.ts): where a
   textblock lost one chip and gained one its chip kind says continues it, and no other pairing
@@ -226,7 +232,7 @@ Steps 0 to 3 are built but for the items each entry says are not; step 3's are i
   Not built of Styling: an instance default (each chip kind's own default stands in), a
   control for a single chip's override (a mention's `form` field is honoured and nothing
   sets it), the scrub bar showing each version in the style it had (it shows the current
-  one), and sections.
+  one), and sections: all under Later.
 - **Mentions:** the chip kind's fields, forms and labels, its context loader, the rule for who
   may be mentioned, the `@` menu in the doc editor and in a note's composer, the `mentions=`
   search filter with `@handle` in the search box, and the dashboard's "Mentions of you" card
@@ -693,6 +699,11 @@ Because anchors never contain a label, no restyle, rename or renumbering detache
 
 ## Later
 
+- **The instance default style**, for every doc that hasn't set its own (Styling, above).
+  Changing it is the one style change the refresh relabels (step 1, item 10), and that fan-out
+  is untested (Risks, item 5).
+- **The scrub bar showing each version in the style it had.** It shows the current one. The
+  style is in the ydoc's settings map, so each version already holds its own.
 - **Section styles** (Styling, above).
 - **Comments.** The comment schema and its Markdown box gain the node. `parseCommentBody` then
   runs each chip kind's validator, since the schema no longer checks a chip's fields. Each chip

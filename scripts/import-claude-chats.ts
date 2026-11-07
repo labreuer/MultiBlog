@@ -78,10 +78,14 @@ import { TiptapTransformer } from "@hocuspocus/transformer";
 import { prisma } from "../src/lib/prisma";
 import type { Prisma } from "../src/generated/prisma/client";
 import type { Role } from "../src/generated/prisma/enums";
-import { markdownToDocContent, MAX_MARKDOWN_BYTES } from "../src/lib/markdown-import";
+import { escapeChipAts, markdownToDocContent, MAX_MARKDOWN_BYTES } from "../src/lib/markdown-import";
 import { createDocWithContent } from "../src/lib/doc-create";
+import type { Actor } from "../src/lib/actor";
+import { resolveParsedChips } from "../src/lib/entity-chips/parsed-chips";
+import { withoutChipLabels } from "../src/lib/entity-chips/materialize";
+import { isChip } from "../src/lib/entity-chips/text";
 import { canManageDocs } from "../src/lib/role-checks";
-import { contentExtensions, docContentExtensions, pmDocContentSchema } from "../src/lib/tiptap-schema";
+import { docContentExtensions, pmDocContentSchema } from "../src/lib/tiptap-schema";
 import { docContentFromYdoc } from "../src/lib/doc-content";
 import { ydocIdForDoc, DOC_APPLY_UPDATE_PATH } from "../src/lib/ydoc-names";
 import { signYdocToken } from "../src/lib/ydoc-token";
@@ -158,8 +162,8 @@ const chatUrl = (uuid: string) => `https://claude.ai/chat/${uuid}`;
 
 // For text that is plain rather than Markdown (a quoted excerpt, a file name, a
 // search query): every character that means something to Markdown is escaped,
-// so the doc shows exactly that text.
-const escapeInline = (s: string) => s.replace(/[\\`*_[\]<>#~|$&]/g, "\\$&");
+// so the doc shows exactly that text, an @ that would read as a chip included.
+const escapeInline = (s: string) => escapeChipAts(s.replace(/[\\`*_[\]<>#~|$&]/g, "\\$&"));
 
 function escapeLine(line: string): string {
   return escapeInline(line.trim())
@@ -183,20 +187,37 @@ function plainToMarkdown(text: string): string {
 // through. A fence can be indented any amount, or sit in a blockquote — Claude
 // nests them in list items.
 const FENCE = /^(?:\s*>)*\s*(`{3,}|~{3,})/;
-function mapOutsideFences(md: string, fn: (line: string, next: string | undefined) => string): string {
+function fencedLines(lines: string[]): boolean[] {
   let fence: string | null = null;
+  return lines.map((line) => {
+    const f = line.match(FENCE);
+    if (f) {
+      if (!fence) fence = f[1];
+      else if (f[1][0] === fence[0] && f[1].length >= fence.length && /^(?:\s*>)*\s*[`~]+\s*$/.test(line)) fence = null;
+      return true;
+    }
+    return fence !== null;
+  });
+}
+function mapOutsideFences(md: string, fn: (line: string, next: string | undefined) => string): string {
   const lines = md.split("\n");
-  return lines
-    .map((line, i) => {
-      const f = line.match(FENCE);
-      if (f) {
-        if (!fence) fence = f[1];
-        else if (f[1][0] === fence[0] && f[1].length >= fence.length && /^(?:\s*>)*\s*[`~]+\s*$/.test(line)) fence = null;
-        return line;
-      }
-      return fence ? line : fn(line, lines[i + 1]);
-    })
-    .join("\n");
+  const fenced = fencedLines(lines);
+  return lines.map((line, i) => (fenced[i] ? line : fn(line, lines[i + 1]))).join("\n");
+}
+// The same, but fn gets each run of lines between fences whole, for a rewrite
+// that has to see past a line's end: a code span can cross one.
+function mapRunsOutsideFences(md: string, fn: (run: string) => string): string {
+  const lines = md.split("\n");
+  const fenced = fencedLines(lines);
+  const runs: string[] = [];
+  for (let i = 0; i < lines.length; ) {
+    let j = i;
+    while (j < lines.length && fenced[j] === fenced[i]) j++;
+    const run = lines.slice(i, j).join("\n");
+    runs.push(fenced[i] ? run : fn(run));
+    i = j;
+  }
+  return runs.join("\n");
 }
 
 // Headings drop two levels so they nest under the "## Claude" / "## <human>"
@@ -224,6 +245,10 @@ function demoteHeadings(md: string, by = 2): string {
 // around it — which is what XML-ish text, like the review-comments block
 // claude.ai sends for comments on a document, is made of. Autolinks
 // (<https://…>) and code spans are left alone.
+//
+// An @ that would read as an entity chip is escaped too (escapeChipAts): a
+// transcript names packages, @playwright/test, and people, not works in the
+// library, and the parse refuses an unknown key rather than keep it as text.
 const TAG_START = /(`+).*?\1|<(?![a-z][a-z0-9+.-]*:|[^\s<>@]+@)(?=[a-z/!?])/gi;
 const QUOTE = /^(?:\s*>)*\s*/;
 const quoteDepth = (line: string) => (line.match(QUOTE)![0].match(/>/g) ?? []).length;
@@ -231,7 +256,7 @@ const BLOCK_START = /^([-+*]\s|\d{1,9}[.)]\s|#{1,6}(\s|$)|`{3}|~{3})/;
 const NO_BREAK_AFTER = /^(#{1,6}(\s|$)|\||([-*_])(\s*\3){2,}\s*$)/;
 
 function withLineBreaks(text: string): string {
-  const md = text.replace(/\r\n?/g, "\n").trim();
+  const md = mapRunsOutsideFences(text.replace(/\r\n?/g, "\n").trim(), escapeChipAts);
   return demoteHeadings(
     mapOutsideFences(md, (line, next) => {
       const escaped = line.replace(TAG_START, (m) => (m.startsWith("`") ? m : "\\<"));
@@ -456,6 +481,35 @@ async function importingAccount() {
   return account;
 }
 
+// The Markdown's body as the doc will hold it: each chip its Markdown names
+// resolved as /docs' import resolves one, as the importing account, except
+// strictly. A handle that account may not mention, or a key the library
+// doesn't have, refuses the file rather than leaving it as a link or as text
+// (docs/CITATIONS.md, "Markdown"). `existing` is the doc being updated, whose
+// own chips may be written back whatever the rule says of them now.
+async function parsedBody(md: string, existing: { id: string; body: unknown } | null): Promise<{ title: string | null; body: JSONContent }> {
+  const { title, body } = markdownToDocContent(md, { chips: true });
+  const { id, role } = await importingAccount();
+  const actor: Actor = { userId: id, role };
+  const held = existing ? (existing.body as JSONContent) : null;
+  return { title, body: await resolveParsedChips(body, actor, { docId: existing?.id ?? null, held }) };
+}
+
+// A body with no chip's instance id, and no label: a parse gives every chip
+// a new id, and a doc's cache labels each one, so two bodies are the same
+// when their chips stand for the same things with the same fields.
+function withoutChipIds(body: JSONContent): JSONContent {
+  const walk = (node: JSONContent): JSONContent => {
+    if (isChip(node)) {
+      const attrs = { ...node.attrs };
+      delete attrs.iid;
+      return { ...node, attrs };
+    }
+    return node.content ? { ...node, content: node.content.map(walk) } : node;
+  };
+  return walk(withoutChipLabels(body));
+}
+
 // Looked up on the first import: whether the importing account may create docs
 // at all — the check /docs' import action makes on its session, since
 // createDocWithContent makes none — and the byline's accounts.
@@ -491,7 +545,7 @@ async function importDoc(md: string, opts: { span?: Span; record: boolean; impor
   }
   const bylineIds = await bylineForImports();
   const { id: userId } = await importingAccount();
-  const { title, body } = markdownToDocContent(md);
+  const { title, body } = await parsedBody(md, null);
   const doc = await createDocWithContent(userId, title ?? "", body, {
     byline: bylineIds,
     record: opts.record,
@@ -517,9 +571,10 @@ async function finishDoc(docId: string, importedUpdateId: bigint | null, span?: 
 // What an import of this Markdown would store: the parse, then the same Yjs
 // round trip, so the attribute defaults it fills in match the stored cache.
 // The ydoc is returned too, for the in-place update to copy blocks from.
-function importedDoc(md: string): { title: string; body: JSONContent; ydoc: Y.Doc } {
-  const { title, body } = markdownToDocContent(md);
-  const ydoc = TiptapTransformer.toYdoc(body, "default", contentExtensions);
+type Imported = { title: string; body: JSONContent; ydoc: Y.Doc };
+async function importedDoc(md: string, existing: ExistingDoc): Promise<Imported> {
+  const { title, body } = await parsedBody(md, existing);
+  const ydoc = TiptapTransformer.toYdoc(body, "default", docContentExtensions);
   return { title: title ?? "", body: docContentFromYdoc(ydoc).proseJson, ydoc };
 }
 
@@ -582,11 +637,13 @@ function alignBlocks(a: string[], b: string[]): Step[] {
 
 // One token per document position, so two runs of blocks line up position for
 // position exactly when their token lists are equal. A newline inside text and
-// a hard break are the same token: each takes one position.
+// a hard break are the same token: each takes one position. A chip's token is
+// what it stands for, so an anchor never moves onto a chip naming someone else.
 function positionTokens(nodes: PMNode[]): string[] {
   const out: string[] = [];
   const walk = (n: PMNode) => {
     if (n.isText) for (const ch of n.text!) out.push(ch);
+    else if (isChip(n)) out.push(`<chip ${canonical(withoutChipIds(n.toJSON()).attrs)}/>`);
     else if (n.isLeaf) out.push(n.type.name === "hardBreak" ? "\n" : `<${n.type.name}/>`);
     else {
       out.push(`<${n.type.name}>`);
@@ -601,7 +658,8 @@ function positionTokens(nodes: PMNode[]): string[] {
 // Stored-doc position → new-doc position, per stretch of the document.
 type Stretch = { aFrom: number; aTo: number; bFrom: number; aligned: boolean };
 
-async function planInPlace(docId: string, docTitle: string, md: string): Promise<Plan | string> {
+// `fresh` is the conversion (importedDoc), whose ydoc this takes over.
+async function planInPlace(docId: string, docTitle: string, fresh: Imported): Promise<Plan | string> {
   const ydocId = ydocIdForDoc(docId);
   const loaded = await ydocStore.load(ydocId);
   if (!loaded || loaded === UNAVAILABLE) return "its ydoc couldn't be loaded";
@@ -611,12 +669,18 @@ async function planInPlace(docId: string, docTitle: string, md: string): Promise
 
   const schema = pmDocContentSchema;
   const A = schema.nodeFromJSON(docContentFromYdoc(ydoc).proseJson);
-  const fresh = importedDoc(md);
   const C = schema.nodeFromJSON(fresh.body);
   if (fresh.title !== docTitle) return `its title differs (${JSON.stringify(fresh.title)})`;
 
-  const keysOf = (n: PMNode) => Array.from({ length: n.childCount }, (_, i) => canonical(n.child(i).toJSON()));
+  // A block holding a chip matches whatever its chip's instance id: the
+  // stored one is kept, and anchors' records of it stay true.
+  const keysOf = (n: PMNode) => Array.from({ length: n.childCount }, (_, i) => canonical(withoutChipIds(n.child(i).toJSON())));
   const steps = alignBlocks(keysOf(A), keysOf(C));
+  // What the doc should be once updated: the kept blocks as stored, the rest as converted.
+  const expected = A.type.create(
+    A.attrs,
+    steps.flatMap((s) => (s.kind === "keep" ? [A.child(s.a)] : s.kind === "add" ? [C.child(s.b)] : [])),
+  );
 
   // Stretches: each kept block, and each maximal run of removed and added
   // blocks between them.
@@ -667,7 +731,7 @@ async function planInPlace(docId: string, docTitle: string, md: string): Promise
       });
   });
   fresh.ydoc.destroy();
-  if (!schema.nodeFromJSON(docContentFromYdoc(ydoc).proseJson).eq(C)) return "the ydoc edit didn't reproduce the conversion";
+  if (!schema.nodeFromJSON(docContentFromYdoc(ydoc).proseJson).eq(expected)) return "the ydoc edit didn't reproduce the conversion";
 
   const rows = await prisma.anchoredLinkAnchor.findMany({
     where: { docId },
@@ -680,7 +744,7 @@ async function planInPlace(docId: string, docTitle: string, md: string): Promise
     const from = map(r.anchorFrom, 1);
     const to = map(r.anchorTo, -1);
     if (from === null || to === null || to <= from) return `anchor ${r.id} is in a passage whose text changed`;
-    anchors.push({ id: r.id, from, to, quotedText: C.textBetween(from, to, " ") });
+    anchors.push({ id: r.id, from, to, quotedText: expected.textBetween(from, to, " ") });
   }
 
   return { docId, ydoc, before, anchors, blocksChanged: steps.filter((s) => s.kind !== "keep").length };
@@ -854,7 +918,7 @@ async function markdownSources(): Promise<{ sources: Source[]; empty: number }> 
   for (const file of ids) {
     const md = readFileSync(file, "utf8");
     const importKey = basename(file);
-    const { title } = markdownToDocContent(md);
+    const { title } = markdownToDocContent(md, { chips: true });
     if (!title) {
       console.error(`${file}: no leading heading to title the doc by`);
       process.exitCode = 1;
@@ -947,25 +1011,34 @@ async function main() {
       if (!plan && (doc.importKey !== source.importKey || (source.record && !doc.record))) {
         await prisma.$executeRaw`UPDATE doc SET import_key = ${source.importKey}, record = ${doc.record || source.record} WHERE id = ${doc.id}`;
       }
-      const fresh = importedDoc(md);
-      fresh.ydoc.destroy();
-      if (fresh.title === doc.title && canonical(fresh.body) === canonical(doc.body)) {
+      let fresh: Imported;
+      try {
+        fresh = await importedDoc(md, doc);
+      } catch (err) {
+        console.error(`${label}: ${err instanceof Error ? err.message : err}`);
+        process.exitCode = 1;
+        continue;
+      }
+      if (fresh.title === doc.title && canonical(withoutChipIds(fresh.body)) === canonical(withoutChipIds(doc.body as JSONContent))) {
+        fresh.ydoc.destroy();
         upToDate++;
         continue;
       }
       if (!update) {
+        fresh.ydoc.destroy();
         differing.push(`/doc/${doc.slug}  ${label}`);
         continue;
       }
       // The guard: an edit made in MultiBlog since the import would be undone.
       const edited = doc.importedUpdateId === null ? null : await lastEdited(doc.id);
       if (edited && edited.id > doc.importedUpdateId! && !force) {
+        fresh.ydoc.destroy();
         differing.push(
           `/doc/${doc.slug}  ${label}  (not updated: edited in MultiBlog since its import, last ${edited.at.toISOString()}; --force to overwrite)`,
         );
         continue;
       }
-      const result = await planInPlace(doc.id, doc.title, md);
+      const result = await planInPlace(doc.id, doc.title, fresh);
       if (typeof result === "string") {
         differing.push(`/doc/${doc.slug}  ${label}  (not updated: ${result})`);
         continue;

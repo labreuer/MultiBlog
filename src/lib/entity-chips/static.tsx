@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import type { Extensions, JSONContent } from "@tiptap/core";
 import { renderToReactElement } from "@tiptap/static-renderer";
+import { RUN_TAGS, type InlineRun } from "../inline-markdown";
 import { chipRenderings, chipsInJSON, renderingsByIid, UNKNOWN_CHIP } from "./renderings";
 import { ENTITY_CHIP, type ChipInputs, type ChipRendering } from "./types";
 
@@ -11,6 +12,18 @@ import { ENTITY_CHIP, type ChipInputs, type ChipRendering } from "./types";
 //
 // No "use client": the same function renders on the server (a page's first
 // paint) and in the browser (a replayed revision).
+
+/** A label's runs as elements, each mark an element around its text. */
+function ChipRuns({ runs }: { runs: readonly InlineRun[] }) {
+  return runs.map((run, index) => {
+    let shown: ReactNode = run.text;
+    for (const mark of [...(run.marks ?? [])].reverse()) {
+      const Tag = RUN_TAGS[mark];
+      shown = <Tag>{shown}</Tag>;
+    }
+    return <Fragment key={index}>{shown}</Fragment>;
+  });
+}
 
 /**
  * One chip as static markup, carrying the attributes the node's parse rule
@@ -25,12 +38,13 @@ export function StaticChip({ attrs, rendering }: { attrs: Record<string, unknown
     "data-chip": JSON.stringify(attrs.data ?? {}),
     "data-status": rendering.status,
   };
+  const shown = rendering.runs ? <ChipRuns runs={rendering.runs} /> : rendering.label;
   return rendering.status === "live" && rendering.href ? (
     <a {...shared} href={rendering.href}>
-      {rendering.label}
+      {shown}
     </a>
   ) : (
-    <span {...shared}>{rendering.label}</span>
+    <span {...shared}>{shown}</span>
   );
 }
 
