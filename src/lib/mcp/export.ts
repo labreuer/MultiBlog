@@ -1,10 +1,11 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { mentionIdsFor } from "@/lib/search";
+import { citedIdsFor, mentionIdsFor } from "@/lib/search";
 import { docsSearch } from "@/lib/search/docs";
 import { searchAuthorOptions } from "@/lib/search/authors";
 import { dayRangeToInstants } from "@/lib/search/dates";
-import { DEFAULT_TIME_ZONE, isTimeZone, parseDay } from "@/lib/search/params";
+import { DEFAULT_TIME_ZONE, isTimeZone, MAX_CITED_LENGTH, parseDay } from "@/lib/search/params";
+import { REFERENCE_KEY_RE } from "@/lib/references/csl";
 import { loadDocState } from "@/lib/doc-state";
 import { docContentToMarkdown } from "@/lib/markdown-import";
 import { docText } from "@/lib/doc-text";
@@ -58,6 +59,13 @@ export async function selectByFilters(actor: Actor, params: URLSearchParams): Pr
   const tags = listParam(params, "tags");
   const mentions = listParam(params, "mentions");
   for (const slug of [...authors, ...tags, ...mentions]) if (!SLUG_RE.test(slug)) throw invalid(`${slug} isn't a slug.`);
+  const cites = listParam(params, "cites");
+  for (const key of cites) if (!REFERENCE_KEY_RE.test(key)) throw invalid(`${key} isn't a reference key.`);
+  const cited = {
+    cites,
+    citedTitle: (params.get("cited_title") ?? "").trim().slice(0, MAX_CITED_LENGTH),
+    citedAuthor: (params.get("cited_author") ?? "").trim().slice(0, MAX_CITED_LENGTH),
+  };
   const day = (name: string) => {
     const value = params.get(name);
     if (value === null) return null;
@@ -92,6 +100,7 @@ export async function selectByFilters(actor: Actor, params: URLSearchParams): Pr
       updated: dayRangeToInstants({ from: day("updated_from"), to: day("updated_to") }, tz),
       // As `search` reads it: handles, `me` for the actor, and one nobody has narrows to nothing.
       mentionIds: mentions.length > 0 ? await mentionIdsFor(searchActorOf(actor), mentions) : null,
+      citedIds: await citedIdsFor(cited),
       excludePostId: null,
       tagIds,
       memo: new Map(),

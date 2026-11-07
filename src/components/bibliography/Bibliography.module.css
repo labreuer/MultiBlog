@@ -1,0 +1,45 @@
+/* docs/CITATIONS.md, "The bibliography" — the works a doc cites, after its
+   text. Inside a `.prose` box on every surface, so the heading and the body
+   type are the doc's; this adds only the list's own shape. */
+
+.bibliography {
+  margin-top: 1.5em;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Two classes, to outrank `.prose h2`'s top margin, which the rule above
+   already stands in for. */
+.bibliography .heading {
+  margin-top: 1em;
+}
+
+/* Two classes, to outrank `.prose ul`'s indent and bullets. */
+.bibliography .list {
+  list-style: none;
+  padding-left: 0;
+}
+
+/* A hanging indent: each entry's first line out at the margin, as a
+   bibliography sets it, so the eye runs down the first authors. */
+.bibliography .entry {
+  padding-left: 2em;
+  text-indent: -2em;
+  margin: 0 0 0.6em;
+}
+
+.lead {
+  font-weight: 600;
+}
+
+.deleted {
+  text-decoration: line-through;
+  color: var(--text-secondary);
+}
+
+/* Inside the doc editor's scrolling box (EditorChrome.module.css's
+   .editorContent, a flex column), after the text however the two came to be
+   appended, and not stretched as the text is. */
+.inEditor {
+  order: 1;
+  flex: none;
+}

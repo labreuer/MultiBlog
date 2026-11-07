@@ -21,6 +21,7 @@ export type ApiErrorCode =
   | "unknown_chip"
   | "chip_as_text"
   | "splits_chip"
+  | "chip_changed"
   | "unknown_kind"
   | "read_only"
   | "already_done"
@@ -68,6 +69,7 @@ const HTTP_STATUS: Record<ApiErrorCode, number> = {
   unknown_chip: 422,
   chip_as_text: 422,
   splits_chip: 422,
+  chip_changed: 409,
   unknown_kind: 422,
   read_only: 409,
   already_done: 409,

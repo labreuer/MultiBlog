@@ -173,6 +173,36 @@ export function chipIdentitiesBetween(node: PMNode, from: number, to: number): s
   return found;
 }
 
+/** The chips inside a range of `node`, in order, as their attributes. */
+export function chipsBetween(node: PMNode, from: number, to: number): Omit<ChipOccurrence, "pos">[] {
+  const found: Omit<ChipOccurrence, "pos">[] = [];
+  node.nodesBetween(from, to, (child, pos) => {
+    if (child.type.name === ENTITY_CHIP && pos >= from && pos < to) found.push(chipAttrsOf(child.attrs));
+    return !child.isLeaf;
+  });
+  return found;
+}
+
+/** The Markdown of the chips inside a range of `node`, in order, from a doc's `chipMarkdowns`. */
+export function chipMarkdownBetween(node: PMNode, from: number, to: number, markdown: ReadonlyMap<string, string>): string[] {
+  return chipsBetween(node, from, to).flatMap((chip) => {
+    const md = markdown.get(chip.iid);
+    return md === undefined ? [] : [md];
+  });
+}
+
+/**
+ * Whether two chips hold the same fields, as their chip kind stores them: what
+ * a quote naming a chip by its Markdown is checked against beyond its identity
+ * (docs/ENTITY_CHIPS.md, MCP item 3), such as a citation's page.
+ */
+export function sameChipFields(a: Pick<ChipOccurrence, "kind" | "data">, b: Pick<ChipOccurrence, "kind" | "data">): boolean {
+  if (a.kind !== b.kind) return false;
+  const kind = chipKind(a.kind);
+  const fields = (data: Record<string, unknown>) => JSON.stringify(kind?.validate(data) ?? data);
+  return fields(a.data) === fields(b.data);
+}
+
 /**
  * Each chip's Markdown, by instance id (docs/ENTITY_CHIPS.md, MCP item 1):
  * its chip kind's own syntax, from the same doc-order pass the labels come

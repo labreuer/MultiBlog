@@ -1,18 +1,18 @@
-# Citations and references (planned)
+# Citations and references
 
-**Status: partly built; "Built so far" below says which parts.** A *citation* is an entity chip
+**Status: built, but for what "Built so far" below names, and Later.** A *citation* is an entity chip
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md)) that stands for one or more works at a page. It is shown as
 `(BU p. 49)`, `(Radner 2012, p. 49)` or `[3, p. 49]`, depending on the doc's style. The works are
-*references*: records in a library, which this file also plans. This file fills in the kit's kind
+*references*: records in a library, which this file also covers. This file fills in the kit's kind
 contract. The kit says how every chip is stored, rendered, quoted and searched. Citations are step
 3 of the kit's order.
 
 ## Built so far
 
-The reference library (its data, its pages and its machine door) and the citation chip
-itself. Everything below not listed here is still a plan: reading a citation back from
-Markdown, the chip's popover, the bibliography, the search filters, and what a reference's
-page shows of who cites it.
+The reference library (its data, its pages and its machine door), the citation chip itself
+with its popover, its Markdown both ways and a quote written in it, a doc's bibliography, and
+search by cited work. Everything below not listed here is still a plan: of the Markdown, the
+transcript importer's escape; and Later.
 
 - **The chip kind:** `src/lib/entity-chips/kinds/citation.ts` holds its fields and
   validation, its identity (the works, in any order), when one citation continues another
@@ -34,12 +34,27 @@ page shows of who cites it.
 - **The menu:** `CiteMenu.tsx`, opened by `[@` in the doc editor and a note's composer. It
   searches the library by key, abbreviation, title and author, and "radner 49" sets the
   locator.
+- **The popover:** `CitePopover.tsx`, beside the menu: a selected citation's pages, words,
+  form and works, each edit one attribute set on the chip (below).
 - **The doc's style:** a Citations row in the doc's Settings, written to the ydoc's
   `settings` map as the mention style is.
-- **MCP:** a read shows a citation as its label in text and as Pandoc's syntax in Markdown.
-  The syntax is not read back yet (`readsMarkdown: false`), so an `edit_doc` whose passage
-  holds a citation, and an `edit_note` of a note holding one, are refused as `unknown_kind`
-  rather than drop it; the words beside it can be edited.
+- **MCP:** a read shows a citation as its label in text and as Pandoc's syntax in Markdown,
+  and every Markdown write reads that syntax back (Markdown, below).
+- **Markdown, both ways:** `citation-markdown.ts` reads Pandoc's forms for the chip parse's
+  tokenizer (`markdown-import.ts`), which yields a placeholder holding the keys; `resolveParsedChips`
+  makes each a citation of the references they name, a key a reference used to have included,
+  or refuses `unknown_chip`, in the UI's import as on every MCP write. The writer escapes text
+  that would read as a citation and guards the text beside one. An edit that sends a citation's
+  Markdown with a field changed keeps the chip and takes the field, and one that adds a work
+  continues it. A quote may give a citation in the syntax as well as as the label a text read
+  shows (below): `withQuoteChips` (`parsed-chips.ts`) reads it, `resolveQuote` finds it by
+  identity, and an edit from a stale read is refused as `chip_changed` (the kit's MCP, items 3
+  and 6).
+- **Search by cited work** (below): `cites`, `cited_title` and `cited_author` on the page,
+  MCP's `search` and the export.
+- **The bibliography** (below): `citation-bibliography.ts` computes it, `Bibliography.tsx`
+  and `LiveBibliography.tsx` (`src/components/bibliography/`) show it, and
+  `docJsonForPostSide` appends it to a post's text.
 
 - **Records:** the `reference` table (migration `reference_library`), its `csl` built field by
   field by `parseCslItem` (`src/lib/references/csl.ts`) on every way in and read back through
@@ -64,9 +79,10 @@ page shows of who cites it.
   restore. Author(s), Year and Title sort through the `reference_listing` view (migration
   `reference_listing_view`), since they are fields of the record's jsonb.
 - **`/references/[key]`** is public and reads no session: the entry as a bibliography sets
-  it, the abbreviation, and the DOI, ISBN and URL. A key the reference used to have redirects
-  to its current one. Not yet: the posts that cite it, and the client island for what only
-  some viewers may see.
+  it, the abbreviation, the DOI, ISBN and URL, and the published posts citing it. A key the
+  reference used to have redirects to its current one. `CitedBy.tsx`, a client island, asks
+  `referenceCitedBy` (`src/lib/reference-cited-by.ts`) for the docs and notes citing it and its
+  PDF, each through its read rule, and offers the PDF at the page a post's link names.
 - **The entry format:** `src/lib/references/entry.ts`, the one bibliography entry the house
   styles share.
 - **MCP:** `find_refs` and `create_ref` (`src/lib/mcp/tools/references.ts`). The names are
@@ -174,13 +190,17 @@ call for no refresh.
     anything in code or link text. The braced form is read wherever it stands, which Pandoc doesn't
     do; the writer needs it (below).
   - The parse needs no key lookup. It makes a chip of every `@word`, and the write refuses a key
-    that doesn't exist, as `unknown_chip` (the kit's MCP, item 6).
+    that doesn't exist, as `unknown_chip` (the kit's MCP, item 6). A key a reference used to
+    have still names it. A deleted reference is refused too, unless the body already cites it,
+    so a struck-through citation can be written back; so can a work the library no longer has,
+    which is written with its stored id.
   - The refusal names the word and offers the two ways out: a mention,
     `[@Name](/authors/<slug>)`, or a literal `\@`.
   - Every Markdown write that can hold a chip refuses alike: `create_doc`, `edit_doc`, a note's
     body, and the UI's import and paste box. An import lists each unknown key and creates nothing.
   - Text that already reads `@word` is written as `\@word` on the way out, so a read can be sent
-    back unchanged. The serializer doesn't escape `@` today, so this is new.
+    back unchanged. So is a published post's text, where a mention's label at publish reads
+    `@Ada Lovelace`. Link text is left alone, since it holds no citation.
   - Keeping an unknown `@word` as text with a warning is rejected: a mistyped key would quietly
     stop being a citation.
 - **Text beside a chip can't change it.** The writer guards what would:
@@ -195,13 +215,17 @@ call for no refresh.
   ordinary link rather than being refused as an unknown key. A chip can't carry a link, since
   y-tiptap stores no marks on inline nodes, so a citation there would cost the link. This departs
   from Pandoc, which reads citations inside link text. A mention is claimed before any link.
-- **`scripts/import-claude-chats.ts` escapes `@` in a transcript** before the parse, outside code
+- **`scripts/import-claude-chats.ts`** parses without chips today, so a transcript's `@` is text.
+  The plan, should it read chips: it escapes `@` in a transcript before the parse, outside code
   and autolinks, as it already escapes a tag-like `<`. A transcript names packages rather than
   works, such as `@playwright/test`, and 6 of 354 local docs hold one. `escapeInline`, for quoted
   excerpts, file names and search queries, gains `@` too. Its `--markdown` files parse strictly.
-- **A quote copied from a Markdown read** holds this syntax, not the label, and finds its chip by
-  identity (the kit's MCP, item 3). A quote naming the right work at a different locator matches,
-  and the reply reports the current locator, unless it is an edit's target, which is refused.
+- **A quote copied from a Markdown read** holds this syntax, not the label, and finds its chip
+  by identity (the kit's MCP, item 3). Of several citations of one work, the one whose locator
+  and words also agree wins. A quote naming the right work at a different locator matches, and
+  the reply reports the citation's Markdown now (`chipsNow`), unless it is an edit's target,
+  which is refused as `chip_changed` with the same. A key the library doesn't know finds
+  nothing, rather than being refused as it would be in a write.
 
 ## Step 3: references and citations
 
@@ -253,13 +277,16 @@ call for no refresh.
 **Pages.**
 
 - **`/references`**, through the admin table kit, for signed-in members.
-- **`/references/[key]`** is public. A published post's citations link to it, and it shows only
-  what a bibliography prints.
-  - The record, and the published posts citing it, are cached like an author page
-    (`revalidate = 60`).
-  - What only some viewers may see comes from a client island that asks the server on open, the
-    way `TagChips` keeps the post page static. That covers the docs and notes citing it, and its
-    PDF, at the page a post's link names. Each list goes through its read rule.
+- **`/references/[key]`** is public. A published post's citations link to it, and it shows what
+  a bibliography prints and where the work is cited publicly.
+  - The record, and the published posts citing it (found in the `citation` table), are cached
+    like an author page (`revalidate = 60`).
+  - What only some viewers may see comes from a client island that asks the server once the
+    reader is signed in, the way `TagChips` keeps the post page static. That covers the docs and
+    notes citing it, the first 20 of each with a link to `cites=` for the rest, and its PDF, at
+    the page a post's link names (`#p=49`, read in the browser so the page stays one cached
+    page). Each list goes through its read rule, a PDF included, so a PRIVATE file is offered
+    only to its owners.
 - **A key is permanent once used.** Posts link to `/references/<key>`, and Markdown exports write
   `[@key]`. So renaming a key keeps the old one redirecting through a key history, as
   `UserSlugHistory` does for users.
@@ -271,31 +298,87 @@ prefixes.
 - It sits in the doc editor and the annotation composer.
 - It searches by key, short label, title and authors.
 - "radner 49" sets the locator.
-- The chip's popover edits what validation allows (The chip, above):
-  - the locator;
-  - prefix and suffix;
-  - the form;
-  - further works in the same citation.
 
-**The bibliography** is generated from the doc's citations in the doc's style. It is shown after
-the doc in the reading view, the editor and side-by-side. On a post it is appended as text at
-publish, alongside the post's labels, and refreshed on republish.
+**The popover** (`CitePopover.tsx`) edits what validation allows (The chip, above): each work's
+page, the words before and after it, and whether its author is left out; the form; and further
+works, found as the menu finds them, "radner 7" included.
 
-- The house styles share one entry format, from the CSL-JSON fields: authors, year, title, and
-  the container or publisher, each entry linked to its reference page. A `numeric` doc lists
-  entries by number; the others list them alphabetically by first author.
+- **Where.** Beside the menu, in the doc editor and the annotation composer, and only in an
+  editor that can be typed in. Selecting a citation opens it, by a click or the arrow keys, and
+  Enter moves into it.
+- **Each edit is one attribute set** on the chip's `data`, run through the kind's validation as
+  every other way in is. So the chip keeps its instance id and its place, and an anchor on it
+  asks the kind whether the new fields continue the old ones (The chip, above). Removing a work
+  can therefore detach an anchor, as an edit removing it by any other means would.
+- **A text field writes when it is left or Enter is pressed**, not on each keystroke, since
+  validation trims and would eat the space being typed. Escape puts a changed field back, and a
+  second Escape returns to the editor with the citation still selected.
+- **"In the sentence" is offered only where Pandoc has the form**: one work, its author shown,
+  nothing before it. Otherwise the choice is disabled and says why.
+- **Open while it is wanted.** It shows while the editor has focus and its selection is the
+  citation. Once focus moves into the popover, by a press, a key or a script, it holds the
+  popover open until focus or a press goes somewhere else.
+
+**The bibliography** is the works a doc's citations name, in the doc's style, shown after the
+doc in the reading view, the editor and side-by-side. Like a label, it is computed wherever the
+doc is shown and never stored in the doc. A post gets it as text at publish, alongside the
+post's labels, and a republish refreshes both.
+
+- **One function computes it.** `citationBibliography`
+  (`src/lib/entity-chips/kinds/citation-bibliography.ts`) takes the doc's chips in order, its
+  styles and the chip context, the same inputs the labels take. It reads the labels' doc-order
+  pass (`citationLabelling` in `citation.ts`), so a work's number in the list is the number its
+  citations show, and a shared abbreviation is told apart in the list as in the text.
+- **What it lists.** Each work once.
+  - A `numeric` doc lists works by number, which is their order of first citation. The other
+    styles list them alphabetically by first author, a work with no author by its title, then
+    by year.
+  - Each entry leads with what the doc's citations call the work: `[3]` in the `numeric` style,
+    and the abbreviation in the `short` style. A work with no abbreviation has no lead, since its
+    author-date label already finds it by author and year.
+  - A deleted reference is listed struck through and unlinked, as its citations show it. A work
+    the context doesn't hold is left out, as its citation shows "unknown work". A citation its
+    kind refuses numbers nothing, here or in the text.
+- **Each entry** is the house format (`src/lib/references/entry.ts`, split into runs by
+  `entryParts`): authors, year, title, then the container or publisher. A whole work's title is
+  in italics, a part's in quotation marks. The title links to the reference's page, which is
+  public, so a post's reader can follow it as a doc's can.
+- **Where it is shown.**
+  - The reading view and side-by-side render it on the server with their static first paint
+    (`StaticBibliography`).
+  - Every live surface follows its editor: `LiveBibliography` recomputes whenever the chip
+    plugin's renderings do (`node.ts`), when a citation comes, goes or changes, or the style or
+    context changes, and never for typing.
+  - In the doc editor the list sits inside the scrolling box, after the text, so it scrolls
+    with the doc rather than taking room under it. It isn't editable.
+- **On a post** `docJsonForPostSide` (`post-content.ts`) appends a "References" heading and a
+  paragraph per work, so the landing page's preamble gets one too. The lead is bold and a
+  deleted work is struck, in the marks a post's schema has. Being the post's text, it is
+  searched, quoted and commented on like the rest.
+- **Not in a doc's own text.** A doc's search text and its Markdown, an MCP read's included,
+  leave it out: it is generated, and an edit sent back with it would write it in as prose.
 - A CSL style's bibliography comes with citeproc (Later) and replaces this format for that doc.
 
-**Search.**
+**Search** ([FULLTEXT.md](FULLTEXT.md), "Cited works"):
 
-- `cites=<key>` finds what cites one work.
-- `citedTitle=<text>` and `citedAuthor=<text>` find what cites any work whose title or authors
-  match.
-  - The text matches against `reference.search_vector`. The matching references' ids then go
-    through the `citation` index table, inside each kind's readable `where`, so no citing doc's
-    own vector changes.
-  - `citedAuthor` is the author of a *cited work*. The existing `authors` filter is who wrote the
-    item, so the UI labels them "cites a work titled…" and "cites a work by…".
+- `cites=<key>` finds what cites a work. Several keys find what cites any of them, and a key a
+  reference used to have still names it.
+- `cited_title=<text>` and `cited_author=<text>` find what cites a work whose title, or whose
+  authors and editors, have those words, each as a prefix.
+  - The text matches against `reference.search_vector` by weight: its A is the key, the
+    abbreviation and the title, and its B the people (`referenceIdsMatching`,
+    `src/lib/reference-data.ts`). Deleted references count, since a citation of one still names
+    the work.
+  - The matching references' ids then go through the `citation` index table, inside each kind's
+    readable `where` (`citedWhere`, `src/lib/search/context.ts`), so no citing doc's own vector
+    changes.
+  - Each filter set must be met at once: `cites=radner2012&cited_author=barfield` finds what
+    cites both.
+  - The page labels them "Cites a work with the key…", "titled…" and "by…", since the existing
+    `authors` filter is who wrote the item found, not the work cited. It says what it narrowed
+    to, and that PDFs and comments, which cite nothing, are left out.
+- The underscores match the querystring's other names (`created_from`), and the bulk export
+  (MCP.md) takes the same three.
 
 **MCP.**
 
@@ -305,7 +388,8 @@ publish, alongside the post's labels, and refreshed on republish.
     for tag terms.
   - It refuses `duplicate` with the existing key, and `invalid` for an identifier that fails its
     check.
-- `search` gains `cites`, `cited_title` and `cited_author`.
+- `search` takes `cites`, `cited_title` and `cited_author`, and refuses a key nothing has
+  ([MCP.md](MCP.md)).
 
 ## Later
 
@@ -328,7 +412,8 @@ publish, alongside the post's labels, and refreshed on republish.
 - **Unit tests:**
   - each form with its delimiters, its narrative and author-suppressed shapes, a page range,
     numbering, the `short` disambiguation, and the fallback for a reference without `short`;
-  - the bibliography's entry format and its order in each form;
+  - the bibliography's entry format, its order and leads in each form, its numbers matching the
+    labels', and what it leaves out or strikes through;
   - a bare `@word`: a known key makes a chip, an unknown one is refused, and `\@`, an email address
     and code stay text;
   - the identity rule for a citation of several works, and an edit adding a work keeping the
@@ -340,4 +425,14 @@ publish, alongside the post's labels, and refreshed on republish.
   - `[@handle](https://x.com/handle)` staying a link.
 - **e2e:**
   - a duplicate refused, from an import and through `create_ref`;
-  - a post's citation linking to the reference page, and the page offering the PDF to a member.
+  - a post's citation linking to the reference page, and the page offering the PDF to a member;
+  - the bibliography in the editor, following a change of style, in the reading view, and in a
+    post's text;
+  - the popover: a page, the words before, the author left out, the narrative form offered only
+    where it applies, a work added and removed on one chip, and Escape and Enter between it and
+    the editor;
+  - search by key, title and author, each at once, through MCP and the page, and an unknown key
+    refused by MCP;
+  - a reference's page listing the posts citing it to everyone and the docs only to a reader
+    who may read them. Not covered: the PDF offered at the page a post's link names, which
+    needs a reference with a file.

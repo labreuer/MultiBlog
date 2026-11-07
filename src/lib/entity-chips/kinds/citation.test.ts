@@ -5,17 +5,12 @@ import { citationKind, normalizeLocator, UNKNOWN_WORK, type CitationContext, typ
 // docs/CITATIONS.md — the citation chip kind: what it stores, and what each
 // form shows for it.
 
-const work = (id: string, more: Partial<CitedWork> = {}): CitedWork => ({
-  id,
-  key: id,
-  short: null,
-  names: "Radner",
-  year: 2012,
-  title: "The Origin of Ideas",
-  deleted: false,
-  file: null,
-  ...more,
-});
+const work = (id: string, more: Partial<CitedWork> = {}): CitedWork => {
+  const fields = { id, key: id, short: null, names: "Radner", year: 2012, title: "The Origin of Ideas", deleted: false, file: null, ...more };
+  // The entry as the context loader makes one, from the same record.
+  const entry = { authors: fields.names, year: fields.year === null ? "n.d." : String(fields.year), title: fields.title, titleIsContainer: true, source: "" };
+  return { entry, ...fields };
+};
 const CONTEXT: CitationContext = {
   bu: work("bu", { key: "barfield1957", short: "BU", names: "Barfield", year: 1957, title: "Saving the Appearances" }),
   radner: work("radner", { key: "radner2012" }),

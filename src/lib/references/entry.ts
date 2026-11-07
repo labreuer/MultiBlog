@@ -72,13 +72,25 @@ export function referenceEntry(item: CslItem): ReferenceEntry {
   };
 }
 
+/** One run of an entry's text. The title is its own run, for a surface to italicize (when `titleIsContainer`) and link. */
+export type EntryPart = { text: string; title?: true };
+
+/** A sentence's full stop, unless it already ends in one, inside a closing quotation mark or not. */
+const stopAfter = (text: string) => (/[.?!]”?$/.test(text) ? "" : ".");
+
+/** The entry as runs: `Radner, D. (2012). ` `The Origin of Ideas` `. Oxford: Clarendon Press.` */
+export function entryParts(entry: ReferenceEntry): EntryPart[] {
+  // A part's title is quoted, with its full stop inside the quotation marks.
+  const title = entry.titleIsContainer ? entry.title : `“${entry.title}${stopAfter(entry.title)}”`;
+  const titled: EntryPart[] = [{ text: title, title: true }, { text: stopAfter(title) }];
+  const source: EntryPart = { text: entry.source ? ` ${entry.source}${stopAfter(entry.source)}` : "" };
+  const parts = entry.authors ? [{ text: `${entry.authors} (${entry.year}). ` }, ...titled, source] : [...titled, { text: ` (${entry.year}).` }, source];
+  return parts.filter((part) => part.text !== "");
+}
+
 /** The entry as one line: `Radner, D. (2012). The Origin of Ideas. Oxford: Clarendon Press.` */
 export function entryText(item: CslItem): string {
-  const entry = referenceEntry(item);
-  const stop = (text: string) => (/[.?!]”?$/.test(text) ? text : `${text}.`);
-  // A part's title is quoted, with its full stop inside the quotation marks.
-  const title = entry.titleIsContainer ? entry.title : `“${stop(entry.title)}”`;
-  return [entry.authors ? `${entry.authors} (${entry.year}).` : `${stop(title)} (${entry.year}).`, entry.authors ? stop(title) : "", entry.source ? stop(entry.source) : ""]
-    .filter(Boolean)
-    .join(" ");
+  return entryParts(referenceEntry(item))
+    .map((part) => part.text)
+    .join("");
 }

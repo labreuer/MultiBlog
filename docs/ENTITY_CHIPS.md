@@ -54,9 +54,8 @@ date is refused".
 
 ## Built so far
 
-Steps 0 to 2 are built on the `entity-chips` branch but for the items each entry says are
-not, and step 3 is under way ([CITATIONS.md](CITATIONS.md), "Built so far"). Everything below
-not listed here is still a plan.
+Steps 0 to 3 are built but for the items each entry says are not; step 3's are in
+[CITATIONS.md](CITATIONS.md), "Built so far". Everything below not listed here is still a plan.
 
 - **Step 0, the gate:** all of it ([YDOC.md](YDOC.md)).
 - **Step 1, item 1:** the spike, with its result.
@@ -184,8 +183,9 @@ not listed here is still a plan.
 
   `create_doc` reads the same syntax (`markdownToDocContent` with `chips`), under the rule
   for a doc that doesn't exist yet, and `download` writes it, so a doc moves between
-  instances by handle. `/docs`' Markdown import reads it too, and leaves a mention it can't
-  resolve as the link its Markdown also is (`unresolved: "link"`), where MCP refuses.
+  instances by handle and key. `/docs`' Markdown import reads it too, and leaves a mention it
+  can't resolve as the link its Markdown also is (`unresolved: "link"`), where MCP refuses; a
+  citation it can't resolve refuses the import on both (CITATIONS.md, "Markdown").
 
   An edit whose passage holds a chip of a kind the server doesn't know is refused as
   `unknown_kind`, since the new text can't write that chip back; the words beside it can
@@ -193,12 +193,16 @@ not listed here is still a plan.
 
   The merge pairs a chip that continues another (`pairContinuations`, doc-edit.ts): where a
   textblock lost one chip and gained one its chip kind says continues it, and no other pairing
-  is possible either way, the new chip takes the old one's instance id. No edit reaches this
-  yet, since only a citation continues anything and no Markdown reads a citation back.
+  is possible either way, the new chip takes the old one's instance id. An edit reaches it by
+  a citation's Markdown with a work added. A chip that lines up with itself keeps its node and
+  instance id and takes its fields from the new text (`chipFieldsFrom`), so a citation sent
+  back with another page has that page.
 
-  Not built of item 14, each needing a chip kind whose Markdown carries fields, which a
-  mention's doesn't: the Markdown retry against identity text (the retry matches the label a
-  link's text gives, which is the same for a mention), and `chip_changed`.
+  A quote that gives a chip in its chip kind's syntax finds it by identity (MCP item 3):
+  `withQuoteChips` (`parsed-chips.ts`) reads each part of the quote through the chip parse and
+  looks up the handles and keys it names, read-only (`chipsForFinding`, `placeholders.ts`), and
+  `resolveQuote` matches the result in the doc's identity text (`flattenForIdentity`). An edit
+  whose quote gives a chip other fields than it holds is refused as `chip_changed`.
 - **Styling, per doc and per post:**
   - **The doc's style** is in a `Y.Map("settings")` in its ydoc, one key per chip kind
     (`settings.ts`), cached to `Doc.chipStyles` by the store. `DocSettingsPanel` writes it
@@ -343,7 +347,8 @@ doesn't cover are in [YDOC.md](YDOC.md).
    - relabelling every chip at once (the context arriving, a restyle, a rename) takes 4–11 ms.
 
    The keystroke figure depends on one thing. The plugin maps its decoration set through a
-   transaction that touches no chip, and rebuilds it only when a chip comes or goes or the
+   transaction that touches no chip, and rebuilds it only when a chip comes or goes, has its
+   attributes set (an `AttrStep`, whose step map is empty, so it is looked for by name), or the
    inputs change. Rebuilding on every keystroke doubled typing latency at the doc's end, because
    ProseMirror then compares every block's decorations.
 
@@ -569,17 +574,17 @@ So:
      reads back the same whatever the doc's style.
    - The lowering is one-to-one: text that would read back as a chip is escaped on the way out.
      CommonMark and Pandoc both read `\@` as a literal `@`, so hand-written `[@radner2012]` goes
-     out as `\[\@radner2012\]`. The serializer already escapes the brackets; the `@` is new.
-   - The new escapes need a subclass of `MarkdownManager`. `escapeMarkdownSyntax` is a fixed regex
-     with no hook, and overriding it keeps its caller's skipping of code, which an output pass
-     would have to redo. The escapes that depend on a neighbouring chip (CITATIONS.md, "Text
-     beside a chip") go in `renderNodeToMarkdown(node, parentNode, index)`, the one method that
-     sees a text node's siblings. The round-trip test catches a TipTap rename.
-   - Each `MarkdownManager` gets its own `new Marked()`, through the constructor's `marked`
-     option. All three in `markdown-import.ts` share marked's global instance today, so a chip
-     tokenizer registered for the doc parse would also run in the comment parse. That parse has
-     no chip node and drops the token, so a comment saying "@Andrew, see this" would lose
-     "@Andrew".
+     out as `\[\@radner2012\]`, the serializer escaping the brackets.
+   - The escapes are written into the JSON before the serializer runs, as a private-use stand-in
+     wherever a backslash belongs, replaced with one in its output (`serializeWithEscapes`). The
+     serializer offers no hook: `escapeMarkdownSyntax` is private, and inline text is written by
+     a private path that sees no sibling, which the escapes beside a chip (CITATIONS.md, "Text
+     beside a chip") need. The pass skips code, as the serializer's own escaping does. The
+     round-trip tests (`citation-markdown.test.ts`) catch a TipTap change that breaks it.
+   - Each chip parser has its own `new Marked()`, through the constructor's `marked` option, and
+     the other managers in `markdown-import.ts` share marked's global instance. A chip tokenizer
+     registered on that instance would also run in the comment parse, which has no chip node and
+     drops the token, so a comment saying "@Andrew, see this" would lose "@Andrew".
    - A chip whose target is gone is written with its stored id where its slug or key would go, so
      a round trip keeps it.
 3. **Chips in quotes.** Every quote an agent sends resolves through `resolveQuote`
@@ -593,16 +598,21 @@ So:
      falls inside a label widens to the whole chip; an edit's is refused (item 6). Verification
      compares a range's text with the quote, which a widened range fails, so the resolver returns
      the match with the chip its edge fell in, and the caller widens or refuses.
-   - **The Markdown retry** parses with every chip kind's codec. Today it parses with
-     `contentExtensions`, which has no chips, so a citation in a quote stays literal text and
-     never matches. When the parse holds chips, the quote is matched against the doc's *identity
-     text* instead. There each chip is one private-use code point per identity, the text the
+   - **The Markdown retry** parses with every chip kind's codec. When the parse holds chips,
+     the quote is matched against the doc's *identity text* instead. There each chip is one private-use code point per identity, the text the
      merge aligns (item 5). So `[see @radner2012, p. 49]`, copied from a Markdown read, finds
      its chip whatever style, number or label the doc shows now. Where several chips of that
-     identity fit, the one whose other fields also agree wins.
+     identity fit, the one whose other fields also agree wins. The parse runs on the Next server,
+     where the handles and keys are looked up (`withQuoteChips`); the quote carries the result,
+     as JSON, to the collab server for an edit. A handle or key that names nothing is kept as
+     written, which is how a chip whose target is gone is written, so it finds that chip only.
+     When the identity text holds no match, the quote is matched as its plain parse's text, as a
+     quote with no chip is: `**Ask** @Ada Lovelace` still finds a mention shown as
+     `@Ada Lovelace`, though the chip parse takes `@Ada` for a citation.
    - **A quote whose fields disagree** names the right chip with, say, the wrong page.
-     - One chip fits: the quote matches, and the reply reports the chip's current fields. A refusal
-       would cost a round trip and land on the same chip.
+     - One chip fits: the quote matches, and the reply reports the chip's current Markdown
+       (`chipsNow`, in `around`'s occurrence and a note's `passage`). A refusal would cost a round
+       trip and land on the same chip. A link reports no passage, and so nothing.
      - One chip fits and the quote is an edit's target: refused as `chip_changed` (item 6). The
        merge takes fields from the new text, so an edit from a stale read would silently undo a
        correction made since. An agent changes a field by quoting its current value.

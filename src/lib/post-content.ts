@@ -2,6 +2,7 @@ import type * as Y from "yjs";
 import type { JSONContent } from "@tiptap/core";
 import { extractText } from "./diff";
 import { loadChipContext } from "./entity-chips/context";
+import { bibliographyContent, citationBibliography } from "./entity-chips/kinds/citation-bibliography";
 import { chipsToLinkedText } from "./entity-chips/linked-text";
 import { chipsInJSON } from "./entity-chips/renderings";
 import { chipStylesOf } from "./entity-chips/settings";
@@ -31,19 +32,23 @@ export async function postContentFromYdoc(doc: Y.Doc, postStyles: ChipStyles = D
 
 /**
  * A doc's body as a post-side surface can render it: the two doc-only marks
- * stripped, and each entity chip replaced by its label as linked text
- * (docs/ENTITY_CHIPS.md, step 1, item 9). The one conversion for a post's
- * snapshot and the landing page's preamble, the only two paths by which a
- * doc's JSON reaches a renderer that has no chip node.
+ * stripped, each entity chip replaced by its label as linked text
+ * (docs/ENTITY_CHIPS.md, step 1, item 9), and the doc's bibliography
+ * appended as text (docs/CITATIONS.md, "The bibliography"). The one
+ * conversion for a post's snapshot and the landing page's preamble, the only
+ * two paths by which a doc's JSON reaches a renderer that has no chip node.
  *
  * `styles` are the ones the labels are written in: the doc's own, with a
  * post's over them. Labels are the ones current as this runs: frozen into a post at publish
  * and refreshed by republishing, computed anew at each render of the
- * preamble.
+ * preamble. The bibliography is too.
  */
 export async function docJsonForPostSide(bodyJSON: JSONContent, styles: ChipStyles = DEFAULT_CHIP_STYLES): Promise<JSONContent> {
   const stripped = stripMarksFromDoc(bodyJSON, ["authorHighlight", "annotation"]);
   const chips = chipsInJSON(stripped);
   if (chips.length === 0) return stripped;
-  return chipsToLinkedText(stripped, styles, await loadChipContext(chips));
+  const context = await loadChipContext(chips);
+  const linked = chipsToLinkedText(stripped, styles, context);
+  const bibliography = bibliographyContent(citationBibliography(chips, styles, context));
+  return bibliography.length > 0 ? { ...linked, content: [...(linked.content ?? []), ...bibliography] } : linked;
 }

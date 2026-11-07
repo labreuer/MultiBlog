@@ -63,8 +63,12 @@ for its Link, which yields a placeholder holding the handle; `resolveParsedChips
 each a chip under the rule the `@` menu lists by. A handle that names no account here, or one
 this importer may not mention, stays the link the Markdown also is: a person shouldn't lose a
 file to one handle. (`create_doc` refuses instead, since an agent can look the handle up and
-try again.) So `createDocWithContent` encodes with `docContentExtensions`, the one list with
-the chip node; for a body with no chip the result is what `contentExtensions` gave.
+try again.) A citation is Pandoc's syntax, `[@key, p. 49]` or a bare `@key`
+([CITATIONS.md](CITATIONS.md), "Markdown"), and a key the library lacks refuses the import,
+naming each one, with nothing created: kept as text it would quietly stop being a citation. So
+a file holding a bare `@word` that isn't a key imports only once that `@` is escaped, `\@word`.
+`createDocWithContent` encodes with `docContentExtensions`, the one list with the chip node;
+for a body with no chip the result is what `contentExtensions` gave.
 
 A GFM pipe table is the worked example of the rule cutting the other way. Until docs/TABLES.md's native tables put
 `@tiptap/extension-table` into `contentExtensions`, a table in the source was **silently

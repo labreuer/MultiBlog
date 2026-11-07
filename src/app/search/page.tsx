@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { search } from "@/lib/search";
-import { MENTIONS_ME, parseSearchParams, searchQueryString, urlSearchParamsFrom, type SearchKind } from "@/lib/search/params";
+import { hasCitationFilter, MENTIONS_ME, parseSearchParams, searchQueryString, urlSearchParamsFrom, type SearchKind } from "@/lib/search/params";
 import SearchForm from "./SearchForm";
 import SearchResults from "./SearchResults";
 import { kindList } from "./labels";
@@ -65,6 +65,18 @@ export default async function SearchPage({ searchParams }: { searchParams: Searc
         <p className={styles.notice}>
           Only what mentions {result.mentions.map((handle) => (handle === MENTIONS_ME ? "you" : `@${handle}`)).join(" or ")}
           {result.withoutMentions.length > 0 && <>, which leaves out {kindList(result.withoutMentions)}</>}.
+        </p>
+      )}
+
+      {hasCitationFilter(result.params) && (
+        <p className={styles.notice}>
+          Only what cites{" "}
+          {[
+            ...(result.params.cites.length > 0 ? [result.params.cites.map((key) => `@${key}`).join(" or ")] : []),
+            ...(result.params.citedTitle ? [`a work titled “${result.params.citedTitle}”`] : []),
+            ...(result.params.citedAuthor ? [`a work by “${result.params.citedAuthor}”`] : []),
+          ].join(", and ")}
+          {result.withoutCitations.length > 0 && <>, which leaves out {kindList(result.withoutCitations)}</>}.
         </p>
       )}
 

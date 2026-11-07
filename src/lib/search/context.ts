@@ -19,6 +19,13 @@ export type KindContext = {
    * passes: the handles asked for name nobody.
    */
   mentionIds: string[] | null;
+  /**
+   * The works to keep to (docs/CITATIONS.md, "Search"), as reference ids: one
+   * list per citation filter, each to be cited from (any of its works), and
+   * every list at once. Null for no citation filter; an empty list is one
+   * that nothing passes.
+   */
+  citedIds: string[][] | null;
   /** A post to leave out, with its comments: the quote picker's own host post (§8). */
   excludePostId: string | null;
   /**
@@ -54,6 +61,15 @@ export function taggedWhere(tagIds: string[]) {
  */
 export function mentionedWhere(mentionIds: string[] | null) {
   return mentionIds === null ? {} : { mentions: { some: { userId: { in: mentionIds } } } };
+}
+
+/**
+ * "Cites a work from each of these lists" as relation filters on a kind's
+ * `citations`, the rows of the trigger-kept `citation` table (docs/ENTITY_CHIPS.md,
+ * step 1, item 12). By identity, as a mention is found.
+ */
+export function citedWhere(citedIds: string[][] | null) {
+  return citedIds === null ? {} : { AND: citedIds.map((ids) => ({ citations: { some: { referenceId: { in: ids } } } })) };
 }
 
 /** `load()` once per search, under `key`. */

@@ -7,6 +7,8 @@
 // /docs checks its own against its option list. The page and the API (§8) both
 // go through this parser, so the two can't read the same URL differently.
 
+import { REFERENCE_KEY_RE } from "@/lib/references/csl";
+
 /** The five kinds, in the order the page shows their sections (§7). */
 export const SEARCH_KINDS = ["docs", "posts", "pdfs", "annotations", "comments"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
@@ -30,6 +32,16 @@ export type SearchParams = {
    * narrows to nothing, as one whose mentions this viewer can't read does.
    */
   mentions: string[];
+  /**
+   * What cites a work (docs/CITATIONS.md, "Search"): reference keys, any of
+   * them; a key a reference used to have still names it. Well-formed and
+   * nothing more, so a key nothing has narrows to nothing.
+   */
+  cites: string[];
+  /** What cites a work whose title matches this text; "" for no such filter. */
+  citedTitle: string;
+  /** What cites a work by someone whose name matches this text; "" for no such filter. */
+  citedAuthor: string;
   created: DayRange;
   updated: DayRange;
   /** An IANA zone `Intl` accepts. The days above are days in it. */
@@ -70,6 +82,19 @@ function parseAuthors(params: URLSearchParams): string[] {
 
 function parseMentions(params: URLSearchParams): string[] {
   return [...new Set(listParam(params, "mentions").filter((slug) => SLUG_RE.test(slug)))];
+}
+
+function parseCites(params: URLSearchParams): string[] {
+  // Written as a citation writes one, `@radner2012`, or in capitals, it is still the key.
+  const keys = listParam(params, "cites").map((key) => key.replace(/^@/, "").toLowerCase());
+  return [...new Set(keys.filter((key) => REFERENCE_KEY_RE.test(key)))];
+}
+
+/** A cited work's title or author asks for, as typed; capped as a reference search is. */
+export const MAX_CITED_LENGTH = 100;
+
+function citedText(value: string | null): string {
+  return (value ?? "").trim().slice(0, MAX_CITED_LENGTH).trim();
 }
 
 /** The handle that means "the searcher" in a mention filter. No account can have it (user-slug.ts). */
@@ -151,6 +176,9 @@ export function parseSearchParams(params: URLSearchParams): SearchParams {
     kinds: parseKinds(params),
     authors: parseAuthors(params),
     mentions: parseMentions(params),
+    cites: parseCites(params),
+    citedTitle: citedText(params.get("cited_title")),
+    citedAuthor: citedText(params.get("cited_author")),
     created: { from: parseDay(params.get("created_from")), to: parseDay(params.get("created_to")) },
     updated: { from: parseDay(params.get("updated_from")), to: parseDay(params.get("updated_to")) },
     tz: parseTimeZone(params.get("tz")),
@@ -159,12 +187,18 @@ export function parseSearchParams(params: URLSearchParams): SearchParams {
   };
 }
 
+/** Whether a citation filter is set: `cites`, `cited_title` or `cited_author`. */
+export function hasCitationFilter(params: Pick<SearchParams, "cites" | "citedTitle" | "citedAuthor">): boolean {
+  return params.cites.length > 0 || params.citedTitle !== "" || params.citedAuthor !== "";
+}
+
 /** Whether any filter narrows the search — what lets an empty `q` list rather than show nothing (§4). */
 export function hasFilters(params: SearchParams): boolean {
   return (
     params.kinds !== null ||
     params.authors.length > 0 ||
     params.mentions.length > 0 ||
+    hasCitationFilter(params) ||
     params.created.from !== null ||
     params.created.to !== null ||
     params.updated.from !== null ||
@@ -187,6 +221,9 @@ export function searchQueryString(params: SearchParams, changes: Partial<SearchP
   if (next.kinds) out.set("kinds", next.kinds.join(","));
   if (next.authors.length > 0) out.set("authors", next.authors.join(","));
   if (next.mentions.length > 0) out.set("mentions", next.mentions.join(","));
+  if (next.cites.length > 0) out.set("cites", next.cites.join(","));
+  if (next.citedTitle) out.set("cited_title", next.citedTitle);
+  if (next.citedAuthor) out.set("cited_author", next.citedAuthor);
   const dates: [string, string | null][] = [
     ["created_from", next.created.from],
     ["created_to", next.created.to],

@@ -15,6 +15,7 @@ import {
 } from "../src/lib/tiptap-schema";
 import { planEdits, planTitle, type EditPlan, type EditSpec } from "../src/lib/doc-edit";
 import { chipLabelsIn } from "../src/lib/entity-chips/text";
+import { chipMarkdowns, chipsIn } from "../src/lib/entity-chips/renderings";
 import { chipStylesOf, sameChipStyles, setChipStyle } from "../src/lib/entity-chips/settings";
 import { NO_CHIP_INPUTS, type ChipInputs } from "../src/lib/entity-chips/types";
 import { writeBackDoc } from "../src/lib/doc-edit-yjs";
@@ -125,6 +126,7 @@ type Planned = { body: PMNode; title: PMNode | null; plan: Extract<EditPlan, { o
 
 function planOn(doc: Y.Doc, request: EditRequest, authorId: string): Planned | { refusal: Extract<EditPlan, { ok: false }>["refusal"] } {
   const { body, title } = decode(doc);
+  const inputs = chipInputsOf(request);
   const plan = planEdits(body, request.edits, {
     schema: pmDocContentSchema,
     authorId,
@@ -133,7 +135,8 @@ function planOn(doc: Y.Doc, request: EditRequest, authorId: string): Planned | {
     // Labelled here, over the document as it is now, from the records the
     // client's read used: a chip typed in since is labelled too, if its
     // person was already among them.
-    labels: chipLabelsIn(body, chipInputsOf(request)),
+    labels: chipLabelsIn(body, inputs),
+    chipMarkdown: chipMarkdowns(chipsIn(body), inputs.styles, inputs.context),
   });
   if (!plan.ok) return { refusal: plan.refusal };
   const nextTitle =

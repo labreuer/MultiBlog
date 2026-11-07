@@ -266,10 +266,12 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
     and how many there are, and `no_match` for one that occurs nowhere, with up to three near
     misses (§7), or for a fragment link whose passage isn't on its page (§8);
   - `unknown_chip` for a mention written in Markdown whose handle names no account, or one the
-    actor may not mention there, with the handles; `chip_as_text` for an edit whose new
+    actor may not mention there, with the handles, and for a citation whose key names no
+    reference, or a deleted one, with the keys; `chip_as_text` for an edit whose new
     text has a mention's name as plain words where the mention was, with the labels;
     `splits_chip` for an edit whose passage begins or ends partway through a mention, with
-    the passage as it would be whole; and `unknown_kind` for an edit whose passage holds a
+    the passage as it would be whole; `chip_changed` for an edit whose quote gives a citation in
+    its Markdown with other fields than it holds now, with its Markdown now; and `unknown_kind` for an edit whose passage holds a
     chip of a kind this server doesn't know, with the kinds
     ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), MCP item 6);
   - `read_only` for an edit to a record (§6);
@@ -1131,8 +1133,9 @@ as read.
 
 A chip kind's Markdown is read as a chip wherever an agent writes Markdown: `edit_doc`,
 `add_note`, `edit_note` and `create_doc` (and so `POST /api/mcp/docs`). A mention is resolved
-by its handle under the rule the `@` menu lists by, and `unknown_chip` refuses one it can't
-resolve (§4).
+by its handle under the rule the `@` menu lists by, a citation by its keys, and `unknown_chip`
+refuses one it can't resolve (§4). A citation's Markdown is Pandoc's, so any `@` before a word
+is one: text that reads that way is written `\@` in a read, and is sent back so.
 
 That is COLLAB.md §9's matcher pointed at its §2b stamped state: the state is immutable, the
 work is server-side, every hit is verified, and the stored text is derived rather than taken
@@ -1158,7 +1161,9 @@ version is exactly the state the read returned (§6).
 - **One retry, for Markdown.** A quote that misses as written is parsed as Markdown, with the
   `MarkdownManager` the reads use, and matched again as the text that parse yields. So
   `the **key** claim`, or `[the paper](/link/…)`, copied out of a Markdown read still lands. A
-  quote taken from a `text` read (§6) needs no retry.
+  quote taken from a `text` read (§6) needs no retry. Where the quote holds a chip kind's
+  syntax, such as a citation's `[@radner2012, p. 49]`, the retry first matches it by what each
+  chip points at ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), MCP item 3).
 - **Only an exact match anchors.** The matcher's `ends` tier accepts a long quote whose first
   and last 32 characters match while its middle differs, and stores the real text in its
   place. For a write it never counts as a match. A miss answers `no_match`, with up to three
@@ -1907,6 +1912,11 @@ So `kinds=docs&authors=<slug>` is "this person's docs", and with the `tags` filt
 - **A `mentions` filter** (MENTIONS.md, "Search"). Each kind's ids are narrowed to those that
   mention any of the named people, `me` being the actor. PDFs and comments hold no mention,
   and the response names them as left out (`withoutMentions`).
+- **`cites`, `cited_title` and `cited_author`** (CITATIONS.md, "Search"). What cites a work by
+  its key, or a work whose title or authors have the given words, each filter at once. Unlike
+  the page, a key no reference has is refused as `invalid`, naming the keys, since it is
+  likelier a misremembered key than a question; a reference's record is public, so the refusal
+  discloses nothing. PDFs and comments drop out (`withoutCitations`).
 - **Correction is reported, never hidden.** The response carries `corrected` (FULLTEXT.md §5).
   - **Checking whether something exists needs `exact=1`.** Before creating a doc or minting a
     link, an agent asks whether one is already there. Without `exact=1`, typo correction
@@ -2014,7 +2024,7 @@ comment's writer and the post's moderators. So a hit never leads to `not_found`.
 
 | Tool | Scope | Does |
 |---|---|---|
-| `search` | read | Search, and filtered listing, across kinds; `within` one doc ranks its sections, within one PDF its pages; `tags`, `authors`, `mentions`, dates, `exact` (§14) |
+| `search` | read | Search, and filtered listing, across kinds; `within` one doc ranks its sections, within one PDF its pages; `tags`, `authors`, `mentions`, `cites`, `cited_title`, `cited_author`, dates, `exact` (§14) |
 | `read` | read | Any MultiBlog URL (below): whole, as its outline, as a range or `around` a quote; changes `since` a version, on a doc the actor can edit; and `include` for what hangs off the object, each list paged on its own, threads filtered under `threads` (§6, §9, §10) |
 | `find_users` | read | Byline-eligible users by name or slug, or one by exact email (§12) |
 | `find_tags` | read | Tag terms by name (§11) |

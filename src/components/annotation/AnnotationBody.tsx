@@ -9,6 +9,7 @@ import EditorToolbar, { ANNOTATION_TOOLS } from "../EditorToolbar";
 import DocRefMenu from "../DocRefMenu";
 import MentionMenu from "../MentionMenu";
 import CiteMenu from "../CiteMenu";
+import CitePopover from "../CitePopover";
 import { ChipSurfaceProvider, useChipSurface } from "@/lib/entity-chips/chip-surface";
 import type { ChipInputs } from "@/lib/entity-chips/types";
 import { useChipInputs } from "@/lib/entity-chips/use-chip-inputs";
@@ -142,6 +143,7 @@ function AnnotationBodyEditor({
       <DocRefMenu editor={editor} disabled={!editable} />
       <MentionMenu editor={editor} disabled={!editable} />
       <CiteMenu editor={editor} disabled={!editable} />
+      <CitePopover editor={editor} disabled={!editable} />
       {editable && (
         <button type="button" onClick={toggleToolbar} className={styles.toolbarToggle}>
           {toolbarVisible ? "Hide formatting" : "Aa Formatting"}

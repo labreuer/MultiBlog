@@ -9,6 +9,8 @@ import { docContentToMarkdown, markdownToText } from "@/lib/markdown-import";
 import { flattenForMatch } from "@/lib/comment-quote-match";
 import { chipDisplayText, isChip, type ChipLabels } from "@/lib/entity-chips/text";
 import { contextOf, resolveQuote } from "@/lib/quote-resolve";
+import { withQuoteChips } from "@/lib/entity-chips/parsed-chips";
+import { chipMarkdownBetween } from "@/lib/entity-chips/renderings";
 import { alignBlocks, diffRuns, renderWordDiff } from "@/lib/block-align";
 import {
   blocksOfRange,
@@ -240,7 +242,8 @@ export async function readDoc(
  */
 async function aroundQuote(state: DocState, args: ReadArgs, format: Format, url: string): Promise<ToolResult> {
   const target = flattenForMatch(state.node, state.chips.labels);
-  const resolution = resolveQuote(target, { quote: args.around, prefix: args.prefix, suffix: args.suffix }, markdownToText);
+  const spec = await withQuoteChips({ quote: args.around, prefix: args.prefix, suffix: args.suffix });
+  const resolution = resolveQuote(target, spec, markdownToText);
   if (resolution.kind === "none") {
     throw new ApiError("no_match", "That quote isn't in this doc as written.", {
       nearMisses: resolution.nearMisses.map((miss) => ({
@@ -262,6 +265,8 @@ async function aroundQuote(state: DocState, args: ReadArgs, format: Format, url:
       from,
       to,
       ...(heading && heading.number !== at.from ? { heading: heading.heading!.text } : {}),
+      // The quote named its chips with other fields than they hold: what they hold now.
+      ...(match.chipsDiffer ? { chipsNow: chipMarkdownBetween(state.node, match.from, match.to, state.chips.markdown) } : {}),
       [bodyKey(format)]: render(state.blocks.slice(from - 1, to), format, state.chips.markdown),
     };
   });

@@ -4,14 +4,19 @@ import { referenceByKey } from "@/lib/reference-data";
 import { REFERENCE_KEY_RE, type CslItem } from "@/lib/references/csl";
 import { referenceEntry } from "@/lib/references/entry";
 import { normalizeDoi } from "@/lib/references/identifiers";
+import { prisma } from "@/lib/prisma";
+import { publishedPostWhere } from "@/lib/post-status";
+import { postListOrderBy } from "@/lib/post-pages";
+import PostListing, { postListingInclude } from "@/components/PostListing";
+import CitedBy from "./CitedBy";
 import styles from "./page.module.css";
 
 // docs/CITATIONS.md, "Pages" — a reference's own page. **Public**: a
-// published post's citations link here, and it shows only what a
-// bibliography prints. So it reads no session and is cached like an author
-// page; anything only some viewers may see (the docs and notes that cite the
-// work, its PDF) belongs in a client island that asks the server on open, as
-// `TagChips` keeps the post page static.
+// published post's citations link here, and it shows what a bibliography
+// prints and the published posts citing the work. So it reads no session and
+// is cached like an author page; what only some viewers may see (the docs
+// and notes that cite the work, its PDF) is CitedBy, a client island that
+// asks the server on open, as `TagChips` keeps the post page static.
 //
 // A key the reference used to have redirects to the one it has now, the way
 // an author's old handle does.
@@ -51,6 +56,12 @@ export default async function ReferencePage({ params }: { params: Promise<{ key:
 
   const { item } = reference;
   const doi = item.DOI ? normalizeDoi(item.DOI) : null;
+  // Found by identity in the trigger-kept `citation` table, as search finds them (`cites=`).
+  const posts = await prisma.post.findMany({
+    where: { ...publishedPostWhere(), citations: { some: { referenceId: reference.id } } },
+    orderBy: postListOrderBy,
+    include: postListingInclude,
+  });
   return (
     <main className={styles.container}>
       <p className={styles.kicker}>Reference · {reference.key}</p>
@@ -91,6 +102,13 @@ export default async function ReferencePage({ params }: { params: Promise<{ key:
           )}
         </tbody>
       </table>
+      {posts.length > 0 && (
+        <section className={styles.citedIn}>
+          <h2>Cited in posts</h2>
+          <PostListing posts={posts} emptyMessage="" />
+        </section>
+      )}
+      <CitedBy referenceId={reference.id} referenceKey={reference.key} />
     </main>
   );
 }

@@ -4,6 +4,7 @@
 
 import { MarkdownManager } from "@tiptap/markdown";
 import { decodeHTML } from "entities";
+import { Marked, marked } from "marked";
 import { Extension, type JSONContent, type MarkdownParseHelpers, type MarkdownToken } from "@tiptap/core";
 import {
   annotationContentExtensions,
@@ -17,6 +18,8 @@ import {
   tableExtensions,
 } from "./tiptap-schema";
 import { blockText } from "./doc-text";
+import { CITATION } from "./entity-chips/kinds/citation";
+import { citationShapedAts, citationStart, guardBareKey, readCitation } from "./entity-chips/kinds/citation-markdown";
 import { MENTION, MENTION_HREF_PREFIX } from "./entity-chips/kinds/mention";
 import { EntityChip } from "./entity-chips/node";
 import { isChip } from "./entity-chips/text";
@@ -170,25 +173,36 @@ function splitCodeAtFormatting(json: JSONContent): JSONContent {
 // from) and handed over on the node as `md`: the serializer meets one node at
 // a time and has no chip context.
 //
-// A mention's syntax is a link, `[@Label](/authors/slug)`, so a link someone
-// wrote by hand with that shape has to be told apart from one. It is written
-// with its `@` escaped, `[\@Andrew](/authors/andrew)`, which CommonMark reads
-// as the same link text. The lowering stays one-to-one: nothing in a doc's
-// text reads back as a chip that wasn't one.
+// The writer escapes what would otherwise read back as a chip, so the
+// lowering stays one-to-one: nothing in a doc's text reads back as a chip
+// that wasn't one.
 //
-// The serializer has no hook for that escape: a mark's `renderMarkdown` is
+// - A mention's syntax is a link, `[@Label](/authors/slug)`, so a link
+//   someone wrote by hand with that shape is written with its `@` escaped,
+//   `[\@Andrew](/authors/andrew)`, which CommonMark reads as the same link
+//   text.
+// - A citation's is Pandoc's, so text reading `@radner2012` is written
+//   `\@radner2012` (`citationShapedAts`), and hand-written `[@radner2012]`
+//   comes out as `\[\@radner2012\]`, the serializer escaping the brackets.
+// - Text beside a citation can't change it (docs/CITATIONS.md, "Text beside a
+//   chip"): a `(` or `:` straight after a bracketed chip is escaped, since
+//   `[@radner2012](sic)` reads as a link and `[@radner2012]: agreed.` opening
+//   a paragraph as a link reference definition, and a bare key is braced
+//   where a letter or digit before it, or key characters after it, would
+//   change it (`guardBareKey`).
+//
+// The serializer has no hook for any of this: a mark's `renderMarkdown` is
 // asked for its opening and closing around a placeholder and never sees the
-// text, and the method that escapes a text node is private. So the `@` is
-// swapped for a stand-in before the serializer runs, and the stand-in for
-// `\@` in what it wrote. The stand-in is a private-use character the doc
-// doesn't hold, checked per doc, since extracted PDF text can hold any.
+// text, and the methods that escape a text node are private and see no
+// sibling. So a stand-in is put wherever a backslash belongs before the
+// serializer runs, and replaced with one in what it wrote. The stand-in is a
+// private-use character the doc doesn't hold, checked per doc, since
+// extracted PDF text can hold any.
 
 /** Whether `node`, child `index` of `parent`, is the text a mention-shaped link opens with. */
 function opensMentionShapedLink(node: JSONContent, parent: JSONContent | undefined, index: number): boolean {
   if (node.type !== "text" || !node.text?.startsWith("@")) return false;
   const marks = node.marks ?? [];
-  // Inside code the `@` is literal either way, and a backslash would be too.
-  if (marks.some((mark) => mark.type === "code")) return false;
   const href = marks.find((mark) => mark.type === "link")?.attrs?.href;
   if (typeof href !== "string" || !href.startsWith(MENTION_HREF_PREFIX)) return false;
   // Only the link's first text: the parse reads a mention off how the link's text starts.
@@ -196,26 +210,59 @@ function opensMentionShapedLink(node: JSONContent, parent: JSONContent | undefin
   return !previous?.marks?.some((mark) => mark.type === "link" && mark.attrs?.href === href);
 }
 
-/**
- * `json` serialized by `manager`, with the `@` that opens a hand-written
- * mention-shaped link escaped.
- */
-function serializeEscapingMentionShapes(manager: MarkdownManager, json: JSONContent): string {
-  let found = false;
-  const mark = (node: JSONContent, parent: JSONContent | undefined, index: number, standIn: string): JSONContent => {
-    if (opensMentionShapedLink(node, parent, index)) {
-      found = true;
-      return { ...node, text: standIn + node.text!.slice(1) };
-    }
-    return node.content ? { ...node, content: node.content.map((child, i) => mark(child, node, i, standIn)) } : node;
-  };
+/** A chip's Markdown, as `withChipMarkdown` put it on the node; "" for anything else. */
+function chipMd(node: JSONContent | undefined): string {
+  return node && isChip(node) && typeof node.attrs?.md === "string" ? node.attrs.md : "";
+}
+
+/** What a neighbour of a chip reads as, for the chip's guards: its text, or its own Markdown. */
+function neighbourText(node: JSONContent | undefined): string {
+  if (!node) return "";
+  if (node.type === "text") return node.text ?? "";
+  return chipMd(node);
+}
+
+/** `json` serialized by `manager`, with a backslash wherever its text alone would read back as something else (above). */
+function serializeWithEscapes(manager: MarkdownManager, json: JSONContent): string {
   const source = JSON.stringify(json);
   let code = 0xe000;
   while (source.includes(String.fromCharCode(code))) code += 1;
-  const standIn = String.fromCharCode(code);
-  const marked = mark(json, undefined, 0, standIn);
-  const markdown = manager.serialize(found ? marked : json);
-  return found ? markdown.replaceAll(standIn, "\\@") : markdown;
+  const slash = String.fromCharCode(code);
+  let found = false;
+
+  const visit = (node: JSONContent): JSONContent => {
+    // Inside code a backslash is literal, and so is everything it would escape.
+    if (node.type === "codeBlock" || !node.content) return node;
+    const siblings = node.content;
+    const content = siblings.map((child, index): JSONContent => {
+      const previous = siblings[index - 1];
+      if (isChip(child)) {
+        const md = chipMd(child);
+        const guarded = md && guardBareKey(md, neighbourText(previous).slice(-1) || undefined, neighbourText(siblings[index + 1]));
+        return guarded && guarded !== md ? { ...child, attrs: { ...child.attrs, md: guarded } } : child;
+      }
+      if (child.type !== "text" || typeof child.text !== "string") return visit(child);
+      if (child.marks?.some((mark) => mark.type === "code")) return child;
+      // Link text holds no citation, so only a mention's shape is escaped there.
+      const inLink = child.marks?.some((mark) => mark.type === "link") ?? false;
+      const offsets = new Set(inLink ? [] : citationShapedAts(child.text));
+      if (opensMentionShapedLink(child, node, index)) offsets.add(0);
+      if (/^[:(]/.test(child.text) && chipMd(previous).endsWith("]")) offsets.add(0);
+      if (offsets.size === 0) return child;
+      found = true;
+      let text = "";
+      let done = 0;
+      for (const offset of [...offsets].sort((a, b) => a - b)) {
+        text += child.text.slice(done, offset) + slash;
+        done = offset;
+      }
+      return { ...child, text: text + child.text.slice(done) };
+    });
+    return { ...node, content };
+  };
+
+  const markdown = manager.serialize(visit(json));
+  return found ? markdown.replaceAll(slash, "\\") : markdown;
 }
 
 const ChipMarkdown = EntityChip.extend({
@@ -225,9 +272,10 @@ const ChipMarkdown = EntityChip.extend({
 const docMarkdownManager = new MarkdownManager({ extensions: [...contentExtensions, ChipMarkdown] });
 
 // The other direction (MCP item 2): Markdown read with each chip kind's
-// syntax taken for a chip. Only the paths that ask for it parse this way (an
-// MCP edit, an MCP note); an import, a comment and a post never do, so a
-// pasted `[@x](/authors/x)` stays the link it says it is.
+// syntax taken for a chip. Only the paths that ask for it parse this way
+// (MCP's doc and note writes, /docs' Markdown import, and a quote's chip
+// form, `withQuoteChips`); a comment and a post never do, so `[@x](/authors/x)`
+// pasted into a comment stays the link it says it is.
 //
 // The parse keys on the syntax, never on the label: a link to an author page
 // whose text opens with a literal `@`. marked tells that `@` from an escaped
@@ -239,12 +287,63 @@ const docMarkdownManager = new MarkdownManager({ extensions: [...contentExtensio
 // each to an account, under the chip kind's own rule for who may be named
 // (`resolveParsedChips`), before anything is stored.
 //
+// A citation is Pandoc's syntax (citation-markdown.ts), read by a tokenizer
+// of its own into the same kind of placeholder, holding the keys it named.
+//
 // The link is replaced where StarterKit's own stands, since a mark's place in
 // the list is its rank (tiptap-schema.ts), and the first handler registered
 // for a token is the one the parser uses.
+
+const CITATION_TOKEN = "citation";
+
+/**
+ * `tokens` with each citation put back as the text it was read from. Link
+ * text holds no citation (docs/CITATIONS.md, "Markdown"): a chip can't carry
+ * a link, so a citation there would cost the link, and
+ * `[@handle](https://x.com/handle)` is a link, not an unknown key.
+ */
+function citationsAsText(tokens: readonly MarkdownToken[] | undefined): MarkdownToken[] {
+  return (tokens ?? []).map((token) =>
+    token.type === CITATION_TOKEN
+      ? { type: "text", raw: token.raw, text: token.raw }
+      : token.tokens
+        ? { ...token, tokens: citationsAsText(token.tokens) }
+        : token,
+  );
+}
+
+const CitationParsing = Extension.create({
+  name: "citationParsing",
+  markdownTokenName: CITATION_TOKEN,
+  markdownTokenizer: {
+    name: CITATION_TOKEN,
+    level: "inline",
+    start: citationStart,
+    tokenize: (src, tokens) => {
+      const before = tokens[tokens.length - 1]?.raw?.slice(-1);
+      const citation = readCitation(src, before || undefined);
+      return citation ? { type: CITATION_TOKEN, raw: citation.raw, citation } : undefined;
+    },
+  },
+  parseMarkdown: (token) => {
+    const citation = token.citation as ReturnType<typeof readCitation>;
+    if (!citation) return [];
+    return {
+      type: ENTITY_CHIP,
+      attrs: {
+        kind: CITATION,
+        iid: "",
+        // `label` is the Markdown it was read from, for a title taken from a heading.
+        data: { items: citation.items, ...(citation.narrative ? { form: "narrative" } : {}), label: citation.raw },
+      },
+    };
+  },
+});
+
 const ChipParsingLink = Link.extend({
   parseMarkdown: (token, helpers) => {
     const href = typeof token.href === "string" ? token.href : "";
+    token = { ...token, tokens: citationsAsText(token.tokens) };
     const first = token.tokens?.[0];
     if (href.startsWith(MENTION_HREF_PREFIX) && first?.type === "text" && String(first.raw ?? "").startsWith("@")) {
       const slug = href.slice(MENTION_HREF_PREFIX.length);
@@ -268,7 +367,12 @@ const ChipParsingKit = StarterKit.extend({
   },
 });
 
-const docChipParser = new MarkdownManager({ extensions: [ChipParsingKit, ...tableExtensions] });
+// Each chip parser has a marked instance of its own: a tokenizer is
+// registered on the instance, and on the shared one the citation's would also
+// run in the comment parse, which has no chip node and would drop "@Andrew".
+const chipMarked = () => new Marked() as unknown as typeof marked;
+
+const docChipParser = new MarkdownManager({ marked: chipMarked(), extensions: [ChipParsingKit, CitationParsing, ...tableExtensions] });
 
 /** `json` with each chip carrying its Markdown as `md`, for `ChipMarkdown` to write. */
 function withChipMarkdown(json: JSONContent, chipMarkdown: ReadonlyMap<string, string>): JSONContent {
@@ -290,15 +394,20 @@ function withChipMarkdown(json: JSONContent, chipMarkdown: ReadonlyMap<string, s
  */
 export function docContentToMarkdown(json: JSONContent, chipMarkdown?: ReadonlyMap<string, string>): string {
   const stripped = stripMarksFromDoc(json, ["annotation", "authorHighlight"]);
-  return serializeEscapingMentionShapes(
+  return serializeWithEscapes(
     docMarkdownManager,
     splitCodeAtFormatting(chipMarkdown ? withChipMarkdown(stripped, chipMarkdown) : stripped),
   );
 }
 
-/** A published post's content (contentExtensions JSON) as Markdown. A post holds no chip, and its links are written as they are. */
+/**
+ * A published post's content (contentExtensions JSON) as Markdown. A post
+ * holds no chip, but its text is escaped as a doc's is, so it can be sent to
+ * `create_doc` as it reads: a mention's label at publish, "@Ada Lovelace", is
+ * text that would otherwise read back as a citation.
+ */
 export function postContentToMarkdown(json: JSONContent): string {
-  return markdownManager.serialize(splitCodeAtFormatting(json));
+  return serializeWithEscapes(markdownManager, splitCodeAtFormatting(json));
 }
 
 /**
@@ -481,7 +590,10 @@ const annotationMarkdownManager = new MarkdownManager({
   extensions: [...annotationContentExtensions, commentMarkdownShims[2]],
 });
 
-const annotationChipParser = new MarkdownManager({ extensions: [ChipParsingKit, commentMarkdownShims[2]] });
+const annotationChipParser = new MarkdownManager({
+  marked: chipMarked(),
+  extensions: [ChipParsingKit, CitationParsing, commentMarkdownShims[2]],
+});
 
 // The writer: the same list with the doc writer's chip and its escape
 // (above), which a note's body shares with a doc's.
@@ -497,7 +609,7 @@ const annotationMarkdownWriter = new MarkdownManager({
  */
 export function annotationContentToMarkdown(json: JSONContent, chipMarkdown?: ReadonlyMap<string, string>): string {
   const stripped = stripMarksFromDoc(json, ["authorHighlight"]);
-  return serializeEscapingMentionShapes(
+  return serializeWithEscapes(
     annotationMarkdownWriter,
     splitCodeAtFormatting(chipMarkdown ? withChipMarkdown(stripped, chipMarkdown) : stripped),
   );

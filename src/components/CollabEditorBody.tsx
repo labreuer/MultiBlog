@@ -19,6 +19,8 @@ import EditorToolbar from "./EditorToolbar";
 import DocRefMenu from "./DocRefMenu";
 import MentionMenu from "./MentionMenu";
 import CiteMenu from "./CiteMenu";
+import CitePopover from "./CitePopover";
+import LiveBibliography from "./bibliography/LiveBibliography";
 import { EDITOR_SCROLL_ATTRIBUTE } from "./editor-scroll";
 import styles from "./EditorChrome.module.css";
 import proseStyles from "@/styles/prose.module.css";
@@ -146,6 +148,8 @@ export default function CollabEditorBody({
   // from two places — the toolbar's "Table from file…" item and the drop
   // handler below — and cleared by either's next success or the ×.
   const [notice, setNotice] = useState<string | null>(null);
+  // The scrolling box the editor's text sits in, for the bibliography to follow the text inside it.
+  const [contentElement, setContentElement] = useState<HTMLDivElement | null>(null);
   // handleDrop below is written into editorProps at construction and
   // closes over nothing reactive; the editor it inserts into is the one
   // being built, reached through this ref.
@@ -336,6 +340,7 @@ export default function CollabEditorBody({
           know which band of text is on screen — the page doesn't scroll here,
           this does. Harmless on the embedders that have no rail. */}
       <EditorContent
+        ref={setContentElement}
         editor={editor}
         {...{ [EDITOR_SCROLL_ATTRIBUTE]: "" }}
         className={`${styles.editorContent} ${proseStyles.prose} ${suppressAnnotations ? proseStyles.noAnnotations : ""}`}
@@ -343,9 +348,12 @@ export default function CollabEditorBody({
       {/* "[[" at the caret — a doc reference dropped into running text.
           Beside the editor rather than in the toolbar, since the annotation
           editor's toolbar is hidden by default and this shouldn't be. */}
+      {/* docs/CITATIONS.md, "The bibliography": inside the scrolling box, after the text. */}
+      <LiveBibliography editor={editor} host={contentElement} />
       <DocRefMenu editor={editor} disabled={!editable} />
       <MentionMenu editor={editor} disabled={!editable} />
       <CiteMenu editor={editor} disabled={!editable} />
+      <CitePopover editor={editor} disabled={!editable} />
     </div>
   );
 }

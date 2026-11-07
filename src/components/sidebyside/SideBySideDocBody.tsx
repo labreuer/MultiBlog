@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { EditorContent, type Editor, type JSONContent } from "@tiptap/react";
+import LiveBibliography from "@/components/bibliography/LiveBibliography";
 import { DocLink, setDocLinks, type ResolvedDocLink } from "@/lib/doc-link-extension";
 import { createDocLinkResolver, captureAnchor, type DocLinkInput } from "@/lib/doc-link-anchor";
 import { useLiveDocContent } from "@/lib/use-live-doc-content";
@@ -234,6 +235,7 @@ export default function SideBySideDocBody({
         style={{ display: ready ? "block" : "none" }}
       >
         <EditorContent editor={editor} />
+        <LiveBibliography editor={editor} />
       </div>
       {pending && editor && (
         <DocLinkPopover

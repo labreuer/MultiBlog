@@ -27,6 +27,8 @@ import styles from "./page.module.css";
 // link like "All 12 docs" has just changed.
 
 const DATE_FIELDS = ["created_from", "created_to", "updated_from", "updated_to"] as const;
+// docs/CITATIONS.md, "Search": what cites a work, by its key, its title or its author.
+const CITED_FIELDS = ["cites", "cited_title", "cited_author"] as const;
 
 function browserTimeZone(): string | null {
   try {
@@ -57,8 +59,8 @@ export default function SearchForm({
       const values = data.getAll(name).map(String).filter(Boolean);
       if (values.length > 0) query.set(name, values.join(","));
     }
-    for (const name of DATE_FIELDS) {
-      const value = String(data.get(name) ?? "");
+    for (const name of [...CITED_FIELDS, ...DATE_FIELDS]) {
+      const value = String(data.get(name) ?? "").trim();
       if (value) query.set(name, value);
     }
     const zone = browserTimeZone();
@@ -123,6 +125,20 @@ export default function SearchForm({
               ))}
             </fieldset>
           )}
+
+          {/* "Cites", not "by": the author here wrote the work cited, not the item found. */}
+          <fieldset className={styles.fieldset}>
+            <legend>Cites a work</legend>
+            <label className={styles.text}>
+              with the key <input type="text" name="cites" defaultValue={params.cites.join(", ")} placeholder="radner2012" />
+            </label>
+            <label className={styles.text}>
+              titled <input type="text" name="cited_title" defaultValue={params.citedTitle} />
+            </label>
+            <label className={styles.text}>
+              by <input type="text" name="cited_author" defaultValue={params.citedAuthor} />
+            </label>
+          </fieldset>
 
           <fieldset className={styles.fieldset}>
             <legend>Created</legend>

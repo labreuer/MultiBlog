@@ -22,6 +22,9 @@ test("an empty querystring is every default", () => {
     kinds: null,
     authors: [],
     mentions: [],
+    cites: [],
+    citedTitle: "",
+    citedAuthor: "",
     created: { from: null, to: null },
     updated: { from: null, to: null },
     tz: "UTC",
@@ -104,6 +107,19 @@ test("mention handles must look like slugs, me among them, and a filter by one i
   assert.deepEqual(parse("mentions=Ada,../x,@me").mentions, []);
   assert.equal(hasFilters(parse("mentions=me")), true);
   assert.equal(searchQueryString(parse("q=budget&mentions=me,ada")), "?q=budget&mentions=me%2Cada");
+});
+
+// docs/CITATIONS.md, "Search" — what cites a work, by its key, its title or its author.
+
+test("cited-work filters: keys as a citation writes them, and text trimmed and capped", () => {
+  assert.deepEqual(parse("cites=radner2012,@Barfield1957, radner2012,../x").cites, ["radner2012", "barfield1957"]);
+  assert.equal(parse(`cited_title=%20${"a".repeat(150)}`).citedTitle.length, 100);
+  for (const query of ["cites=radner2012", "cited_title=origin", "cited_author=radner"]) assert.equal(hasFilters(parse(query)), true, query);
+  assert.equal(hasFilters(parse("cited_title=%20%20")), false);
+  assert.equal(
+    searchQueryString(parse("q=ideas&cites=radner2012&cited_title=The%20Origin&cited_author=radner")),
+    "?q=ideas&cites=radner2012&cited_title=The+Origin&cited_author=radner",
+  );
 });
 
 test("an @handle word in the box is a mention filter, and the rest is the text", () => {

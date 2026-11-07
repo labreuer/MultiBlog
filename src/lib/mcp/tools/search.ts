@@ -2,7 +2,9 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { search, PAGE_SIZE, OVERVIEW_SIZE } from "@/lib/search";
-import { SEARCH_KINDS, DEFAULT_TIME_ZONE, isTimeZone, parseDay, type SearchParams } from "@/lib/search/params";
+import { SEARCH_KINDS, DEFAULT_TIME_ZONE, isTimeZone, MAX_CITED_LENGTH, parseDay, type SearchParams } from "@/lib/search/params";
+import { REFERENCE_KEY_RE } from "@/lib/references/csl";
+import { referencesByKeys } from "@/lib/reference-data";
 import { isEmptyQuery, websearchQuery, headlineTexts, sqlConfig, type TsQuery } from "@/lib/search/sql";
 import { correctQuery } from "@/lib/search/correct";
 import { matchPages, pageSnippets } from "@/lib/search/pdfs";
@@ -48,6 +50,14 @@ const input = z.strictObject({
     .max(20)
     .optional()
     .describe("Author slugs, or me for yourself: docs, posts and annotations that mention any of them."),
+  cites: z
+    .array(z.string().regex(REFERENCE_KEY_RE, "a reference key"))
+    .min(1)
+    .max(20)
+    .optional()
+    .describe(`Reference keys, from ${listedName("find_refs")}: docs, posts and annotations citing any of them.`),
+  cited_title: z.string().min(1).max(MAX_CITED_LENGTH).optional().describe("Docs, posts and annotations citing a work whose title has these words."),
+  cited_author: z.string().min(1).max(MAX_CITED_LENGTH).optional().describe("Docs, posts and annotations citing a work by someone with these names."),
   created_from: day.optional(),
   created_to: day.optional(),
   updated_from: day.optional(),
@@ -97,6 +107,9 @@ export async function runSearch(
     kinds: args.kinds ? SEARCH_KINDS.filter((kind) => args.kinds!.includes(kind)) : null,
     authors: args.authors ?? [],
     mentions: args.mentions ?? [],
+    cites: args.cites ?? [],
+    citedTitle: args.cited_title?.trim() ?? "",
+    citedAuthor: args.cited_author?.trim() ?? "",
     created: { from: args.created_from ?? null, to: args.created_to ?? null },
     updated: { from: args.updated_from ?? null, to: args.updated_to ?? null },
     tz: args.tz ?? DEFAULT_TIME_ZONE,
@@ -104,6 +117,13 @@ export async function runSearch(
     exact: args.exact ?? false,
   };
   const tagIds = args.tags ? await tagIdsFor(args.tags) : [];
+  // A key nothing has is refused, as a tag is; the page narrows to nothing instead. A reference's record is
+  // public, so saying which keys exist tells nobody anything.
+  if (params.cites.length > 0) {
+    const found = await referencesByKeys(params.cites);
+    const unknown = params.cites.filter((key) => !found.has(key));
+    if (unknown.length > 0) throw invalid(`No reference has that key. ${listedName("find_refs")} lists the library.`, { keys: unknown.slice(0, ERROR_LIST_CAP) });
+  }
   const result = await search(searchActorOf(ctx.actor), params, {
     pageSize: oneKind ? cursor.size : OVERVIEW_SIZE,
     tagIds,
@@ -117,7 +137,7 @@ export async function runSearch(
     throw new ApiError("unknown_author", "No author you can see has that slug.", { slugs: refused.slice(0, ERROR_LIST_CAP) });
   }
   if (result.status === "idle") {
-    throw invalid("Give q, or a filter (kinds, authors, tags, mentions or a date) to list by.");
+    throw invalid("Give q, or a filter (kinds, authors, tags, mentions, a cited work or a date) to list by.");
   }
   return shapeSearch(result, (section) =>
     oneKind && cursor.offset + cursor.size < section.total
@@ -224,7 +244,7 @@ export const searchTool = defineTool({
   name: "search",
   scope: "READ",
   description: (who) =>
-    `Search MultiBlog, this person's research archive: docs, PDFs, their notes on passages, links, tags, posts, comments and imported Claude chats. You act as ${who.actor}, on a token issued by ${who.issuer ?? "the same account"}. Find by full-text query (stemmed, accent-folded) over what you can read, or list by filter: kinds, authors, tags, dates. Dates are UTC days; tz moves only the date filters. A call needs q or a filter; with no q, a filter lists what it selects, newest first. Pass exact:true whenever the question is whether something exists: otherwise a typo is corrected when nothing matched, and the answer says corrected:true. One handle per hit, its url (an annotation's is its id): cite what you use by its URL. A doc hit's passage is one ${listedName("read")} away, with around set to a phrase from inside its snippet's fragment. within a doc ranks its sections, each with its blocks for a ranged read; within a PDF, every matching page.`,
+    `Search MultiBlog, this person's research archive: docs, PDFs, their notes on passages, links, tags, posts, comments and imported Claude chats. You act as ${who.actor}, on a token issued by ${who.issuer ?? "the same account"}. Find by full-text query (stemmed, accent-folded) over what you can read, or list by filter: kinds, authors, tags, cited works, dates. Dates are UTC days; tz moves only the date filters. A call needs q or a filter; with no q, a filter lists what it selects, newest first. Pass exact:true whenever the question is whether something exists: otherwise a typo is corrected when nothing matched, and the answer says corrected:true. One handle per hit, its url (an annotation's is its id): cite what you use by its URL. A doc hit's passage is one ${listedName("read")} away, with around set to a phrase from inside its snippet's fragment. within a doc ranks its sections, each with its blocks for a ranged read; within a PDF, every matching page.`,
   input,
   output,
   readOnly: true,
@@ -234,7 +254,7 @@ export const searchTool = defineTool({
   async run(args, ctx) {
     if (args.within !== undefined) {
       if (!args.q?.trim()) throw invalid("within ranks text: give q.");
-      for (const key of ["kinds", "authors", "tags", "created_from", "created_to", "updated_from", "updated_to"] as const) {
+      for (const key of ["kinds", "authors", "tags", "mentions", "cites", "cited_title", "cited_author", "created_from", "created_to", "updated_from", "updated_to"] as const) {
         if (args[key] !== undefined) throw invalid(`${key} doesn't apply within one object.`);
       }
       const container = await readableContainer(ctx.actor, args.within);

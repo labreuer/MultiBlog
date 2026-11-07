@@ -85,8 +85,8 @@ test("parse: the label is never read, and only the syntax counts", () => {
   assert.ok(!isChipAt("[**@Ada**](/authors/ada)"));
   assert.ok(!isChipAt("[@Ada](/authors/ada/extra)"));
   assert.ok(!isChipAt("[@Ada](https://example.com/authors/ada)"));
-  // And a bare @name is text.
-  assert.ok(!isChipAt("ask @ada about it"));
+  // And a bare @name is no mention: it is a citation's syntax (citation-markdown.test.ts).
+  assert.ok(!parsed("ask @ada about it").some((node) => node.type === "entityChip" && node.attrs?.kind === MENTION));
 });
 
 test("round trip: what a read writes for a chip parses back to that chip's handle, and a hand-written link to a link", () => {
@@ -163,7 +163,8 @@ test("merge: new words beside a kept mention are the actor's, and the old ones k
 // --- the refusals ----------------------------------------------------------
 
 test("refused: a mention sent back as its name in plain words", () => {
-  for (const typed of ["Ask @Ada Lovelace about the loom", "Ask Ada Lovelace about the loom", "Ask ada  lovelace about the loom"]) {
+  // Unescaped, "@Ada" would be read as a citation's key, and refused before the merge as one the library lacks.
+  for (const typed of ["Ask \\@Ada Lovelace about the loom", "Ask Ada Lovelace about the loom", "Ask ada  lovelace about the loom"]) {
     const result = planEdits(DOC, [replace("Ask @Ada Lovelace about the engine", md(typed))], options);
     assert.equal(result.ok, false, typed);
     assert.ok(!result.ok && result.refusal.code === "chip_as_text" && result.refusal.edit === -1, typed);
@@ -244,8 +245,8 @@ test("write-back: a kept chip survives the ydoc round trip with its instance id,
 
 // --- a chip that continues another (MCP item 5) ------------------------------
 //
-// At the merge itself: no Markdown reads a citation back yet, so no edit
-// reaches this through `planEdits`.
+// At the merge itself. An edit reaches it by a citation's Markdown, as
+// `[@a; @b]` sent where `[@a]` was (citation-markdown.ts).
 
 const cite = (iid: string, ...refIds: string[]): JSONContent => ({
   type: "entityChip",

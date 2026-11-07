@@ -38,6 +38,27 @@ export async function referenceByKey(key: string): Promise<ReferenceRow | null> 
   return historic ? toRow(historic.reference) : null;
 }
 
+/**
+ * The references these keys name, or once named, by the key asked: each one's
+ * id and whether it is deleted. A key nothing answers to is absent. For the
+ * Markdown parse, which names works by key (parsed-chips.ts).
+ */
+export async function referencesByKeys(keys: readonly string[]): Promise<Map<string, { id: string; deleted: boolean }>> {
+  const found = new Map<string, { id: string; deleted: boolean }>();
+  if (keys.length === 0) return found;
+  const direct = await prisma.reference.findMany({ where: { key: { in: [...keys] } }, select: { id: true, key: true, deletedAt: true } });
+  for (const row of direct) found.set(row.key, { id: row.id, deleted: row.deletedAt !== null });
+  const rest = keys.filter((key) => !found.has(key));
+  if (rest.length > 0) {
+    const historic = await prisma.referenceKeyHistory.findMany({
+      where: { key: { in: rest } },
+      select: { key: true, reference: { select: { id: true, deletedAt: true } } },
+    });
+    for (const row of historic) found.set(row.key, { id: row.reference.id, deleted: row.reference.deletedAt !== null });
+  }
+  return found;
+}
+
 /** The references with these ids, by id, deleted ones included: a citation's context. */
 export async function referencesById(ids: readonly string[]): Promise<Map<string, ReferenceRow>> {
   if (ids.length === 0) return new Map();
@@ -51,6 +72,26 @@ export async function referencesById(ids: readonly string[]): Promise<Map<string
  * people, container and year. A word still being typed matches as a prefix,
  * so "radn" finds Radner.
  */
+/**
+ * The ids of the references a cited-work filter names (docs/CITATIONS.md,
+ * "Search"): each word as a prefix, ANDed, over the title (the vector's
+ * weight A, which holds the key and abbreviation too) or over the people
+ * (weight B, authors and editors). Deleted references included, since a
+ * citation of one still names the work.
+ */
+export async function referenceIdsMatching(text: string, field: "title" | "author"): Promise<string[]> {
+  const words = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  if (words.length === 0) return [];
+  const weight = field === "title" ? "A" : "B";
+  // Built from the words alone, so nothing typed is tsquery syntax.
+  const tsquery = words.map((word) => `${word}:*${weight}`).join(" & ");
+  const rows = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+    SELECT r.id
+    FROM "reference" r, to_tsquery('public.english_unaccent', ${tsquery}) AS query
+    WHERE r.search_vector @@ query`);
+  return rows.map((row) => row.id);
+}
+
 export async function findReferences(query: string, limit: number): Promise<ReferenceRow[]> {
   const q = query.trim();
   if (!q) return [];

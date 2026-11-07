@@ -11,7 +11,7 @@ import { readableDocsWhere } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { parseHeadline } from "./headline";
 import { orderNewest, orderRanked, rankRows, snippetsFor } from "./sql";
-import { mentionedWhere, remember, taggedWhere, type KindContext, type KindSearch } from "./context";
+import { citedWhere, mentionedWhere, remember, taggedWhere, type KindContext, type KindSearch } from "./context";
 import type { DocHit } from "./types";
 
 /**
@@ -34,6 +34,7 @@ function candidates(ctx: KindContext): Promise<Map<string, Date>> {
           ctx.updated ? { updatedAt: ctx.updated } : {},
           taggedWhere(ctx.tagIds),
           mentionedWhere(ctx.mentionIds),
+          citedWhere(ctx.citedIds),
         ],
       },
       select: { id: true, updatedAt: true },

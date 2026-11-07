@@ -1,4 +1,5 @@
 import type { Node as PMNode } from "@tiptap/pm/model";
+import { chipIdentity } from "./entity-chips/renderings";
 import { anchorLeafText, chipDisplayText, isChip, type ChipLabels } from "./entity-chips/text";
 
 // PLAN.md §23n — the quote matcher, pure and browser-safe: given a comment
@@ -113,14 +114,52 @@ export type FlatTarget = {
   positions: number[];
   /** The labels the chips were flattened with, which a hit is verified against. */
   labels?: ChipLabels;
+  /** What a chip reads as in `text`, which a hit is verified against: its label, or its identity's code. */
+  chipText?: (chip: PMNode) => string;
 };
 
 export function flattenForMatch(node: PMNode, labels?: ChipLabels): FlatTarget {
+  const target = flatten(node, labels ? (chip) => chipDisplayText(chip.attrs, labels) : null);
+  return labels ? { ...target, labels } : target;
+}
+
+/**
+ * Per chip identity, one private-use character (docs/ENTITY_CHIPS.md, MCP
+ * item 3): the *identity text* a quote read through the chip parse is matched
+ * in, where a chip equals only a chip pointing at the same thing, whatever
+ * label either shows. Allocated per match, skipping every character in
+ * `taken`, since extracted PDF text can hold any private-use character.
+ */
+export type ChipCodes = (chip: PMNode) => string;
+
+export function chipCodesFor(taken: string): ChipCodes {
+  const used = new Set(taken);
+  const codes = new Map<string, string>();
+  let next = 0xe000;
+  return (chip) => {
+    const key = chipIdentity({ kind: String(chip.attrs.kind ?? ""), data: (chip.attrs.data ?? {}) as Record<string, unknown> });
+    let code = codes.get(key);
+    if (code === undefined) {
+      while (used.has(String.fromCharCode(next))) next += 1;
+      code = String.fromCharCode(next);
+      next += 1;
+      codes.set(key, code);
+    }
+    return code;
+  };
+}
+
+/** `node` flattened with each chip as its identity's code (`chipCodesFor`). No widening applies: a chip is one character. */
+export function flattenForIdentity(node: PMNode, codes: ChipCodes): FlatTarget {
+  return flatten(node, codes);
+}
+
+function flatten(node: PMNode, chipText: ((chip: PMNode) => string) | null): FlatTarget {
   const chars: string[] = [];
   const flatPositions: number[] = [];
   node.descendants((child, pos) => {
-    if (labels && isChip(child)) {
-      for (const char of chipDisplayText(child.attrs, labels)) {
+    if (chipText && isChip(child)) {
+      for (const char of chipText(child)) {
         // Per UTF-16 unit, as the text nodes above are, so the two maps agree.
         for (let i = 0; i < char.length; i++) {
           chars.push(char[i]);
@@ -153,7 +192,7 @@ export function flattenForMatch(node: PMNode, labels?: ChipLabels): FlatTarget {
   const normalized = normalizeForMatch(chars.join(""));
   return {
     node,
-    ...(labels ? { labels } : {}),
+    ...(chipText ? { chipText } : {}),
     text: normalized.text,
     positions: normalized.map.map((flatIndex) => flatPositions[flatIndex]),
   };
@@ -195,14 +234,14 @@ export function quotedTextAt(node: PMNode, from: number, to: number): string {
 
 /**
  * A range's text as the query is compared with it: `quotedTextAt`, except
- * that a chip reads as its label when the target was flattened with labels,
+ * that a chip reads as it was flattened (its label, or its identity's code),
  * since that is what the query holds there. The text a match *stores* is
  * always `quotedTextAt`'s.
  */
 function matchTextAt(target: FlatTarget, from: number, to: number): string {
-  const { labels } = target;
-  if (!labels) return quotedTextAt(target.node, from, to);
-  return target.node.textBetween(from, to, " ", (leaf) => (isChip(leaf) ? chipDisplayText(leaf.attrs, labels) : " "));
+  const { chipText } = target;
+  if (!chipText) return quotedTextAt(target.node, from, to);
+  return target.node.textBetween(from, to, " ", (leaf) => (isChip(leaf) ? chipText(leaf) : " "));
 }
 
 /** The one-line rule for "is this range the query": its normalized text equals the normalized query. */

@@ -1,5 +1,6 @@
 import { prismaIncludingDeleted } from "../../prisma";
 import { citedNames, cslOf, yearOf } from "../../references/csl";
+import { referenceEntry } from "../../references/entry";
 import type { CitationContext } from "./citation";
 
 // docs/CITATIONS.md, "Context" — each cited reference's label parts, deleted
@@ -41,6 +42,7 @@ export async function loadCitationContext(refIds: readonly string[]): Promise<Ci
       year: item ? yearOf(item) : null,
       title: item?.title ?? row.key,
       deleted: row.deletedAt !== null,
+      entry: item ? referenceEntry(item) : { authors: "", year: "n.d.", title: row.key, titleIsContainer: true, source: "" },
       file:
         row.file && row.file.visibility === "SHARED" && row.file.deletedByUserId === null
           ? { slug: row.file.slug, pageLabels: Array.isArray(labels) && labels.every((l) => typeof l === "string") ? (labels as string[]) : null }

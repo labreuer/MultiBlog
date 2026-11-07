@@ -1,0 +1,43 @@
+import type { JSONContent } from "@tiptap/core";
+import { BIBLIOGRAPHY_HEADING, citationBibliography, type Bibliography } from "@/lib/entity-chips/kinds/citation-bibliography";
+import { chipsInJSON } from "@/lib/entity-chips/renderings";
+import type { ChipInputs } from "@/lib/entity-chips/types";
+import { entryParts } from "@/lib/references/entry";
+import styles from "./Bibliography.module.css";
+
+// docs/CITATIONS.md, "The bibliography" — a doc's bibliography as markup.
+// No "use client": the reading view and side-by-side render it on the
+// server for their first paint, and LiveBibliography in the browser after.
+
+/** The list, or nothing for a doc that cites no work the context holds. */
+export default function BibliographyList({ bibliography }: { bibliography: Bibliography }) {
+  if (bibliography.items.length === 0) return null;
+  return (
+    <section className={styles.bibliography} data-bibliography={bibliography.form} aria-label={BIBLIOGRAPHY_HEADING}>
+      <h2 className={styles.heading}>{BIBLIOGRAPHY_HEADING}</h2>
+      <ul className={styles.list}>
+        {bibliography.items.map((item) => (
+          <li key={item.refId} className={`${styles.entry} ${item.deleted ? styles.deleted : ""}`} data-ref={item.refId}>
+            {item.lead && <span className={styles.lead}>{item.lead} </span>}
+            {entryParts(item.entry).map((part, index) => {
+              if (!part.title) return <span key={index}>{part.text}</span>;
+              const title = item.entry.titleIsContainer ? <i>{part.text}</i> : part.text;
+              return item.href ? (
+                <a key={index} href={item.href}>
+                  {title}
+                </a>
+              ) : (
+                <span key={index}>{title}</span>
+              );
+            })}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** The bibliography of a doc body as a static render shows it, from the inputs its labels were computed with. */
+export function StaticBibliography({ body, inputs }: { body: JSONContent; inputs: ChipInputs }) {
+  return <BibliographyList bibliography={citationBibliography(chipsInJSON(body), inputs.styles, inputs.context)} />;
+}

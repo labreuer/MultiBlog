@@ -1,4 +1,6 @@
+import type { ReferenceEntry } from "../../references/entry";
 import type { ChipKind, ChipRendering } from "../types";
+import { escapeCitationField, writeKey } from "./citation-markdown";
 
 // docs/CITATIONS.md — a citation stands for one or more works at a page: a
 // chip whose identity is the works, shown as `(BU p. 49)`, `(Radner 2012,
@@ -47,6 +49,8 @@ export type CitedWork = {
   deleted: boolean;
   /** The work's PDF, when /files holds one: its slug, and each sheet's printed label, for a link to the page cited. */
   file: { slug: string; pageLabels: string[] | null } | null;
+  /** The work as a bibliography lists it (references/entry.ts). */
+  entry: ReferenceEntry;
 };
 
 export type CitationContext = Record<string, CitedWork>;
@@ -131,7 +135,7 @@ function authorDate(work: CitedWork, suppressAuthor: boolean): string {
  * `short` label, and falls back to author-date, so a doc mixes `(BU p. 49)`
  * and `(Radner 2012, p. 49)` until the abbreviation is filled in.
  */
-function formFor(work: CitedWork, form: CitationForm): CitationForm {
+export function formFor(work: CitedWork, form: CitationForm): CitationForm {
   return form === "short" && !work.short?.trim() ? "author-date" : form;
 }
 
@@ -142,20 +146,63 @@ function itemText(item: CitationItem, form: CitationForm, label: string): string
   return [item.prefix, joined].filter(Boolean).join(" ") + (item.suffix ? `, ${item.suffix}` : "");
 }
 
-/** `/pdf/<slug>#page=<sheet>` for a locator the file's page labels name, else null. */
-function pdfHref(work: CitedWork, locator: string | undefined): string | null {
-  if (!work.file || !locator) return null;
+/**
+ * `/pdf/<slug>#page=<sheet>` for a locator the file's page labels name, else
+ * null: the first page of a range, found among the printed labels, or taken
+ * as the sheet itself for a file that has none.
+ */
+export function pdfPageHref(file: { slug: string; pageLabels: string[] | null } | null, locator: string | undefined): string | null {
+  if (!file || !locator) return null;
   const first = locator.split("–")[0].trim();
-  const labels = work.file.pageLabels;
+  const labels = file.pageLabels;
   const sheet = labels ? labels.indexOf(first) + 1 : /^\d+$/.test(first) ? Number(first) : 0;
-  return sheet > 0 ? `/pdf/${work.file.slug}#page=${sheet}` : null;
+  return sheet > 0 ? `/pdf/${file.slug}#page=${sheet}` : null;
+}
+
+/** What every label in a doc reads from the doc's citations as a whole: each work's number and its told-apart short label. */
+export type CitationLabelling = {
+  /** Each work's number by first appearance, for the numeric form. */
+  numbers: Map<string, number>;
+  /** A work's `short` label as the doc shows it: a shared abbreviation gains the year, then the key. */
+  shortLabel(work: CitedWork): string;
+};
+
+/**
+ * The doc-order facts behind the labels, from every citation in the doc in
+ * order: the labels and the bibliography both read them, so the two can't
+ * number a work differently.
+ */
+export function citationLabelling(chips: readonly CitationData[], context: CitationContext): CitationLabelling {
+  const numbers = new Map<string, number>();
+  // Which works each `short` label stands for here: two that share one are told apart.
+  const wearers = new Map<string, Set<string>>();
+  for (const data of chips) {
+    for (const item of data.items) {
+      const work = context[item.refId];
+      if (!work) continue;
+      if (!numbers.has(work.id)) numbers.set(work.id, numbers.size + 1);
+      const base = shortBase(work);
+      let ids = wearers.get(base);
+      if (!ids) wearers.set(base, (ids = new Set()));
+      ids.add(work.id);
+    }
+  }
+  // A shared short label gains the year, then the key, as two same-named people gain a qualifier.
+  const shortLabel = (work: CitedWork): string => {
+    const base = shortBase(work);
+    const sharing = [...(wearers.get(base) ?? [])].map((id) => context[id]).filter(Boolean);
+    if (sharing.length < 2 || !work.short?.trim()) return base;
+    const withYear = `${base} ${work.year ?? "n.d."}`;
+    const sameYear = sharing.filter((other) => other.short?.trim() === work.short?.trim() && other.year === work.year);
+    return sameYear.length > 1 ? `${withYear} ${work.key}` : withYear;
+  };
+  return { numbers, shortLabel };
 }
 
 export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext> = {
   name: CITATION,
-  // A citation is written out in Pandoc's syntax (below) and not yet read
-  // back: until it is, an MCP edit works around a citation, never over one.
-  readsMarkdown: false,
+  // Pandoc's syntax, written below and read by citation-markdown.ts.
+  readsMarkdown: true,
 
   validate(data) {
     if (!isRecord(data) || !Array.isArray(data.items)) return null;
@@ -193,31 +240,7 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
 
   render(chips, style, context) {
     const { form } = style;
-
-    // Numbered by first appearance in the doc, for the numeric form.
-    const numbers = new Map<string, number>();
-    // Which works each `short` label stands for here: two that share one are told apart.
-    const wearers = new Map<string, Set<string>>();
-    for (const data of chips) {
-      for (const item of data.items) {
-        const work = context[item.refId];
-        if (!work) continue;
-        if (!numbers.has(work.id)) numbers.set(work.id, numbers.size + 1);
-        const base = shortBase(work);
-        let ids = wearers.get(base);
-        if (!ids) wearers.set(base, (ids = new Set()));
-        ids.add(work.id);
-      }
-    }
-    // A shared short label gains the year, then the key, as two same-named people gain a qualifier.
-    const shortLabel = (work: CitedWork): string => {
-      const base = shortBase(work);
-      const sharing = [...(wearers.get(base) ?? [])].map((id) => context[id]).filter(Boolean);
-      if (sharing.length < 2 || !work.short?.trim()) return base;
-      const withYear = `${base} ${work.year ?? "n.d."}`;
-      const sameYear = sharing.filter((other) => other.short?.trim() === work.short?.trim() && other.year === work.year);
-      return sameYear.length > 1 ? `${withYear} ${work.key}` : withYear;
-    };
+    const { numbers, shortLabel } = citationLabelling(chips, context);
 
     return chips.map((data): ChipRendering => {
       const works = data.items.map((item) => context[item.refId]);
@@ -270,7 +293,7 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
       const page = `/references/${known[0].key}`;
       return {
         label,
-        href: pdfHref(known[0], first.locator) ?? page,
+        href: pdfPageHref(known[0].file, first.locator) ?? page,
         postHref: first.locator ? `${page}#p=${encodeURIComponent(first.locator.split("–")[0])}` : page,
         status: "live",
       };
@@ -280,17 +303,20 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
   // Pandoc's citation syntax, keyed by the works' keys, so every field
   // round-trips whatever style the doc shows: `[see @radner2012, p. 49;
   // @barfield1957]`, `[-@radner2012]`, and `@radner2012 [p. 49]` for the
-  // narrative form. A work that is gone is written with its stored id.
+  // narrative form. A work that is gone is written with its stored id. A
+  // bare key that its neighbours would change is braced by the writer, which
+  // sees them (markdown-import.ts).
   markdown(data, rendering, context) {
-    const keyOf = (item: CitationItem) => context[item.refId]?.key ?? item.refId;
-    const after = (item: CitationItem) => [item.locator ? pages(item.locator) : "", item.suffix ?? ""].filter(Boolean).join(", ");
+    const keyOf = (item: CitationItem) => writeKey(context[item.refId]?.key ?? item.refId);
+    const after = (item: CitationItem) =>
+      escapeCitationField([item.locator ? pages(item.locator) : "", item.suffix ?? ""].filter(Boolean).join(", "));
     let out: string;
     if (data.form === "narrative") {
       const [item] = data.items;
-      out = `@${keyOf(item)}${after(item) ? ` [${after(item)}]` : ""}`;
+      out = `${keyOf(item)}${after(item) ? ` [${after(item)}]` : ""}`;
     } else {
       out = `[${data.items
-        .map((item) => `${item.prefix ? `${item.prefix} ` : ""}${item.suppressAuthor ? "-" : ""}@${keyOf(item)}${after(item) ? `, ${after(item)}` : ""}`)
+        .map((item) => `${item.prefix ? `${escapeCitationField(item.prefix)} ` : ""}${item.suppressAuthor ? "-" : ""}${keyOf(item)}${after(item) ? `, ${after(item)}` : ""}`)
         .join("; ")}]`;
     }
     return rendering.status === "live" ? out : `~~${out}~~`;
