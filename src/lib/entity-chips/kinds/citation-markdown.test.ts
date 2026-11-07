@@ -6,7 +6,7 @@ import { mergeTextblock } from "../../doc-edit";
 import { pmDocContentSchema } from "../../tiptap-schema";
 import { chipMarkdowns, chipsIn } from "../renderings";
 import { DEFAULT_CHIP_STYLES } from "../types";
-import { CITATION, type CitationContext, type CitedWork } from "./citation";
+import { CITATION, citationKind, type CitationContext, type CitedWork } from "./citation";
 import { citationShapedAts, guardBareKey, readCitation, writeKey } from "./citation-markdown";
 
 // docs/CITATIONS.md, "Markdown" — a citation in Pandoc's syntax: what the
@@ -233,6 +233,26 @@ test("round trip: a mark that stops at a chip leaves its space outside, where th
   // A note's body is parsed the same way.
   const note = markdownToAnnotationContent("**see [@radner2012]**", { chips: true }).content?.[0].content ?? [];
   assert.deepEqual(shape(note), ["see|bold", " ", k]);
+});
+
+test("round trip: Markdown inside a citation's words, escapes and delimiters included", () => {
+  const fields = [
+    { prefix: "see *especially*", suffix: "**emphasis** added" },
+    { prefix: "\\*not italic\\*", suffix: "a `code; span` and [sic]" },
+    { prefix: "x; y @z", suffix: "ends in \\\\" },
+    { prefix: "a \\\\ b" },
+  ];
+  for (const field of fields) {
+    const stored = citationKind.validate({ items: [{ refId: "r1", ...field }] })!;
+    const doc = pmDocContentSchema.nodeFromJSON({ type: "doc", content: [para(cite("a", stored))] });
+    const markdown = docContentToMarkdown(doc.toJSON(), chipMarkdowns(chipsIn(doc), DEFAULT_CHIP_STYLES, { [CITATION]: CONTEXT }));
+    const [read] = inline(markdown);
+    assert.equal(read.type, "entityChip", markdown);
+    // The placeholder holds what the Markdown wrote; the validator stores it as the chip did.
+    const [item] = (read.attrs?.data as { items: Record<string, unknown>[] }).items;
+    const back = citationKind.validate({ items: [{ refId: "r1", prefix: item.prefix, suffix: item.suffix }] })!;
+    assert.deepEqual(back, stored, markdown);
+  }
 });
 
 test("a post's Markdown escapes a label's @, so create_doc reads it back as text", () => {

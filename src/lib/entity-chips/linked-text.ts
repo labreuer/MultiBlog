@@ -1,4 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
+import { mergeRuns } from "../inline-markdown";
 import { chipKind } from "./registry";
 import { chipRenderings, chipsInJSON } from "./renderings";
 import { ENTITY_CHIP, type ChipContext, type ChipStyles } from "./types";
@@ -30,7 +31,10 @@ function refOf(chip: { kind: string; iid: string; data: Record<string, unknown> 
  *   the chip recorded on the link;
  * - a deleted or unknown one is struck through and unlinked;
  * - a chip with nothing to show is dropped, a text node being unable to be
- *   empty.
+ *   empty;
+ * - a label with formatting (`runs`) is a text node per run, each with the
+ *   run's marks beside the link, but code, which the schema allows no other
+ *   mark beside: a code run is plain text there, still linked.
  *
  * A `chip` attribute already on a link in `doc` is cleared first. Only this
  * function may say that a link stands for a chip, and a doc's own links never
@@ -41,31 +45,42 @@ export function chipsToLinkedText(doc: JSONContent, styles: ChipStyles, context:
   const renderings = chipRenderings(chips, styles, context);
   let next = 0;
 
-  const convert = (node: JSONContent): JSONContent | null => {
+  const convert = (node: JSONContent): JSONContent[] => {
     if (node.type === ENTITY_CHIP) {
       const index = next++;
       const rendering = renderings[index];
-      if (rendering.label === "") return null;
+      if (rendering.label === "") return [];
       const marks =
         rendering.status === "live" && rendering.postHref
           ? [{ type: "link", attrs: { href: rendering.postHref, chip: refOf(chips[index]) } }]
           : rendering.status === "live"
             ? []
             : [{ type: "strike" }];
-      return { type: "text", text: rendering.label, ...(marks.length > 0 ? { marks } : {}) };
+      const runs = mergeRuns(
+        (rendering.runs ?? [{ text: rendering.label }]).map((run) => ({
+          text: run.text,
+          marks: (run.marks ?? []).filter((mark) => mark !== "code" && !marks.some((chipMark) => chipMark.type === mark)),
+        })),
+      );
+      return runs.map((run) => {
+        const all = [...(run.marks ?? []).map((mark) => ({ type: mark })), ...marks];
+        return { type: "text", text: run.text, ...(all.length > 0 ? { marks: all } : {}) };
+      });
     }
 
     const { marks: rawMarks, content: rawContent, ...rest } = node;
     const marks = rawMarks?.map((mark) =>
       mark.type === "link" && mark.attrs?.chip != null ? { ...mark, attrs: { ...mark.attrs, chip: null } } : mark,
     );
-    const content = rawContent?.map(convert).filter((child): child is JSONContent => child !== null);
-    return {
-      ...rest,
-      ...(marks !== undefined ? { marks } : {}),
-      ...(content !== undefined ? { content } : {}),
-    };
+    const content = rawContent?.flatMap(convert);
+    return [
+      {
+        ...rest,
+        ...(marks !== undefined ? { marks } : {}),
+        ...(content !== undefined ? { content } : {}),
+      },
+    ];
   };
 
-  return convert(doc) ?? doc;
+  return convert(doc)[0] ?? doc;
 }

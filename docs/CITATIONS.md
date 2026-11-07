@@ -110,6 +110,8 @@ search by cited work. Everything below not listed here is still a plan: Later.
     for the others, so "Radner (2012) and Barfield (1957)" is two chips.
   - A suffix that reads as a locator becomes one: `p. 5, note` with no locator is stored as
     locator `5`, suffix `note`.
+  - The words before and after a work are inline Markdown, stored as Markdown (Markdown,
+    "Markdown inside a citation").
   - A hyphen in a page range becomes an en dash.
 
 ## Labels
@@ -210,6 +212,27 @@ call for no refresh.
     as the key `radner2012-style`, or a letter or digit before it, since `see@radner2012` reads as
     text. Pandoc has no form for the second case, which is why the braced form is read after a
     letter here.
+- **Markdown inside a citation.** The words before and after a work are inline Markdown, as
+  Pandoc reads them: `[see *especially* @buber1923, p. 49, **emphasis** added]`.
+  - **What is read:** emphasis, strong emphasis, `~~strikethrough~~` and code spans, with
+    backslash escapes (`inlineRuns`, `src/lib/inline-markdown.ts`). Anything else is text: a
+    link, since a chip is one link already; raw HTML; and a single `~`, which is Pandoc's
+    subscript. Each field is read on its own, so an unclosed `*` before a work doesn't reach the
+    words after it.
+  - **The parser is its own**, since the live editor runs it, and would otherwise ship marked
+    for a few characters of a chip. It follows CommonMark's rules for which delimiter runs
+    open and close, and its tests hold it to marked's answers, except where marked departs from
+    CommonMark.
+  - **How it is stored:** as the Markdown, every escape kept but a delimiter's. `[`, `]`, `;` and
+    `@` mean nothing inside a field, so the chip holds them bare and the writer escapes them,
+    and a trailing backslash is doubled so it can't escape what follows the field
+    (`citationField`). The parse, the validator and the popover all store this form, so a field
+    reads back as it was written.
+  - **How it is shown:** a rendering's `label` is the text alone. Everything that reads a chip
+    as text takes that: search, quotes, the cards, an MCP text read, the bibliography's lead.
+    Its `runs` are the same text with its formatting, for what draws a chip: the editor, a
+    static render, and a post, which gets a linked text node per run. A post's schema lets
+    code carry no other mark, so there a code run is plain, still linked.
 - **Link text holds no citation**, so `[@handle](https://x.com/handle)` in an upload stays an
   ordinary link rather than being refused as an unknown key. A chip can't carry a link, since
   y-tiptap stores no marks on inline nodes, so a citation there would cost the link. This departs
@@ -301,8 +324,8 @@ prefixes.
 - "radner 49" sets the locator.
 
 **The popover** (`CitePopover.tsx`) edits what validation allows (The chip, above): each work's
-page, the words before and after it, and whether its author is left out; the form; and further
-works, found as the menu finds them, "radner 7" included.
+page, the words before and after it (inline Markdown, as in the Markdown), and whether its author
+is left out; the form; and further works, found as the menu finds them, "radner 7" included.
 
 - **Where.** Beside the menu, in the doc editor and the annotation composer, and only in an
   editor that can be typed in. Selecting a citation opens it, by a click or the arrow keys, and

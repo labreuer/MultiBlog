@@ -7,6 +7,7 @@ import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { chipKind } from "./registry";
 import { repairSharedIids } from "./shared-iids";
 import { chipRenderings, chipsIn, UNKNOWN_CHIP } from "./renderings";
+import { RUN_TAGS, type InlineRun } from "../inline-markdown";
 import type { ChipLabels } from "./text";
 import {
   CHIP_ANCHOR_TEXT,
@@ -58,7 +59,8 @@ export function chipLabelsOf(state: EditorState): ChipLabels {
 // to decide whether a node view needs its `update` called: a chip whose
 // rendering didn't change is left alone, and one that did is redrawn even
 // when the transaction never touched its paragraph (a renumbering).
-type ChipDecorationSpec = { chipLabel: string; chipHref: string | null; chipStatus: ChipRendering["status"] };
+// The runs travel as their JSON for the same reason: a string compares by value.
+type ChipDecorationSpec = { chipLabel: string; chipRuns: string | null; chipHref: string | null; chipStatus: ChipRendering["status"] };
 
 function compute(doc: PMNode, inputs: ChipInputs): Pick<ChipPluginState, "decorations" | "byIid"> {
   const chips = chipsIn(doc);
@@ -69,6 +71,7 @@ function compute(doc: PMNode, inputs: ChipInputs): Pick<ChipPluginState, "decora
     if (!byIid.has(chip.iid)) byIid.set(chip.iid, rendering);
     const spec: ChipDecorationSpec = {
       chipLabel: rendering.label,
+      chipRuns: rendering.runs ? JSON.stringify(rendering.runs) : null,
       chipHref: rendering.href,
       chipStatus: rendering.status,
     };
@@ -82,10 +85,22 @@ function renderingFrom(decorations: readonly Decoration[]): ChipRendering | null
     const spec = decoration.spec as Partial<ChipDecorationSpec>;
     if (typeof spec.chipLabel === "string") {
       // A live editor is a doc's own view and never needs the post's link.
-      return { label: spec.chipLabel, href: spec.chipHref ?? null, postHref: null, status: spec.chipStatus ?? "unknown" };
+      const runs = spec.chipRuns ? (JSON.parse(spec.chipRuns) as InlineRun[]) : undefined;
+      return { label: spec.chipLabel, ...(runs ? { runs } : {}), href: spec.chipHref ?? null, postHref: null, status: spec.chipStatus ?? "unknown" };
     }
   }
   return null;
+}
+
+/** A label's runs as DOM nodes, each mark an element around its text. */
+function runsAsDom(runs: readonly InlineRun[]): (Element | Text)[] {
+  return runs.map((run) =>
+    (run.marks ?? []).reduceRight<Element | Text>((inner, mark) => {
+      const element = document.createElement(RUN_TAGS[mark]);
+      element.append(inner);
+      return element;
+    }, document.createTextNode(run.text)),
+  );
 }
 
 /** A fresh instance id. Random, since it only has to be unique within one doc. */
@@ -352,9 +367,15 @@ export const EntityChip = Node.create({
       dom.contentEditable = "false";
       dom.dataset.entityChip = node.attrs.kind;
       dom.dataset.iid = node.attrs.iid;
+      let drawn: string | null = null;
       const draw = (current: readonly Decoration[]) => {
         const rendering = renderingFrom(current) ?? UNKNOWN_CHIP;
-        if (dom.textContent !== rendering.label) dom.textContent = rendering.label;
+        const shown = rendering.runs ? JSON.stringify(rendering.runs) : rendering.label;
+        if (shown !== drawn) {
+          if (rendering.runs) dom.replaceChildren(...runsAsDom(rendering.runs));
+          else dom.textContent = rendering.label;
+          drawn = shown;
+        }
         dom.dataset.status = rendering.status;
         if (link && rendering.href) dom.setAttribute("href", rendering.href);
         else dom.removeAttribute("href");

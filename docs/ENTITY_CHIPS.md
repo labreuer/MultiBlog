@@ -67,7 +67,10 @@ Steps 0 to 3 are built but for the items each entry says are not; step 3's are i
   `shared-iids.ts`), so their repairs agree. It runs only right after a remote change, when
   the editor's document and the Yjs one hold the same chips, and is kept out of undo.
 - **Item 4, the rendering function:** `chipRenderings` (`renderings.ts`), the three statuses, and
-  the placeholder for a chip kind the build doesn't know. Not the `~~ ~~` in Markdown.
+  the placeholder for a chip kind the build doesn't know. Not the `~~ ~~` in Markdown. A
+  rendering's `label` is plain text. When a chip kind's label carries formatting (a citation's
+  words before and after a work, CITATIONS.md "Markdown inside a citation"), its `runs` hold
+  the same text formatted, and the node view, `StaticChip` and `chipsToLinkedText` draw those.
 - **Item 5, the chip context:** `loadChipContext`, `GET /api/chip-context` with its per-viewer
   rule (`context-for.ts`), and `useChipInputs`, which refetches for a target it doesn't hold and
   shows `…` meanwhile. The doc reading view's first paint gets its context as props.

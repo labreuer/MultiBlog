@@ -79,3 +79,17 @@ test("a doc with no chips comes back equal, and the input is never mutated", () 
   chipsToLinkedText(source, {}, context);
   assert.equal(JSON.stringify(source), before);
 });
+
+test("a citation whose words are formatted becomes a linked text node per run, code plain", () => {
+  const work = { id: "bu", key: "barfield1957", short: "BU", names: "Barfield", year: 1957, title: "Saving the Appearances", deleted: false, file: null };
+  const entry = { authors: "Barfield", year: "1957", title: "Saving the Appearances", titleIsContainer: true, source: "" };
+  const cited = docOf(para(chip("citation", "c1", { items: [{ refId: "bu", prefix: "see *especially* `this`" }] })));
+  const converted = chipsToLinkedText(cited, {}, { citation: { bu: { ...work, entry } } });
+  pmSchema.nodeFromJSON(converted).check();
+  const link = { type: "link", attrs: { href: "/references/barfield1957", chip: { kind: "citation", iid: "c1", targets: ["bu"] } } };
+  assert.deepEqual(converted.content?.[0].content, [
+    { type: "text", text: "(see ", marks: [link] },
+    { type: "text", text: "especially", marks: [{ type: "italic" }, link] },
+    { type: "text", text: " this BU)", marks: [link] },
+  ]);
+});

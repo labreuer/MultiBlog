@@ -1,6 +1,7 @@
+import { inlineRuns, mergeRuns, runsHaveMarks, runsText, type InlineRun } from "../../inline-markdown";
 import type { ReferenceEntry } from "../../references/entry";
 import type { ChipKind, ChipRendering } from "../types";
-import { escapeCitationField, writeKey } from "./citation-markdown";
+import { citationField, escapeCitationField, writeKey } from "./citation-markdown";
 
 // docs/CITATIONS.md — a citation stands for one or more works at a page: a
 // chip whose identity is the works, shown as `(BU p. 49)`, `(Radner 2012,
@@ -17,9 +18,9 @@ export type CitationItem = {
   refId: string;
   /** The printed page or pages: "49", "49–51". */
   locator?: string;
-  /** Words before the work, inside the citation: "see". */
+  /** Words before the work, inside the citation: "see". Inline Markdown, as `citationField` stores it. */
   prefix?: string;
-  /** Words after the locator, inside the citation: "emphasis added". */
+  /** Words after the locator, inside the citation: "emphasis added". Inline Markdown, as the prefix is. */
   suffix?: string;
   /** Leave the author out, for a sentence that has just named them. */
   suppressAuthor?: boolean;
@@ -75,6 +76,12 @@ function text(value: unknown): string | undefined {
   return trimmed ? trimmed.slice(0, MAX_TEXT) : undefined;
 }
 
+/** A word before or after a work: text, in the Markdown form a chip stores. */
+function words(value: unknown): string | undefined {
+  const folded = text(value);
+  return folded === undefined ? undefined : citationField(folded);
+}
+
 /** A locator as every label writes one: no "p.", and a range with an en dash. */
 export function normalizeLocator(raw: string): string {
   return raw
@@ -97,15 +104,15 @@ function validateItem(raw: unknown): CitationItem | null {
   const { refId } = raw;
   if (typeof refId !== "string" || refId === "" || refId.length > MAX_ID_LENGTH) return null;
   let locator = text(raw.locator);
-  let suffix = text(raw.suffix);
+  let suffix = words(raw.suffix);
   if (!locator && suffix) {
     const asLocator = LOCATOR_RE.exec(suffix);
     if (asLocator) {
       locator = asLocator[1];
-      suffix = text(asLocator[2]);
+      suffix = words(asLocator[2]);
     }
   }
-  const prefix = text(raw.prefix);
+  const prefix = words(raw.prefix);
   return {
     refId,
     ...(locator ? { locator: normalizeLocator(locator) } : {}),
@@ -139,11 +146,30 @@ export function formFor(work: CitedWork, form: CitationForm): CitationForm {
   return form === "short" && !work.short?.trim() ? "author-date" : form;
 }
 
+// A label as it is built: runs of text, the words before and after a work
+// read as the Markdown they are, everything else plain.
+type Label = InlineRun[];
+
+const plain = (value: string): Label => (value ? [{ text: value }] : []);
+const markdownWords = (value: string | undefined): Label => (value ? inlineRuns(value) : []);
+
+/** The parts with any text, `separator` between them. */
+function joined(parts: readonly Label[], separator: string): Label {
+  return parts.filter((part) => runsText(part) !== "").flatMap((part, index) => (index > 0 ? [...plain(separator), ...part] : part));
+}
+
+/** Every part, empty or not, `separator` between them. */
+function joinedAll(parts: readonly Label[], separator: string): Label {
+  return parts.flatMap((part, index) => (index > 0 ? [...plain(separator), ...part] : part));
+}
+
+const withSuffix = (label: Label, item: CitationItem): Label => (item.suffix ? [...label, ...plain(", "), ...markdownWords(item.suffix)] : label);
+
 /** The parts of one item's text inside the delimiters, for a non-numeric form. */
-function itemText(item: CitationItem, form: CitationForm, label: string): string {
+function itemLabel(item: CitationItem, form: CitationForm, name: string): Label {
   // `short` has no comma before the page, as the notes it comes from never had; the other forms have one.
-  const joined = item.locator ? `${label}${form === "short" ? " " : ", "}${pages(item.locator)}` : label;
-  return [item.prefix, joined].filter(Boolean).join(" ") + (item.suffix ? `, ${item.suffix}` : "");
+  const named = item.locator ? `${name}${form === "short" ? " " : ", "}${pages(item.locator)}` : name;
+  return withSuffix(joined([markdownWords(item.prefix), plain(named)], " "), item);
 }
 
 /**
@@ -248,16 +274,18 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
       const known = works as CitedWork[];
       const [open, close] = form === "numeric" ? ["[", "]"] : ["(", ")"];
 
-      let label: string;
+      let built: Label;
       if (form === "numeric") {
-        const inner = data.items
-          .map((item, index) => {
+        const inner = joinedAll(
+          data.items.map((item, index) => {
             const n = String(numbers.get(known[index].id) ?? "?");
-            return [item.prefix, item.locator ? `${n}, ${pages(item.locator)}` : n].filter(Boolean).join(" ") + (item.suffix ? `, ${item.suffix}` : "");
-          })
-          .join("; ");
+            return withSuffix(joined([markdownWords(item.prefix), plain(item.locator ? `${n}, ${pages(item.locator)}` : n)], " "), item);
+          }),
+          "; ",
+        );
         // Suppressing the author changes nothing in a numeric citation, as in citeproc.
-        label = data.form === "narrative" ? `${known[0].names || known[0].title} ${open}${inner}${close}` : `${open}${inner}${close}`;
+        const lead = data.form === "narrative" ? `${known[0].names || known[0].title} ` : "";
+        built = [...plain(`${lead}${open}`), ...inner, ...plain(close)];
       } else if (data.form === "narrative") {
         const [item] = data.items;
         const [work] = known;
@@ -270,22 +298,28 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
               ? pages(item.locator)
               : ""
             : [work.year === null ? "n.d." : String(work.year), item.locator ? pages(item.locator) : ""].filter(Boolean).join(", ");
-        const rest = [inside, item.suffix].filter(Boolean).join(", ");
-        label = rest ? `${who} ${open}${rest}${close}` : who;
+        const rest = joined([plain(inside), markdownWords(item.suffix)], ", ");
+        built = runsText(rest) ? [...plain(`${who} ${open}`), ...rest, ...plain(close)] : plain(who);
       } else {
-        const inner = data.items
-          .map((item, index) => {
+        const inner = joinedAll(
+          data.items.map((item, index) => {
             const work = known[index];
             const shown = formFor(work, form);
             // With the author suppressed, a short citation is its page alone, and an author-date one its year.
             const name = shown === "short" ? (item.suppressAuthor ? "" : shortLabel(work)) : authorDate(work, item.suppressAuthor === true);
-            return name ? itemText(item, shown, name) : [item.prefix, item.locator ? pages(item.locator) : ""].filter(Boolean).join(" ") + (item.suffix ? `, ${item.suffix}` : "");
-          })
-          .join("; ");
-        label = `${open}${inner}${close}`;
+            return name ? itemLabel(item, shown, name) : withSuffix(joined([markdownWords(item.prefix), plain(item.locator ? pages(item.locator) : "")], " "), item);
+          }),
+          "; ",
+        );
+        built = [...plain(open), ...inner, ...plain(close)];
       }
+      // The label is the text alone, for everything that reads a chip as text; the runs, when the words carry
+      // any formatting, are for what draws one.
+      const runs = mergeRuns(built);
+      const label = runsText(runs);
+      const formatted = runsHaveMarks(runs) ? { runs } : {};
 
-      if (known.some((work) => work.deleted)) return { label, href: null, postHref: null, status: "deleted" };
+      if (known.some((work) => work.deleted)) return { label, ...formatted, href: null, postHref: null, status: "deleted" };
       // One link per chip, to its first work: the passage in its PDF where the doc's readers may open files, the
       // reference's own page otherwise. A post's reader always gets the reference page, since files aren't public,
       // with the page in the fragment for that page's island to offer.
@@ -293,6 +327,7 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
       const page = `/references/${known[0].key}`;
       return {
         label,
+        ...formatted,
         href: pdfPageHref(known[0].file, first.locator) ?? page,
         postHref: first.locator ? `${page}#p=${encodeURIComponent(first.locator.split("–")[0])}` : page,
         status: "live",
