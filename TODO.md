@@ -1081,6 +1081,22 @@ restatement, so it doesn't drift out of sync with that file.
 
 ---
 
+## Mention notifications (docs/MENTIONS.md, "The notification stub")
+
+**Status:** not built. Each `mention` row's `first_seen_at` is the outbox, and nothing reads it
+yet. MENTIONS.md says what a notification must respect:
+
+- only a new mention counts, at most once per person per item;
+- the sender is taken from the item's `clients` map;
+- delivery re-checks that the recipient may read the item.
+
+Undecided: the channel (email through `sendMail()`, a list in the app, or both), and whether
+mail goes out at once or as a digest. An instance with no `RESEND_API_KEY` logs mail rather
+than sending it (docs/EMAIL.md), so an email-only design notifies nobody there. Once comments
+hold chips, a PENDING comment notifies nobody (MENTIONS.md, Later).
+
+---
+
 ## Upstream follow-ups from the e2e flakiness work
 
 **Status:** the local half is done. This item used to be "`npm run e2e` fails ~1 run in 2 on a

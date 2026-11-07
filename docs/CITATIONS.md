@@ -394,10 +394,21 @@ post's labels, and a republish refreshes both.
 
 ## Later
 
-- **CSL styles through citeproc-js** (CPAL-1.0 OR AGPL-1.0, about 1 MB).
-  - Never inline in the Hocuspocus process, which is single-threaded on a one-CPU box: a worker,
-    or the Next server.
-  - Probably with a cache of label maps keyed by the doc's version, its style and its context.
+- **CSL styles through citeproc-js** (CPAL-1.0 OR AGPL-1.0, about 1 MB). A doc's Citations
+  setting offers a CSL style beside the three house forms. For a doc set to one, citeproc-js
+  computes its labels and its bibliography from the `csl` records, in place of `citation.ts`'s
+  forms and `entry.ts`'s format, and the style decides numbering, telling works apart and
+  "ibid.". To settle here before it is built:
+  - **Where it runs.** Never inline in the Hocuspocus process, which is single-threaded on a
+    one-CPU box. Either every editor of such a doc loads the 1 MB and labels its chips itself,
+    as it does today, or the Next server labels them and editors fetch the labels, so a new
+    citation waits a round trip for its own. The second probably needs a cache of label maps
+    keyed by the doc's version, its style and its context.
+  - **The licence.** Both of citeproc-js's licences bind software used over a network.
+  - **Note styles.** A notes-and-bibliography style puts a citation in a footnote, and a doc
+    has no footnotes: leave such styles out, or build footnotes first.
+  - **Which styles.** A few bundled, or any from the CSL repository, which needs somewhere to
+    upload one, and the locale files the styles need.
 - **Converting the hand-written citations.**
   - The docs hold many links such as `[BU p. 49](/pdf/…#page=53&text=…)`, about 1,830 in a stale
     copy.
@@ -405,8 +416,10 @@ post's labels, and a republish refreshes both.
   - Every stored quote across one is re-stamped at the conversion, with its positions mapped
     through it and its quote re-derived. That was 58 of 140 annotation quotes in that copy.
   - An editor annotation whose mark covered only the label loses it.
-  - Opted into per doc.
-- **DOI lookup** on import.
+  - Opted into per doc, and done last, once the rest is built.
+- **DOI lookup** on import. A DOI pasted alone fetches its record as CSL-JSON from doi.org, by
+  content negotiation, and the record goes through `parseCslItem` like any other. The fetch
+  goes to doi.org alone, never to a URL the user gives.
 
 ## Checks
 

@@ -226,7 +226,7 @@ Steps 0 to 3 are built but for the items each entry says are not; step 3's are i
   Not built of Styling: an instance default (each chip kind's own default stands in), a
   control for a single chip's override (a mention's `form` field is honoured and nothing
   sets it), the scrub bar showing each version in the style it had (it shows the current
-  one), and sections.
+  one), and sections: all under Later.
 - **Mentions:** the chip kind's fields, forms and labels, its context loader, the rule for who
   may be mentioned, the `@` menu in the doc editor and in a note's composer, the `mentions=`
   search filter with `@handle` in the search box, and the dashboard's "Mentions of you" card
@@ -693,6 +693,11 @@ Because anchors never contain a label, no restyle, rename or renumbering detache
 
 ## Later
 
+- **The instance default style**, for every doc that hasn't set its own (Styling, above).
+  Changing it is the one style change the refresh relabels (step 1, item 10), and that fan-out
+  is untested (Risks, item 5).
+- **The scrub bar showing each version in the style it had.** It shows the current one. The
+  style is in the ydoc's settings map, so each version already holds its own.
 - **Section styles** (Styling, above).
 - **Comments.** The comment schema and its Markdown box gain the node. `parseCommentBody` then
   runs each chip kind's validator, since the schema no longer checks a chip's fields. Each chip
