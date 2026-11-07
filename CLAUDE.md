@@ -18,6 +18,7 @@ to re-derive the decision from.
 | [docs/ANNOTATIONS.md](docs/ANNOTATIONS.md) | Annotations as built: a body that is its own ydoc, three anchor mechanisms picked by surface, the version stamp, DRAFT → LIVE → RAISED, editing a posted body, composing from the editor, the PDF panel. |
 | [docs/MARGIN_NOTES.md](docs/MARGIN_NOTES.md) | The margin rails as built: only the anchored cards move, CSS owns the grid and JS the alignment, the 1180px threshold and the 340–680px range, the editor's queue mode, the PDF rail. |
 | [docs/TAGS.md](docs/TAGS.md) | Tags as built: term vs. assignment vs. anchor, one write layer for both front doors, "you may tag what you may read", chips that read no session and where they mount, `/tag/[slug]`'s per-type sections, `/tags`, and the Tags column in `/docs` and `/files` with what the ADMIN override withholds. |
+| [docs/ENTITY_CHIPS.md](docs/ENTITY_CHIPS.md) | Entity chips, **planned** (only its step 0, the schema gate, is built): one inline leaf node, `entityChip`, holding only which person or work it stands for, its label computed wherever it is shown — the rules, the kind contract, the build order (the schema-version gate in docs/YDOC.md first), styling, MCP, quoting and search. A file per chip kind: [docs/MENTIONS.md](docs/MENTIONS.md), and [docs/CITATIONS.md](docs/CITATIONS.md) with the reference library. |
 | [docs/research/multi-anchoring.md](docs/research/multi-anchoring.md) | Literature survey behind §20's multi-part anchors: flat part-sets vs. per-part roles, and the recommendations not yet folded into PLAN.md. Read before giving any consumer's parts roles or per-part text. |
 | [docs/TABLES.md](docs/TABLES.md) | Tables as built: the native nodes and where they are not, pasted column widths, CSV into an existing doc and out again (the grid, the format table, the cap, the policy calls), auto-size, and the three specs. |
 | [docs/research/tables.md](docs/research/tables.md) | Why doc tables are TipTap's native nodes and not an external block (anything else holds no text in the ydoc, so nothing in it can be quoted or annotated), the CSV design and where the build departed from it, and what xlsx and docx would add. |
@@ -25,7 +26,7 @@ to re-derive the decision from.
 | [docs/PDF_FRAGMENT_LINKS.md](docs/PDF_FRAGMENT_LINKS.md) | PDF fragment links as built: a link to a PDF passage that is only a URL (`/pdf/<slug>#page=<n>&text=<words>`, no row) — the grammar, the letters-and-digits skeleton match, quads measured from text items, cross-page passages, the check, its integrity script and one-quote CLI, and writing them from a corrected extraction. |
 | [docs/PDF_QUADS.md](docs/PDF_QUADS.md) | Quads from text items without a selection: where an edge inside an item falls, the browser's canvas measurer, the Liberation width tables a server measures with and their generator, `extractPageItems`, and how close each lands to a real selection. |
 | [docs/DOCS.md](docs/DOCS.md) | Docs as built: the entity beside its ydoc, the `title`/`prose_json` caches and the live title, roles and visibility, routes, the reading view and its freeze, the editor, what is deferred. |
-| [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, the `/admin` endpoints and the token they take, restarts, IndexedDB. |
+| [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, the `/admin` endpoints and the token they take, restarts, IndexedDB, and the schema-version gate that refuses a tab whose bundle predates a schema change. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
 | [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures. |
 | [docs/mobile/coordinates.html](docs/mobile/coordinates.html) | Fixed popovers vs. the iOS keyboard: the two coordinate spaces, and what changed on desktop. |
@@ -230,9 +231,23 @@ before changing the behavior it describes.
   `resolveAvatarSrc` prefers the upload. `src/lib/avatar.ts` is server-only; `avatar-url.ts` is
   the browser-safe half. There is deliberately **no "avatar from URL" path** — a server-side
   fetch of a user-supplied URL is SSRF. PLAN.md §17n, §17o.
+- **A change to a ydoc-bound schema is a `SCHEMA_VERSION` bump, and a live editor's extension
+  list is one call into `src/lib/live-editor-extensions.ts`.** A tab still running the old
+  bundle deletes from the shared document whatever its schema can't build — a new node, the
+  whole paragraph under a new mark, a new attribute on anything it edits — so every collab
+  socket states its bundle's version and the server refuses any other
+  (`server/schema-gate.ts`). `schema-version.test.ts` fingerprints the schemas the three
+  editors build and fails until the version is bumped, which it can only do for a list it can
+  read: an extension added in `CollabEditorBody`, `AnnotationBody` or `CollabTitleField`
+  beside that call is invisible to it. A bump refuses every open tab until it reloads, so it
+  is never incidental; a socket you open yourself (a spec, a script) needs
+  `withSchemaVersion` on its URL; and a rollback past a bump is not covered. A tab's IndexedDB
+  copy of a ydoc is read with no server in between, so its name carries the version too
+  (`ydocDbName`), and a new bundle takes in an older version's database but never a newer
+  one's. docs/YDOC.md "A tab whose schema is out of date is refused".
 - **Tables are in `contentExtensions` and deliberately not in `annotationContentExtensions`.**
   The annotation list used to be an alias of `authorHighlightExtensions` and is now its own
-  `[StarterKit, AuthorHighlight]`, mirrored by `AnnotationBody.tsx`; don't re-derive one from
+  `[StarterKit, AuthorHighlight]`, mirrored by `annotationEditorExtensions`; don't re-derive one from
   the other. And `Table`'s two configure options both look like stray configuration and are
   not: `renderWrapper: true` is what makes the static renderer emit the same `.tableWrapper`
   the editor's node view draws (the post page's only horizontal scroll box), and `View:

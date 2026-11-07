@@ -8,6 +8,13 @@ import { CollabTokenDenied, refreshCollabToken } from "@/lib/collab-token-reques
 import { useDocPresence } from "./doc-presence-context";
 import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 
+/**
+ * What an annotation editor says once the page is `outOfDate`. Its unsent
+ * text is in this tab alone, so the sentence says what to do with it before
+ * the reload the page's own notice asks for.
+ */
+export const OUT_OF_DATE_BODY = "This page is out of date. Copy anything unsaved here before reloading.";
+
 export type AnnotationConnection = {
   provider: HocuspocusProvider | null;
   ydoc: Y.Doc;
@@ -18,6 +25,11 @@ export type AnnotationConnection = {
   // knows from the first render and never sees the null.
   readOnly: boolean | null;
   error: string | null;
+  // The page's `outOfDate` (doc-presence-context.tsx): the server refused
+  // this tab's schema version, so nothing typed from here on is sent. A body
+  // has no local database to keep it either, so the caller stops the editor
+  // and its submit at once, and leaves the text on screen to be copied out.
+  outOfDate: boolean;
 };
 
 // The provider-connection lifecycle for one annotation's ydoc, factored out of
@@ -56,7 +68,7 @@ export function useAnnotationProvider(
   annotationId: string,
   initialConnection?: AnnotationConnectionBundle,
 ): AnnotationConnection {
-  const { getSocket, reportSignedOut } = useDocPresence();
+  const { getSocket, reportSignedOut, outOfDate } = useDocPresence();
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const [readOnly, setReadOnly] = useState<boolean | null>(initialConnection?.readOnly ?? null);
   const [error, setError] = useState<string | null>(null);
@@ -165,5 +177,5 @@ export function useAnnotationProvider(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `initialConnection` is read once, at attach time; a later identity change must not tear down a live connection to re-attach with a token no fresher than the refresher's
   }, [annotationId, ydoc, getSocket, reportSignedOut]);
 
-  return { provider, ydoc, readOnly, error };
+  return { provider, ydoc, readOnly, error, outOfDate };
 }

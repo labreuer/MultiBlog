@@ -2,6 +2,7 @@
 
 import { HocuspocusProvider, HocuspocusProviderWebsocket, type HocuspocusProviderConfiguration } from "@hocuspocus/provider";
 import { getCollabUrl } from "./collab-url";
+import { SCHEMA_REFUSAL } from "./schema-version";
 
 // One websocket per page, every document on it — docs/YDOC.md "One socket
 // per page". A surface's own document (a doc's live tap, the doc editor, a
@@ -17,8 +18,23 @@ import { getCollabUrl } from "./collab-url";
 
 export type CollabSocket = HocuspocusProviderWebsocket;
 
-export function createCollabSocket(): CollabSocket {
-  return new HocuspocusProviderWebsocket({ url: getCollabUrl() });
+// What to tell when the server refuses a document on this socket for its
+// schema version (docs/YDOC.md "A tab whose schema is out of date is
+// refused"). The refusal is the bundle's, not the document's, so it is
+// reported once to the socket's owner rather than handled by each provider:
+// most of them (annotation bodies, the live tap, PDF presence) have no
+// `onAuthenticationFailed` of their own to notice it with.
+const schemaRefusalListeners = new WeakMap<CollabSocket, () => void>();
+
+/** True for the reason the server gives a tab whose bundle is out of date. */
+export function isSchemaRefusal(reason: string): boolean {
+  return reason === SCHEMA_REFUSAL;
+}
+
+export function createCollabSocket(onSchemaRefused?: () => void): CollabSocket {
+  const socket = new HocuspocusProviderWebsocket({ url: getCollabUrl() });
+  if (onSchemaRefused) schemaRefusalListeners.set(socket, onSchemaRefused);
+  return socket;
 }
 
 type SharedProviderConfiguration = Omit<HocuspocusProviderConfiguration, "url" | "websocketProvider">;
@@ -32,9 +48,20 @@ type SharedProviderConfiguration = Omit<HocuspocusProviderConfiguration, "url" |
  * does not, and an unattached provider silently sends nothing — no token, no
  * sync, no error. `destroy()` detaches it again and leaves the socket to its
  * owner.
+ *
+ * It is also where a schema refusal is noticed, for every document on the
+ * socket alike: the socket's owner is told, and the provider's own
+ * `onAuthenticationFailed` still runs after.
  */
 export function attachProvider(socket: CollabSocket, configuration: SharedProviderConfiguration): HocuspocusProvider {
-  const provider = new HocuspocusProvider({ ...configuration, websocketProvider: socket } as HocuspocusProviderConfiguration);
+  const provider = new HocuspocusProvider({
+    ...configuration,
+    websocketProvider: socket,
+    onAuthenticationFailed: (data) => {
+      if (isSchemaRefusal(data.reason)) schemaRefusalListeners.get(socket)?.();
+      configuration.onAuthenticationFailed?.(data);
+    },
+  } as HocuspocusProviderConfiguration);
   provider.attach();
   return provider;
 }

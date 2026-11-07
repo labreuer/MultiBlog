@@ -127,11 +127,11 @@ export const StarterKit = BaseStarterKit.extend({
   },
 });
 
-// StarterKit's Link options for a *live* editor. CollabEditorBody and
-// AnnotationBody each build their own StarterKit (undo/redo off, since
-// Collaboration owns history) and both take these, as does the comment
-// editor's Link below, so they can't drift. Only Link's plugins are
-// affected — click, autolink, paste — and contentExtensions below is a
+// StarterKit's Link options for a *live* editor. The doc and annotation
+// editors' lists (live-editor-extensions.ts) each build their own StarterKit
+// (undo/redo off, since Collaboration owns history) and both take these, as
+// does the comment editor's Link below, so they can't drift. Only Link's
+// plugins are affected — click, autolink, paste — and contentExtensions below is a
 // schema whose mark renders the same either way, so it doesn't need them.
 //
 // openOnClick off: a click in a link places the caret, like a click
@@ -165,7 +165,7 @@ function shouldAutoLink(value: string): boolean {
 }
 
 // docs/TABLES.md — TipTap's own table nodes, as one list so the live editors
-// (CollabEditorBody builds its own StarterKit and adds these beside it) and
+// (docEditorExtensions builds its own StarterKit and adds these beside it) and
 // the schema below register exactly the same four types. Not part of
 // StarterKit, so docs/TIPTAP.md's "never add StarterKit's own extensions
 // beside it" doesn't apply; the extension exists precisely to be added.
@@ -258,8 +258,9 @@ export const pmDocContentSchema = getSchema(docContentExtensions);
 // authorHighlightExtensions, which it used to be an alias of: that list
 // carries tableExtensions since docs/TABLES.md, and a margin note has no room
 // for a table — the same reason ANNOTATION_TOOLS (EditorToolbar.tsx) offers
-// no headings. AnnotationBody's own extension list mirrors this one, so the
-// live annotation editor and every decoder of its ydoc agree on the shape.
+// no headings. annotationEditorExtensions (live-editor-extensions.ts) mirrors
+// this one, so the live annotation editor and every decoder of its ydoc agree
+// on the shape.
 export const annotationContentExtensions = [StarterKit, AuthorHighlight];
 export const pmAnnotationContentSchema = getSchema(annotationContentExtensions);
 

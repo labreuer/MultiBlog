@@ -2,6 +2,7 @@ import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import type { Page } from "@playwright/test";
 import { COLLAB_PORT, DEV_HOST } from "../scripts/dev-ports";
+import { withSchemaVersion } from "../src/lib/schema-version";
 import { collabHttpOrigin } from "../src/lib/collab-http-origin";
 import { DOC_APPLY_UPDATE_PATH } from "../src/lib/ydoc-names";
 import { test, expect, bodyEditor, QUOTED_BODY } from "./fixtures";
@@ -23,7 +24,9 @@ import { ADMIN_EMAIL, getDocState } from "./db";
 // either way, so this spec passes without that wait; it is there for the day
 // the ordering changes.
 
-const COLLAB_URL = `ws://${DEV_HOST}:${COLLAB_PORT}`;
+// With the schema version every socket states (docs/YDOC.md "A tab whose
+// schema is out of date is refused"), as the app's own `getCollabUrl` adds it.
+const COLLAB_URL = withSchemaVersion(`ws://${DEV_HOST}:${COLLAB_PORT}`);
 const APPENDED = "Appended through the collab server's own document.";
 
 type TokenResponse = { token: string; documentName: string; readOnly: boolean };

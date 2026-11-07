@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 import AnnotationBody from "./AnnotationBody";
-import { useAnnotationProvider } from "./use-annotation-provider";
+import { OUT_OF_DATE_BODY, useAnnotationProvider } from "./use-annotation-provider";
 import { cancelAnnotationEdit, finishAnnotationEdit } from "@/app/actions/annotations";
 import type { AnnotationConnectionBundle } from "@/lib/annotation-connection";
 import styles from "./AnnotationNode.module.css";
@@ -39,7 +39,7 @@ type Props = {
 // stays available and is not needed for this).
 export default function AnnotationEditSession({ annotationId, connection, onFinished, onCancelled }: Props) {
   const { data: session } = useSession();
-  const { provider, ydoc, readOnly, error: connectionError } = useAnnotationProvider(annotationId, connection);
+  const { provider, ydoc, readOnly, error: connectionError, outOfDate } = useAnnotationProvider(annotationId, connection);
   const [pending, setPending] = useState<null | "finish" | "cancel">(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,11 +90,12 @@ export default function AnnotationEditSession({ annotationId, connection, onFini
         userId={session.user.id}
         userName={displayNameOf(session.user)}
         userColor={session.user.color}
-        editable
+        editable={!outOfDate}
       />
+      {outOfDate && <p className={styles.error}>{OUT_OF_DATE_BODY}</p>}
       {error && <p className={styles.error}>{error}</p>}
       <div className={styles.editActions}>
-        <button type="button" onClick={handleFinish} disabled={pending !== null} className={styles.confirmYes}>
+        <button type="button" onClick={handleFinish} disabled={pending !== null || outOfDate} className={styles.confirmYes}>
           {pending === "finish" ? "Saving…" : "Done"}
         </button>{" "}
         /{" "}

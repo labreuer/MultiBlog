@@ -4950,3 +4950,15 @@ introduced this stub.
 Built 2026-10-23 on `paginate-blog`: `/page/N` beyond the landing page's ten posts, and each
 post linking to the posts published just before and after it. **As built:
 [docs/BLOG.md](docs/BLOG.md) §5–§8.**
+
+## 29. Entity chips: mentions and citations
+
+Planned 2026-11-04: a mention of a person and a citation of a work, each an
+*entity chip*. That is an inline leaf node holding only which person or work it stands for.
+Its label is computed from the doc's style and the entity's current record, so labels follow
+renames and restyles, and anchored quotes store a placeholder that never moves. One node serves
+every chip kind, so a later kind needs no schema change.
+**Plan: [docs/ENTITY_CHIPS.md](docs/ENTITY_CHIPS.md)**, the kit every chip kind shares, with a file
+per chip kind: [docs/MENTIONS.md](docs/MENTIONS.md) and [docs/CITATIONS.md](docs/CITATIONS.md).
+Built 2026-11-04 on `entity-chips`: its step 0, the schema-version gate. **As built:
+[docs/YDOC.md](docs/YDOC.md), "A tab whose schema is out of date is refused".**

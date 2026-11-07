@@ -13,6 +13,8 @@ import { docTitleOrFallback } from "@/lib/doc-title";
 import type { DocLinkInput } from "@/lib/doc-link-anchor";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { SignInAgainLink } from "@/components/SignedOutNotice";
+import { ReloadButton } from "@/components/OutOfDateNotice";
+import { isSchemaRefusal } from "@/lib/collab-socket";
 import SideBySideDocBody from "./SideBySideDocBody";
 import CollabTitleField from "@/components/CollabTitleField";
 import CollabEditorBody from "@/components/CollabEditorBody";
@@ -99,6 +101,10 @@ export default function DocColumn({
   // own socket (docs/YDOC.md), so stopping it stops only this column, and the
   // status line below is where it says so.
   const [denial, setDenial] = useState<TokenDenial | null>(null);
+  // The server refused this column's schema version (docs/YDOC.md "A tab
+  // whose schema is out of date is refused"). Kept here for the reason
+  // `denial` is: the socket is this column's own.
+  const [outOfDate, setOutOfDate] = useState(false);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ydoc = useMemo(() => new Y.Doc(), [docId]);
@@ -151,6 +157,11 @@ export default function DocColumn({
           if (status !== "connected") setSynced(false);
         },
         onSynced: () => setSynced(true),
+        onAuthenticationFailed: ({ reason }) => {
+          if (!isSchemaRefusal(reason)) return;
+          instance?.disconnect();
+          setOutOfDate(true);
+        },
       });
       setProvider(instance);
     })();
@@ -164,11 +175,13 @@ export default function DocColumn({
 
   // attachIndexeddb runs only for a column actually in write mode (§14g) —
   // detached again the moment it toggles back to read, or on unmount.
+  // Nor for a column the server refused: DocEditor's out-of-date effect says
+  // what a refused tab's local database could otherwise do.
   useEffect(() => {
-    if (mode !== "write" || !lineage) return;
+    if (mode !== "write" || !lineage || outOfDate) return;
     const detach = attachIndexeddb(ydoc, lineage.documentName, lineage.lineageMs);
     return detach;
-  }, [mode, lineage, ydoc]);
+  }, [mode, lineage, ydoc, outOfDate]);
 
   const canEdit = readOnly === false;
   const aria = ARIA[side];
@@ -186,6 +199,7 @@ export default function DocColumn({
                 userColor={userColor}
                 className={styles.titleInput}
                 ariaLabel={aria.title}
+                editable={!outOfDate}
                 onTitleChange={setTitle}
                 onEditorReady={() => {}}
               />
@@ -211,7 +225,11 @@ export default function DocColumn({
         </div>
         {mode === "write" && (
           <p className={styles.statusLine}>
-            {denial === "signed-out" ? (
+            {outOfDate ? (
+              <>
+                🔴 Out of date — <ReloadButton /> to keep editing
+              </>
+            ) : denial === "signed-out" ? (
               <>
                 🔴 Signed out — <SignInAgainLink />
               </>
@@ -238,6 +256,7 @@ export default function DocColumn({
                 userInitials={userInitials}
                 onEditorReady={() => {}}
                 ariaLabel={aria.body}
+                editable={!outOfDate}
                 suppressAnnotations
               />
             ) : (

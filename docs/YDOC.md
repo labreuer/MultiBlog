@@ -291,3 +291,159 @@ host, and `applyAnnotationMark` treats a non-JSON 200 as `applied: false` rather
 "Observability of swallowed bulk-action failures" makes about `settleBulk`; this is the second
 instance of the pattern, which suggests the general rule is worth stating: **a best-effort call
 may swallow a failure's *effect on control flow*, never its *existence in the log*.**
+
+## A tab whose schema is out of date is refused
+
+The first step of [ENTITY_CHIPS.md](ENTITY_CHIPS.md), and it protects every schema change, not
+only that one.
+
+### The problem
+
+A tab keeps running the JavaScript it loaded. After a deploy that changes a ydoc-bound schema
+(a new node, mark or attribute), y-tiptap in that tab deletes from the *shared* document whatever
+its schema can't build. It does so inside a Yjs transaction, so the deletion syncs to everyone:
+
+- **A node type it lacks is deleted**, together with any text inside it. A table is one case.
+- **A mark type it lacks erases its paragraph's whole text.**
+- **An attribute it lacks is dropped** from a mark or node as soon as the old tab edits that run
+  or block, through `updateYText` and `updateYFragment`.
+
+Measured against y-tiptap 3.0.7, using the sync plugin's own calls:
+`yXmlFragmentToProseMirrorRootNode`, and `initProseMirrorDoc` followed by `updateYFragment`.
+
+TipTap's `enableContentCheck` doesn't help, because it checks the document y-tiptap has already
+built, after the deletion. TipTap's open PR #8686 says the same: "y-tiptap deletes the content
+before the content check sees it, so `contentError` never fires."
+
+### The gate
+
+1. **A version in the bundle.** `src/lib/schema-version.ts` exports `SCHEMA_VERSION`, and it is
+   compiled into the bundle. It is 0: the gate by itself forces no reload. The first schema
+   change after it makes the version 1, which also refuses tabs opened before the gate existed.
+2. **The version goes on the socket URL.** `getCollabUrl()` (`src/lib/collab-url.ts`) appends
+   `schema=<SCHEMA_VERSION>` through `withSchemaVersion`. Every browser socket is built from it:
+   - `createCollabSocket`, the page's one socket;
+   - the side-by-side columns (`sidebyside/DocColumn.tsx`);
+   - `/ydoc-debug` (`YdocDebug.tsx`).
+
+   It isn't in the token. `/api/doc/<id>/token` is fetched again on every reconnect, so a new
+   server would hand an old tab a token carrying the new version.
+
+   A spec that opens a socket of its own calls `withSchemaVersion` on its URL.
+3. **The server refuses a mismatch, with a reason the client can read.** `refuseStaleSchema`
+   (`server/schema-gate.ts`) runs first in `onAuthenticate` and compares the URL's `schema` with
+   the server's own constant. A missing parameter counts as 0; anything that isn't a whole number
+   matches no version.
+   - Hocuspocus sends the client `error.reason ?? "permission-denied"`, and every other refusal
+     throws a plain `Error`, so the browser reads "permission-denied" for those.
+   - The gate throws `SchemaRefused`, whose `reason` is `SCHEMA_REFUSAL`: one sentence shared by
+     server and client, "This page is out of date. Reload it to keep editing." The client matches
+     on it (`isSchemaRefusal`) to tell this refusal from the others.
+   - It logs each refusal, once per socket.
+4. **A refused tab receives nothing.** Hocuspocus 4 runs `onAuthenticate` before any sync, and
+   holds and then drops a document's messages if it fails.
+5. **Every deploy reconnects every tab.** `deploy/deploy.sh` restarts web and collab in one
+   command, so every open socket reconnects and is checked against the new server.
+6. **The refusal is detected once and shown once.**
+   - `attachProvider` (`collab-socket.ts`) wraps every provider's `onAuthenticationFailed` and
+     tells the socket's owner, so the surfaces with no handler of their own (annotation bodies,
+     the live doc tap, PDF presence) are covered with the rest.
+   - `DocPresenceProvider` stops the socket and sets `outOfDate`, beside `signedOut`.
+   - The doc editor's status line says "Out of date", with a reload button; both its editors go
+     read-only; and its IndexedDB is detached. Anything typed while collab was restarting is
+     already in IndexedDB, and the reloaded page takes it in (The local database is named by
+     schema version, below).
+   - Detaching IndexedDB is what makes that complete: the database is closed and no longer
+     written, so the reloaded page reads all of it and its delete isn't held up.
+   - An annotation's editor has no IndexedDB, so it goes read-only at once, its submit is
+     disabled, and it says to copy out anything unsaved before reloading.
+   - The reading views and the PDF viewer show `OutOfDateNotice`.
+   - A side-by-side column and `/ydoc-debug` own their sockets, so each handles the refusal
+     itself: the socket stops, the editors stop, IndexedDB is detached.
+7. **A unit test makes a bump impossible to forget.** `src/lib/schema-version.test.ts`:
+   - Each live editor's whole extension list lives in `src/lib/live-editor-extensions.ts`
+     (`docEditorExtensions`, `annotationEditorExtensions`, `titleEditorExtensions`), and
+     `CollabEditorBody`, `AnnotationBody` and `CollabTitleField` pass that call and nothing
+     beside it. So the test reads the lists the editors run, and an extension added in a
+     component is one it would never see.
+   - It asserts that each list builds the same schema as the one `tiptap-schema.ts` decodes that
+     ydoc with.
+   - It fingerprints the three schemas: every node and mark in order, their attributes and
+     defaults, and what may sit where. It fails until `SCHEMA_FINGERPRINTS` has the new
+     fingerprint under a new `SCHEMA_VERSION`, the way `check:schema` fails on an unformatted
+     `schema.prisma`. The failure prints the line to add.
+
+`e2e/schema-gate.spec.ts` covers the rest: the server's refusal from a raw socket, an editor
+refused on reconnect and live again after its reload, and a reading view refused at load. One
+build has no out-of-date tab, so the spec rewrites the version on the socket URL the page opens.
+
+### The local database is named by schema version
+
+The server can refuse a socket, but a tab reads its IndexedDB copy of a doc with no server in
+between, and y-indexeddb's compaction reads what other tabs in the same browser wrote. A
+database shared across bundles would hand an old tab a new tab's content, to delete what its
+schema lacks and leave that deletion for its next load to sync. A tab opened before the gate
+existed would do it with no refusal to stop its editor first.
+
+So `ydocDbName` (`src/lib/ydoc-db-name.ts`) puts the bundle's `SCHEMA_VERSION` in the name:
+`ydoc-debug:s<version>:<document>:<lineage>`. Version 0's name has no `s<version>:`, which is
+the name every bundle before the gate used. Two bundles never share a database, and that covers
+the tabs from before the gate too, so a bump waits on nothing.
+
+On its first attach of a doc, `attachIndexeddb` settles that doc's other local databases
+(`settleOtherDatabases`, `ydoc-persistence.ts`):
+
+- **An older version's, of the same lineage, is taken in and then deleted.** It holds what a tab
+  on that bundle typed and hadn't yet synced, typically while collab restarted for the deploy
+  that brought the new bundle. It holds nothing the new schema can't build, because no newer
+  bundle ever writes it. The updates are applied to the live `Y.Doc`, so y-indexeddb stores
+  them under the new name and the provider syncs them.
+- **A newer version's is left alone.** This bundle can't build what it holds, and the build
+  that can is the one a roll-forward brings back.
+- **Another lineage's is deleted**, as before (The database is keyed by lineage, above).
+
+Two limits:
+
+- **The delete waits on any tab that still has the database open**, and what such a tab writes
+  after the read is lost with the database. A refused tab has detached and gone read-only, so
+  this is only a tab from before the gate, typing on after its refusal, while a reloaded tab in
+  the same browser has the same doc open.
+- **It needs `indexedDB.databases()`.** Where a browser lacks it nothing is listed, so nothing
+  is taken in or deleted, and an older version's unsynced typing stays where it is.
+
+`e2e/local-database.spec.ts` types with collab cut off, moves the database to the previous
+version's name, and expects the next load to show and sync the text, delete that database, and
+leave a newer version's unread.
+
+### What it doesn't cover
+
+- **A rollback.** Rolling back past a bump, after people have used the new type, makes the old
+  build current again, and its tabs delete that content. Roll forward instead.
+- **Server-side writers need nothing.** MCP edits, imports and the `/admin` endpoints run the
+  server's own schema.
+
+### Not chosen
+
+- **A version stored in each ydoc**, as Leaflet and Lexical's Yjs binding do.
+  - It is more precise, but every writer has to stamp it, and it protects only tabs whose code
+    already checks it.
+  - Their per-update checks exist because clients on different versions meet on one document.
+    Here the server refuses any mismatch, so they never do.
+- **Keeping unknown content as opaque placeholder nodes**, as Atlassian's editor and BlockSuite
+  do. It needs a fork of y-tiptap, and y-prosemirror has no plans for such a node.
+- **A second layer, later.** Once y-tiptap ships PR #8686, `enableContentCheck: true` writes
+  nothing to the Y.Doc and makes the editor non-editable instead. That is worth enabling, though
+  it protects only tabs already running that version.
+
+### Prior art
+
+- **TipTap's Diagrams guide documents this gate.** The client puts `?schema=` on the Hocuspocus
+  URL, and the server checks it in `onConnect`, "before the document is loaded"
+  (tiptap.dev/docs/diagrams/guides/collaboration).
+- **Leaflet hit the same y-prosemirror bug** and checks in the browser: "a client on an old deploy
+  merely opening a doc with newer content would destroy that content for everyone."
+- **The library maintainers both recommend a version check.**
+  - Kevin Jahns (Yjs) says a client on an older schema "shouldn't open the document".
+  - Marijn Haverbeke (ProseMirror) says "build some kind of version-check into your protocols".
+- **Sync engines refuse an old client.** tldraw sync closes the session with `CLIENT_TOO_OLD`, and
+  Replicache sends a `schemaVersion` with every request.

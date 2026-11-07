@@ -11,6 +11,7 @@ import { collect as collectMarkInventory } from "@/lib/mark-inventory";
 import { extractText } from "@/lib/diff";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import { getCollabUrl } from "@/lib/collab-url";
+import { isSchemaRefusal } from "@/lib/collab-socket";
 import { useLocalTime } from "./LocalTime";
 import CollabEditorBody from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
@@ -900,7 +901,17 @@ function EditView({
             if (status !== "connected") setSynced(false);
           },
           onSynced: () => setSynced(true),
-          onAuthenticationFailed: ({ reason }) => setError(`Live editing unavailable: ${reason}`),
+          // The error replaces both editors, so nothing more is typed. A
+          // refused schema version also stops the socket and the local
+          // database, as DocEditor's out-of-date effect does and says why.
+          onAuthenticationFailed: ({ reason }) => {
+            if (isSchemaRefusal(reason)) {
+              instance?.disconnect();
+              detachIndexeddb?.();
+              detachIndexeddb = null;
+            }
+            setError(`Live editing unavailable: ${reason}`);
+          },
         });
         setProvider(instance);
       } catch (e) {

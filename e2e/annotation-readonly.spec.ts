@@ -1,6 +1,7 @@
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { COLLAB_PORT, DEV_HOST } from "../scripts/dev-ports";
+import { withSchemaVersion } from "../src/lib/schema-version";
 import { test, expect, QUOTED_BODY, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
 import { ADMIN_EMAIL, createTestAnnotation } from "./db";
 import type { Page } from "@playwright/test";
@@ -22,7 +23,9 @@ import type { Page } from "@playwright/test";
 // the gate under test); the connection is then made from Node, which is the
 // only place a spec can attempt a write the app itself declines to offer.
 
-const COLLAB_URL = `ws://${DEV_HOST}:${COLLAB_PORT}`;
+// With the schema version every socket states (docs/YDOC.md "A tab whose
+// schema is out of date is refused"), as the app's own `getCollabUrl` adds it.
+const COLLAB_URL = withSchemaVersion(`ws://${DEV_HOST}:${COLLAB_PORT}`);
 
 type TokenResponse = { token: string; documentName: string; readOnly?: boolean };
 

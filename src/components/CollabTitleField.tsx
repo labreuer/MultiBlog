@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Extension } from "@tiptap/core";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
-import Collaboration from "@tiptap/extension-collaboration";
 import type * as Y from "yjs";
-import { AuthorHighlight } from "@/lib/author-highlight-extension";
-import { collectAuthorHighlightStats, titleExtensions } from "@/lib/tiptap-schema";
+import { titleEditorExtensions } from "@/lib/live-editor-extensions";
+import { collectAuthorHighlightStats } from "@/lib/tiptap-schema";
 import { useAuthorColors } from "@/lib/use-author-colors";
 import AuthorHighlightStyles from "./AuthorHighlightStyles";
 
@@ -29,16 +27,6 @@ type Props = {
   // See CollabEditorBody's identical prop — PLAN.md §14f.
   ariaLabel?: string;
 };
-
-// Enter would otherwise attempt a splitBlock that the `content: "paragraph"`
-// schema rejects anyway; making it an explicit no-op keeps it from also
-// scrolling//bubbling as a failed command.
-const SingleLine = Extension.create({
-  name: "titleSingleLine",
-  addKeyboardShortcuts() {
-    return { Enter: () => true };
-  },
-});
 
 // A doc's title, as a collaborative field rather than a plain <input>: it's a
 // second Yjs fragment ("title") of the *same* Y.Doc the body uses, so it rides
@@ -68,12 +56,9 @@ export default function CollabTitleField({
   const [isEmpty, setIsEmpty] = useState(true);
 
   const editor = useEditor({
-    extensions: [
-      ...titleExtensions,
-      SingleLine,
-      Collaboration.configure({ document: ydoc, field: "title" }),
-      AuthorHighlight.configure({ getAuthorId: () => userId }),
-    ],
+    // The whole list is live-editor-extensions.ts's, and nothing is added
+    // beside it here: that file says why.
+    extensions: titleEditorExtensions({ ydoc, getAuthorId: () => userId }),
     editorProps: { attributes: { "aria-label": ariaLabel, role: "textbox" } },
     immediatelyRender: false,
   });

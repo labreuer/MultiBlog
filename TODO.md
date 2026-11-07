@@ -66,6 +66,18 @@ at all, since signing out reaches no server.
 
 ---
 
+## A second layer under the schema gate: `enableContentCheck`
+
+The collab server refuses a tab whose bundle is on another schema version (docs/YDOC.md, "A tab
+whose schema is out of date is refused"), because such a tab deletes from the shared document
+whatever its schema can't build. Two things stay open:
+
+- **A rollback past a bump isn't covered.** The old build becomes current again, and its tabs
+  delete what the newer schema added. Roll forward.
+- **Once y-tiptap ships TipTap PR #8686**, `enableContentCheck: true` writes nothing to the
+  Y.Doc and makes the editor non-editable instead. Worth enabling as a second layer, though it
+  protects only tabs already running that version.
+
 ## Server/client environment divergence has no check covering it
 
 **Status:** two instances found and fixed on 2026-08-11; the *class* is still untested, and one

@@ -2,12 +2,15 @@
 
 import * as Y from "yjs";
 import { IndexeddbPersistence } from "y-indexeddb";
+import { SCHEMA_VERSION } from "./schema-version";
+import { parseYdocDbName, ydocDbName } from "./ydoc-db-name";
 
 // Client-side durability for the /ydoc-debug editor only — PostEditor.tsx
 // does not use this (PLAN.md §11e). Two distinct duplication bugs, two
 // distinct fixes; see the module-level comments below for which is which.
 
-const DB_PREFIX = "ydoc-debug:";
+// y-indexeddb's object store of updates, one per key, in the order written.
+const UPDATES_STORE = "updates";
 
 type Attachment = { persistence: IndexeddbPersistence; refs: number; doc: Y.Doc };
 
@@ -35,38 +38,81 @@ const attachments = new Map<string, Attachment>();
 // *lineage* (its `ydoc.created_at`, which only changes when the row is
 // recreated) rather than on documentName alone — a re-seed then lands in a
 // different local database, so there's nothing to merge.
-function dbName(documentName: string, lineageMs: number): string {
-  return `${DB_PREFIX}${documentName}:${lineageMs}`;
+// `ydocDbName` (ydoc-db-name.ts) builds the name, which also carries the
+// bundle's schema version.
+
+/** The updates a y-indexeddb database holds, oldest first. */
+async function readUpdates(name: string): Promise<Uint8Array[]> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(name);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try {
+    if (!db.objectStoreNames.contains(UPDATES_STORE)) return [];
+    return await new Promise<Uint8Array[]>((resolve, reject) => {
+      const request = db.transaction(UPDATES_STORE, "readonly").objectStore(UPDATES_STORE).getAll();
+      request.onsuccess = () => resolve(request.result as Uint8Array[]);
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    db.close();
+  }
 }
 
-// Deletes any other lineage's local database for this document, so a stale
-// copy can never be attached later by mistake — merely orphaned data, not a
-// live merge target. Best-effort: Firefox doesn't implement
-// indexedDB.databases(), in which case stale entries are simply never swept,
-// which is harmless (they just sit unused).
-async function sweepStaleLineages(documentName: string, currentDbName: string): Promise<void> {
+// Settles this document's other local databases, on first attach:
+//
+//  - another lineage's is deleted, so a stale copy can never be attached
+//    later by mistake;
+//  - an older schema version's, of this lineage, is taken in and then
+//    deleted. It holds what a tab on that bundle typed and hadn't yet synced
+//    (while collab restarted for the deploy that brought this bundle, say),
+//    and nothing this schema can't build: a newer bundle never writes it;
+//  - a newer schema version's is left alone. This bundle can't build what it
+//    holds, and the build that can is the one a roll-forward brings back.
+//
+// The delete waits on any tab that still has the database open, and what such
+// a tab writes after this read is lost with it. A refused tab has stopped
+// writing (it detaches at the refusal); only a tab from before the gate
+// existed keeps typing.
+//
+// Best-effort: without indexedDB.databases() nothing is listed, so nothing is
+// taken in or swept, and the databases sit unused.
+async function settleOtherDatabases(doc: Y.Doc, documentName: string, lineageMs: number, current: string, stillAttached: () => boolean): Promise<void> {
   if (typeof indexedDB.databases !== "function") return;
   try {
-    const databases = await indexedDB.databases();
-    const prefix = `${DB_PREFIX}${documentName}:`;
-    for (const { name } of databases) {
-      if (name && name.startsWith(prefix) && name !== currentDbName) {
+    for (const { name } of await indexedDB.databases()) {
+      if (!name || name === current) continue;
+      const parsed = parseYdocDbName(name, documentName);
+      if (!parsed) continue;
+      if (parsed.lineageMs !== lineageMs) {
         indexedDB.deleteDatabase(name);
+        continue;
       }
+      if (parsed.version > SCHEMA_VERSION) continue;
+      const updates = await readUpdates(name);
+      // Applied with no origin of y-indexeddb's own, so the attached
+      // persistence stores them and the provider syncs them.
+      if (!stillAttached()) return;
+      doc.transact(() => {
+        for (const update of updates) Y.applyUpdate(doc, update);
+      });
+      indexedDB.deleteDatabase(name);
     }
   } catch {
-    // Best-effort cleanup only — never block attaching over this.
+    // Best-effort only — never block attaching over this.
   }
 }
 
 /**
  * Attaches (or reuses) IndexedDB persistence for `doc`, keyed by the
- * document's lineage. Ref-counted per Y.Doc instance (bug 1); sweeps stale
- * lineages for the same documentName on first attach (bug 2). Call
+ * document's lineage and this bundle's schema version. Ref-counted per Y.Doc
+ * instance (bug 1); on first attach, sweeps stale lineages for the same
+ * documentName (bug 2) and takes in an older schema version's database. Call
  * `detach()` in the same effect's cleanup that calls this.
  */
 export function attachIndexeddb(doc: Y.Doc, documentName: string, lineageMs: number): () => void {
-  const name = dbName(documentName, lineageMs);
+  const name = ydocDbName(documentName, lineageMs);
   const existing = attachments.get(name);
   if (existing) {
     if (existing.doc !== doc) {
@@ -82,7 +128,7 @@ export function attachIndexeddb(doc: Y.Doc, documentName: string, lineageMs: num
 
   const persistence = new IndexeddbPersistence(name, doc);
   attachments.set(name, { persistence, refs: 1, doc });
-  void sweepStaleLineages(documentName, name);
+  void settleOtherDatabases(doc, documentName, lineageMs, name, () => attachments.get(name)?.persistence === persistence);
 
   return () => detach(name);
 }

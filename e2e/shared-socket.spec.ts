@@ -2,6 +2,7 @@ import * as Y from "yjs";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import type { Page } from "@playwright/test";
 import { COLLAB_PORT, DEV_HOST } from "../scripts/dev-ports";
+import { withSchemaVersion } from "../src/lib/schema-version";
 import {
   test,
   expect,
@@ -43,7 +44,9 @@ import {
 // websocket to the collab port per page, an annotation composer or two
 // notwithstanding.
 
-const COLLAB_URL = `ws://${DEV_HOST}:${COLLAB_PORT}`;
+// With the schema version every socket states (docs/YDOC.md "A tab whose
+// schema is out of date is refused"), as the app's own `getCollabUrl` adds it.
+const COLLAB_URL = withSchemaVersion(`ws://${DEV_HOST}:${COLLAB_PORT}`);
 
 type TokenResponse = { token: string; documentName: string; readOnly?: boolean };
 

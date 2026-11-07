@@ -1,5 +1,7 @@
 "use client";
 
+import { withSchemaVersion } from "./schema-version";
+
 // The collab (Hocuspocus) WebSocket URL, resolved against whatever host the
 // page was actually loaded from — so the same dev build works whether it's
 // opened via localhost or a LAN IP (e.g. testing from a phone on the same
@@ -27,6 +29,12 @@
 // through and produce `ws://host:`.
 const COLLAB_PORT = process.env.NEXT_PUBLIC_COLLAB_PORT || "1234";
 
+// Every browser socket is built from this, so every one states the schema
+// version its bundle was compiled with, and the server refuses a tab still
+// running an older bundle (docs/YDOC.md "A tab whose schema is out of date is
+// refused"). On the URL rather than in the token: the token route is fetched
+// again on every reconnect, so a new server would hand an old tab a token
+// carrying the new version.
 export function getCollabUrl(): string {
-  return process.env.NEXT_PUBLIC_COLLAB_URL ?? `ws://${window.location.hostname}:${COLLAB_PORT}`;
+  return withSchemaVersion(process.env.NEXT_PUBLIC_COLLAB_URL ?? `ws://${window.location.hostname}:${COLLAB_PORT}`);
 }
