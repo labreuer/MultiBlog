@@ -1,0 +1,60 @@
+/* FileReferencesPanel.tsx — the references a PDF is the PDF of, below its
+   tags in the Metadata pane. */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.9rem;
+}
+
+.heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.remove {
+  flex: none;
+  padding: 0 0.35rem;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.remove:hover:not(:disabled) {
+  color: var(--foreground);
+  border-color: var(--border-strong);
+}
+
+.none {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.error {
+  font-size: 0.8rem;
+  color: var(--error);
+}

@@ -7,9 +7,19 @@ import { ApiError } from "@/lib/api/errors";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import type { CitedWork } from "@/lib/entity-chips/kinds/citation";
 import { loadCitationContext } from "@/lib/entity-chips/kinds/citation-context";
+import { canUserReadFile } from "@/lib/file-authz";
+import { prisma } from "@/lib/prisma";
 import { findReferences } from "@/lib/reference-data";
 import { referenceCitedBy as citedByFor, type ReferenceCitedBy } from "@/lib/reference-cited-by";
-import { importReferences, referencePath, setReferenceDeleted, updateReference, type ImportOutcome } from "@/lib/reference-write";
+import { findReadablePdfs, referencesOfFile, type FileReference, type PdfCandidate } from "@/lib/reference-files";
+import {
+  importReferences,
+  referencePath,
+  setReferenceDeleted,
+  untieReferenceFromFile as untieFromFile,
+  updateReference,
+  type ImportOutcome,
+} from "@/lib/reference-write";
 import { entryText } from "@/lib/references/entry";
 
 // docs/CITATIONS.md — the reference library's server actions. Each is a
@@ -74,6 +84,61 @@ export async function updateReferenceKey(id: string, key: string): Promise<{ key
   revalidatePath("/references");
   revalidatePath(referencePath(updated.key));
   return { key: updated.key };
+}
+
+// docs/CITATIONS.md, "A work's PDF" — tying a reference to its PDF, from
+// either side.
+
+/** Sets a reference's PDF, or with null unties it: the File column of /references. */
+export async function setReferenceFile(id: string, fileId: string | null): Promise<void> {
+  if (typeof id !== "string" || (fileId !== null && typeof fileId !== "string")) throw new Error("That isn't a reference and a file.");
+  await updateReference(await requireActor(), id, { fileId }).catch(said);
+  revalidatePath("/references");
+}
+
+/** The PDFs the File column's picker offers: ones the viewer may read, by title, slug or file name. */
+export async function searchReferencePdfs(query: string): Promise<PdfCandidate[]> {
+  const session = await auth();
+  if (!session?.user || typeof query !== "string") return [];
+  return findReadablePdfs(actorFromSessionUser(session.user), query.slice(0, 100), 8);
+}
+
+/** A file the viewer may read, by id, or a refusal: what the PDF page's actions are asked about. */
+async function readableFile(actor: Actor, fileId: string): Promise<void> {
+  const file = typeof fileId === "string" ? await prisma.storedFile.findUnique({ where: { id: fileId }, select: { id: true, visibility: true } }) : null;
+  if (!file || !(await canUserReadFile(actor.userId, actor.role, file))) throw new Error("That file isn't one you can read.");
+}
+
+/** Ties a reference to this PDF, from the PDF's page; answers the references the PDF is now the PDF of. */
+export async function tieReferenceToFile(fileId: string, referenceId: string): Promise<FileReference[]> {
+  const actor = await requireActor();
+  await readableFile(actor, fileId);
+  if (typeof referenceId !== "string") throw new Error("That isn't a reference.");
+  await updateReference(actor, referenceId, { fileId }).catch(said);
+  revalidatePath("/references");
+  return referencesOfFile(fileId);
+}
+
+/** Unties a reference from this PDF, if it is still tied to it; answers the references the PDF is now the PDF of. */
+export async function untieReferenceFromFile(fileId: string, referenceId: string): Promise<FileReference[]> {
+  const actor = await requireActor();
+  await readableFile(actor, fileId);
+  if (typeof referenceId !== "string") throw new Error("That isn't a reference.");
+  if (await untieFromFile(actor, referenceId, fileId).catch(said)) revalidatePath("/references");
+  return referencesOfFile(fileId);
+}
+
+/** A work the PDF page's picker offers, and whether tying it here would move it from another PDF. */
+export type FileReferenceCandidate = FileReference & { elsewhere: boolean };
+
+/** The references the PDF page's picker offers, found as the citation menu finds them. */
+export async function searchReferencesForFile(fileId: string, query: string): Promise<FileReferenceCandidate[]> {
+  const session = await auth();
+  if (!session?.user || typeof query !== "string" || typeof fileId !== "string") return [];
+  const found = await findReferences(query.slice(0, 100), 8);
+  return found
+    .filter((reference) => !reference.deleted && reference.fileId !== fileId)
+    .map((reference) => ({ id: reference.id, key: reference.key, entry: entryText(reference.item), elsewhere: reference.fileId !== null }));
 }
 
 export type CiteCandidate = {

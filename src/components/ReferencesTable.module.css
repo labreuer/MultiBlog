@@ -35,6 +35,38 @@
   font-style: italic;
 }
 
+/* The File column: the PDF, and under it, while open, the picker that sets it. */
+.fileCell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.filePicker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 16rem;
+  max-width: 24rem;
+}
+
+.untie {
+  align-self: flex-start;
+  padding: 0.1rem 0.5rem;
+  font: inherit;
+  font-size: 0.85em;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.untie:hover:not(:disabled) {
+  color: var(--foreground);
+  border-color: var(--border-strong);
+}
+
 .importPanel {
   margin-bottom: 1rem;
 }

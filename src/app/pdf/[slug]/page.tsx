@@ -9,6 +9,9 @@ import { getOwnFileDraftAnnotations } from "@/lib/annotation-data";
 import { anchoredLinkForViewer } from "@/lib/anchored-link-data";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import TagChips from "@/components/tags/TagChips";
+import FileReferencesPanel from "@/components/pdf/FileReferencesPanel";
+import { referencesOfFile } from "@/lib/reference-files";
+import { canWriteReferences } from "@/lib/role-checks";
 import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
 import styles from "./page.module.css";
 
@@ -119,6 +122,8 @@ export default async function PdfPage({
   // draft once its composer is gone. Their own id, never anyone else's
   // (getOwnFileDraftAnnotations).
   const ownDrafts = await getOwnFileDraftAnnotations(file.id, user.id);
+  // A reference's record is public, and this page has checked its reader may read the file.
+  const references = await referencesOfFile(file.id);
 
   // PLAN.md §20d — the tag chips, handed to the viewer as its Metadata
   // pane.
@@ -132,9 +137,8 @@ export default async function PdfPage({
   // The `key` is pre-emptive. An async Server Component handed across a
   // client boundary as a prop needs one the moment its client renders it
   // among siblings (CLAUDE.md's Gotchas; /doc/[slug]'s byline is the live
-  // case). PdfMetadataPanel renders this as its sole child today, which is
-  // the only reason it escapes — and that panel is expected to grow the
-  // file's own facts beside it.
+  // case). PdfMetadataPanel renders it beside the references this file is
+  // the PDF of, each keyed.
   return (
     <>
       {/* The key makes file identity a mount boundary, the doc page's
@@ -150,7 +154,17 @@ export default async function PdfPage({
         entries={entries}
         ownDrafts={ownDrafts}
         anchoredLink={anchoredLink}
-        metadata={<TagChips key="tags" target={{ kind: "file", id: file.id }} />}
+        metadata={[
+          <TagChips key="tags" target={{ kind: "file", id: file.id }} />,
+          // docs/CITATIONS.md, "A work's PDF": the references this is the PDF of, and for a writer the picker.
+          <FileReferencesPanel
+            key="references"
+            fileId={file.id}
+            initial={references}
+            canWrite={canWriteReferences(user.role)}
+            isPrivate={file.visibility === "PRIVATE"}
+          />,
+        ]}
       />
       {/* docs/ANCHORED_LINKS.md — the open-link tray, a self-fetching
           sibling of the viewer island rather than a child of it: it must
