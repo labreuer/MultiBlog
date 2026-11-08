@@ -508,6 +508,11 @@ well. `start` is written as the first marker, `0` included (the package reads an
 reads back as an item with an empty paragraph, which is what the schema requires of a list
 item. The package's tokenizer gives it no content at all, which is invalid.
 
+An empty bullet item is written as a bare `-`, since the bullet tokenizer, the package's, takes
+`- ` opening a list for a paragraph holding "- ". A nested list that opens with an empty bullet
+gets a blank line above it, because `- a` over `  -` is a setext heading "a" to CommonMark.
+`list-item-markdown.ts` writes both kinds of item.
+
 ### Where it is, and the one way to break it
 
 - `ordered-list-markers.ts` holds the matcher, the reading of a first marker, the tokenizer,

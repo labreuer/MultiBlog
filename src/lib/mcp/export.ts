@@ -213,7 +213,7 @@ export function exportTar(selection: ExportSelection, format: ExportFormat): Rea
         } else {
           name = `${id}.${format === "text" ? "txt" : "md"}`;
           const front = ["---", `id: ${id}`, `slug: ${row.slug}`, `title: ${JSON.stringify(title)}`, `version: ${JSON.stringify(version)}`, "---", ""];
-          const content = format === "text" ? docText(state.blocks) : docContentToMarkdown(state.json, state.chips.markdown).trim();
+          const content = format === "text" ? docText(state.blocks) : docContentToMarkdown(state.json, state.chips.markdown).replace(/^\n+|\n+$/g, "");
           body = `${front.join("\n")}\n${content}\n`;
         }
         manifest.push({

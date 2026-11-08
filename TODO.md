@@ -355,6 +355,28 @@ comments, annotations).
     `&copy;` making the round trip unchanged through all three managers, and for the Markdown
     each writes.
 
+## Three Markdown round trips that still lose something (`src/lib/markdown-import.ts`)
+
+Found by taking 325 Claude transcripts and slot B's docs from doc to Markdown and back, in the
+export's whole-doc form and the MCP read's block-by-block one. Each happens without chips.
+
+- **A space that opens a line after a hard break, inside a numbered list item.** The reader keeps
+  spaces after a hard break that CommonMark drops: `one  \n   two` reads as "   two", where
+  CommonMark has "two". Inside an ordered item it strips only part of the indent:
+  `1. one  \n   two` reads as " two". The writer doesn't indent an item's continuation lines, so
+  that " two" goes out as a line opening with one space, which the reader takes for indent. The
+  round trip loses the space, and the space itself came in on import, from the three-space
+  indent a transcript gives a wrapped line under `1.` (one transcript holds nine of them). The
+  fix is in the reader, which changes what re-importing an existing transcript produces, so
+  check docs/CLAUDE_IMPORT.md's update in place with it.
+- **Two hard breaks in a row, or one that opens a paragraph.** The writer writes a hard break as
+  two spaces before the line's end, so a second one is a line of spaces, which ends the
+  paragraph: "a", break, break, "c" comes back as two paragraphs, "a  " and "c". A break that
+  opens a paragraph is dropped. CommonMark's other hard break, a backslash at the line's end, is
+  the first thing to try for both.
+- **An empty list item holding a nested list.** `-` over `  - b` reads back as an item whose
+  first child is the list, with no paragraph, which the schema refuses.
+
 ## The ordered-list marker rule overrides upstream, and tiptap#8377 alone won't retire it (docs/DOC_IMPORT.md §12)
 
 `OrderedList` and `ListItem` in `src/lib/tiptap-schema.ts` replace `@tiptap/extension-list`

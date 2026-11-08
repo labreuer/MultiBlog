@@ -44,7 +44,8 @@ type ChipMarkdown = DocState["chips"]["markdown"];
 /** One block in the format asked for. A chip is its label in text, and its chip kind's syntax in Markdown. */
 function renderBlock(block: DocBlock, format: Format, chips: ChipMarkdown): string {
   if (format === "text") return block.text;
-  return docContentToMarkdown({ type: "doc", content: [block.node.toJSON()] }, chips).trim();
+  // Line breaks only: a space at either end is the block's own text.
+  return docContentToMarkdown({ type: "doc", content: [block.node.toJSON()] }, chips).replace(/^\n+|\n+$/g, "");
 }
 
 function render(blocks: readonly DocBlock[], format: Format, chips: ChipMarkdown): string {

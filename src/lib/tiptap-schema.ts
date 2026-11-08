@@ -27,6 +27,7 @@ import {
   renderOrderedListItem,
 } from "./ordered-list-markers";
 import { typedOrderedListInputRule } from "./ordered-list-input-rule";
+import { renderListItemMarkdown } from "./list-item-markdown";
 import { atLine, startingAtLine } from "./list-from-line";
 import { Annotation } from "./annotation-extension";
 import { EntityChip } from "./entity-chips/node";
@@ -85,9 +86,7 @@ export const BulletList = BaseBulletList.extend({
 
 export const ListItem = BaseListItem.extend({
   renderMarkdown: (node, helpers, ctx) =>
-    ctx.parentType === "orderedList"
-      ? renderOrderedListItem(node, helpers, ctx)
-      : BaseListItem.config.renderMarkdown!(node, helpers, ctx),
+    ctx.parentType === "orderedList" ? renderOrderedListItem(node, helpers, ctx) : renderListItemMarkdown(node, helpers, "- ", "-"),
 });
 
 // docs/TIPTAP.md "A link ends where its text ends" — TipTap's link mark is
