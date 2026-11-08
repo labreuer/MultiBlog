@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { citationKind, normalizeLocator, UNKNOWN_WORK, type CitationContext, type CitationData, type CitedWork } from "./citation";
+import { citationKind, isPageLocator, normalizeLocator, pdfPageHref, splitTrailingPages, UNKNOWN_WORK, type CitationContext, type CitationData, type CitedWork } from "./citation";
 
 // docs/CITATIONS.md — the citation chip kind: what it stores, and what each
 // form shows for it.
 
 const work = (id: string, more: Partial<CitedWork> = {}): CitedWork => {
-  const fields = { id, key: id, short: null, names: "Radner", year: 2012, title: "The Origin of Ideas", deleted: false, file: null, ...more };
+  const fields = { id, key: id, short: null, names: "Radner", year: 2012, title: "The Origin of Ideas", deleted: false, ...more };
   // The entry as the context loader makes one, from the same record.
   const entry = { authors: fields.names, year: fields.year === null ? "n.d." : String(fields.year), title: fields.title, titleIsContainer: true, source: "" };
   return { entry, ...fields };
@@ -81,21 +81,63 @@ test("a deleted reference keeps its label, unlinked; an unknown one is a placeho
   const [deleted, unknown, live] = citationKind.render([cite("gone", { locator: "4" }), cite("nobody"), cite("bu", { locator: "49–51" })], { form: "short" }, CONTEXT);
   assert.deepEqual(deleted, { label: "(GN p. 4)", href: null, postHref: null, status: "deleted" });
   assert.deepEqual(unknown, { label: UNKNOWN_WORK, href: null, postHref: null, status: "unknown" });
-  // A post's reader is sent to the reference's page, the page cited in the fragment.
-  assert.deepEqual(live, { label: "(BU pp. 49–51)", href: "/references/barfield1957", postHref: "/references/barfield1957#p=49", status: "live" });
+  // Every reader, of a doc or a post, gets the route that decides where the page cited is when it is followed.
+  assert.deepEqual(live, { label: "(BU pp. 49–51)", href: "/references/barfield1957/p/49", postHref: "/references/barfield1957/p/49", status: "live" });
 });
 
-test("a doc's link goes to the page in the PDF, by the file's page labels, when it has both", () => {
-  const withFile: CitationContext = { bu: { ...CONTEXT.bu, file: { slug: "saving", pageLabels: ["i", "ii", "1", "2", "49"] } } };
-  const href = (locator?: string) => citationKind.render([cite("bu", locator ? { locator } : {})], { form: "short" }, withFile)[0].href;
-  assert.equal(href("49"), "/pdf/saving#page=5");
-  assert.equal(href("ii"), "/pdf/saving#page=2");
-  // A page the file doesn't label, and no page at all: the reference's own page.
-  assert.equal(href("300"), "/references/barfield1957");
+test("a citation links to its first work's page route, by the first page cited, or to the reference's page", () => {
+  const href = (locator?: string) => citationKind.render([cite("bu", locator ? { locator } : {})], { form: "short" }, CONTEXT)[0].href;
+  assert.equal(href("49"), "/references/barfield1957/p/49");
+  assert.equal(href("49, 51"), "/references/barfield1957/p/49");
+  assert.equal(href("xii"), "/references/barfield1957/p/xii");
   assert.equal(href(), "/references/barfield1957");
+});
+
+test("the route finds the page cited in the PDF by the file's page labels", () => {
+  const labelled = { slug: "saving", pageLabels: ["i", "ii", "1", "2", "49"] };
+  assert.equal(pdfPageHref(labelled, "49"), "/pdf/saving#page=5");
+  assert.equal(pdfPageHref(labelled, "ii"), "/pdf/saving#page=2");
+  assert.equal(pdfPageHref(labelled, "49–51"), "/pdf/saving#page=5");
+  assert.equal(pdfPageHref(labelled, "49, 60"), "/pdf/saving#page=5");
+  // A page the file doesn't label, or no page: nothing to go to in the PDF.
+  assert.equal(pdfPageHref(labelled, "300"), null);
+  assert.equal(pdfPageHref(labelled, undefined), null);
   // With no labels, a number is the sheet.
-  const unlabelled: CitationContext = { bu: { ...CONTEXT.bu, file: { slug: "saving", pageLabels: null } } };
-  assert.equal(citationKind.render([cite("bu", { locator: "49" })], { form: "short" }, unlabelled)[0].href, "/pdf/saving#page=49");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null }, "49"), "/pdf/saving#page=49");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null }, "xii"), null);
+  // But not past the file's last sheet.
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 40 }, "49"), null);
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 49 }, "49"), "/pdf/saving#page=49");
+});
+
+test("Page holds pages only, and an item is stored as Markdown reads it back", () => {
+  const item = (fields: Record<string, unknown>) => citationKind.validate({ items: [{ refId: "r", ...fields }] })?.items[0];
+  // Pages: digits, well-formed Roman numerals, ranges and lists.
+  for (const [typed, stored] of [["49", "49"], ["p. 49", "49"], ["49-51", "49–51"], ["xii", "xii"], ["XIV", "XIV"], ["49,51", "49, 51"], ["pp. 33-35, 38", "33–35, 38"]]) {
+    assert.deepEqual(item({ locator: typed }), { refId: "r", locator: stored }, typed);
+    assert.equal(isPageLocator(typed), true, typed);
+  }
+  // Pages, then more: the rest goes after them.
+  assert.deepEqual(item({ locator: "49 n. 3" }), { refId: "r", locator: "49", suffix: "n. 3" });
+  assert.deepEqual(item({ locator: "49 n. 3", suffix: "emphasis added" }), { refId: "r", locator: "49", suffix: "n. 3, emphasis added" });
+  // No page first: all of it goes after the work, so no label writes "p." before it.
+  assert.deepEqual(item({ locator: "ch. 3" }), { refId: "r", suffix: "ch. 3" });
+  assert.deepEqual(item({ locator: "§ 4" }), { refId: "r", suffix: "§ 4" });
+  for (const word of ["mild", "did", "civil", "iiii"]) assert.deepEqual(item({ locator: word }), { refId: "r", suffix: word }, word);
+  // Words after that are pages join the pages, as Markdown reads them.
+  assert.deepEqual(item({ locator: "49", suffix: "51" }), { refId: "r", locator: "49, 51" });
+  assert.deepEqual(item({ locator: "49", suffix: "51st edition" }), { refId: "r", locator: "49", suffix: "51st edition" });
+  assert.deepEqual(item({ suffix: "p. 49 n. 3" }), { refId: "r", suffix: "p. 49 n. 3" });
+  // What the writer writes for each reads back as the item stored.
+  for (const fields of [{ locator: "49 n. 3" }, { locator: "ch. 3" }, { locator: "49", suffix: "51" }, { locator: "49, 51", suffix: "i.e. both" }, { suffix: "emphasis *added*" }]) {
+    const stored = item(fields)!;
+    const markdown = citationKind.markdown({ items: [stored] }, citationKind.render([{ items: [stored] }], { form: "short" }, { r: work("r") })[0], { r: work("r") });
+    const after = /^\[@r(?:, (.*))?\]$/.exec(markdown)?.[1];
+    assert.deepEqual(item({ suffix: after }), stored, JSON.stringify(fields));
+  }
+  assert.deepEqual(splitTrailingPages("radner 49"), { words: "radner", locator: "49" });
+  assert.deepEqual(splitTrailingPages("radner pp. 49-51, 60"), { words: "radner", locator: "49–51, 60" });
+  assert.deepEqual(splitTrailingPages("radner origin"), { words: "radner origin", locator: null });
 });
 
 test("validation stores only what the Markdown can write, in the form it reads back as", () => {

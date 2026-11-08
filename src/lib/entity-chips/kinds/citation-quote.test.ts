@@ -26,7 +26,6 @@ const work = (id: string, key: string, short: string | null, names: string, year
   year,
   title: key,
   deleted: false,
-  file: null,
   entry: { authors: names, year: String(year), title: key, titleIsContainer: true, source: "" },
 });
 const CONTEXT: CitationContext = {

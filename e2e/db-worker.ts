@@ -1243,6 +1243,12 @@ export async function deleteTestReferences(keyPrefix: string): Promise<number> {
   return removed.count;
 }
 
+/** Ties a test reference to a file, or unties it: the state the reference pickers leave, set directly. */
+export async function setTestReferenceFile(key: string, fileId: string | null): Promise<void> {
+  if (!/^e2e[a-z0-9-]{4,}$/.test(key)) throw new Error(`setTestReferenceFile: "${key}" isn't an e2e key.`);
+  await prisma.reference.update({ where: { key }, data: { fileId } });
+}
+
 /** A reference as stored, by key: its identifiers, and whether it is deleted. Null for no such key. */
 export async function getTestReference(key: string): Promise<{ key: string; identifiers: string[]; deleted: boolean; short: string | null } | null> {
   const row = await prisma.reference.findUnique({
@@ -2830,6 +2836,7 @@ const handlers = {
   annotationSearchHolds,
   setAnchorChipLabels,
   deleteTestReferences,
+  setTestReferenceFile,
   getTestReference,
   getDocChipIids,
   markPresentAtStamp,

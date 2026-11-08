@@ -19,10 +19,10 @@ search by cited work. Everything below not listed here is still a plan: Later.
   three forms with their narrative
   and author-suppressed shapes, numbering by first appearance, the year-then-key
   disambiguation of a shared abbreviation, the per-work fallback to author-date for a
-  reference with no abbreviation, and Pandoc's syntax on the way out. A doc's link goes to
-  the page in the work's PDF when the file is SHARED and its page labels name the locator
-  (a PRIVATE file is never linked, since a rendering can't depend on who is looking), and
-  otherwise to the reference's page; a post's goes to `/references/<key>#p=<page>`.
+  reference with no abbreviation, and Pandoc's syntax on the way out. A citation at a page
+  links, in a doc and a post alike, to `/references/<key>/p/<page>`, which sends whoever
+  follows it to the PDF at that page if they may open it, and to the reference's page
+  otherwise (Labels, "The link").
 - **Its context:** `citation-context.ts` loads the cited references, deleted ones included.
   The chip-context endpoint answers for any work asked about, a reference's record being
   public.
@@ -93,7 +93,8 @@ search by cited work. Everything below not listed here is still a plan: Later.
 
 - **Reference.** A bibliographic record (book, article, chapter), optionally tied to a PDF in
   `/files`.
-- **Locator.** The printed page a citation points at, such as "49" or "49–51".
+- **Locator.** The printed page or pages a citation points at, such as "49", "49–51", "49, 51"
+  or "xii", and nothing else (The chip, "The page").
 
 ## The chip
 
@@ -108,8 +109,17 @@ search by cited work. Everything below not listed here is still a plan: Later.
   back as, so every way in stores the same value:
   - A narrative chip holds one work, with no prefix and no suppressed author. Pandoc has no form
     for the others, so "Radner (2012) and Barfield (1957)" is two chips.
-  - A suffix that reads as a locator becomes one: `p. 5, note` with no locator is stored as
-    locator `5`, suffix `note`.
+  - **The page.** A locator holds pages and nothing else: digits or a well-formed Roman
+    numeral, a range of two, or a list of either, as Pandoc reads `pp. 33-35, 38`. "mild" and
+    "did" are words; "mix" and "liv" are numerals, as they are to Pandoc. What follows a
+    locator's pages goes after the work, so "49 n. 3" is stored as page 49 and "n. 3", shown
+    `(RTS p. 49, n. 3)`. A locator that opens with no page, "ch. 3" or "§ 4", goes after the
+    work whole, so no label writes "p." before it. The popover says what it moved.
+  - **Then the page and the words after it are stored as Markdown reads them**, since the
+    writer puts both in one place. With no locator, a suffix that opens with pages gives them
+    up: `p. 5, note` is stored as locator `5`, suffix `note`. A suffix that is pages joins the
+    locator: page 49 and "51" are pages 49, 51. A suffix such as "p. 49 n. 3", with no comma
+    after the page, stays words, since that is how Markdown reads `[@key, p. 49 n. 3]`.
   - The words before and after a work are inline Markdown, stored as Markdown (Markdown,
     "Markdown inside a citation").
   - A hyphen in a page range becomes an en dash.
@@ -151,24 +161,34 @@ doc mixes `(BU p. 49)` and `(Radner 2012, p. 49)` until the abbreviation is fill
 - **A deleted reference** shows the same label, struck through and unlinked.
 - **An unknown id** shows a struck-through "unknown work".
 
-**Context:** the references cited, deleted ones included, with their files' page labels for
-links.
+**Context:** the references cited, deleted ones included. Nothing about their PDFs: no label
+or link reads one.
 
-**Refresh** (the kit's step 1, item 10): a reference's record changes. Page labels change only a
-chip's link, which every surface computes as it shows it and a post freezes at publish, so they
-call for no refresh.
+**Refresh** (the kit's step 1, item 10): a reference's record changes. Nothing about a PDF calls
+for one, since the link below decides when it is followed.
 
-**Links.**
+**The link.** A citation links to its first work, the same for every reader, in a doc and in a
+post alike:
 
-- **In the doc's own views**, a citation with a file and a locator links to the PDF passage,
-  `/pdf/<slug>#page=<sheet>`. The sheet comes from the file's `pageLabels`
-  ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)). Without both, it links to the reference page,
-  `/references/<key>`.
-- **A published post always links to the reference page**, with the locator in its fragment:
-  `/references/<key>#p=49`. Files aren't publicly readable ([PERMISSIONS.md](PERMISSIONS.md)), so
-  a PDF link would send a signed-out reader to sign in. The reference page's client island reads
-  the fragment and offers the PDF passage to whoever may read the file. A fragment, rather than a
-  query string, keeps the page static.
+- **With a page**, to `/references/<key>/p/<first page>`, which renders nothing
+  (`src/app/references/[key]/p/[page]/page.tsx`, `citedPageTarget` in
+  `src/lib/reference-cited-by.ts`). A reader who may open the work's PDF, under the files' read
+  rule, is sent to `/pdf/<slug>#page=<sheet>`, the sheet found by the file's `pageLabels`
+  ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)), or taken as the page itself for a file with
+  none. Anyone else, and a page the labels don't name, goes to `/references/<key>#p=49`, where
+  the page's client island offers the PDF to whoever may read it. A fragment, rather than a query
+  string, keeps that page static.
+- **Without one**, to `/references/<key>`.
+
+Why the route decides, and not the label: a rendering never depends on who is looking
+([ENTITY_CHIPS.md](ENTITY_CHIPS.md), rule 2), and a link straight to a PDF would show every
+reader of a doc a file most of them may not open, a PRIVATE one included. Asked at the click, as
+`/link/<id>` asks of its targets ([ANCHORED_LINKS.md](ANCHORED_LINKS.md)), the link names only
+the reference, whose page is public, and is right for each reader: the owner of a private PDF
+reaches it from their own doc, and a doc shared later, or a PDF made private or deleted, needs
+nothing rewritten. A viewer who may not read the PDF gets the answer a reference with no PDF
+gives, so the route says nothing about one. The cost is a redirect on the way, and a link whose
+address names the reference rather than the PDF.
 
 ## Markdown
 
@@ -308,9 +328,10 @@ call for no refresh.
   - What only some viewers may see comes from a client island that asks the server once the
     reader is signed in, the way `TagChips` keeps the post page static. That covers the docs and
     notes citing it, the first 20 of each with a link to `cites=` for the rest, and its PDF, at
-    the page a post's link names (`#p=49`, read in the browser so the page stays one cached
-    page). Each list goes through its read rule, a PDF included, so a PRIVATE file is offered
-    only to its owners.
+    the page the citation's route names (`#p=49`, read in the browser so the page stays one
+    cached page). Each list goes through its read rule, a PDF included, so a PRIVATE file is
+    offered only to its owners.
+- **`/references/[key]/p/[page]`** is the citation's link at a page (Labels, "The link").
 - **A key is permanent once used.** Posts link to `/references/<key>`, and Markdown exports write
   `[@key]`. So renaming a key keeps the old one redirecting through a key history, as
   `UserSlugHistory` does for users.
@@ -337,6 +358,9 @@ is left out; the form; and further works, found as the menu finds them, "radner 
 - **A text field writes when it is left or Enter is pressed**, not on each keystroke, since
   validation trims and would eat the space being typed. Escape puts a changed field back, and a
   second Escape returns to the editor with the citation still selected.
+- **Page holds pages only** (The chip, "The page"). Text typed there that isn't all pages is
+  moved, as validation moves it: "49 n. 3" leaves 49 in Page and puts "n. 3" in After, and the
+  popover says what went, until the next edit or until it closes.
 - **"In the sentence" is offered only where Pandoc has the form**: one work, its author shown,
   nothing before it. Otherwise the choice is disabled and says why.
 - **Open while it is wanted.** It shows while the editor has focus and its selection is the

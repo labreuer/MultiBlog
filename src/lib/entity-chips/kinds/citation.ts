@@ -16,7 +16,7 @@ export type CitationForm = (typeof CITATION_FORMS)[number];
 /** One work in a citation, with what was said about it. */
 export type CitationItem = {
   refId: string;
-  /** The printed page or pages: "49", "49–51". */
+  /** The printed page or pages: "49", "49–51", "49, 51", "xii". Nothing else: docs/CITATIONS.md, "The page". */
   locator?: string;
   /** Words before the work, inside the citation: "see". Inline Markdown, as `citationField` stores it. */
   prefix?: string;
@@ -48,8 +48,6 @@ export type CitedWork = {
   year: number | null;
   title: string;
   deleted: boolean;
-  /** The work's PDF, when /files holds one: its slug, and each sheet's printed label, for a link to the page cited. */
-  file: { slug: string; pageLabels: string[] | null } | null;
   /** The work as a bibliography lists it (references/entry.ts). */
   entry: ReferenceEntry;
 };
@@ -82,22 +80,60 @@ function words(value: unknown): string | undefined {
   return folded === undefined ? undefined : citationField(folded);
 }
 
-/** A locator as every label writes one: no "p.", and a range with an en dash. */
+/** A locator as every label writes one: no "p.", a range with an en dash, and a comma and a space between pages. */
 export function normalizeLocator(raw: string): string {
   return raw
     .trim()
     .replace(/^pp?\.?\s*/i, "")
     .replace(/\s*(?:-{1,2}|–|—)\s*/g, "–")
+    .replace(/\s*,\s*/g, ", ")
     .trim();
 }
 
-// "p. 5", "pp. 5-7", "5", "5–7", "xii": what a suffix is when it is really a page.
-const LOCATOR_RE = /^(?:pp?\.?\s*)?([0-9ivxlcdm]+(?:\s*(?:-{1,2}|–|—)\s*[0-9ivxlcdm]+)?)\s*(?:,\s*(.*))?$/i;
+// docs/CITATIONS.md, "The page" — what a page is: digits, or a Roman numeral
+// as front matter numbers its pages. Only a well-formed numeral, so "mild"
+// and "did" are words; "mix" and "liv" are numerals, as they are to Pandoc.
+// Then a range of two, or a list of either, as Pandoc reads `pp. 33-35, 38`.
+const PAGE = String.raw`(?:\d+|(?=[ivxlcdm])m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3}))`;
+const RANGE = String.raw`${PAGE}(?:\s*(?:-{1,2}|–|—)\s*${PAGE})?`;
+const PAGES = String.raw`${RANGE}(?:\s*,\s*${RANGE})*`;
+const PAGE_TERM = String.raw`(?:pp?\.?\s*)?`;
+
+/** What Markdown reads after a work's key: pages, then a comma and the words after them, or words alone. */
+const LOCATOR_RE = new RegExp(String.raw`^${PAGE_TERM}(${PAGES})\s*(?:,\s*(.*))?$`, "i");
+/** Pages, and words after them with no comma between: "49 n. 3". */
+const LEADING_PAGES_RE = new RegExp(String.raw`^${PAGE_TERM}(${PAGES})\s+(\S.*)$`, "i");
+/** Words, then pages: what the `[@` menu's query ends with, "radner 49". */
+// The words as short as they can be, so the locator takes every page: "radner 49, 51".
+const TRAILING_PAGES_RE = new RegExp(String.raw`^(.*?\S)\s+(${PAGE_TERM}${PAGES})$`, "i");
+
+/** Whether `raw` is a page and nothing else: what a citation's Page holds. */
+export function isPageLocator(raw: string): boolean {
+  return new RegExp(String.raw`^${PAGE_TERM}${PAGES}$`, "i").test(raw.trim());
+}
+
+/** The first page `locator` names, for a link to it: "49" in "49–51" and in "49, 51". */
+export function firstPage(locator: string): string {
+  return locator.split(/[–,]/)[0].trim();
+}
+
+/** A query that ends with pages, split: "radner 49" is the words "radner" and the locator 49. */
+export function splitTrailingPages(query: string): { words: string; locator: string | null } {
+  const match = TRAILING_PAGES_RE.exec(query.trim());
+  return match ? { words: match[1], locator: normalizeLocator(match[2]) } : { words: query.trim(), locator: null };
+}
 
 /**
- * One item as stored. A suffix that reads as a locator becomes one (`p. 5,
- * note` with no locator is locator `5`, suffix `note`), since Markdown writes
- * both in the same place and reads them back that way.
+ * One item as stored, which is always what Markdown reads it back as
+ * (docs/CITATIONS.md, "The page").
+ *
+ *  - **A locator holds pages and nothing else.** What follows its pages goes
+ *    after them, "49 n. 3" becoming page 49 and "n. 3"; a locator that opens
+ *    with no page ("ch. 3", "§ 4") goes after the work whole.
+ *  - **Then the page and the words after it are read as Markdown reads
+ *    them**, since the writer puts both in one place: a suffix that is pages
+ *    joins them ("49" and "51" are pages 49, 51), and with no locator, a
+ *    suffix that opens with pages gives them up.
  */
 function validateItem(raw: unknown): CitationItem | null {
   if (!isRecord(raw)) return null;
@@ -105,21 +141,29 @@ function validateItem(raw: unknown): CitationItem | null {
   if (typeof refId !== "string" || refId === "" || refId.length > MAX_ID_LENGTH) return null;
   let locator = text(raw.locator);
   let suffix = words(raw.suffix);
-  if (!locator && suffix) {
-    const asLocator = LOCATOR_RE.exec(suffix);
-    if (asLocator) {
-      locator = asLocator[1];
-      suffix = words(asLocator[2]);
-    }
+  if (locator && !isPageLocator(locator)) {
+    const leading = LEADING_PAGES_RE.exec(locator);
+    const rest = words(leading ? leading[2] : locator);
+    locator = leading ? leading[1] : undefined;
+    suffix = [rest, suffix].filter(Boolean).join(", ") || undefined;
   }
+  const after = [locator ? pages(normalizeLocator(locator)) : "", suffix ?? ""].filter(Boolean).join(", ");
+  const read = after ? LOCATOR_RE.exec(after) : null;
+  locator = read ? normalizeLocator(read[1]) : undefined;
+  suffix = read ? words(read[2]) : words(after);
   const prefix = words(raw.prefix);
   return {
     refId,
-    ...(locator ? { locator: normalizeLocator(locator) } : {}),
+    ...(locator ? { locator } : {}),
     ...(prefix ? { prefix } : {}),
     ...(suffix ? { suffix } : {}),
     ...(raw.suppressAuthor === true ? { suppressAuthor: true } : {}),
   };
+}
+
+/** Where a citation of the work with this key, at this locator, links: `/references/<key>/p/<first page>`, or the reference's page. */
+export function citedPagePath(key: string, locator: string | undefined): string {
+  return locator ? `/references/${key}/p/${encodeURIComponent(firstPage(locator))}` : `/references/${key}`;
 }
 
 function pages(locator: string): string {
@@ -174,15 +218,18 @@ function itemLabel(item: CitationItem, form: CitationForm, name: string): Label 
 
 /**
  * `/pdf/<slug>#page=<sheet>` for a locator the file's page labels name, else
- * null: the first page of a range, found among the printed labels, or taken
- * as the sheet itself for a file that has none.
+ * null: its first page, found among the printed labels, or taken as the
+ * sheet itself for a file that has none, if the file has that many.
  */
-export function pdfPageHref(file: { slug: string; pageLabels: string[] | null } | null, locator: string | undefined): string | null {
+export function pdfPageHref(
+  file: { slug: string; pageLabels: string[] | null; pageCount?: number | null } | null,
+  locator: string | undefined,
+): string | null {
   if (!file || !locator) return null;
-  const first = locator.split("–")[0].trim();
+  const first = firstPage(locator);
   const labels = file.pageLabels;
   const sheet = labels ? labels.indexOf(first) + 1 : /^\d+$/.test(first) ? Number(first) : 0;
-  return sheet > 0 ? `/pdf/${file.slug}#page=${sheet}` : null;
+  return sheet > 0 && (typeof file.pageCount !== "number" || sheet <= file.pageCount) ? `/pdf/${file.slug}#page=${sheet}` : null;
 }
 
 /** What every label in a doc reads from the doc's citations as a whole: each work's number and its told-apart short label. */
@@ -320,18 +367,12 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
       const formatted = runsHaveMarks(runs) ? { runs } : {};
 
       if (known.some((work) => work.deleted)) return { label, ...formatted, href: null, postHref: null, status: "deleted" };
-      // One link per chip, to its first work: the passage in its PDF where the doc's readers may open files, the
-      // reference's own page otherwise. A post's reader always gets the reference page, since files aren't public,
-      // with the page in the fragment for that page's island to offer.
+      // One link per chip, to its first work, the same for every reader: with a page, to the route that sends
+      // whoever follows it to the PDF at that page if they may open it, and to the reference's page otherwise
+      // (docs/CITATIONS.md, "The link"). Without one, to the reference's page.
       const first = data.items[0];
-      const page = `/references/${known[0].key}`;
-      return {
-        label,
-        ...formatted,
-        href: pdfPageHref(known[0].file, first.locator) ?? page,
-        postHref: first.locator ? `${page}#p=${encodeURIComponent(first.locator.split("–")[0])}` : page,
-        status: "live",
-      };
+      const href = citedPagePath(known[0].key, first.locator);
+      return { label, ...formatted, href, postHref: href, status: "live" };
     });
   },
 

@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react";
 import { PluginKey } from "@tiptap/pm/state";
 import { searchCitable, type CiteCandidate } from "@/app/actions/references";
 import { useChipSurface, useSeedChipContext } from "@/lib/entity-chips/chip-surface";
-import { CITATION, normalizeLocator } from "@/lib/entity-chips/kinds/citation";
+import { CITATION, splitTrailingPages } from "@/lib/entity-chips/kinds/citation";
 import { newChipIid } from "@/lib/entity-chips/node";
 import { ENTITY_CHIP } from "@/lib/entity-chips/types";
 import SuggestionMenu from "./SuggestionMenu";
@@ -27,14 +27,12 @@ const suggestionKey = new PluginKey("citeSuggestion");
 const MAX_QUERY_LENGTH = 60;
 
 /**
- * A query's words and the page it ends with, if it ends with one: "radner
- * 49", "barfield 49-51", "bu xii". A lone word is never a page, so "1984"
- * still finds the novel.
+ * A query's words and the pages it ends with, if it ends with any: "radner
+ * 49", "barfield 49-51", "bu xii", "bu 49, 51", by the rule a citation's
+ * Page holds to. A lone word is never a page, so "1984" still finds the
+ * novel.
  */
-export function splitLocator(query: string): { words: string; locator: string | null } {
-  const match = /^(.*\S)\s+((?:pp?\.?\s*)?(?:\d+|[ivxlcdm]+)(?:\s*(?:-{1,2}|–)\s*(?:\d+|[ivxlcdm]+))?)$/i.exec(query.trim());
-  return match ? { words: match[1], locator: normalizeLocator(match[2]) } : { words: query.trim(), locator: null };
-}
+export const splitLocator = splitTrailingPages;
 
 export default function CiteMenu({ editor, disabled }: { editor: Editor; disabled?: boolean }) {
   const surface = useChipSurface();
