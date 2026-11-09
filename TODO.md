@@ -377,6 +377,33 @@ export's whole-doc form and the MCP read's block-by-block one. Each happens with
 - **An empty list item holding a nested list.** `-` over `  - b` reads back as an item whose
   first child is the list, with no paragraph, which the schema refuses.
 
+## Disable `mailto:` links: a typed email address becomes one
+
+GFM's autolink, which marked runs in every Markdown parse, links a bare address: "write to
+luke@example.com" reads back with the address under a `mailto:` link that nobody wrote. Turn it
+off.
+
+- **Where it shows.**
+  - The comment's Markdown box, where a commenter's address becomes a link on submit.
+  - A rich comment holding a plain address: a switch to Markdown and back (`convertCommentBody`)
+    adds the link, so that round trip isn't one-to-one. `comment-body-chips.test.ts`'s round
+    trip uses `first@last`, which GFM doesn't link, for this reason; give it a real address once
+    this is fixed.
+  - The doc and note parses do the same. `citation-markdown.test.ts` asserts the link today
+    (`mail luke@example.com` → `luke@example.com|link`), so that case changes with the fix.
+- **What to change.** The email half of marked's GFM autolink (its `url` tokenizer), on every
+  instance the parses use: each chip parser has its own `new Marked()`, and the other managers
+  in `markdown-import.ts` share marked's global one. Keep the `http(s)://` and `www.`
+  autolinks.
+- **Decide with it.**
+  - Whether a comment keeps `mailto:` at all. `LINK_PROTOCOLS` in `comment-body.ts` allows it,
+    so `[me](mailto:…)` and the rich editor's link control still make one.
+  - Whether the editors' autolink (`shouldAutoLink`, over linkify) links a typed address, and
+    if so whether to stop it there too.
+- **Stored bodies keep their links.** Nothing rewrites a body already written.
+- **Check** with a round trip of text holding an address, through both of a comment's front
+  doors and the doc import.
+
 ## The ordered-list marker rule overrides upstream, and tiptap#8377 alone won't retire it (docs/DOC_IMPORT.md §12)
 
 `OrderedList` and `ListItem` in `src/lib/tiptap-schema.ts` replace `@tiptap/extension-list`
