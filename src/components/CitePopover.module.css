@@ -141,6 +141,12 @@
   border-radius: 3px;
 }
 
+/* Said when the Page field's text didn't all stay there: what went to After. */
+.moved {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
 .check {
   display: inline-flex;
   align-items: center;

@@ -81,7 +81,7 @@ test("a doc with no chips comes back equal, and the input is never mutated", () 
 });
 
 test("a citation whose words are formatted becomes a linked text node per run, code plain", () => {
-  const work = { id: "bu", key: "barfield1957", short: "BU", names: "Barfield", year: 1957, title: "Saving the Appearances", deleted: false, file: null };
+  const work = { id: "bu", key: "barfield1957", short: "BU", names: "Barfield", year: 1957, title: "Saving the Appearances", deleted: false };
   const entry = { authors: "Barfield", year: "1957", title: "Saving the Appearances", titleIsContainer: true, source: "" };
   const cited = docOf(para(chip("citation", "c1", { items: [{ refId: "bu", prefix: "see *especially* `this`" }] })));
   const converted = chipsToLinkedText(cited, {}, { citation: { bu: { ...work, entry } } });

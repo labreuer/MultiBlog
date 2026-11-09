@@ -20,7 +20,6 @@ const entry = (authors: string, year: string, title: string, more: Partial<Refer
 const work = (id: string, fields: Omit<CitedWork, "id" | "deleted" | "file"> & { deleted?: boolean }): CitedWork => ({
   id,
   deleted: false,
-  file: null,
   ...fields,
 });
 const CONTEXT: CitationContext = {

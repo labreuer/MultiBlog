@@ -3,10 +3,16 @@ import {
   ADMIN_EMAIL,
   addTestDocAuthor,
   createTestDoc,
+  createTestFile,
   createTestPost,
+  createTestUser,
   deleteTestDoc,
+  deleteTestFile,
   deleteTestPost,
   deleteTestReferences,
+  deleteTestUser,
+  setTestReferenceFile,
+  uniqueEmail,
   getCitationSources,
   getDocSearchText,
   getPostContentText,
@@ -212,10 +218,10 @@ test("[@ cites a work from the library: the chip is labelled, listed in the bibl
     await expect.poll(() => getDocSearchText(doc.id), { timeout: 15_000 }).toContain(`representations. (${short} p. 49)`);
     await expect.poll(() => getCitationSources(key)).toEqual([`doc:${doc.id}`]);
 
-    // The reading view links it to the reference's page.
+    // The reading view links it to the route that decides, when it is followed, where page 49 is for this reader.
     await page.goto(`/doc/${doc.slug}`);
     await expect(page.locator("a.entity-chip").filter({ visible: true })).toHaveText([`(${short} p. 49)`]);
-    await expect(page.locator("a.entity-chip").filter({ visible: true })).toHaveAttribute("href", `/references/${key}`);
+    await expect(page.locator("a.entity-chip").filter({ visible: true })).toHaveAttribute("href", `/references/${key}/p/49`);
     const shown = page.locator("[data-bibliography]").filter({ visible: true });
     await expect(shown.getByRole("listitem")).toHaveText([entryOf(`${short} `)]);
     await expect(shown.getByRole("link", { name: `Saving the Appearances ${prefix}` })).toHaveAttribute("href", `/references/${key}`);
@@ -238,7 +244,7 @@ test("[@ cites a work from the library: the chip is labelled, listed in the bibl
     await page.getByRole("button", { name: `Set abbreviation of ${key}` }).click();
     await expect.poll(() => getDocSearchText(doc.id), { timeout: 15_000 }).toContain(`(${short}X p. 49)`);
 
-    // A post holds it as linked text, to the reference's public page with the page cited.
+    // A post holds it as linked text, to the same route.
     post = await createTestPost({
       authorEmail: ADMIN_EMAIL,
       publish: true,
@@ -263,7 +269,7 @@ test("[@ cites a work from the library: the chip is labelled, listed in the bibl
     expect(response?.status()).toBe(200);
     await expect(page.getByRole("link", { name: `(${short}X pp. 49–51)`, exact: true }).filter({ visible: true })).toHaveAttribute(
       "href",
-      `/references/${key}#p=49`,
+      `/references/${key}/p/49`,
     );
     await expect(page.getByRole("link", { name: `Saving the Appearances ${prefix}`, exact: true }).filter({ visible: true })).toHaveAttribute(
       "href",
@@ -291,6 +297,72 @@ test("[@ cites a work from the library: the chip is labelled, listed in the bibl
     if (post) await deleteTestPost(post.id);
     await deleteTestDoc(doc.id);
     await deleteTestReferences(prefix);
+    await agent.dispose();
+  }
+});
+
+// docs/CITATIONS.md, "The link" — a citation's link at a page is one route for
+// every reader, which decides when it is followed: the PDF at that page for a
+// reader who may open the work's PDF, the reference's page for anyone else.
+test("a citation's link at a page sends a reader who may open the work's PDF to that page, and anyone else to the reference's page", async ({
+  page,
+  browser,
+  request,
+}) => {
+  const agent = await createAgent(request);
+  const prefix = `e2eroute${Date.now().toString(36)}`;
+  const key = `${prefix}-bhaskar1975`;
+  const other = await createTestUser({ email: uniqueEmail("route-owner"), role: "AUTHOR" });
+  const files: string[] = [];
+  try {
+    const made = await agent.call("create_ref", {
+      csl: { type: "book", title: `A Realist Theory of Science ${prefix}`, author: [{ family: `Bhaskar${prefix}` }], issued: { "date-parts": [[1975]] } },
+      key,
+    });
+    expect(made.isError, JSON.stringify(made.error)).toBe(false);
+    // Test PDFs carry no page labels, so a page is the sheet: these have two.
+    const shared = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    const mine = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "PRIVATE" });
+    const theirs = await createTestFile({ ownerEmail: other.email, visibility: "PRIVATE" });
+    files.push(shared.id, mine.id, theirs.id);
+    const home = `/references/${key}`;
+    const follow = async (at: string): Promise<string> => {
+      const response = await page.goto(at);
+      expect(response?.status()).toBeLessThan(400);
+      const url = new URL(page.url());
+      return `${url.pathname}${url.hash}`;
+    };
+
+    // With no PDF, everyone goes to the reference's page, the page cited in the fragment for its island.
+    expect(await follow(`${home}/p/2`)).toBe(`${home}#p=2`);
+    // A shared PDF, at the page cited; a page it doesn't have, and a locator that is no page, go to the reference.
+    await setTestReferenceFile(key, shared.id);
+    expect(await follow(`${home}/p/2`)).toBe(`/pdf/${shared.slug}#page=2`);
+    expect(await follow(`${home}/p/3`)).toBe(`${home}#p=3`);
+    expect(await follow(`${home}/p/${encodeURIComponent("ch. 3")}`)).toBe(home);
+    // A private PDF reaches its owner from the same link, and nobody else.
+    await setTestReferenceFile(key, mine.id);
+    expect(await follow(`${home}/p/2`)).toBe(`/pdf/${mine.slug}#page=2`);
+    await setTestReferenceFile(key, theirs.id);
+    expect(await follow(`${home}/p/2`)).toBe(`${home}#p=2`);
+    // Signed out, a shared PDF is still not readable: the reference's page, as for no PDF at all.
+    await setTestReferenceFile(key, shared.id);
+    const anonymous = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    try {
+      const outsider = await anonymous.newPage();
+      await outsider.goto(`${home}/p/2`);
+      const url = new URL(outsider.url());
+      expect(`${url.pathname}${url.hash}`).toBe(`${home}#p=2`);
+    } finally {
+      await anonymous.close();
+    }
+    // A key nothing has is not found.
+    expect((await page.goto(`/references/${prefix}-nobody/p/2`))?.status()).toBe(404);
+  } finally {
+    await page.goto("about:blank");
+    await deleteTestReferences(prefix);
+    for (const id of files) await deleteTestFile(id);
+    await deleteTestUser(other.email);
     await agent.dispose();
   }
 });
@@ -452,6 +524,14 @@ test("a citation's popover edits its page, the words before it, its form and its
     // The same chip throughout.
     await expect(chip).toHaveAttribute("data-iid", iid!);
 
+    // Page holds pages only: what follows them goes after the work, and the popover says so.
+    await work.getByLabel("Page").fill("49 n. 3");
+    await work.getByLabel("Page").press("Enter");
+    await expect(chip).toHaveText([`(${short} p. 49, n. 3)`]);
+    await expect(work.getByLabel("Page")).toHaveValue("49");
+    await expect(work.getByLabel("After")).toHaveValue("n. 3");
+    await expect(work.getByRole("status")).toHaveText("Page holds page numbers only, so “n. 3” went to After.");
+
     // Escape goes back to the editor with the chip still selected, and Enter comes back in.
     await page.keyboard.press("Escape");
     await expect(popover).toBeVisible();
@@ -465,7 +545,7 @@ test("a citation's popover edits its page, the words before it, its form and its
     // What was written reaches the server, once the collab server has stored it.
     await expect
       .poll(async () => String((await agent.call("read", { url: `/doc/${docId}` })).result.markdown), { timeout: 15_000 })
-      .toBe(`Appearances are collective [@${barfield}, pp. 50–52].`);
+      .toBe(`Appearances are collective [@${barfield}, p. 49, n. 3].`);
   } finally {
     await page.goto("about:blank");
     if (docId) await deleteTestDoc(docId);

@@ -36,9 +36,9 @@ import type {
   MarkdownTokenizer,
   RenderContext,
 } from "@tiptap/core";
-import { renderNestedMarkdownContent } from "@tiptap/core";
 import { toRoman } from "@tiptap/extension-list";
 import { Plugin } from "@tiptap/pm/state";
+import { renderListItemMarkdown } from "./list-item-markdown";
 
 /** An ordered list's `type` attribute: letters or Roman numerals in either case, or null for numbers. */
 export type OrderedListStyle = "a" | "A" | "i" | "I" | null;
@@ -218,11 +218,11 @@ export function orderedListItemPrefix(type: unknown, position: number): string {
   return isTyped(type) && position >= 1 ? `${orderedListMarker(type, position)}) ` : `${position}. `;
 }
 
-/** ListItem's `renderMarkdown` inside an ordered list: the package's, with `orderedListItemPrefix` for its marker and a `start` of 0 kept. */
+/** ListItem's `renderMarkdown` inside an ordered list: list-item-markdown.ts's, with `orderedListItemPrefix` for its marker and a `start` of 0 kept. */
 export function renderOrderedListItem(node: JSONContent, h: MarkdownRendererHelpers, ctx: RenderContext): string {
   const attrs = ctx.meta?.parentAttrs ?? {};
   const start = typeof attrs.start === "number" ? attrs.start : 1;
-  return renderNestedMarkdownContent(node, h, orderedListItemPrefix(attrs.type, start + (ctx.index || 0)));
+  return renderListItemMarkdown(node, h, orderedListItemPrefix(attrs.type, start + (ctx.index || 0)));
 }
 
 // ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/d
 import { IconX } from "@tabler/icons-react";
 import { searchCitable, type CiteCandidate } from "@/app/actions/references";
 import { useChipSurface, useSeedChipContext } from "@/lib/entity-chips/chip-surface";
-import { CITATION, citationKind, type CitationData, type CitationItem, type CitedWork } from "@/lib/entity-chips/kinds/citation";
+import { CITATION, citationKind, normalizeLocator, type CitationData, type CitationItem, type CitedWork } from "@/lib/entity-chips/kinds/citation";
 import { chipRenderingIn, entityChipKey } from "@/lib/entity-chips/node";
 import { ENTITY_CHIP } from "@/lib/entity-chips/types";
 import { popoverBoundsElement } from "@/lib/popover-placement";
@@ -159,6 +159,8 @@ export default function CitePopover({ editor, disabled }: { editor: Editor; disa
   const [pinned, setPinned] = useState<string | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const firstFieldRef = useRef<HTMLInputElement | null>(null);
+  // What the Page field's last write sent to After: Page holds pages only (docs/CITATIONS.md, "The page").
+  const [moved, setMoved] = useState<{ iid: string; index: number; text: string } | null>(null);
 
   const open = useEditorState({
     editor,
@@ -202,6 +204,12 @@ export default function CitePopover({ editor, disabled }: { editor: Editor; disa
 
   const openIid = open?.iid ?? null;
   const openPos = open?.pos ?? null;
+  // Said only until the popover closes or moves to another citation.
+  const [movedFor, setMovedFor] = useState<string | null>(null);
+  if (movedFor !== openIid) {
+    setMovedFor(openIid);
+    setMoved(null);
+  }
   useLayoutEffect(() => {
     if (openIid === null || openPos === null) return;
     const popover = popoverRef.current;
@@ -228,6 +236,7 @@ export default function CitePopover({ editor, disabled }: { editor: Editor; disa
 
   /** Writes the citation's fields, as its kind stores them; a value the kind refuses changes nothing. */
   const write = (next: CitationData) => {
+    setMoved(null);
     const data = citationKind.validate(next);
     const at = findCitation(editor.state, open.iid);
     if (!data || !at) return;
@@ -333,11 +342,22 @@ export default function CitePopover({ editor, disabled }: { editor: Editor; disa
               <FieldInput
                 label="Page"
                 value={item.locator ?? ""}
-                onCommit={(value) => writeItem(index, { locator: value })}
+                onCommit={(value) => {
+                  writeItem(index, { locator: value });
+                  // The kind keeps a page and sends the rest after it, "49 n. 3" or "ch. 3"; say what went.
+                  const typed = value.trim();
+                  const kept = typed ? citationKind.validate({ items: [{ refId: item.refId, locator: typed }] })?.items[0] : undefined;
+                  if (kept?.suffix && kept.locator !== normalizeLocator(typed)) setMoved({ iid: open.iid, index, text: kept.suffix });
+                }}
                 inputRef={index === 0 ? firstFieldRef : undefined}
               />
               <FieldInput label="After" value={item.suffix ?? ""} onCommit={(value) => writeItem(index, { suffix: value })} />
             </div>
+            {moved?.iid === open.iid && moved.index === index && (
+              <p className={styles.moved} role="status">
+                Page holds page numbers only, so “{moved.text}” went to After.
+              </p>
+            )}
             {!narrative && (
               <label className={styles.check}>
                 <input type="checkbox" checked={item.suppressAuthor === true} onChange={(e) => writeItem(index, { suppressAuthor: e.target.checked })} /> Leave out
