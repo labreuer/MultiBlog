@@ -118,6 +118,15 @@ export function renderingsByIid(
   return map;
 }
 
+/** Two contexts as one, each chip kind's records merged, `more`'s winning where both hold a record. */
+export function mergeChipContexts(base: ChipContext, more: ChipContext): ChipContext {
+  const merged: ChipContext = { ...base };
+  for (const [kind, records] of Object.entries(more)) {
+    merged[kind] = { ...((base[kind] as Record<string, unknown> | undefined) ?? {}), ...(records as Record<string, unknown>) };
+  }
+  return merged;
+}
+
 /** Every record id the chips' renderings read, per chip kind: what a context loader is asked for. */
 export function chipTargets(chips: readonly ChipOccurrence[]): Record<string, string[]> {
   const targets: Record<string, Set<string>> = {};

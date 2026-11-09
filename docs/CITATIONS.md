@@ -456,7 +456,7 @@ post's labels, and a republish refreshes both.
     cites both.
   - The page labels them "Cites a work with the key…", "titled…" and "by…", since the existing
     `authors` filter is who wrote the item found, not the work cited. It says what it narrowed
-    to, and that PDFs and comments, which cite nothing, are left out.
+    to, and that PDFs, which cite nothing, are left out.
 - The underscores match the querystring's other names (`created_from`), and the bulk export
   (MCP.md) takes the same three.
 

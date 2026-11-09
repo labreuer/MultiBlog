@@ -84,7 +84,7 @@ async function sectionFor(
 }
 
 /** The kinds that can hold a citation; the rest drop out while a citation filter is set. */
-export const CITATION_KINDS: readonly SearchKind[] = ["docs", "posts", "annotations"];
+export const CITATION_KINDS: readonly SearchKind[] = ["docs", "posts", "annotations", "comments"];
 
 /**
  * The reference ids each citation filter names, one list per filter that is
@@ -103,7 +103,7 @@ export async function citedIdsFor(params: Pick<SearchParams, "cites" | "citedTit
 }
 
 /** The kinds that can hold a mention; the rest drop out while a mention filter is set. */
-export const MENTION_KINDS: readonly SearchKind[] = ["docs", "posts", "annotations"];
+export const MENTION_KINDS: readonly SearchKind[] = ["docs", "posts", "annotations", "comments"];
 
 /**
  * The user ids a mention filter's handles name. `me` is the searcher, and

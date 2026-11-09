@@ -15,12 +15,17 @@ import {
   type CommentBodyValue,
 } from "@/lib/comment-body-value";
 import CommentEditor from "./CommentEditor";
+import { useCommentChips } from "./comment-chips-context";
 import CommentQuotePicker from "./CommentQuotePicker";
 import styles from "./CommentBodyInput.module.css";
 
 type Props = {
   value: CommentBodyValue;
   onChange: (value: CommentBodyValue) => void;
+  /** The post the comment is on: who it may mention is asked of it. */
+  postId: string;
+  /** The comment being edited, whose own chips an edit may write back; absent for a new one. */
+  commentId?: string;
   ariaLabel: string;
   placeholder?: string;
   disabled?: boolean;
@@ -58,6 +63,8 @@ function markdownQuote(text: string): string {
 export default function CommentBodyInput({
   value,
   onChange,
+  postId,
+  commentId,
   ariaLabel,
   placeholder,
   disabled = false,
@@ -71,6 +78,7 @@ export default function CommentBodyInput({
   // PLAN.md §23h (Phase 4) — the off-page picker, a panel under this composer.
   const [pickerOpen, setPickerOpen] = useState(false);
   const quoteContext = useCommentQuote();
+  const chips = useCommentChips();
   const editorRef = useRef<Editor | null>(null);
   // A quote delivered to a rich composer whose editor has not been created
   // yet (useEditor creates it in an effect after mount — a reply form opened
@@ -175,11 +183,13 @@ export default function CommentBodyInput({
       return;
     }
     startSwitch(async () => {
-      const result = await convertCommentBody(commentBodyValueToInput(value), mode);
+      const result = await convertCommentBody(commentBodyValueToInput(value), mode, { postId, ...(commentId ? { commentId } : {}) });
       if ("error" in result) {
         setSwitchError(result.error);
         return;
       }
+      // Its chips' records first, so the editor's first paint is labelled.
+      if ("json" in result) chips.add(result.chipContext);
       onChange("markdown" in result ? { mode: "markdown", markdown: result.markdown } : { mode: "rich", json: result.json });
     });
   }
@@ -214,6 +224,7 @@ export default function CommentBodyInput({
           disabled={disabled || switching}
           autoFocus={autoFocus}
           onEditorReady={onEditorReady}
+          commentId={commentId}
         />
       )}
       <div className={styles.modeRow} role="group" aria-label="Comment format">

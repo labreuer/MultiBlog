@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import type * as Y from "yjs";
 import { entityChipKey, setChipInputs } from "./node";
-import { chipsIn, chipTargets } from "./renderings";
+import { chipsIn, chipTargets, mergeChipContexts } from "./renderings";
 import { observeChipStyles } from "./settings";
 import { NO_CHIP_INPUTS, type ChipContext, type ChipInputs, type ChipStyles } from "./types";
 
@@ -16,7 +16,11 @@ import { NO_CHIP_INPUTS, type ChipContext, type ChipInputs, type ChipStyles } fr
 
 /** The object an editor's chips belong to, and what the server already rendered them with. */
 export type ChipSurface = {
-  target: { doc: string } | { annotation: string };
+  /**
+   * What the endpoint is asked about. Null for a body nothing stores yet, a
+   * new comment's: its editor is labelled from `initial` and `seeded` alone.
+   */
+  target: { doc: string } | { annotation: string } | { comment: string } | null;
   /** The inputs the page's first paint used. Omitted, the hook fetches them on mount. */
   initial?: ChipInputs;
   /** Records a menu handed over as it inserted a chip (chip-surface.tsx). */
@@ -28,13 +32,6 @@ const ASK_DEBOUNCE_MS = 150;
 type Fetched = { styles: ChipInputs["styles"] | null; context: ChipContext; pending: Record<string, string[]> | null };
 const NOTHING_FETCHED: Fetched = { styles: null, context: {}, pending: null };
 
-function mergeContext(base: ChipContext, more: ChipContext): ChipContext {
-  const merged: ChipContext = { ...base };
-  for (const [kind, records] of Object.entries(more)) {
-    merged[kind] = { ...((base[kind] as Record<string, unknown> | undefined) ?? {}), ...(records as Record<string, unknown>) };
-  }
-  return merged;
-}
 
 /**
  * Keeps `editor`'s chips labelled. A no-op without a surface, which is every
@@ -42,7 +39,14 @@ function mergeContext(base: ChipContext, more: ChipContext): ChipContext {
  * a surface that holds one: its styles are followed live.
  */
 export function useChipInputs(editor: Editor | null, surface: ChipSurface | null | undefined, ydoc?: Y.Doc | null): void {
-  const targetKey = surface ? ("doc" in surface.target ? `doc=${surface.target.doc}` : `annotation=${surface.target.annotation}`) : null;
+  const target = surface?.target ?? null;
+  const targetKey = !target
+    ? null
+    : "doc" in target
+      ? `doc=${target.doc}`
+      : "annotation" in target
+        ? `annotation=${target.annotation}`
+        : `comment=${target.comment}`;
   const initial = surface?.initial;
   const seeded = surface?.seeded;
 
@@ -57,7 +61,7 @@ export function useChipInputs(editor: Editor | null, surface: ChipSurface | null
   const inputs = useMemo<ChipInputs>(
     () => ({
       styles: liveStyles ?? fetched.styles ?? initial?.styles ?? NO_CHIP_INPUTS.styles,
-      context: mergeContext(mergeContext(initial?.context ?? {}, fetched.context), seeded ?? {}),
+      context: mergeChipContexts(mergeChipContexts(initial?.context ?? {}, fetched.context), seeded ?? {}),
       ...(fetched.pending ? { pending: fetched.pending } : {}),
     }),
     [initial, fetched, seeded, liveStyles],
@@ -104,7 +108,7 @@ export function useChipInputs(editor: Editor | null, surface: ChipSurface | null
         }
         return {
           styles: answer?.styles ?? previous.styles,
-          context: answer ? mergeContext(previous.context, answer.context) : previous.context,
+          context: answer ? mergeChipContexts(previous.context, answer.context) : previous.context,
           pending: Object.keys(pending).length > 0 ? pending : null,
         };
       });

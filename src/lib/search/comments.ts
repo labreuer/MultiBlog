@@ -15,7 +15,7 @@ import { commentAnchorName } from "@/lib/comment-anchor-name";
 import { postPath } from "@/lib/post-path";
 import { isWithin } from "./dates";
 import { orderNewest, orderRanked, rankRows, snippetsFor } from "./sql";
-import { remember, taggedWhere, type KindContext, type KindSearch } from "./context";
+import { citedWhere, mentionedWhere, remember, taggedWhere, type KindContext, type KindSearch } from "./context";
 import type { CommentHit } from "./types";
 
 /**
@@ -36,6 +36,9 @@ function candidates(ctx: KindContext): Promise<Map<string, Date>> {
           ctx.created ? { createdAt: ctx.created } : {},
           ctx.excludePostId ? { thread: { postId: { not: ctx.excludePostId } } } : {},
           taggedWhere(ctx.tagIds),
+          // Only an APPROVED comment has index rows, and only a public one is a candidate at all.
+          mentionedWhere(ctx.mentionIds),
+          citedWhere(ctx.citedIds),
         ],
       },
       select: { id: true, createdAt: true },

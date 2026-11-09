@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useEditor, EditorContent, type Editor, type JSONContent } from "@tiptap/react";
 import { UndoRedo } from "@tiptap/extensions";
 import { ListKeymap } from "@tiptap/extension-list";
 import { commentContentExtensions } from "@/lib/tiptap-schema";
+import { commentChipInputs } from "@/lib/comment-body";
+import { useChipInputs } from "@/lib/entity-chips/use-chip-inputs";
+import { useCommentChips } from "./comment-chips-context";
 import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
 import { Indent } from "@/lib/indent-extension";
 import { FormatInputEvents } from "@/lib/format-input-extension";
@@ -40,6 +43,8 @@ type Props = {
   autoFocus?: boolean;
   /** The live instance, for the quote gesture's insertContent; null on unmount. */
   onEditorReady?: (editor: Editor | null) => void;
+  /** The comment being edited: the endpoint the editor asks about a chip the page has no record of. */
+  commentId?: string;
 };
 
 // PLAN.md §23h — AnnotationBody's shape minus every collaboration piece: no
@@ -55,6 +60,7 @@ export default function CommentEditor({
   disabled = false,
   autoFocus = false,
   onEditorReady,
+  commentId,
 }: Props) {
   // A ref rather than a captured closure: useEditor's options are read once
   // at construction, and the parent's onChange is recreated per render.
@@ -76,6 +82,15 @@ export default function CommentEditor({
   useEffect(() => {
     editor?.setEditable(!disabled);
   }, [editor, disabled]);
+
+  // docs/ENTITY_CHIPS.md, "Planned: chips in comments" — the chips' labels,
+  // in the comment style, from the page's records; an edit asks the endpoint
+  // about any chip they don't hold. A new comment has nothing stored to ask
+  // about, and its chips come with the records that put them there.
+  const { context: chipContext } = useCommentChips();
+  const initialChips = useMemo(() => commentChipInputs(chipContext), [chipContext]);
+  const chipSurface = useMemo(() => ({ target: commentId ? { comment: commentId } : null, initial: initialChips }), [commentId, initialChips]);
+  useChipInputs(editor, chipSurface);
 
   useEffect(() => {
     onEditorReady?.(editor);

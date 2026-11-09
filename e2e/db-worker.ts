@@ -25,7 +25,7 @@ import { createHash } from "node:crypto";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { extractText } from "@/lib/diff";
 import { commentBodyTextFromJSON, commentDocFromText, isCommentBodyError } from "@/lib/comment-body";
-import { resolveCommentBody } from "@/lib/comment-body-resolve";
+import { resolveCommentBody } from "@/lib/comment-chips";
 import { captureCommentQuotes } from "@/lib/comment-quote-capture";
 import { colorForSeed } from "@/lib/author-colors";
 import { uniqueUserSlug } from "@/lib/user-slug";
@@ -1823,10 +1823,12 @@ export async function createCommentWithQuotes(opts: {
   parentCommentId?: string;
   /** Unbound hints (PLAN.md §23h, Phase 4) — an off-page target for the matcher to load; a file (Phase 5) is refused. */
   pending?: { id?: string | null; target: { kind: "post" | "comment" | "file"; id: string }; text: string }[];
+  /** Default APPROVED; PENDING for a comment awaiting moderation, whose chips are not indexed yet. */
+  status?: "APPROVED" | "PENDING";
 }): Promise<{ id: string }> {
   const { postId, email, displayName, markdown, parentCommentId } = opts;
   assertSafe(email);
-  const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  const user = await prisma.user.findUnique({ where: { email }, select: { id: true, role: true } });
   const commenter = user
     ? await prisma.commenter.upsert({ where: { userId: user.id }, update: {}, create: { userId: user.id, email, displayName } })
     : await prisma.commenter.upsert({ where: { email }, update: {}, create: { email, displayName } });
@@ -1848,7 +1850,10 @@ export async function createCommentWithQuotes(opts: {
       }));
   }
 
-  const parsed = resolveCommentBody({ format: "markdown", content: markdown });
+  // As the account with this email would write it, or a signed-out commenter
+  // where none has it: who may be mentioned depends on which.
+  const writer = user ? { userId: user.id, role: user.role } : null;
+  const parsed = await resolveCommentBody({ format: "markdown", content: markdown }, { writer, postId, held: null });
   if (isCommentBodyError(parsed)) throw new Error(parsed.error);
   const captured = await captureCommentQuotes({
     node: parsed.node,
@@ -1862,7 +1867,7 @@ export async function createCommentWithQuotes(opts: {
       commenterId: commenter.id,
       body: captured.json as Prisma.InputJsonValue,
       bodyText: captured.text,
-      status: "APPROVED",
+      status: opts.status ?? "APPROVED",
       quoteAnchors: {
         create: captured.anchors.map((anchor) => ({
           id: anchor.id,
@@ -1966,18 +1971,32 @@ export async function getPostContentText(postId: string): Promise<string | null>
  * Sorted, so a test can compare the whole list.
  */
 export async function getMentionSources(userId: string): Promise<string[]> {
-  const rows = await prisma.mention.findMany({ where: { userId }, select: { docId: true, postId: true, annotationId: true } });
-  return rows
-    .map((row) => (row.docId ? `doc:${row.docId}` : row.postId ? `post:${row.postId}` : `annotation:${row.annotationId}`))
-    .sort();
+  const rows = await prisma.mention.findMany({ where: { userId }, select: { docId: true, postId: true, annotationId: true, commentId: true } });
+  return rows.map(sourceOf).sort();
 }
 
-/** Where a reference is cited, by the trigger-kept `citation` table: `doc:<id>`, `post:<id>` or `annotation:<id>`, sorted. By key. */
+/** An index row's source, as `kind:<id>`. */
+function sourceOf(row: { docId: string | null; postId: string | null; annotationId: string | null; commentId: string | null }): string {
+  return row.docId ? `doc:${row.docId}` : row.postId ? `post:${row.postId}` : row.annotationId ? `annotation:${row.annotationId}` : `comment:${row.commentId}`;
+}
+
+/** Where a reference is cited, by the trigger-kept `citation` table: `doc:<id>`, `post:<id>`, `annotation:<id>` or `comment:<id>`, sorted. By key. */
 export async function getCitationSources(key: string): Promise<string[]> {
-  const rows = await prisma.citation.findMany({ where: { reference: { key } }, select: { docId: true, postId: true, annotationId: true } });
-  return rows
-    .map((row) => (row.docId ? `doc:${row.docId}` : row.postId ? `post:${row.postId}` : `annotation:${row.annotationId}`))
-    .sort();
+  const rows = await prisma.citation.findMany({
+    where: { reference: { key } },
+    select: { docId: true, postId: true, annotationId: true, commentId: true },
+  });
+  return rows.map(sourceOf).sort();
+}
+
+/** A comment's stored body, as JSON. */
+export async function getCommentBody(commentId: string): Promise<JSONContent | null> {
+  return ((await prisma.comment.findUnique({ where: { id: commentId }, select: { body: true } }))?.body as JSONContent | undefined) ?? null;
+}
+
+/** Sets a comment's status as moderation would, which is what its chips' index rows follow. */
+export async function setTestCommentStatus(commentId: string, status: "APPROVED" | "PENDING" | "SPAM"): Promise<void> {
+  await prisma.comment.update({ where: { id: commentId }, data: { status } });
 }
 
 /** A reference's id, by key. */
@@ -2859,6 +2878,8 @@ const handlers = {
   getPostContentText,
   getDocSearchText,
   getMentionSources,
+  getCommentBody,
+  setTestCommentStatus,
   getCitationSources,
   getReferenceId,
   countDocYdocSnapshots,

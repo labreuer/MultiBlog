@@ -28,6 +28,7 @@ import {
   type CommentBodyValue,
 } from "@/lib/comment-body-value";
 import { useCommentQuote } from "./comment-quote-context";
+import { useCommentChips } from "./comment-chips-context";
 import { useIsOwnComment } from "./own-comments-context";
 import type { JSONContent } from "@tiptap/core";
 import type { CommentQuoteCitations } from "@/lib/comment-quote-citation";
@@ -79,6 +80,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   // PLAN.md §23h — "Quote in reply" on a closed reply form: the page's quote
   // context asks this card to open it, and delivers once the form registers.
   const quoteContext = useCommentQuote();
+  const chips = useCommentChips();
   useEffect(() => {
     if (!quoteContext) return;
     return quoteContext.registerOpener(`reply:${comment.id}`, () => setReplying(true));
@@ -166,6 +168,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
         return;
       }
       if (result.body && result.bodyText !== undefined) {
+        chips.add(result.chipContext);
         setSaved({ body: result.body, bodyText: result.bodyText });
       }
       setEditing(false);
@@ -215,7 +218,12 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
                   editedAt={comment.editedAt}
                   load={() => getCommentHistory(comment.id)}
                   renderBody={(version: CommentVersion) => (
-                    <CommentBody body={version.body} bodyText={version.bodyText} citations={comment.citations} />
+                    <CommentBody
+                      body={version.body}
+                      bodyText={version.bodyText}
+                      citations={comment.citations}
+                      chipContext={version.chipContext}
+                    />
                   )}
                 />
               </>
@@ -232,6 +240,8 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
                   <CommentBodyInput
                     value={draft}
                     onChange={setDraft}
+                    postId={postId}
+                    commentId={comment.id}
                     ariaLabel="Edit comment"
                     disabled={editPending}
                     rows={4}
@@ -268,7 +278,7 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
             ) : (
               !historyShown && (
                 <div data-comment-body>
-                  <CommentBody body={body} bodyText={bodyText} citations={comment.citations} />
+                  <CommentBody body={body} bodyText={bodyText} citations={comment.citations} chipContext={chips.context} />
                 </div>
               )
             )}

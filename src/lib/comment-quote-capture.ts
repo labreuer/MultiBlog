@@ -6,15 +6,19 @@ import { pmCommentContentSchema, pmSchema, toPlainJSON } from "./tiptap-schema";
 import { deriveDocRangeSelector, targetKey, type AnchorTarget, type DocRangeSelector, type SelectorKind } from "./anchors";
 import { capturePdfTextAnchor } from "./anchors/capture";
 import type { PdfTarget } from "./pdf-anchor";
-import { commentBodyText } from "./comment-body";
+import { commentBodyText, commentChipInputs } from "./comment-body";
+import { commentChipContext } from "./comment-chips";
 import { flattenForMatch, matchQuoteAcross, type FlatTarget, type QuoteRange } from "./comment-quote-match";
 import {
   applyQuoteResolutions,
   clearUnassignedAnchorIds,
   extractQuoteCandidates,
-  paragraphTextsIn,
+  quotedContentIn,
   type QuoteResolution,
 } from "./comment-quote-extract";
+import { chipsIn, mergeChipContexts } from "./entity-chips/renderings";
+import { chipLabelsIn } from "./entity-chips/text";
+import type { ChipContext } from "./entity-chips/types";
 import { isPendingAnchorId, type PendingQuoteHint } from "./comment-quote-pending";
 import { isCommentPublic, publicCommentsWhere } from "./comment-authz";
 import { isPostPublic } from "./post-status";
@@ -31,6 +35,13 @@ import { canQuoteTargetInto } from "./comment-quote-authz";
 // — reorders the candidates and, when it carries offsets, is tried first;
 // it is never trusted as the answer. The stored `quoted_text` is always
 // `quotedTextAt` a verified range.
+//
+// A comment can hold entity chips (docs/ENTITY_CHIPS.md, "Planned: chips in
+// comments"), and a quotation is typed with their labels. So every comment
+// candidate is flattened with its chips' labels, in the comment style, and
+// the body's own spans are read the same way; what is stored is unchanged,
+// a chip being U+FFFC in `quoted_text`, and the rewrite copies the passage's
+// chips into the reply as chips.
 
 /** The most quotations one comment may carry (§23f's count cap). */
 export const MAX_QUOTES_PER_COMMENT = 20;
@@ -77,8 +88,11 @@ export type CommentQuoteAnchorInput = {
 
 export type CapturedQuotes = {
   json: JSONContent;
+  /** `body_text`: the rewritten body's text, each chip as its label in the comment style. */
   text: string;
   anchors: CommentQuoteAnchorInput[];
+  /** The records every chip in `json` is labelled from, for a caller that shows the body next. */
+  chipContext: ChipContext;
 };
 
 type Candidate = {
@@ -91,25 +105,38 @@ type Candidate = {
   near?: number;
 };
 
+/**
+ * A candidate not yet flattened: its key, the comment body it is (for the
+ * one chip context every comment candidate is labelled from), and how to
+ * build it once that context is loaded.
+ */
+type PendingCandidate = { key: string; body?: unknown; build: (context: ChipContext) => Candidate | null };
+
 function candidateFromComment(
   comment: { id: string; revisions: { id: string; body: unknown }[] },
   revision: { id: string; body: unknown } | undefined = comment.revisions[0],
   pinned = false,
-): Candidate | null {
+): PendingCandidate | null {
   if (!revision) return null;
-  let node: PMNode;
-  try {
-    node = pmCommentContentSchema.nodeFromJSON(revision.body as JSONContent);
-  } catch {
-    return null;
-  }
   const target: AnchorTarget = { kind: "comment", id: comment.id };
   return {
     key: pinned ? `${targetKey(target)}@${revision.id}` : targetKey(target),
-    target,
-    flat: flattenForMatch(node),
-    anchoredEventId: null,
-    quotedRevisionId: revision.id,
+    body: revision.body,
+    build: (context) => {
+      let node: PMNode;
+      try {
+        node = pmCommentContentSchema.nodeFromJSON(revision.body as JSONContent);
+      } catch {
+        return null;
+      }
+      return {
+        key: pinned ? `${targetKey(target)}@${revision.id}` : targetKey(target),
+        target,
+        flat: flattenForMatch(node, chipsIn(node).length > 0 ? chipLabelsIn(node, commentChipInputs(context)) : undefined),
+        anchoredEventId: null,
+        quotedRevisionId: revision.id,
+      };
+    },
   };
 }
 
@@ -118,7 +145,7 @@ function candidateFromEvent(
   event: { id: string; proseJson: unknown } | null,
   near: number | null,
   pinned = false,
-): Candidate | null {
+): PendingCandidate | null {
   if (!event?.proseJson) return null;
   let node: PMNode;
   try {
@@ -127,7 +154,8 @@ function candidateFromEvent(
     return null;
   }
   const target: AnchorTarget = { kind: "post", id: postId };
-  return {
+  // A post holds no chip: its links carry what its chips were at publish.
+  const candidate: Candidate = {
     key: pinned ? `${targetKey(target)}@${event.id}` : targetKey(target),
     target,
     flat: flattenForMatch(node),
@@ -135,6 +163,7 @@ function candidateFromEvent(
     quotedRevisionId: null,
     ...(near !== null ? { near } : {}),
   };
+  return { key: candidate.key, build: () => candidate };
 }
 
 const COMMENT_CANDIDATE_SELECT = {
@@ -166,10 +195,10 @@ async function loadCandidates(
   host: CommentQuoteHost,
   existing: ExistingQuoteAnchor[],
   hints: PendingQuoteHint[],
-): Promise<Candidate[]> {
-  const ordered: Candidate[] = [];
+): Promise<{ candidates: Candidate[]; context: ChipContext }> {
+  const ordered: PendingCandidate[] = [];
   const seen = new Set<string>();
-  const push = (candidate: Candidate | null) => {
+  const push = (candidate: PendingCandidate | null) => {
     if (candidate && !seen.has(candidate.key)) {
       seen.add(candidate.key);
       ordered.push(candidate);
@@ -186,7 +215,7 @@ async function loadCandidates(
       publishEvent: { select: { id: true, proseJson: true } },
     },
   });
-  if (!post || !isPostPublic(post)) return [];
+  if (!post || !isPostPublic(post)) return { candidates: [], context: {} };
 
   // Pinned versions first, so an edit re-pins to what it already quoted.
   for (const row of existing) {
@@ -242,7 +271,9 @@ async function loadCandidates(
   });
   for (const comment of others) push(candidateFromComment(comment));
 
-  return ordered;
+  // One context for every comment candidate's chips, loaded in one pass.
+  const context = await commentChipContext(ordered.map((candidate) => candidate.body));
+  return { candidates: ordered.flatMap((candidate) => candidate.build(context) ?? []), context };
 }
 
 /**
@@ -257,14 +288,19 @@ export async function captureCommentQuotes(opts: {
 }): Promise<CapturedQuotes> {
   const { node, host, hints } = opts;
   const existing = opts.existing ?? [];
-  const unchanged = () => ({ json: toPlainJSON(node.toJSON() as JSONContent), text: commentBodyText(node), anchors: [] });
+  const json = toPlainJSON(node.toJSON() as JSONContent);
+  // The body's own chips, read as their labels: in a quotation's span, that
+  // is what the commenter typed, and what each target is searched with.
+  const ownContext = await commentChipContext([json]);
+  const ownLabels = chipsIn(node).length > 0 ? chipLabelsIn(node, commentChipInputs(ownContext)) : undefined;
+  const unchanged = () => ({ json, text: commentBodyText(node, ownLabels), anchors: [], chipContext: ownContext });
 
-  const candidatesInBody = extractQuoteCandidates(node);
+  const candidatesInBody = extractQuoteCandidates(node, ownLabels);
   if (candidatesInBody.length === 0 && existing.length === 0) {
     return unchanged();
   }
 
-  const targets = await loadCandidates(host, existing, hints);
+  const { candidates: targets, context: targetContext } = await loadCandidates(host, existing, hints);
   const hintsById = new Map(hints.filter((hint) => hint.id !== null).map((hint) => [hint.id, hint]));
   const existingById = new Map(existing.map((row) => [row.id, row]));
 
@@ -295,7 +331,7 @@ export async function captureCommentQuotes(opts: {
         continue;
       }
       const anchorId = randomUUID();
-      resolutions.push({ candidate: span, anchorId, quotedText: captured.quotedText, paragraphs: [captured.quotedText] });
+      resolutions.push({ candidate: span, anchorId, quotedText: captured.quotedText, paragraphs: [[{ text: captured.quotedText }]] });
       anchors.push({
         id: anchorId,
         partOrder: anchors.length,
@@ -345,7 +381,7 @@ export async function captureCommentQuotes(opts: {
       candidate: span,
       anchorId,
       quotedText: found.match.quotedText,
-      paragraphs: paragraphTextsIn(winner.flat.node, found.match.from, found.match.to),
+      paragraphs: quotedContentIn(winner.flat.node, found.match.from, found.match.to),
     });
     anchors.push({
       id: anchorId,
@@ -355,7 +391,7 @@ export async function captureCommentQuotes(opts: {
       anchorFrom: found.match.from,
       anchorTo: found.match.to,
       quotedText: found.match.quotedText,
-      selector: deriveDocRangeSelector(winner.flat.node, found.match.from, found.match.to),
+      selector: deriveDocRangeSelector(winner.flat.node, found.match.from, found.match.to, winner.flat.labels),
       anchoredEventId: winner.anchoredEventId,
       quotedRevisionId: winner.quotedRevisionId,
     });
@@ -363,9 +399,13 @@ export async function captureCommentQuotes(opts: {
 
   const rewritten = applyQuoteResolutions(node, resolutions);
   rewritten.check();
-  const json = clearUnassignedAnchorIds(
+  const out = clearUnassignedAnchorIds(
     toPlainJSON(rewritten.toJSON() as JSONContent),
     new Set(anchors.map((anchor) => anchor.id)),
   );
-  return { json, text: commentBodyText(rewritten), anchors };
+  // The reply's chips are its own and the ones its quotations copied, whose
+  // records the candidates' context already holds.
+  const chipContext = mergeChipContexts(ownContext, targetContext);
+  const labels = chipsIn(rewritten).length > 0 ? chipLabelsIn(rewritten, commentChipInputs(chipContext)) : undefined;
+  return { json: out, text: commentBodyText(rewritten, labels), anchors, chipContext };
 }

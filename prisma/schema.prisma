@@ -598,8 +598,10 @@ model Comment {
   // It stays the column every reader path reads, which is why adding history
   // changed no query anywhere.
   body              Json
-  // PLAN.md §23i — the body's plain text, derived by `commentBodyText` and
-  // written beside `body` by the same writers, never by a trigger: /comments'
+  // PLAN.md §23i — the body's plain text, derived by `commentBodyText` with
+  // each entity chip's label and written beside `body` by the same writers,
+  // never by a trigger, and by the label refresh after a rename
+  // (docs/ENTITY_CHIPS.md, step 1, item 10): /comments'
   // free-text filter was a jsonb path query on `body.text` and has no
   // equivalent over a document, and every excerpt wants the same string.
   // Mirrors `Annotation.bodyText`. Not on `comment_revision`, which nothing
@@ -638,6 +640,10 @@ model Comment {
   quotedByAnchors     CommentQuoteAnchor[] @relation("CommentQuoteAnchorTargetComment")
   tagAnchors          TagAnchor[]          @relation("TagAnchorComment")
   anchoredLinkAnchors AnchoredLinkAnchor[] @relation("AnchoredLinkAnchorComment")
+  // docs/ENTITY_CHIPS.md, "Planned: chips in comments" — the chips in this
+  // comment's body while it is APPROVED, kept by triggers.
+  mentions            Mention[]
+  citations           Citation[]
 
   // The other half of post_metrics' count path — see CommentThread.postId.
   @@index([threadId])
@@ -2072,15 +2078,18 @@ enum ApiWriteState {
 // a rename reads it, and so will `mentions=` search, the dashboard's card and
 // notifications.
 //
-// **Written only by triggers** on `doc.prose_json`, `annotation.prose_json`
-// and `post.prose_json` (migration `mention_index`), which diff, so a chip
-// that stays keeps its `firstSeenAt`. Never assign to it; `--repair` in
+// **Written only by triggers** on `doc.prose_json`, `annotation.prose_json`,
+// `post.prose_json` (migration `mention_index`) and `comment.body`
+// (migration `comment_chip_index`), which diff, so a chip that stays keeps
+// its `firstSeenAt`. Never assign to it; `--repair` in
 // scripts/integrity/check-mentions.ts rebuilds a drifted object's rows.
 //
 // One table per chip kind and one shape for all of them, as the anchor tables
 // are (PLAN.md §20a): the target, the chip's instance id, exactly one source
 // (a hand-written CHECK), and when the chip was first seen. A DRAFT
-// annotation has no rows: a private note mentions nobody yet.
+// annotation has no rows: a private note mentions nobody yet. Nor has a
+// comment that isn't APPROVED: a mention in a pending or spam comment has
+// reached nobody.
 //
 // A row says a chip exists, never that anyone may see it. Every reader joins
 // through the source's own read rule.
@@ -2095,6 +2104,7 @@ model Mention {
   docId        String? @map("doc_id")
   postId       String? @map("post_id")
   annotationId String? @map("annotation_id")
+  commentId    String? @map("comment_id")
 
   firstSeenAt DateTime @default(now()) @map("first_seen_at")
 
@@ -2102,10 +2112,12 @@ model Mention {
   doc        Doc?        @relation(fields: [docId], references: [id], onDelete: Cascade)
   post       Post?       @relation(fields: [postId], references: [id], onDelete: Cascade)
   annotation Annotation? @relation(fields: [annotationId], references: [id], onDelete: Cascade)
+  comment    Comment?    @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   @@unique([docId, iid, userId])
   @@unique([postId, iid, userId])
   @@unique([annotationId, iid, userId])
+  @@unique([commentId, iid, userId])
   @@index([userId])
   @@map("mention")
 }
@@ -2113,8 +2125,9 @@ model Mention {
 // docs/ENTITY_CHIPS.md, step 1, item 12 — the citation chip kind's index
 // table, the shape `mention` has: one row per work a citation chip names,
 // with the chip's instance id, its one source, and when it was first seen.
-// **Written only by triggers** (migration `citation_index`), by a diff, from
-// the chips in a doc's or a posted note's `prose_json` and from the `chip`
+// **Written only by triggers** (migrations `citation_index` and
+// `comment_chip_index`), by a diff, from the chips in a doc's or a posted
+// note's `prose_json` and an APPROVED comment's `body`, and from the `chip`
 // attribute on a post's links. Never assign to it, and leave its data out of
 // a data-only load (docs/DATABASE.md).
 model Citation {
@@ -2128,6 +2141,7 @@ model Citation {
   docId        String? @map("doc_id")
   postId       String? @map("post_id")
   annotationId String? @map("annotation_id")
+  commentId    String? @map("comment_id")
 
   firstSeenAt DateTime @default(now()) @map("first_seen_at")
 
@@ -2135,10 +2149,12 @@ model Citation {
   doc        Doc?        @relation(fields: [docId], references: [id], onDelete: Cascade)
   post       Post?       @relation(fields: [postId], references: [id], onDelete: Cascade)
   annotation Annotation? @relation(fields: [annotationId], references: [id], onDelete: Cascade)
+  comment    Comment?    @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   @@unique([docId, iid, referenceId])
   @@unique([postId, iid, referenceId])
   @@unique([annotationId, iid, referenceId])
+  @@unique([commentId, iid, referenceId])
   @@index([referenceId])
   @@map("citation")
 }

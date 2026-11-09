@@ -16,9 +16,10 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { JSONContent } from "@tiptap/core";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import { isCommentBodyError } from "@/lib/comment-body";
-import { resolveCommentBody } from "@/lib/comment-body-resolve";
+import { commentChipContext, commentMarkdownOf, resolveCommentBody, type CommentWriter } from "@/lib/comment-chips";
 import type { CommentBodyInput } from "@/lib/comment-body-value";
-import { commentContentToMarkdown } from "@/lib/markdown-import";
+import { actorFromSessionUser } from "@/lib/actor";
+import type { ChipContext } from "@/lib/entity-chips/types";
 import { docsEqual } from "@/lib/diff";
 import { captureCommentQuotes, type CommentQuoteAnchorInput } from "@/lib/comment-quote-capture";
 import { parsePendingQuoteHints } from "@/lib/comment-quote-pending";
@@ -28,7 +29,7 @@ import { search } from "@/lib/search";
 import { parseSearchParams } from "@/lib/search/params";
 import { headlineText } from "@/lib/search/headline";
 import { displayNameOf } from "@/lib/display-name";
-import { commentHistoryFor, commentMarkdownFor, type CommentVersion } from "@/lib/comment-reading";
+import { commentBodyFor, commentHistoryFor, commentMarkdownFor, type CommentVersion } from "@/lib/comment-reading";
 
 export type SubmitCommentState = { error?: string; status?: CommentStatus };
 
@@ -50,15 +51,8 @@ export async function submitComment(
   if (typeof postId !== "string" || !postId) {
     return { error: "Missing post." };
   }
-  if (typeof body !== "string") {
+  if (typeof body !== "string" || !body.trim()) {
     return { error: "Comment can't be empty." };
-  }
-  // PLAN.md §23m — two front doors, one validated document. Anything but an
-  // explicit "rich" is read as Markdown, which is also what a form with no
-  // JavaScript at all submits.
-  const parsedBody = resolveCommentBody({ format: bodyFormat === "rich" ? "rich" : "markdown", content: body });
-  if (isCommentBodyError(parsedBody)) {
-    return { error: parsedBody.error };
   }
 
   const session = await auth();
@@ -94,6 +88,20 @@ export async function submitComment(
   });
   if (!post || !post.publishEventId || derivePostStatus(post) !== "published") {
     return { error: "This post isn't open for comments." };
+  }
+
+  // PLAN.md §23m — two front doors, one validated document. Anything but an
+  // explicit "rich" is read as Markdown, which is also what a form with no
+  // JavaScript at all submits. After the post, since who a comment may
+  // mention is asked of the post (docs/ENTITY_CHIPS.md, "Planned: chips in
+  // comments").
+  const writer: CommentWriter = session?.user ? actorFromSessionUser(session.user) : null;
+  const parsedBody = await resolveCommentBody(
+    { format: bodyFormat === "rich" ? "rich" : "markdown", content: body },
+    { writer, postId, held: null },
+  );
+  if (isCommentBodyError(parsedBody)) {
+    return { error: parsedBody.error };
   }
 
   const commenter = userId
@@ -335,6 +343,8 @@ export type EditCommentResult = {
   /** The stored body after a successful save, so the card can render it before the refresh lands. */
   body?: JSONContent;
   bodyText?: string;
+  /** The records the body's chips are labelled from, which the page's own may not hold yet. */
+  chipContext?: ChipContext;
 };
 
 // A `comment_quote_anchor` row from the capture's output — the arc through
@@ -364,11 +374,6 @@ export async function editComment(
     return { error: "You must be signed in to edit a comment." };
   }
   const { id: userId, role } = session.user;
-
-  const parsedBody = resolveCommentBody(input);
-  if (isCommentBodyError(parsedBody)) {
-    return { error: parsedBody.error };
-  }
 
   const comment = await prisma.comment.findUnique({
     where: { id: commentId },
@@ -407,6 +412,17 @@ export async function editComment(
   const canModerate = await canUserEditPost(userId, role, comment.thread.post.id);
   if (!isOwnComment && !canModerate) {
     return { error: "You don't have permission to edit this comment." };
+  }
+
+  // The chips the comment already holds may be written back whoever they
+  // name; any other is checked against what the editor may insert.
+  const parsedBody = await resolveCommentBody(input, {
+    writer: actorFromSessionUser(session.user),
+    postId: comment.thread.post.id,
+    held: comment.body as JSONContent,
+  });
+  if (isCommentBodyError(parsedBody)) {
+    return { error: parsedBody.error };
   }
 
   const captured = await captureCommentQuotes({
@@ -477,7 +493,7 @@ export async function editComment(
   ]);
 
   revalidateTouchedPosts([comment.thread.post]);
-  return { status: isSpam ? "SPAM" : comment.status, body: captured.json, bodyText: captured.text };
+  return { status: isSpam ? "SPAM" : comment.status, body: captured.json, bodyText: captured.text, chipContext: captured.chipContext };
 }
 
 // The viewer as canUserReadComment takes one, or null when signed out.
@@ -496,17 +512,29 @@ export async function getCommentMarkdown(commentId: string): Promise<{ markdown:
 // PLAN.md §23m — switching the composer's mode with content in it. Both
 // directions go through the server, so the browser never runs the Markdown
 // parser: parsed there, an HTML token becomes a real node, the opposite of
-// what the server does with the same text. Pure — no row is read or
-// written, and the result is what a submit of the same content would store.
+// what the server does with the same text. Nothing is written, and the
+// result is what a submit of the same content would store, so its chips are
+// resolved under the same rule (docs/ENTITY_CHIPS.md, "Planned: chips in
+// comments"): `where` is the post, and on an edit the comment, whose own
+// chips may be written back. The JSON comes with its chips' records, so the
+// rich editor shows their labels.
 export async function convertCommentBody(
   input: CommentBodyInput,
   to: "markdown" | "rich",
-): Promise<{ markdown: string } | { json: JSONContent } | { error: string }> {
-  const parsedBody = resolveCommentBody(input);
+  where: { postId: string; commentId?: string },
+): Promise<{ markdown: string } | { json: JSONContent; chipContext: ChipContext } | { error: string }> {
+  if (typeof where?.postId !== "string" || !where.postId) return { error: "Missing post." };
+  const session = await auth();
+  const writer: CommentWriter = session?.user ? actorFromSessionUser(session.user) : null;
+  // On an edit, only a body the writer may read is held; anyone else's
+  // conversion is a new comment's.
+  const held = typeof where.commentId === "string" ? await commentBodyFor(writer, where.commentId) : null;
+  const parsedBody = await resolveCommentBody(input, { writer, postId: where.postId, held });
   if (isCommentBodyError(parsedBody)) {
     return { error: parsedBody.error };
   }
-  return to === "markdown" ? { markdown: commentContentToMarkdown(parsedBody.json) } : { json: parsedBody.json };
+  if (to === "markdown") return { markdown: await commentMarkdownOf(parsedBody.json) };
+  return { json: parsedBody.json, chipContext: await commentChipContext([parsedBody.json]) };
 }
 
 // PLAN.md §22c — the history one comment's "edited" marker opens, under the
@@ -687,6 +715,8 @@ export type QuotableTargetBody = {
   label: string;
   /** ProseMirror JSON over the post schema (a post) or the comment schema (a comment). */
   body: JSONContent;
+  /** A comment's chips' records, for their labels; a post holds no chip. */
+  chipContext: ChipContext;
 };
 
 /** One target's body for the picker's passage selection, or null if it is not public. */
@@ -699,12 +729,18 @@ export async function loadQuotableTarget(kind: "post" | "comment", id: string): 
       select: { title: true, publishEvent: { select: { proseJson: true } } },
     });
     if (!post?.publishEvent?.proseJson) return null;
-    return { kind, id, label: post.title, body: post.publishEvent.proseJson as JSONContent };
+    return { kind, id, label: post.title, body: post.publishEvent.proseJson as JSONContent, chipContext: {} };
   }
   const comment = await prisma.comment.findUnique({
     where: { id },
     select: { body: true, commenter: { select: { displayName: true } } },
   });
   if (!comment) return null;
-  return { kind, id, label: `${comment.commenter.displayName}'s comment`, body: comment.body as JSONContent };
+  return {
+    kind,
+    id,
+    label: `${comment.commenter.displayName}'s comment`,
+    body: comment.body as JSONContent,
+    chipContext: await commentChipContext([comment.body]),
+  };
 }

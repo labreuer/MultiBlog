@@ -564,8 +564,9 @@ test("MCP writes citations in Pandoc's syntax, reads them back as sent, edits th
     expect(await found({ cited_author: `Barfield${prefix}`, cites: [radner], kinds: ["docs"] })).toEqual({ docs: [url] });
     // Every filter at once: nothing cites a work titled so.
     expect(await found({ cited_author: `Barfield${prefix}`, cited_title: `nowhere ${prefix}`, kinds: ["docs"] })).toEqual({ docs: [] });
-    const comments = await agent.call("search", { cites: [radner], kinds: ["docs", "comments"] });
-    expect((comments.result as unknown as Found).withoutCitations).toEqual(["comments"]);
+    // A PDF cites nothing, so the response names it as left out; a comment can cite, and is searched.
+    const pdfs = await agent.call("search", { cites: [radner], kinds: ["docs", "pdfs", "comments"] });
+    expect((pdfs.result as unknown as Found).withoutCitations).toEqual(["pdfs"]);
     const unknownKey = await agent.call("search", { cites: [`${prefix}-nothing`] });
     expect(unknownKey.error).toMatchObject({ code: "invalid", keys: [`${prefix}-nothing`] });
     // The page reads the same filter, and says what it narrows to.

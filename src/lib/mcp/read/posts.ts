@@ -7,7 +7,8 @@ import { isCommentVisiblyEdited } from "@/lib/comment-data";
 import { loadCommentQuoteCitations } from "@/lib/comment-quote-data";
 import { commentAnchorName } from "@/lib/comment-anchor-name";
 import { commentHistoryFor, READABLE_COMMENT_INCLUDE } from "@/lib/comment-reading";
-import { commentContentToMarkdown, postContentToMarkdown } from "@/lib/markdown-import";
+import { postContentToMarkdown } from "@/lib/markdown-import";
+import { commentChipContext, commentMarkdownOf } from "@/lib/comment-chips";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { extractText } from "@/lib/diff";
 import { tagsForTarget } from "@/lib/tag-data";
@@ -132,6 +133,12 @@ async function postComments(post: { id: string; publishEventId: string | null },
     orderBy: { createdAt: "asc" },
     select: { id: true, quotedText: true, status: true, anchoredEventId: true },
   });
+  // Each chip in its chip kind's Markdown, labelled in the comment style
+  // from one context for every comment (docs/ENTITY_CHIPS.md, "Planned: chips in comments").
+  const chipContext = format === "text" ? {} : await commentChipContext(comments.map((c) => c.body));
+  const markdownOf = new Map(
+    format === "text" ? [] : await Promise.all(comments.map(async (c) => [c.id, (await commentMarkdownOf(c.body as JSONContent, chipContext)).trim()] as const)),
+  );
 
   return threads.map((thread) => {
     const entries = [
@@ -149,7 +156,7 @@ async function postComments(post: { id: string; publishEventId: string | null },
               ...(visiblyEdited && c.editedAt ? { edited: minuteOf(c.editedAt) } : {}),
               ...(c.parentCommentId ? { replyTo: c.parentCommentId } : {}),
               id: c.id,
-              body: format === "text" ? c.bodyText : commentContentToMarkdown(c.body as JSONContent).trim(),
+              body: format === "text" ? c.bodyText : (markdownOf.get(c.id) ?? ""),
             },
           };
         }),
@@ -225,20 +232,22 @@ async function readComment(
     post: postUrl,
     thread: comment.threadId,
     ...(comment.parentCommentId ? { replyTo: comment.parentCommentId } : {}),
-    body: format === "text" ? comment.bodyText : commentContentToMarkdown(comment.body as JSONContent).trim(),
+    body: format === "text" ? comment.bodyText : (await commentMarkdownOf(comment.body as JSONContent)).trim(),
     ...(Object.keys(citations).length > 0
       ? { cites: Object.values(citations).map((c) => ({ label: c.label, ...(c.href ? { url: c.href } : {}), ...(c.stale ? { earlierVersion: true } : {}) })) }
       : {}),
   };
   if (args.history) {
     const versions = await commentHistoryFor(viewerOf(ctx.actor), comment.id);
-    result.history = versions.map((v) => ({
-      version: v.revisionNo,
-      at: minuteOf(new Date(v.createdAt)),
-      ...(v.authorName ? { by: v.authorName } : {}),
-      ...(v.current ? { current: true } : {}),
-      body: format === "text" ? v.bodyText : commentContentToMarkdown(v.body).trim(),
-    }));
+    result.history = await Promise.all(
+      versions.map(async (v) => ({
+        version: v.revisionNo,
+        at: minuteOf(new Date(v.createdAt)),
+        ...(v.authorName ? { by: v.authorName } : {}),
+        ...(v.current ? { current: true } : {}),
+        body: format === "text" ? v.bodyText : (await commentMarkdownOf(v.body, v.chipContext)).trim(),
+      })),
+    );
   }
   return result;
 }

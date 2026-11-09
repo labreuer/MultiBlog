@@ -349,7 +349,7 @@ export const pmBlurbSchema = getSchema(blurbExtensions);
 //
 // In: the inline marks people use in prose; lists and blockquote, which
 // prose.module.css already restores from globals.css's reset; hard breaks,
-// because VirtualKeyboardEnter exists; links, hardened below. Out, and why,
+// because VirtualKeyboardEnter exists; links, hardened below; entity chips. Out, and why,
 // is §23b's list: images (a stranger-chosen src is a request every reader's
 // browser makes), headings, code blocks, tables, rules, and raw HTML — which
 // has no extension, so the schema cannot express it and no sanitizer has to
@@ -404,6 +404,11 @@ export const commentContentExtensions = [
     ...EDITOR_LINK_OPTIONS,
     HTMLAttributes: { rel: COMMENT_LINK_REL, target: COMMENT_LINK_TARGET },
   }),
+  // docs/ENTITY_CHIPS.md, "Planned: chips in comments": mentions and
+  // citations, as in a doc or a note. No ydoc holds a comment, so this is no
+  // schema-version bump; `parseCommentBody` runs each chip kind's validator
+  // and keeps no mark on a chip but a quotation's `quote`.
+  EntityChip,
 ];
 export const pmCommentContentSchema = getSchema(commentContentExtensions);
 

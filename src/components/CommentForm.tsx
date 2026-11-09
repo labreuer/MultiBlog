@@ -149,6 +149,7 @@ export default function CommentForm(props: Props) {
       <CommentBodyInput
         value={value}
         onChange={setValue}
+        postId={postId}
         ariaLabel="Comment body"
         placeholder={userName ? `Commenting as ${userName}` : "Write a comment..."}
         disabled={pending}

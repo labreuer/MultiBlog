@@ -361,7 +361,10 @@ export function findQuoteInTarget(
     const starts = allIndexesOf(target.text, normalizedQuery);
     if (starts.length > 0) {
       const start = pickNearest(target, starts, opts.near);
-      const hit = verifyExact(target, rangeFromFlat(target, start, start + normalizedQuery.length), normalizedQuery);
+      const end = start + normalizedQuery.length;
+      // As written, or, where an end falls inside a chip's label, widened to
+      // the chip: a comment quoting half a mention quotes the mention.
+      const hit = verifyExact(target, rangeFromFlat(target, start, end), normalizedQuery) ?? verifyWidened(target, start, end);
       if (hit) return hit;
     }
   }
