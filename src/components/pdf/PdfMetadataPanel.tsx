@@ -13,10 +13,10 @@ import styles from "./PdfPanes.module.css";
 // rather than this module importing it, which is what lets a Server Component
 // reach inside an `ssr: false` island at all (PdfSurfaceClient's header).
 //
-// Tags are all it holds today. The tab is named for the category rather
-// than for its one occupant because the file's own facts — size, page count,
-// uploader, visibility — belong here too when they're wanted, and a tab reading
-// "Tags" would have to be renamed to take them.
+// It holds the tags and the references the file is the PDF of
+// (FileReferencesPanel). The tab is named for the category rather than for
+// either because the file's own facts — size, page count, uploader,
+// visibility — belong here too when they're wanted.
 
 export default function PdfMetadataPanel({ children }: { children: ReactNode }) {
   return <div className={styles.pane}>{children}</div>;

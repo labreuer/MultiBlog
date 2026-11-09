@@ -367,6 +367,125 @@ test("a citation's link at a page sends a reader who may open the work's PDF to 
   }
 });
 
+// docs/CITATIONS.md, "A work's PDF" — tied from the PDF's own page, where you
+// are after uploading it, and then followed from a citation at a page.
+test("a PDF's Metadata pane ties it to a reference, and a citation of the work at a page opens that page", async ({ page, request }) => {
+  const agent = await createAgent(request);
+  const prefix = `e2etie${Date.now().toString(36)}`;
+  const key = `${prefix}-bhaskar1975`;
+  const title = `A Realist Theory of Science ${prefix}`;
+  const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "PRIVATE" });
+  let docId = "";
+  try {
+    const made = await agent.call("create_ref", { csl: { type: "book", title, author: [{ family: `Bhaskar${prefix}` }], issued: { "date-parts": [[1975]] } }, key });
+    expect(made.isError, JSON.stringify(made.error)).toBe(false);
+
+    await page.goto(`/pdf/${file.slug}`);
+    await page.getByRole("tab", { name: "Metadata" }).click();
+    const panel = page.getByRole("region", { name: "The PDF of" });
+    await expect(panel).toContainText("No reference in the library names this as its PDF.");
+    // A private PDF says who a citation opens it for.
+    await expect(panel).toContainText("This PDF is private, so a citation of it opens it only for people who may read it.");
+    await panel.getByLabel("Add a reference").fill(`Bhaskar${prefix}`);
+    await panel.getByRole("button", { name: new RegExp(title) }).click();
+    await expect(panel.getByRole("link", { name: new RegExp(title) })).toHaveAttribute("href", `/references/${key}`);
+
+    // A doc citing the work at page 2 opens the PDF there for its owner, who may read it.
+    const doc = await agent.call("create_doc", { markdown: `Realism about structures [@${key}, p. 2].`, title: `Tie ${prefix}` });
+    expect(doc.isError, JSON.stringify(doc.error)).toBe(false);
+    docId = String(doc.result.id);
+    await page.goto(`/doc/${docId}`);
+    const chip = page.locator("a.entity-chip").filter({ visible: true });
+    await expect(chip).toHaveAttribute("href", `/references/${key}/p/2`);
+    await page.goto(`/references/${key}/p/2`);
+    await expect(page).toHaveURL(`/pdf/${file.slug}#page=2`);
+
+    // Removing it unties it, and the list says so.
+    await page.getByRole("tab", { name: "Metadata" }).click();
+    await page.getByRole("button", { name: `Untie ${key} from this PDF` }).click();
+    await expect(page.getByRole("region", { name: "The PDF of" })).toContainText("No reference in the library names this as its PDF.");
+  } finally {
+    await page.goto("about:blank");
+    if (docId) await deleteTestDoc(docId);
+    await deleteTestReferences(prefix);
+    await deleteTestFile(file.id);
+    await agent.dispose();
+  }
+});
+
+// docs/CITATIONS.md, "A work's PDF" — the File column of /references: set and
+// removed by a writer, and named only to a viewer who may read it.
+test("the File column of /references sets a reference's PDF, removes it, and names only a PDF the viewer may read", async ({ page, request }) => {
+  const agent = await createAgent(request);
+  const prefix = `e2efilecol${Date.now().toString(36)}`;
+  const key = `${prefix}-barfield1957`;
+  const other = await createTestUser({ email: uniqueEmail("filecol-owner"), role: "AUTHOR" });
+  const mine = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", title: `Saving the Appearances scan ${prefix}` });
+  const theirs = await createTestFile({ ownerEmail: other.email, visibility: "PRIVATE", title: `Their private scan ${prefix}` });
+  try {
+    const made = await agent.call("create_ref", {
+      csl: { type: "book", title: `Saving the Appearances ${prefix}`, author: [{ family: `Barfield${prefix}` }], issued: { "date-parts": [[1957]] } },
+      key,
+    });
+    expect(made.isError, JSON.stringify(made.error)).toBe(false);
+    const row = () => page.getByRole("row").filter({ hasText: key });
+
+    await page.goto(`/references?q=${prefix}`);
+    await row().getByRole("button", { name: `Set PDF of ${key}` }).click();
+    await row().getByLabel(`The PDF of ${key}`).fill(prefix);
+    // Only PDFs this viewer may read are offered.
+    await expect(row().getByRole("button", { name: mine.title })).toBeVisible();
+    await expect(row().getByRole("button", { name: theirs.title })).toHaveCount(0);
+    await row().getByRole("button", { name: mine.title }).click();
+    await expect(row().getByRole("link", { name: mine.title })).toHaveAttribute("href", `/pdf/${mine.slug}`);
+
+    await row().getByRole("button", { name: `Set PDF of ${key}` }).click();
+    await row().getByRole("button", { name: "Remove the PDF" }).click();
+    await expect(row().getByRole("link", { name: mine.title })).toHaveCount(0);
+
+    // A PDF the viewer may not read is shown as one, unnamed.
+    await setTestReferenceFile(key, theirs.id);
+    await page.reload();
+    await expect(row()).toContainText("a PDF you can't open");
+    await expect(row()).not.toContainText(theirs.title);
+  } finally {
+    await page.goto("about:blank");
+    await deleteTestReferences(prefix);
+    await deleteTestFile(mine.id);
+    await deleteTestFile(theirs.id);
+    await deleteTestUser(other.email);
+    await agent.dispose();
+  }
+});
+
+// docs/CITATIONS.md, "MCP" — create_ref ties the work to a PDF the account may
+// read, and find_refs names it, to that account only.
+test("create_ref ties a work to a PDF the account may read, refuses one it may not, and find_refs names the PDF", async ({ request }) => {
+  const agent = await createAgent(request);
+  const prefix = `e2erefpdf${Date.now().toString(36)}`;
+  const other = await createTestUser({ email: uniqueEmail("refpdf-owner"), role: "AUTHOR" });
+  // Shared, so the agent's own account may read it; the other is another account's private PDF.
+  const mine = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED" });
+  const theirs = await createTestFile({ ownerEmail: other.email, visibility: "PRIVATE" });
+  try {
+    const csl = (name: string) => ({ type: "book", title: `${name} ${prefix}`, author: [{ family: `${name}${prefix}` }], issued: { "date-parts": [[1990]] } });
+    const tied = await agent.call("create_ref", { csl: csl("Mine"), key: `${prefix}-mine1990`, file: `/pdf/${mine.slug}` });
+    expect(tied.isError, JSON.stringify(tied.error)).toBe(false);
+    const refused = await agent.call("create_ref", { csl: csl("Theirs"), key: `${prefix}-theirs1990`, file: `/pdf/${theirs.slug}` });
+    expect(refused.isError).toBe(true);
+    expect(refused.error.code).toBe("not_found");
+    const found = await agent.call("find_refs", { query: `Mine${prefix}` });
+    expect(found.isError, JSON.stringify(found.error)).toBe(false);
+    expect(found.result.references).toEqual([expect.objectContaining({ key: `${prefix}-mine1990`, pdf: `/pdf/${mine.slug}` })]);
+  } finally {
+    await deleteTestReferences(prefix);
+    await deleteTestFile(mine.id);
+    await deleteTestFile(theirs.id);
+    await deleteTestUser(other.email);
+    await agent.dispose();
+  }
+});
+
 // docs/CITATIONS.md, "Markdown" — a citation written by a machine client in
 // Pandoc's syntax, by key: read back as it was sent, changed by sending its
 // Markdown with the change in it, and refused for a key the library lacks.

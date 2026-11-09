@@ -10,6 +10,8 @@ import {
   restoreReference,
   updateReferenceKey,
   updateReferenceShort,
+  searchReferencePdfs,
+  setReferenceFile,
 } from "@/app/actions/references";
 import { formatDate } from "@/lib/format-date";
 import { type ReferencesFilters, buildReferencesQueryString } from "@/lib/references-query";
@@ -41,6 +43,7 @@ import {
   ShowDeletedToggle,
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
+import SearchPicker from "@/components/SearchPicker";
 import styles from "./ReferencesTable.module.css";
 
 // docs/CITATIONS.md, "Pages" — /references, built from the shared table kit
@@ -59,7 +62,8 @@ export type ReferenceTableRow = {
   people: string;
   year: number | null;
   title: string;
-  file: { slug: string; title: string } | null;
+  /** Its PDF: named for a viewer who may read it, "unreadable" for one they may not, null for none. */
+  file: { slug: string; title: string; private: boolean } | "unreadable" | null;
   createdByName: string;
   createdAt: Date;
   deletedAt: Date | null;
@@ -85,6 +89,8 @@ export default function ReferencesTable({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // The row whose PDF picker is open (docs/CITATIONS.md, "A work's PDF").
+  const [pickingFile, setPickingFile] = useState<string | null>(null);
 
   const { navigate, updateFilters, searchDraft, onSearchChange, handleSort, searchParams } = useTableFilters({
     filters,
@@ -192,7 +198,69 @@ export default function ReferencesTable({
     title: { sortKey: "title", cell: (row) => row.title },
     file: {
       sortKey: "file",
-      cell: (row) => (row.file ? <Link href={`/pdf/${row.file.slug}`}>{row.file.title}</Link> : ""),
+      cell: (row) => (
+        <div className={styles.fileCell}>
+          <span className={styles.keyCell}>
+            {row.file === "unreadable" ? (
+              <span className={styles.missing}>a PDF you can&apos;t open</span>
+            ) : row.file ? (
+              <>
+                <Link href={`/pdf/${row.file.slug}`}>{row.file.title}</Link>
+                {row.file.private && (
+                  <span
+                    className={styles.missing}
+                    title="A citation of it opens it only for people who may read it; everyone else gets the reference's page."
+                  >
+                    private
+                  </span>
+                )}
+              </>
+            ) : null}
+            {canWrite && !row.deleted && (
+              <button
+                type="button"
+                className={styles.editButton}
+                onClick={() => setPickingFile(pickingFile === row.id ? null : row.id)}
+                disabled={pending}
+                title={`Set the PDF of ${row.key}`}
+                aria-label={`Set PDF of ${row.key}`}
+                aria-expanded={pickingFile === row.id}
+              >
+                ✎
+              </button>
+            )}
+          </span>
+          {pickingFile === row.id && (
+            <div className={styles.filePicker}>
+              <SearchPicker
+                label={`The PDF of ${row.key}`}
+                placeholder="Title or file name"
+                disabled={pending}
+                search={async (query) =>
+                  (await searchReferencePdfs(query)).map((pdf) => ({ id: pdf.id, label: pdf.title, ...(pdf.private ? { note: "(private)" } : {}) }))
+                }
+                onPick={(fileId) => {
+                  setPickingFile(null);
+                  run(row, () => setReferenceFile(row.id, fileId), "Failed to set the PDF.");
+                }}
+              />
+              {row.file && (
+                <button
+                  type="button"
+                  className={styles.untie}
+                  disabled={pending}
+                  onClick={() => {
+                    setPickingFile(null);
+                    run(row, () => setReferenceFile(row.id, null), "Failed to remove the PDF.");
+                  }}
+                >
+                  Remove the PDF
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      ),
     },
     created: { sortKey: "created", nowrap: true, cell: (row) => formatDate(row.createdAt, "yyyy-MM-dd HH:mm") },
     createdBy: { sortKey: "createdBy", nowrap: true, cell: (row) => row.createdByName },

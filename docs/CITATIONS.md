@@ -74,9 +74,12 @@ search by cited work. Everything below not listed here is still a plan: Later.
   (`ReferenceImport.tsx`): each record is added, shown as already in the library with the key
   it has there, or refused with why.
 - **`/references`**, through the admin table kit, for signed-in members
-  (`canViewReferences`); AUTHOR and above rename a key, set an abbreviation, delete and
-  restore. Author(s), Year and Title sort through the `reference_listing` view (migration
-  `reference_listing_view`), since they are fields of the record's jsonb.
+  (`canViewReferences`); AUTHOR and above rename a key, set an abbreviation, set or remove its
+  PDF, delete and restore. Author(s), Year and Title sort through the `reference_listing` view
+  (migration `reference_listing_view`), since they are fields of the record's jsonb.
+- **A work's PDF** (Step 3, "A work's PDF"): tied from the PDF's Metadata pane
+  (`FileReferencesPanel.tsx`) or the File column of `/references`, through `updateReference`,
+  and by `create_ref`'s `file`. The reads are `src/lib/reference-files.ts`.
 - **`/references/[key]`** is public and reads no session: the entry as a bibliography sets
   it, the abbreviation, the DOI, ISBN and URL, and the published posts citing it. A key the
   reference used to have redirects to its current one. `CitedBy.tsx`, a client island, asks
@@ -91,8 +94,8 @@ search by cited work. Everything below not listed here is still a plan: Later.
 
 ## Terms
 
-- **Reference.** A bibliographic record (book, article, chapter), optionally tied to a PDF in
-  `/files`.
+- **Reference.** A bibliographic record (book, article, chapter), optionally tied to its PDF in
+  `/files` (Step 3, "A work's PDF").
 - **Locator.** The printed page or pages a citation points at, such as "49", "49–51", "49, 51"
   or "xii", and nothing else (The chip, "The page").
 
@@ -279,7 +282,7 @@ address names the reference rather than the PDF.
 - a unique, slug-shaped `key`, such as `radner2012`;
 - `csl`, a jsonb CSL-JSON item;
 - `short`, the abbreviation labels use, such as `BU`, optional (Labels, above);
-- an optional `file_id`;
+- an optional `file_id`, the work's PDF (A work's PDF, below);
 - audit columns, `deleted_at` and `search_vector`.
 
 **Who writes them.** AUTHOR and above create and edit references.
@@ -317,6 +320,35 @@ address names the reference rather than the PDF.
   - Adding an identifier that another record holds is refused, naming that record.
   - `create_ref` refuses with `duplicate`, returning the existing key and URL so the agent
     cites that record instead.
+
+**A work's PDF.** A reference can name one file as the work's PDF, and several references can
+name one PDF, an anthology's chapters, say. A citation of the work at a page then opens that
+page of it for whoever may read it (Labels, "The link").
+
+- **What it may be.** A PDF the writer may read, live: `updateReference` refuses anything else,
+  as `requireFile`. Writing it is an edit of the reference, so AUTHOR and above.
+- **Where it is set.**
+  - **On the PDF's page**, in its Metadata pane, where you are right after uploading:
+    `FileReferencesPanel.tsx` lists the references the PDF is the PDF of, and offers a writer a
+    search of the library, as the citation menu searches it, to add one, and a way to remove
+    one. A reference tied to another PDF says that adding it here moves it. The panel keeps its
+    own list from each action's answer, since it sits inside the viewer's `ssr: false` island,
+    where a refresh delivers nothing. Removing a reference unties it only if it is still tied to
+    this PDF (`untieReferenceFromFile`).
+  - **In the File column of `/references`**, where you are when tidying the library: a writer's
+    ✎ opens a search of the PDFs they may read, by title, slug or file name, and a way to remove
+    the PDF.
+  - **By `create_ref`**, as its `file` (MCP, below). Changing one afterwards stays in the UI.
+- **A private PDF says so.** A citation opens it only for people who may read it, its owners,
+  and everyone else gets the reference's page. The PDF's panel says this, and the File column
+  marks it private.
+- **Who sees which PDF.** A reference's record is public, but its PDF is under the files' read
+  rule (`readableFilesWhere`). So the File column names a PDF only to a viewer who may read it,
+  and shows any other as "a PDF you can't open", which a writer needs to know before replacing
+  it. It sorts by whether a reference has a PDF, never by the PDF's title, since a sort by a
+  title some viewers can't see would let them find it out a row at a time. `find_refs` names a
+  PDF only to an agent whose account may read it. The PDF's own panel lists its references to
+  whoever may read the PDF, the page's own gate.
 
 **Pages.**
 
@@ -431,7 +463,11 @@ post's labels, and a republish refreshes both.
 **MCP.**
 
 - `find_refs`, by key, title, author, DOI or ISBN, beside `find_users` and `find_tags`.
+- `find_refs` answers each work's PDF, as `pdf: "/pdf/<slug>"`, where the agent's account may
+  read it.
 - `create_ref` (the `write` scope; AUTHOR and above, by the token's account).
+  - Its `file` ties the work to its PDF, by `/pdf/<slug>` or id, refused as not found unless the
+    account may read it.
   - Its description tells the agent to search with `find_refs` first, as `find_tags` does
     for tag terms.
   - It refuses `duplicate` with the existing key, and `invalid` for an identifier that fails its

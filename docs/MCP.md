@@ -2028,7 +2028,7 @@ comment's writer and the post's moderators. So a hit never leads to `not_found`.
 | `read` | read | Any MultiBlog URL (below): whole, as its outline, as a range or `around` a quote; changes `since` a version, on a doc the actor can edit; and `include` for what hangs off the object, each list paged on its own, threads filtered under `threads` (§6, §9, §10) |
 | `find_users` | read | Byline-eligible users by name or slug, or one by exact email (§12) |
 | `find_tags` | read | Tag terms by name (§11) |
-| `find_refs` | read | Works in the reference library by key, title, author or year, or one by its DOI or ISBN ([CITATIONS.md](CITATIONS.md)) |
+| `find_refs` | read | Works in the reference library by key, title, author or year, or one by its DOI or ISBN, each with its PDF where the account may read it ([CITATIONS.md](CITATIONS.md)) |
 | `download` | read | A URL for a file's bytes or for the export, carrying a grant good for ten minutes (§5) |
 | `upload` | write | A URL for uploading a PDF or a .docx, or for creating a doc from a Markdown body, carrying a grant good for ten minutes (§5) |
 | `create_doc` | write | Markdown and a title; the doc is PRIVATE, its byline the actor and then the token's issuer, or the issuer alone (§6, §12) |
@@ -2040,7 +2040,7 @@ comment's writer and the post's moderators. So a hit never leads to `not_found`.
 | `extend_link` | write | More parts on a minted link, anchored by quote (§10) |
 | `edit_link` | write | A link's name; removing and reordering its parts (§10) |
 | `tag` · `untag` | write | Apply a term, minting it when it is new, to anything but a published or scheduled post; remove one's own assignment, or anyone's as ADMIN/EDITOR (§11) |
-| `create_ref` | write | A work added to the reference library from its CSL-JSON record; `duplicate`, with the key to cite, for one the library holds by DOI or ISBN ([CITATIONS.md](CITATIONS.md)) |
+| `create_ref` | write | A work added to the reference library from its CSL-JSON record, with its PDF as `file` if given; `duplicate`, with the key to cite, for one the library holds by DOI or ISBN ([CITATIONS.md](CITATIONS.md)) |
 | `manage` | manage | A doc's or file's visibility, slug, byline or owners, and whether a doc is a record; tagging a published or scheduled post; deleting or restoring a doc, file, annotation or link |
 
 Uploading, downloading and exporting go through §5's byte routes, not through a tool's

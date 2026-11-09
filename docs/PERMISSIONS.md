@@ -750,7 +750,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | `/links` row scoping (readable-target `where`) + per-target cell filter | `src/app/links/page.tsx` |
 | Search: which kinds a viewer may search, each kind's scoping | `src/lib/search/index.ts`, `src/lib/search/{docs,posts,pdfs,annotations,comments}.ts` |
 | Search's author picker, and which kinds an author filter leaves out | `src/lib/search/authors.ts` |
-| The reference library: members list it (`canViewReferences`), AUTHOR and above write it (`canWriteReferences`), and a reference's own page is public | `src/lib/role-checks.ts`, `src/lib/reference-write.ts`, `src/app/references/` |
+| The reference library: members list it (`canViewReferences`), AUTHOR and above write it (`canWriteReferences`), and a reference's own page is public. A work's PDF is a PDF the writer may read, named in the library only to whoever may read it, and a citation's link opens it only for them (`/references/<key>/p/<page>`) | `src/lib/role-checks.ts`, `src/lib/reference-write.ts`, `src/lib/reference-files.ts`, `src/lib/reference-cited-by.ts`, `src/app/references/` |
 | Search's mention filter (`mentions=`, `@handle`), and the dashboard's "Mentions of you": inside each kind's readable ids | `src/lib/search/index.ts` (`mentionIdsFor`), `src/lib/search/context.ts` (`mentionedWhere`), `src/lib/mentions-of.ts` |
 | Post editing and history | `src/lib/authz.ts`, `src/app/posts/**` |
 | Publishing needs doc-edit as well as post-edit | `publishPostFromDoc`/`schedulePostFromDoc` in `src/app/actions/posts.ts`; `/api/doc/[id]/replay` |

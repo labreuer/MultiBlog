@@ -4,6 +4,7 @@ import { ApiError, forbidden, invalid, notFound } from "@/lib/api/errors";
 import { scheduleCitationRefresh } from "@/lib/entity-chips/refresh";
 import { canUserReadFile } from "@/lib/file-authz";
 import { prisma, prismaIncludingDeleted as base } from "@/lib/prisma";
+import { PDF_CONTENT_TYPE } from "@/lib/reference-files";
 import { canWriteReferences } from "@/lib/role-checks";
 import { keyBaseOf, normalizeKey, parseCslItem, type CslItem } from "@/lib/references/csl";
 import { identifiersOf, type Identifier } from "@/lib/references/identifiers";
@@ -29,6 +30,8 @@ import { parseReferences } from "@/lib/references/import";
 //  - **The identifiers are written with the record**, in one transaction.
 //  - **A key is permanent once used.** A rename leaves the old key in
 //    `reference_key_history`, and no other reference may take it.
+//  - **A reference's file is a PDF the actor may read**, live: the work's
+//    PDF, which a citation's page is a page of.
 
 export const referencePath = (key: string) => `/references/${key}`;
 
@@ -39,7 +42,7 @@ export type ReferenceInput = {
   key?: string | null;
   /** The abbreviation a `short`-style citation shows. */
   short?: string | null;
-  /** The PDF of the work, by file id. The actor must be able to read it. */
+  /** The PDF of the work, by file id; null unties it. The actor must be able to read it. */
   fileId?: string | null;
 };
 
@@ -97,8 +100,9 @@ async function freeKey(tx: Prisma.TransactionClient, base: string): Promise<stri
 }
 
 async function requireFile(actor: Actor, fileId: string): Promise<void> {
-  const file = await prisma.storedFile.findUnique({ where: { id: fileId }, select: { id: true, visibility: true } });
+  const file = await prisma.storedFile.findUnique({ where: { id: fileId }, select: { id: true, visibility: true, contentType: true } });
   if (!file || !(await canUserReadFile(actor.userId, actor.role, file))) throw notFound("That file");
+  if (file.contentType !== PDF_CONTENT_TYPE) throw invalid("That file isn't a PDF. A reference's file is the work's PDF.");
 }
 
 function shortOf(raw: string | null | undefined): string | null {
@@ -206,6 +210,19 @@ export async function updateReference(actor: Actor, id: string, input: Partial<R
     if (record) await base.$transaction((tx) => refuseDuplicate(tx, record.identifiers, id));
     throw new ApiError("conflict", "That key was taken as this was saved; try again.");
   }
+}
+
+/**
+ * Unties a reference from `fileId`, if it is still tied to that file: what
+ * the PDF's page asks, which may be showing a tie someone has since moved
+ * to another PDF. Answers whether it untied anything.
+ */
+export async function untieReferenceFromFile(actor: Actor, id: string, fileId: string): Promise<boolean> {
+  requireWriter(actor);
+  const current = await prisma.reference.findUnique({ where: { id }, select: { fileId: true } });
+  if (!current || current.fileId !== fileId) return false;
+  await updateReference(actor, id, { fileId: null });
+  return true;
 }
 
 /**

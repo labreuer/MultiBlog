@@ -12,6 +12,8 @@ import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import ReferencesTable from "@/components/ReferencesTable";
 import ReferenceImport from "@/components/ReferenceImport";
 import { staffDisplayNameOf } from "@/lib/display-name";
+import { actorFromSessionUser } from "@/lib/actor";
+import { readableFiles } from "@/lib/reference-files";
 
 export const metadata: Metadata = { title: "References" };
 
@@ -25,6 +27,12 @@ export const metadata: Metadata = { title: "References" };
 //
 // On the base client: `reference` is not in the soft-delete extension, and
 // the show-deleted toggle lists a deleted one so it can be restored.
+//
+// **The File column is the exception**, since a reference's PDF is under the
+// files' read rule, not the library's: a PDF this viewer may not read is
+// shown as one, unnamed, and the column sorts by whether a reference has a
+// PDF, never by its title, which would order rows by titles some viewers
+// may not see (docs/CITATIONS.md, "A work's PDF").
 
 /** The ids whose search vector matches every word typed, each as a prefix: what the search box narrows to. */
 async function matchingIds(q: string): Promise<string[] | null> {
@@ -53,7 +61,7 @@ function buildOrderBy(sort: SortColumn<ReferencesSortKey>[]): Prisma.ReferenceOr
       case "title":
         return { listing: { title: { sort: dir, nulls: "last" } } };
       case "file":
-        return { file: { title: dir } };
+        return { fileId: { sort: dir, nulls: "last" } };
       case "created":
         return { createdAt: dir };
       case "createdBy":
@@ -115,7 +123,7 @@ export default async function ReferencesPage({
         deletedAt: true,
         // Read from the same view that sorts them.
         listing: { select: { title: true, people: true, year: true } },
-        file: { select: { slug: true, title: true, deletedByUserId: true } },
+        fileId: true,
         createdBy: { select: { name: true, email: true } },
       },
     }),
@@ -123,6 +131,13 @@ export default async function ReferencesPage({
   ]);
 
   const canWrite = canWriteReferences(session.user.role);
+  // A PDF named only to whoever may read it; one that is deleted is no PDF.
+  const tied = references.flatMap((reference) => (reference.fileId ? [reference.fileId] : []));
+  const [readable, live] = await Promise.all([
+    readableFiles(actorFromSessionUser(session.user), tied),
+    prismaIncludingDeleted.storedFile.findMany({ where: { id: { in: tied }, deletedByUserId: null }, select: { id: true } }),
+  ]);
+  const liveIds = new Set(live.map((file) => file.id));
   const rows = references.map((reference) => ({
     id: reference.id,
     key: reference.key,
@@ -130,8 +145,7 @@ export default async function ReferencesPage({
     people: reference.listing?.people ?? "",
     year: reference.listing?.year ?? null,
     title: reference.listing?.title ?? "",
-    // A file reached through a relation isn't filtered by the soft-delete extension, so a deleted one is left out by hand.
-    file: reference.file && reference.file.deletedByUserId === null ? { slug: reference.file.slug, title: reference.file.title } : null,
+    file: reference.fileId && liveIds.has(reference.fileId) ? (readable.get(reference.fileId) ?? ("unreadable" as const)) : null,
     createdByName: staffDisplayNameOf(reference.createdBy, session.user.role),
     createdAt: reference.createdAt,
     deletedAt: reference.deletedAt,
