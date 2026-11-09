@@ -1845,6 +1845,9 @@ The response:
 - **Its place.** The ids of its post, its thread and its parent comment.
 - **Its citations.** What each quotation in the body cites, from `loadCommentQuoteCitations`,
   whose post arm names a post only while it is public (`isPostPublic`).
+- **Its chips.** In Markdown, each mention and citation in its chip kind's syntax, labelled in
+  the comment style (`commentMarkdownOf`; ENTITY_CHIPS.md, "Chips in comments"); as text, its
+  `body_text`, which holds the labels.
 - **Its status**, only when the comment isn't public. Only its writer or a moderator can see
   such a comment.
 
@@ -1910,13 +1913,13 @@ So `kinds=docs&authors=<slug>` is "this person's docs", and with the `tags` filt
   ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), "Styling"). `since` names a change of style beside the
   blocks that read differently for it.
 - **A `mentions` filter** (MENTIONS.md, "Search"). Each kind's ids are narrowed to those that
-  mention any of the named people, `me` being the actor. PDFs and comments hold no mention,
-  and the response names them as left out (`withoutMentions`).
+  mention any of the named people, `me` being the actor. PDFs hold no mention, and the
+  response names them as left out (`withoutMentions`).
 - **`cites`, `cited_title` and `cited_author`** (CITATIONS.md, "Search"). What cites a work by
   its key, or a work whose title or authors have the given words, each filter at once. Unlike
   the page, a key no reference has is refused as `invalid`, naming the keys, since it is
   likelier a misremembered key than a question; a reference's record is public, so the refusal
-  discloses nothing. PDFs and comments drop out (`withoutCitations`).
+  discloses nothing. PDFs drop out (`withoutCitations`).
 - **Correction is reported, never hidden.** The response carries `corrected` (FULLTEXT.md §5).
   - **Checking whether something exists needs `exact=1`.** Before creating a doc or minting a
     link, an agent asks whether one is already there. Without `exact=1`, typo correction

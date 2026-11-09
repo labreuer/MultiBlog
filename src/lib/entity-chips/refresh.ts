@@ -1,6 +1,7 @@
 import type { JSONContent } from "@tiptap/core";
 import { Prisma } from "@/generated/prisma/client";
 import { annotationBodyText } from "@/lib/annotation-body";
+import { commentBodyTextFromJSON, commentChipLabels } from "@/lib/comment-body";
 import { prismaIncludingDeleted as prisma } from "@/lib/prisma";
 import { parseChipRecords, relabelChipRecords, type ChipRecord } from "@/lib/anchors";
 import { chipInputsForBody, loadChipContext } from "./context";
@@ -32,6 +33,10 @@ import { DEFAULT_CHIP_STYLES } from "./types";
 //  - **A note** gets `body_text` recomputed from its `prose_json`, which is
 //    label-free. No date moves either: a note's "updated" date is the edit
 //    its card tells readers about (docs/FULLTEXT.md §6).
+//  - **A comment** gets `body_text` recomputed from its `body`, in the
+//    comment style, the same way and for the same reason: neither `edited_at`
+//    nor any revision moves (docs/ENTITY_CHIPS.md, "Planned: chips in
+//    comments"). Its page shows the new label at its next regeneration.
 //  - **An anchor into either** (a note's stored quote, a link's or a tag's
 //    part) gets its chip records' labels from the body they point into, by
 //    instance id, so a quote shown with no ydoc open reads as that body now
@@ -62,20 +67,23 @@ import { DEFAULT_CHIP_STYLES } from "./types";
 /** Hocuspocus's store debounce waits ten seconds at most (docs/DOCS.md); this is past it. */
 const SECOND_PASS_MS = 15_000;
 
-export type RefreshResult = { docs: number; annotations: number; anchors: number };
+export type RefreshResult = { docs: number; annotations: number; comments: number; anchors: number };
+
+/** An index table's row, as the refresh reads it: the source and the chip. */
+type IndexRow = { docId: string | null; annotationId: string | null; commentId: string | null; iid: string };
 
 /**
  * Relabels every doc and note that mentions one of `userIds`, or one of
  * their bots: a bot's label can name the person it works for.
  */
 export async function refreshMentionLabels(userIds: readonly string[]): Promise<RefreshResult> {
-  if (userIds.length === 0) return { docs: 0, annotations: 0, anchors: 0 };
+  if (userIds.length === 0) return { docs: 0, annotations: 0, comments: 0, anchors: 0 };
   const bots = await prisma.user.findMany({ where: { worksForUserId: { in: [...userIds] } }, select: { id: true } });
   const targets = [...new Set([...userIds, ...bots.map((bot) => bot.id)])];
 
   const rows = await prisma.mention.findMany({
     where: { userId: { in: targets }, postId: null },
-    select: { docId: true, annotationId: true, iid: true },
+    select: { docId: true, annotationId: true, commentId: true, iid: true },
   });
   const result = await refreshSources(rows);
   return { ...result, anchors: result.anchors + (await refreshOrphanRecords(MENTION, targets, rows)) };
@@ -87,24 +95,26 @@ export async function refreshMentionLabels(userIds: readonly string[]): Promise<
  * through the `citation` table, as a mention's are through `mention`.
  */
 export async function refreshCitationLabels(refIds: readonly string[]): Promise<RefreshResult> {
-  if (refIds.length === 0) return { docs: 0, annotations: 0, anchors: 0 };
+  if (refIds.length === 0) return { docs: 0, annotations: 0, comments: 0, anchors: 0 };
   const rows = await prisma.citation.findMany({
     where: { referenceId: { in: [...refIds] }, postId: null },
-    select: { docId: true, annotationId: true, iid: true },
+    select: { docId: true, annotationId: true, commentId: true, iid: true },
   });
   const result = await refreshSources(rows);
   return { ...result, anchors: result.anchors + (await refreshOrphanRecords(CITATION, refIds, rows)) };
 }
 
-/** The refresh proper, over the docs and notes an index table named. */
-async function refreshSources(rows: readonly { docId: string | null; annotationId: string | null }[]): Promise<RefreshResult> {
+/** The refresh proper, over the docs, notes and comments an index table named. */
+async function refreshSources(rows: readonly IndexRow[]): Promise<RefreshResult> {
   const docIds = [...new Set(rows.flatMap((row) => (row.docId ? [row.docId] : [])))];
   const annotationIds = [...new Set(rows.flatMap((row) => (row.annotationId ? [row.annotationId] : [])))];
+  const commentIds = [...new Set(rows.flatMap((row) => (row.commentId ? [row.commentId] : [])))];
 
   // One at a time: a prolific person's rename is hundreds of documents, and
   // nothing is waiting on any one of them.
   let docs = 0;
   let annotations = 0;
+  let comments = 0;
   let anchors = 0;
   for (const id of docIds) {
     if (await refreshDoc(id)) docs += 1;
@@ -114,7 +124,11 @@ async function refreshSources(rows: readonly { docId: string | null; annotationI
     if (await refreshAnnotation(id)) annotations += 1;
     anchors += await refreshAnchorsInto({ kind: "annotation", id });
   }
-  return { docs, annotations, anchors };
+  for (const id of commentIds) {
+    if (await refreshComment(id)) comments += 1;
+    anchors += await refreshAnchorsInto({ kind: "comment", id });
+  }
+  return { docs, annotations, comments, anchors };
 }
 
 async function refreshDoc(docId: string): Promise<boolean> {
@@ -144,11 +158,29 @@ async function refreshAnnotation(annotationId: string): Promise<boolean> {
   return written > 0;
 }
 
+async function refreshComment(commentId: string): Promise<boolean> {
+  const comment = await prisma.comment.findUnique({ where: { id: commentId }, select: { body: true, bodyText: true } });
+  if (!comment?.body) return false;
+  const body = comment.body as JSONContent;
+  const bodyText = commentBodyTextFromJSON(body, commentChipLabels(body, (await chipInputsForBody(body)).context));
+  if (bodyText === comment.bodyText) return false;
+  const written = await prisma.$executeRaw(
+    Prisma.sql`UPDATE "comment" SET body_text = ${bodyText} WHERE id = ${commentId} AND body_text = ${comment.bodyText}`,
+  );
+  return written > 0;
+}
+
 /** The three anchor tables that keep a chip record inside their `selector` (src/lib/anchors/selector.ts). */
 const SELECTOR_TABLES = ["tag_anchor", "anchored_link_anchor", "comment_quote_anchor"] as const;
 
-/** The chip records of every anchor into one body, a doc's or a note's, relabelled as that body reads now. */
-async function refreshAnchorsInto(target: { kind: "doc" | "annotation"; id: string }): Promise<number> {
+/** The chip records of every anchor into one body, a doc's, a note's or a comment's, relabelled as that body reads now. */
+async function refreshAnchorsInto(target: AnchoredBody): Promise<number> {
+  if (target.kind === "comment") {
+    const comment = await prisma.comment.findUnique({ where: { id: target.id }, select: { body: true } });
+    const json = comment?.body as JSONContent | null | undefined;
+    if (!json || chipsInJSON(json).length === 0) return 0;
+    return refreshAnchorRecords(target, commentChipLabels(json, (await chipInputsForBody(json)).context));
+  }
   // A doc's labels are in its own style; a note's body has none of its own.
   const body =
     target.kind === "doc"
@@ -159,6 +191,9 @@ async function refreshAnchorsInto(target: { kind: "doc" | "annotation"; id: stri
   if (chipsInJSON(json).length === 0) return 0;
   return refreshAnchorRecords(target, chipLabels(json, await chipInputsForBody(json, parseChipStyles(body.chipStyles))));
 }
+
+/** A body that anchors point into and whose chips can be relabelled. */
+type AnchoredBody = { kind: "doc" | "annotation" | "comment"; id: string };
 
 /**
  * Rewrites the chip records of every anchor into one body with `labels`,
@@ -172,23 +207,27 @@ async function refreshAnchorsInto(target: { kind: "doc" | "annotation"; id: stri
  * by adding a second person of the same name, and the records follow the
  * body.
  */
-export async function refreshAnchorRecords(target: { kind: "doc" | "annotation"; id: string }, labels: ChipLabels): Promise<number> {
+export async function refreshAnchorRecords(target: AnchoredBody, labels: ChipLabels): Promise<number> {
   if (labels.size === 0) return 0;
   let written = 0;
 
-  // Notes: a root's quote of the doc, or a reply's quote of the note it answers.
-  const notes = await prisma.annotation.findMany({
-    where: {
-      ...(target.kind === "doc" ? { docId: target.id, parentAnnotationId: null } : { parentAnnotationId: target.id }),
-      anchorChips: { not: Prisma.DbNull },
-    },
-    select: { id: true, anchorChips: true },
-  });
+  // Notes: a root's quote of the doc, or a reply's quote of the note it
+  // answers. No note is on a comment.
+  const notes =
+    target.kind === "comment"
+      ? []
+      : await prisma.annotation.findMany({
+          where: {
+            ...(target.kind === "doc" ? { docId: target.id, parentAnnotationId: null } : { parentAnnotationId: target.id }),
+            anchorChips: { not: Prisma.DbNull },
+          },
+          select: { id: true, anchorChips: true },
+        });
   for (const note of notes) {
     written += await writeRecords({ table: "annotation", id: note.id, stored: note.anchorChips }, (was) => relabelChipRecords(was, labels));
   }
 
-  const column = Prisma.raw(target.kind === "doc" ? "doc_id" : "target_annotation_id");
+  const column = Prisma.raw(target.kind === "doc" ? "doc_id" : target.kind === "annotation" ? "target_annotation_id" : "target_comment_id");
   for (const table of SELECTOR_TABLES) {
     const rows = await prisma.$queryRaw<{ id: string; selector: unknown }[]>(
       Prisma.sql`SELECT id, selector FROM ${Prisma.raw(`"${table}"`)} WHERE ${column} = ${target.id} AND selector_kind = 'DOC_RANGE' AND selector ? 'chips'`,
@@ -265,16 +304,13 @@ async function writeRecords(row: StoredRecords, relabel: (was: ChipRecord[]) => 
  * has records. A change to a name or a reference is rare, and nothing waits
  * on this.
  */
-export async function refreshOrphanRecords(
-  kindName: string,
-  targetIds: readonly string[],
-  held: readonly { docId: string | null; annotationId: string | null; iid: string }[],
-): Promise<number> {
+export async function refreshOrphanRecords(kindName: string, targetIds: readonly string[], held: readonly IndexRow[]): Promise<number> {
   const kind = chipKind(kindName);
   if (!kind || targetIds.length === 0) return 0;
   const patterns = targetIds.map((id) => JSON.stringify([{ kind: kindName, data: kind.naming(id) }]));
-  const bodyKey = (docId: string | null, annotationId: string | null) => (annotationId ? `annotation:${annotationId}` : `doc:${docId}`);
-  const inBody = new Set(held.map((row) => `${bodyKey(row.docId, row.annotationId)}:${row.iid}`));
+  const bodyKey = (docId: string | null, annotationId: string | null, commentId: string | null = null) =>
+    commentId ? `comment:${commentId}` : annotationId ? `annotation:${annotationId}` : `doc:${docId}`;
+  const inBody = new Set(held.map((row) => `${bodyKey(row.docId, row.annotationId, row.commentId)}:${row.iid}`));
 
   // Each row with the body its anchor points into: a reply's is the note it answers.
   const rows: (StoredRecords & { body: string })[] = [];
@@ -285,10 +321,14 @@ export async function refreshOrphanRecords(
     rows.push({ table: "annotation", id: note.id, stored: note.anchor_chips, body: bodyKey(note.doc_id, note.parent_annotation_id) });
   }
   for (const table of SELECTOR_TABLES) {
-    const parts = await prisma.$queryRaw<{ id: string; doc_id: string | null; target_annotation_id: string | null; selector: unknown }[]>(
-      Prisma.sql`SELECT id, doc_id, target_annotation_id, selector FROM ${Prisma.raw(`"${table}"`)} WHERE selector_kind = 'DOC_RANGE' AND selector -> 'chips' @> ANY (${patterns}::jsonb[])`,
+    const parts = await prisma.$queryRaw<
+      { id: string; doc_id: string | null; target_annotation_id: string | null; target_comment_id: string | null; selector: unknown }[]
+    >(
+      Prisma.sql`SELECT id, doc_id, target_annotation_id, target_comment_id, selector FROM ${Prisma.raw(`"${table}"`)} WHERE selector_kind = 'DOC_RANGE' AND selector -> 'chips' @> ANY (${patterns}::jsonb[])`,
     );
-    for (const part of parts) rows.push({ table, id: part.id, stored: part.selector, body: bodyKey(part.doc_id, part.target_annotation_id) });
+    for (const part of parts) {
+      rows.push({ table, id: part.id, stored: part.selector, body: bodyKey(part.doc_id, part.target_annotation_id, part.target_comment_id) });
+    }
   }
   if (rows.length === 0) return 0;
 

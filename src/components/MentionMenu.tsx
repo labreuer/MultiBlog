@@ -43,6 +43,8 @@ export default function MentionMenu({ editor, disabled }: { editor: Editor; disa
   // opens on every "@" to say it found no one: a reader's note is the case.
   if (!surface || !session?.user || !canInsertMentions(session.user.role)) return null;
   const { target } = surface;
+  // A comment's menu is its own (docs/ENTITY_CHIPS.md, "Planned: chips in comments").
+  if (!target || "comment" in target) return null;
 
   return (
     <SuggestionMenu<MentionCandidate>

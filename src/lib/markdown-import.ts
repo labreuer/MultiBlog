@@ -222,8 +222,15 @@ function neighbourText(node: JSONContent | undefined): string {
   return chipMd(node);
 }
 
-/** `json` serialized by `manager`, with a backslash wherever its text alone would read back as something else (above). */
-function serializeWithEscapes(manager: MarkdownManager, json: JSONContent): string {
+/**
+ * `json` serialized by `manager`, with a backslash wherever its text alone
+ * would read back as something else (above). `bareAts: false` is a comment's
+ * writer, whose parse reads no bare `@key` (docs/ENTITY_CHIPS.md, "Planned:
+ * chips in comments"): text reading `@word` is written as it is, so the edit
+ * box shows a commenter their own words.
+ */
+function serializeWithEscapes(manager: MarkdownManager, json: JSONContent, opts: { bareAts?: boolean } = {}): string {
+  const bareAts = opts.bareAts ?? true;
   const source = JSON.stringify(json);
   let code = 0xe000;
   while (source.includes(String.fromCharCode(code))) code += 1;
@@ -245,7 +252,7 @@ function serializeWithEscapes(manager: MarkdownManager, json: JSONContent): stri
       if (child.marks?.some((mark) => mark.type === "code")) return child;
       // Link text holds no citation, so only a mention's shape is escaped there.
       const inLink = child.marks?.some((mark) => mark.type === "link") ?? false;
-      const offsets = new Set(inLink ? [] : citationShapedAts(child.text));
+      const offsets = new Set(inLink || !bareAts ? [] : citationShapedAts(child.text));
       if (opensMentionShapedLink(child, node, index)) offsets.add(0);
       if (/^[:(]/.test(child.text) && chipMd(previous).endsWith("]")) offsets.add(0);
       if (offsets.size === 0) return child;
@@ -273,9 +280,9 @@ const docMarkdownManager = new MarkdownManager({ extensions: [...contentExtensio
 
 // The other direction (MCP item 2): Markdown read with each chip kind's
 // syntax taken for a chip. Only the paths that ask for it parse this way
-// (MCP's doc and note writes, /docs' Markdown import, and a quote's chip
-// form, `withQuoteChips`); a comment and a post never do, so `[@x](/authors/x)`
-// pasted into a comment stays the link it says it is.
+// (MCP's doc and note writes, /docs' Markdown import, a quote's chip form,
+// `withQuoteChips`, and a comment, which reads the bracketed forms only); a
+// post never does.
 //
 // The parse keys on the syntax, never on the label: a link to an author page
 // whose text opens with a literal `@`. marked tells that `@` from an escaped
@@ -297,6 +304,43 @@ const docMarkdownManager = new MarkdownManager({ extensions: [...contentExtensio
 const CITATION_TOKEN = "citation";
 
 /**
+ * The citation tokenizer. With `bare`, a doc's, which also reads the
+ * narrative `@key`; without it, a comment's, which reads only the bracketed
+ * forms, since "@Andrew, see this" is how one commenter addresses another
+ * (docs/ENTITY_CHIPS.md, "Planned: chips in comments").
+ */
+function citationParsing(bare: boolean) {
+  return Extension.create({
+    name: "citationParsing",
+    markdownTokenName: CITATION_TOKEN,
+    markdownTokenizer: {
+      name: CITATION_TOKEN,
+      level: "inline",
+      start: bare ? citationStart : (src: string) => src.indexOf("["),
+      tokenize: (src, tokens) => {
+        if (!bare && src[0] !== "[") return undefined;
+        const before = tokens[tokens.length - 1]?.raw?.slice(-1);
+        const citation = readCitation(src, before || undefined);
+        return citation ? { type: CITATION_TOKEN, raw: citation.raw, citation } : undefined;
+      },
+    },
+    parseMarkdown: (token) => {
+      const citation = token.citation as ReturnType<typeof readCitation>;
+      if (!citation) return [];
+      return {
+        type: ENTITY_CHIP,
+        attrs: {
+          kind: CITATION,
+          iid: "",
+          // `label` is the Markdown it was read from, for a title taken from a heading.
+          data: { items: citation.items, ...(citation.narrative ? { form: "narrative" } : {}), label: citation.raw },
+        },
+      };
+    },
+  });
+}
+
+/**
  * `tokens` with each citation put back as the text it was read from. Link
  * text holds no citation (docs/CITATIONS.md, "Markdown"): a chip can't carry
  * a link, so a citation there would cost the link, and
@@ -312,33 +356,7 @@ function citationsAsText(tokens: readonly MarkdownToken[] | undefined): Markdown
   );
 }
 
-const CitationParsing = Extension.create({
-  name: "citationParsing",
-  markdownTokenName: CITATION_TOKEN,
-  markdownTokenizer: {
-    name: CITATION_TOKEN,
-    level: "inline",
-    start: citationStart,
-    tokenize: (src, tokens) => {
-      const before = tokens[tokens.length - 1]?.raw?.slice(-1);
-      const citation = readCitation(src, before || undefined);
-      return citation ? { type: CITATION_TOKEN, raw: citation.raw, citation } : undefined;
-    },
-  },
-  parseMarkdown: (token) => {
-    const citation = token.citation as ReturnType<typeof readCitation>;
-    if (!citation) return [];
-    return {
-      type: ENTITY_CHIP,
-      attrs: {
-        kind: CITATION,
-        iid: "",
-        // `label` is the Markdown it was read from, for a title taken from a heading.
-        data: { items: citation.items, ...(citation.narrative ? { form: "narrative" } : {}), label: citation.raw },
-      },
-    };
-  },
-});
+const CitationParsing = citationParsing(true);
 
 const ChipParsingLink = Link.extend({
   parseMarkdown: (token, helpers) => {
@@ -368,8 +386,9 @@ const ChipParsingKit = StarterKit.extend({
 });
 
 // Each chip parser has a marked instance of its own: a tokenizer is
-// registered on the instance, and on the shared one the citation's would also
-// run in the comment parse, which has no chip node and would drop "@Andrew".
+// registered on the instance, and on the shared one the doc's citation
+// tokenizer would also run in every parse without chips, which would drop
+// "@Andrew", and in the comment's, which reads no bare `@key`.
 const chipMarked = () => new Marked() as unknown as typeof marked;
 
 const docChipParser = new MarkdownManager({ marked: chipMarked(), extensions: [ChipParsingKit, CitationParsing, ...tableExtensions] });
@@ -591,8 +610,23 @@ const commentMarkdownShims = [
   }),
 ];
 
-const commentMarkdownManager = new MarkdownManager({
-  extensions: [...commentContentExtensions, ...commentMarkdownShims],
+// docs/ENTITY_CHIPS.md, "Planned: chips in comments" — the comment parse
+// reads a mention's link and the bracketed citations, never a bare `@key`,
+// into the placeholders a doc's parse makes; the server resolves them under
+// the comment's own rule for who may be named (comment-chips.ts). Its writer
+// is the doc's, with a chip's Markdown handed over on the node, and without
+// the bare `@`'s escape.
+const commentChipParser = new MarkdownManager({
+  marked: chipMarked(),
+  extensions: [
+    ...commentContentExtensions.map((extension) => (extension.name === "link" ? ChipParsingLink : extension)),
+    citationParsing(false),
+    ...commentMarkdownShims,
+  ],
+});
+
+const commentMarkdownWriter = new MarkdownManager({
+  extensions: [...commentContentExtensions.map((extension) => (extension.name === ENTITY_CHIP ? ChipMarkdown : extension)), ...commentMarkdownShims],
 });
 
 // A soft line break arrives from marked as a newline *inside* a text node,
@@ -613,24 +647,33 @@ function collapseSoftBreaks(node: JSONContent): JSONContent {
 
 /**
  * Markdown → a comment document over `commentContentExtensions`, ready for
- * `parseCommentBody`. Always a `doc` with at least one block, like the doc
- * importer, and for the same reason. Raw HTML in the source stays literal
- * text (headless, DOC_IMPORT.md §3) — the safe reading of what an anonymous
- * person typed, and the whole reason this runs on the server.
+ * `parseCommentBody` once its chip placeholders are resolved
+ * (`resolveCommentChips`, comment-chips.ts). Always a `doc` with at least one
+ * block, like the doc importer, and for the same reason. Raw HTML in the
+ * source stays literal text (headless, DOC_IMPORT.md §3) — the safe reading
+ * of what an anonymous person typed, and the whole reason this runs on the
+ * server.
  */
 export function markdownToCommentContent(markdown: string): JSONContent {
-  const parsed = collapseSoftBreaks(decodeNodeEntities(commentMarkdownManager.parse(markdown)));
+  const parsed = collapseSoftBreaks(parseWithChips(commentChipParser, markdown));
   const blocks = Array.isArray(parsed.content) ? parsed.content : [];
   return { type: "doc", content: blocks.length > 0 ? blocks : [{ type: "paragraph" }] };
 }
 
 /**
  * The reverse, for the Markdown edit box (§23m: no second stored form — the
- * stored JSON is serialized back on demand). Runs over the same manager, so
- * a body parsed from Markdown and serialized again re-parses to itself.
+ * stored JSON is serialized back on demand). The same extensions as the
+ * parse, so a body parsed from Markdown and serialized again re-parses to
+ * itself. `chipMarkdown` is each entity chip's Markdown by instance id, as
+ * for `docContentToMarkdown`, in the comment style (`commentMarkdownOf`,
+ * comment-chips.ts); a chip it has no entry for is left out.
  */
-export function commentContentToMarkdown(json: JSONContent): string {
-  return commentMarkdownManager.serialize(splitCodeAtFormatting(json));
+export function commentContentToMarkdown(json: JSONContent, chipMarkdown?: ReadonlyMap<string, string>): string {
+  return serializeWithEscapes(
+    commentMarkdownWriter,
+    splitCodeAtFormatting(chipMarkdown ? withChipMarkdown(json, chipMarkdown) : json),
+    { bareAts: false },
+  );
 }
 
 // ---------------------------------------------------------------------------

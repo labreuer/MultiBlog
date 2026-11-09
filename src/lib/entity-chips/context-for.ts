@@ -9,7 +9,7 @@ import { MENTION } from "./kinds/mention";
 import { mentionableAmong } from "./kinds/mention-rule";
 import { chipsInJSON, chipTargets } from "./renderings";
 import { parseChipStyles } from "./settings";
-import { DEFAULT_CHIP_STYLES, type ChipInputs, type ChipOccurrence, type ChipStyles } from "./types";
+import { DEFAULT_CHIP_STYLES, type ChipContext, type ChipInputs, type ChipOccurrence, type ChipStyles } from "./types";
 
 // docs/ENTITY_CHIPS.md, step 1, item 5 — the chip context for one object, as
 // one viewer may have it. Behind `GET /api/chip-context`, and behind a page's
@@ -95,11 +95,16 @@ export async function chipInputsFor(
   // asked about a citation's works may be answered.
   for (const id of asked[CITATION] ?? []) (allowed[CITATION] ??= new Set()).add(id);
 
+  return { styles: resolved.styles, context: await loadContextForIds(allowed) };
+}
+
+/** The context for exactly these target ids, per chip kind: what an answer to the endpoint is loaded from. */
+export async function loadContextForIds(allowed: Record<string, Iterable<string>>): Promise<ChipContext> {
   const occurrences: ChipOccurrence[] = [];
   for (const [kind, ids] of Object.entries(allowed)) {
     // One synthetic chip per target is all a loader reads: the kind and the id.
     if (kind === MENTION) for (const id of ids) occurrences.push({ kind, iid: "", pos: 0, data: { userId: id } });
     if (kind === CITATION) for (const id of ids) occurrences.push({ kind, iid: "", pos: 0, data: { items: [{ refId: id }] } });
   }
-  return { styles: resolved.styles, context: await loadChipContext(occurrences) };
+  return occurrences.length > 0 ? loadChipContext(occurrences) : {};
 }

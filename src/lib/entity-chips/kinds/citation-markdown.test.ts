@@ -85,11 +85,15 @@ test("parse: nothing in code, link text, an address or an escape is a citation",
   assert.deepEqual(shape(inline("\\@radner2012 and \\[\\@x\\]")), ["@radner2012 and [@x]"]);
 });
 
-test("parse: a note's body reads citations too, and a comment's never does", () => {
+test("parse: a note's body reads citations too, and a comment's reads only the bracketed forms", () => {
   const note = markdownToAnnotationContent("see [@x, p. 4]", { chips: true });
   assert.equal(note.content?.[0].content?.[1].attrs?.kind, CITATION);
-  // The comment parse has a marked instance of its own, with no citation tokenizer on it.
-  assert.deepEqual(markdownToCommentContent("@Andrew, see [@x]").content?.[0].content, [{ type: "text", text: "@Andrew, see [@x]" }]);
+  // A comment's bare @word is how one commenter addresses another (docs/ENTITY_CHIPS.md, "Planned: chips in comments").
+  const comment = markdownToCommentContent("@Andrew, see [@x]").content?.[0].content;
+  assert.deepEqual(comment?.[0], { type: "text", text: "@Andrew, see " });
+  assert.equal(comment?.[1].attrs?.kind, CITATION);
+  assert.deepEqual(markdownToCommentContent("@radner2012 [p. 4] and @{x}").content?.[0].content, [{ type: "text", text: "@radner2012 [p. 4] and @{x}" }]);
+  // A parse without chips has a marked instance with no citation tokenizer on it.
   assert.deepEqual(shape(markdownToBlocks("@Andrew, see this")[0].content ?? []), ["@Andrew, see this"]);
 });
 

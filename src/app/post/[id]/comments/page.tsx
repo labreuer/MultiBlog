@@ -7,6 +7,7 @@ import { canUserEditPost } from "@/lib/authz";
 import { signInPath } from "@/lib/sign-in-redirect";
 import ModerateCommentButtons from "@/components/ModerateCommentButtons";
 import CommentBody from "@/components/CommentBody";
+import { commentChipContext } from "@/lib/comment-chips";
 
 export const metadata: Metadata = { title: "Moderate comments" };
 
@@ -40,6 +41,9 @@ export default async function ModerateCommentsPage({ params }: { params: Promise
     orderBy: { createdAt: "asc" },
     include: { commenter: true },
   });
+  // The chips' records, for their labels: a pending comment's mention is
+  // shown here to the people deciding on it, though it reaches nobody yet.
+  const chipContext = await commentChipContext(pending.map((comment) => comment.body));
 
   return (
     <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
@@ -61,7 +65,7 @@ export default async function ModerateCommentsPage({ params }: { params: Promise
                 {comment.createdAt.toLocaleString()}
                 {comment.ipAddress && ` · ${comment.ipAddress}`}
               </p>
-              <CommentBody body={comment.body} bodyText={comment.bodyText} />
+              <CommentBody body={comment.body} bodyText={comment.bodyText} chipContext={chipContext} />
               <ModerateCommentButtons commentId={comment.id} />
             </li>
           ))}

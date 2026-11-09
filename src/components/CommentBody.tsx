@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
 import type { Mark as PMMark, Node as PMNode } from "@tiptap/pm/model";
-import { renderToReactElement, type NodeProps, type MarkProps } from "@tiptap/static-renderer";
+import type { NodeProps, MarkProps } from "@tiptap/static-renderer";
 import { commentContentExtensions } from "@/lib/tiptap-schema";
+import { commentChipInputs } from "@/lib/comment-body";
+import { renderWithChips } from "@/lib/entity-chips/static";
+import type { ChipContext } from "@/lib/entity-chips/types";
 import type { CommentQuoteCitations } from "@/lib/comment-quote-citation";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./CommentBody.module.css";
@@ -23,6 +26,11 @@ import styles from "./CommentBody.module.css";
 // or a row this render was not handed — still shows the quote, just without
 // the line under it. That is §23f's degradation, done at render.
 //
+// docs/ENTITY_CHIPS.md, "Planned: chips in comments" — a mention or citation
+// in the body is drawn with its label, in the comment style, from
+// `chipContext`: the records the page loaded for every comment it shows, which
+// depend on nobody's session, so the post page stays static.
+//
 // Falls back to the plain text on anything the renderer refuses, the same
 // degradation AnnotationVersionBody has — a body that will not render is
 // still worth reading.
@@ -30,6 +38,7 @@ type Props = {
   body: unknown;
   bodyText: string;
   citations?: CommentQuoteCitations;
+  chipContext?: ChipContext;
 };
 
 // The renderer hands its mappings real ProseMirror nodes and marks — the JSON
@@ -48,42 +57,38 @@ function Citation({ anchorId, citations }: { anchorId: string; citations: Commen
   );
 }
 
-export default function CommentBody({ body, bodyText, citations = {} }: Props) {
+export default function CommentBody({ body, bodyText, citations = {}, chipContext = {} }: Props) {
   let rendered: ReactNode;
   try {
-    rendered = renderToReactElement({
-      content: body as never,
-      extensions: commentContentExtensions,
-      options: {
-        nodeMapping: {
-          blockquote: ({ node, children }: NodeCtx) => {
-            const anchorId = typeof node.attrs.anchorId === "string" ? node.attrs.anchorId : null;
-            return (
-              <blockquote {...(anchorId ? { "data-anchor-id": anchorId } : {})}>
-                {children}
-                {anchorId && <Citation anchorId={anchorId} citations={citations} />}
-              </blockquote>
-            );
-          },
+    rendered = renderWithChips(body as never, commentContentExtensions, commentChipInputs(chipContext), {
+      nodeMapping: {
+        blockquote: ({ node, children }: NodeCtx) => {
+          const anchorId = typeof node.attrs.anchorId === "string" ? node.attrs.anchorId : null;
+          return (
+            <blockquote {...(anchorId ? { "data-anchor-id": anchorId } : {})}>
+              {children}
+              {anchorId && <Citation anchorId={anchorId} citations={citations} />}
+            </blockquote>
+          );
         },
-        markMapping: {
-          quote: ({ mark, children }: MarkCtx) => {
-            const anchorId = typeof mark.attrs.anchorId === "string" ? mark.attrs.anchorId : null;
-            const citation = anchorId ? citations[anchorId] : undefined;
-            const title = citation ? (citation.stale ? `${citation.label}, quoted an earlier version` : citation.label) : undefined;
-            const q = (
-              <q {...(anchorId ? { "data-anchor-id": anchorId } : {})} title={title}>
-                {children}
-              </q>
-            );
-            return citation?.href ? (
-              <a href={citation.href} className={styles.inlineCitation}>
-                {q}
-              </a>
-            ) : (
-              q
-            );
-          },
+      },
+      markMapping: {
+        quote: ({ mark, children }: MarkCtx) => {
+          const anchorId = typeof mark.attrs.anchorId === "string" ? mark.attrs.anchorId : null;
+          const citation = anchorId ? citations[anchorId] : undefined;
+          const title = citation ? (citation.stale ? `${citation.label}, quoted an earlier version` : citation.label) : undefined;
+          const q = (
+            <q {...(anchorId ? { "data-anchor-id": anchorId } : {})} title={title}>
+              {children}
+            </q>
+          );
+          return citation?.href ? (
+            <a href={citation.href} className={styles.inlineCitation}>
+              {q}
+            </a>
+          ) : (
+            q
+          );
         },
       },
     });

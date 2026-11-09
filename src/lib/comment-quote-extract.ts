@@ -1,7 +1,10 @@
 import type { JSONContent } from "@tiptap/core";
-import type { Node as PMNode } from "@tiptap/pm/model";
+import type { Mark, Node as PMNode } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
-import { quotedTextAt } from "./comment-quote-match";
+import { newChipIid } from "./entity-chips/node";
+import { chipAttrsOf } from "./entity-chips/renderings";
+import { chipDisplayText, isChip, type ChipLabels } from "./entity-chips/text";
+import { CHIP_ANCHOR_TEXT, ENTITY_CHIP, type ChipAttrs } from "./entity-chips/types";
 
 // PLAN.md §23n — which spans of a comment body are quotations to be found,
 // and §23f — how the body is rewritten once they are. Pure and browser-safe;
@@ -24,6 +27,14 @@ import { quotedTextAt } from "./comment-quote-match";
 // supplies its own. An unmatched candidate degrades: the blockquote keeps a
 // null `anchorId`, an existing mark comes off and the words stay between
 // literal quotes. Never an error.
+//
+// **Entity chips** (docs/ENTITY_CHIPS.md, "Planned: chips in comments"). A
+// passage holding a mention or a citation is copied as nodes, never as its
+// text, whose chips are U+FFFC: each chip becomes a chip in the reply, with
+// an instance id of its own, so the quotation follows a rename as the
+// comment it came from does. Extraction reads a chip as its label, which is
+// what the commenter typed and what the matcher searches the target with, so
+// an edit's quotation matches again.
 
 /** The shortest inline run worth matching, in normalized characters. */
 export const MIN_INLINE_QUOTE_CHARS = 12;
@@ -54,15 +65,31 @@ export type QuoteCandidateSpan = BlockQuoteCandidate | InlineQuoteCandidate;
 const OPEN_QUOTES = new Set(['"', "\u201c"]);
 const CLOSE_QUOTES = new Set(['"', "\u201d"]);
 
+/** What a chip reads as in extracted text: its label, or its anchor text where there is no label to give. */
+function chipText(chip: PMNode, labels: ChipLabels | undefined): string {
+  return chipDisplayText(chip.attrs, labels) || CHIP_ANCHOR_TEXT;
+}
+
 /** One textblock's inline content as a string, with each character's position and what it may take part in. */
-function scanTextblock(block: PMNode, blockPos: number) {
+function scanTextblock(block: PMNode, blockPos: number, labels: ChipLabels | undefined) {
   const chars: string[] = [];
   const positions: number[] = [];
   const eligible: boolean[] = [];
   const quoteAnchorIds: (string | null | undefined)[] = [];
   block.forEach((child, offset) => {
     const start = blockPos + 1 + offset;
-    if (child.isText && child.text) {
+    if (isChip(child)) {
+      // Its label, every character at the chip's one position, so a run of
+      // quote-marked words that ends in a chip ends after it. Never part of a
+      // typed-quote candidate, which is the commenter's own words.
+      const quote = child.marks.find((m) => m.type.name === "quote");
+      for (const char of chipText(child, labels)) {
+        chars.push(char);
+        positions.push(start);
+        eligible.push(false);
+        quoteAnchorIds.push(quote ? ((quote.attrs.anchorId as string | null) ?? null) : undefined);
+      }
+    } else if (child.isText && child.text) {
       const code = child.marks.some((m) => m.type.name === "code");
       const quote = child.marks.find((m) => m.type.name === "quote");
       for (let i = 0; i < child.text.length; i++) {
@@ -81,7 +108,11 @@ function scanTextblock(block: PMNode, blockPos: number) {
   return { chars, positions, eligible, quoteAnchorIds };
 }
 
-export function extractQuoteCandidates(doc: PMNode): QuoteCandidateSpan[] {
+/**
+ * Every quotation candidate in `doc`. `labels` are the body's own chips'
+ * labels, in the comment style: what a chip reads as in a candidate's text.
+ */
+export function extractQuoteCandidates(doc: PMNode, labels?: ChipLabels): QuoteCandidateSpan[] {
   const found: QuoteCandidateSpan[] = [];
   doc.descendants((node, pos) => {
     if (node.type.name === "blockquote") {
@@ -89,14 +120,14 @@ export function extractQuoteCandidates(doc: PMNode): QuoteCandidateSpan[] {
         kind: "block",
         pos,
         nodeSize: node.nodeSize,
-        text: node.textBetween(0, node.content.size, "\n", "\n"),
+        text: node.textBetween(0, node.content.size, "\n", (leaf) => (isChip(leaf) ? chipText(leaf, labels) : "\n")),
         anchorId: typeof node.attrs.anchorId === "string" ? node.attrs.anchorId : null,
       });
       return false;
     }
     if (!node.isTextblock) return true;
 
-    const scan = scanTextblock(node, pos);
+    const scan = scanTextblock(node, pos, labels);
 
     // Existing `quote` marks: one candidate per run of the same anchor id.
     let runStart = -1;
@@ -142,19 +173,23 @@ export function extractQuoteCandidates(doc: PMNode): QuoteCandidateSpan[] {
   return found;
 }
 
+/** One piece of a quoted passage's inline content: plain text, or an entity chip as its source holds it. */
+export type QuotedInline = { text: string } | { chip: Omit<ChipAttrs, "iid"> };
+
 export type QuoteResolution =
   | {
       candidate: QuoteCandidateSpan;
       /** The real anchor row id the body will carry. */
       anchorId: string;
-      /** `quotedTextAt` the verified range — what an inline run becomes, and the row's `quoted_text`. */
+      /** `quotedTextAt` the verified range: the row's `quoted_text`. */
       quotedText: string;
       /**
-       * What a block becomes: one plain paragraph per source textblock in the
-       * range (`paragraphTextsIn`), or a single paragraph of the quoted text
-       * for a source with no ProseMirror structure — a PDF page.
+       * The passage, one entry per source textblock in the range
+       * (`quotedContentIn`), or a single one of the quoted text for a source
+       * with no ProseMirror structure — a PDF page. What a block becomes, a
+       * plain paragraph each, and, joined by spaces, what an inline run does.
        */
-      paragraphs: string[];
+      paragraphs: QuotedInline[][];
     }
   | { candidate: QuoteCandidateSpan; anchorId: null };
 
@@ -162,20 +197,63 @@ function candidateStart(candidate: QuoteCandidateSpan): number {
   return candidate.kind === "block" ? candidate.pos : candidate.from;
 }
 
-/** The plain paragraphs a matched range of `source` becomes inside the quoting comment. */
-export function paragraphTextsIn(source: PMNode, from: number, to: number): string[] {
-  const texts: string[] = [];
+/**
+ * A matched range of `source` as the quoting comment holds it: one entry per
+ * textblock the range reaches, each its text with every mark dropped and
+ * every entity chip kept as a chip. Any other inline leaf (a hard break) is a
+ * space, as in `quotedTextAt`, so the text between the chips is the stored
+ * quote's.
+ */
+export function quotedContentIn(source: PMNode, from: number, to: number): QuotedInline[][] {
+  const blocks: QuotedInline[][] = [];
   source.nodesBetween(from, to, (node, pos) => {
     if (!node.isTextblock) return true;
     const start = Math.max(from, pos + 1);
     const end = Math.min(to, pos + 1 + node.content.size);
+    const pieces: QuotedInline[] = [];
+    const addText = (text: string) => {
+      if (!text) return;
+      const last = pieces[pieces.length - 1];
+      if (last && "text" in last) last.text += text;
+      else pieces.push({ text });
+    };
     if (end > start) {
-      const text = quotedTextAt(source, start, end);
-      if (text.trim()) texts.push(text);
+      node.forEach((child, offset) => {
+        const at = pos + 1 + offset;
+        if (at + child.nodeSize <= start || at >= end) return;
+        if (child.isText) addText((child.text ?? "").slice(Math.max(start, at) - at, Math.min(end, at + child.nodeSize) - at));
+        else if (isChip(child)) {
+          const { kind, data } = chipAttrsOf(child.attrs);
+          pieces.push({ chip: { kind, data } });
+        } else addText(" ");
+      });
     }
+    blocks.push(pieces);
     return false;
   });
-  return texts;
+  return blocks;
+}
+
+/** Whether a quoted block has anything in it to show: a chip, or text that isn't only whitespace. */
+function hasContent(pieces: readonly QuotedInline[]): boolean {
+  return pieces.some((piece) => "chip" in piece || piece.text.trim() !== "");
+}
+
+/** A copied chip's attributes: its source's kind and fields, and an instance id of its own. */
+function copiedChipAttrs(chip: Omit<ChipAttrs, "iid">): ChipAttrs {
+  return { kind: chip.kind, iid: newChipIid(), data: chip.data };
+}
+
+/** `pieces` as nodes of `schema`, each chip with a fresh instance id, every node under `marks`. */
+function inlineNodes(schema: PMNode["type"]["schema"], pieces: readonly QuotedInline[], marks: readonly Mark[] = []): PMNode[] {
+  return pieces.flatMap((piece) => {
+    if ("chip" in piece) {
+      const chipType = schema.nodes[ENTITY_CHIP];
+      // A target schema with no chip node can't be quoting one; a post never holds a chip.
+      return chipType ? [chipType.create(copiedChipAttrs(piece.chip), null, marks)] : [];
+    }
+    return piece.text ? [schema.text(piece.text, marks)] : [];
+  });
 }
 
 /**
@@ -198,9 +276,9 @@ export function applyQuoteResolutions(doc: PMNode, resolutions: QuoteResolution[
         }
         continue;
       }
-      const texts = resolution.paragraphs.filter((text) => text.trim());
-      const paragraphs = (texts.length > 0 ? texts : [resolution.quotedText]).map((text) =>
-        schema.nodes.paragraph.create(null, schema.text(text)),
+      const kept = resolution.paragraphs.filter(hasContent);
+      const paragraphs = (kept.length > 0 ? kept : [[{ text: resolution.quotedText }]]).map((pieces) =>
+        schema.nodes.paragraph.create(null, inlineNodes(schema, pieces)),
       );
       const blockquote = schema.nodes.blockquote.create({ anchorId: resolution.anchorId }, paragraphs);
       tr.replaceWith(candidate.pos, candidate.pos + candidate.nodeSize, blockquote);
@@ -221,7 +299,9 @@ export function applyQuoteResolutions(doc: PMNode, resolutions: QuoteResolution[
     }
     const from = candidate.typedQuotes ? candidate.from - 1 : candidate.from;
     const to = candidate.typedQuotes ? candidate.to + 1 : candidate.to;
-    tr.replaceWith(from, to, schema.text(resolution.quotedText, [quoteMark.create({ anchorId: resolution.anchorId })]));
+    // The blocks joined by a space, as `quotedTextAt` joins them.
+    const pieces = resolution.paragraphs.flatMap((block, index) => (index > 0 ? [{ text: " " }, ...block] : block));
+    tr.replaceWith(from, to, inlineNodes(schema, pieces.length > 0 ? pieces : [{ text: resolution.quotedText }], [quoteMark.create({ anchorId: resolution.anchorId })]));
   }
 
   return tr.doc;

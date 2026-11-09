@@ -174,7 +174,13 @@ export default async function DashboardPage() {
                   <li key={mention.href}>
                     <Link href={mention.href}>{mention.title}</Link>
                     <span style={{ color: "var(--text-secondary)" }}>
-                      {mention.kind === "annotation" ? ` · a note by ${mention.by}` : mention.kind === "post" ? " · a post" : ""}
+                      {mention.kind === "annotation"
+                        ? ` · a note by ${mention.by}`
+                        : mention.kind === "comment"
+                          ? ` · a comment by ${mention.by}`
+                          : mention.kind === "post"
+                            ? " · a post"
+                            : ""}
                       {" · "}
                       <LocalTime value={mention.at} />
                     </span>

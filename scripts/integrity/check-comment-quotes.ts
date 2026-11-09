@@ -31,6 +31,9 @@ import { prismaIncludingDeleted as prisma } from "../../src/lib/prisma";
 import { pmCommentContentSchema, pmSchema } from "../../src/lib/tiptap-schema";
 import { targetFromColumns } from "../../src/lib/anchors";
 import { quotedTextAt } from "../../src/lib/comment-quote-match";
+import type { Node as PMNode } from "@tiptap/pm/model";
+import { anchorLeafText, isChip } from "../../src/lib/entity-chips/text";
+import { CHIP_ANCHOR_TEXT } from "../../src/lib/entity-chips/types";
 
 const args = process.argv.slice(2);
 const verbose = args.includes("--verbose");
@@ -39,23 +42,28 @@ const postId = postIndex >= 0 ? args[postIndex + 1] : null;
 
 type Finding = { anchorId: string; commentId: string; level: "ERROR" | "WARN"; check: string; detail: string };
 
-/** The words the quoting body carries for one anchor id — a blockquote's textblocks, or a quote mark's run. */
+/**
+ * The words the quoting body carries for one anchor id — a blockquote's
+ * textblocks, or a quote mark's run. An entity chip the rewrite copied in is
+ * its anchor text, U+FFFC, as in the row's `quoted_text`.
+ */
 function bodySpanText(body: JSONContent, anchorId: string): string | null {
   let found: string | null = null;
+  const inRun = (n: PMNode) => (n.isText || isChip(n)) && n.marks.some((m) => m.type.name === "quote" && m.attrs.anchorId === anchorId);
   try {
     const node = pmCommentContentSchema.nodeFromJSON(body);
     node.descendants((child, pos) => {
       if (found !== null) return false;
       if (child.type.name === "blockquote" && child.attrs.anchorId === anchorId) {
-        found = child.textBetween(0, child.content.size, " ", " ");
+        found = child.textBetween(0, child.content.size, " ", anchorLeafText(" "));
         return false;
       }
-      if (child.isText && child.marks.some((m) => m.type.name === "quote" && m.attrs.anchorId === anchorId)) {
-        // Gather the whole run — adjacent text nodes may share the mark.
+      if (inRun(child)) {
+        // Gather the whole run — adjacent text nodes and chips may share the mark.
         let text = "";
         node.nodesBetween(pos, node.content.size, (n) => {
-          if (n.isText && n.marks.some((m) => m.type.name === "quote" && m.attrs.anchorId === anchorId)) {
-            text += n.text ?? "";
+          if (inRun(n)) {
+            text += n.isText ? (n.text ?? "") : CHIP_ANCHOR_TEXT;
             return false;
           }
           return text === "";

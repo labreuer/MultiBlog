@@ -1,4 +1,6 @@
 import { getPostThreadsWithApprovedComments, getDetachedThreadContext, type ThreadComment } from "@/lib/comment-data";
+import { commentChipContext } from "@/lib/comment-chips";
+import { CommentChipsProvider } from "./comment-chips-context";
 import CommentForm from "./CommentForm";
 import CommentEntryList, { type CommentEntry } from "./CommentEntryList";
 import { type CommentNodeData } from "./CommentNode";
@@ -42,6 +44,13 @@ export default async function CommentSection({ postId }: { postId: string }) {
     }
   }
 
+  // docs/ENTITY_CHIPS.md, "Planned: chips in comments" — one context for
+  // every comment on the page, computed here and sent in the payload beside
+  // the comments. Each record is on a public page already (an author page, a
+  // reference's), and none depends on who is looking, so the page stays
+  // static; a rename reaches it at its next regeneration.
+  const chipContext = await commentChipContext(threads.flatMap((thread) => thread.comments.map((comment) => comment.body)));
+
   const entries: CommentEntry[] = [
     ...quoteThreads.flatMap((thread) =>
       buildTree(thread.comments).map((root) => ({
@@ -70,13 +79,15 @@ export default async function CommentSection({ postId }: { postId: string }) {
   return (
     <section className={styles.section} data-comment-section>
       <h2 className={styles.heading}>Comments</h2>
-      <CommentForm postId={postId} />
+      <CommentChipsProvider context={chipContext}>
+        <CommentForm postId={postId} />
 
-      {threads.length === 0 ? (
-        <p className={styles.empty}>No comments yet.</p>
-      ) : (
-        <CommentEntryList entries={entries} postId={postId} />
-      )}
+        {threads.length === 0 ? (
+          <p className={styles.empty}>No comments yet.</p>
+        ) : (
+          <CommentEntryList entries={entries} postId={postId} />
+        )}
+      </CommentChipsProvider>
     </section>
   );
 }

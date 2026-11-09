@@ -58,13 +58,27 @@ export async function resolveParsedChips(
   actor: Actor,
   opts: { docId: string | null; held: JSONContent | null; unresolved?: "refuse" | "link" },
 ): Promise<JSONContent> {
-  return resolveCitations(await resolveMentions(content, actor, opts), opts.held);
+  const mentionable = (ids: string[]) => mentionableAmong(actor, opts.docId, ids);
+  return resolveCitations(await resolveMentions(content, { ...opts, mentionable }), opts.held);
+}
+
+/**
+ * The same for a comment body (docs/ENTITY_CHIPS.md, "Planned: chips in
+ * comments"), whose rule for who may be named is its own (`mentionable`,
+ * comment-chips.ts) and whose commenter may be signed out. A mention the rule
+ * refuses, or a handle nobody has, stays the link its Markdown also is, as an
+ * import leaves one; a key that names no reference refuses, as anywhere.
+ */
+export async function resolveParsedCommentChips(
+  content: JSONContent,
+  opts: { held: JSONContent | null; mentionable: (userIds: string[]) => Promise<string[]> },
+): Promise<JSONContent> {
+  return resolveCitations(await resolveMentions(content, { ...opts, unresolved: "link" }), opts.held);
 }
 
 async function resolveMentions(
   content: JSONContent,
-  actor: Actor,
-  opts: { docId: string | null; held: JSONContent | null; unresolved?: "refuse" | "link" },
+  opts: { held: JSONContent | null; unresolved?: "refuse" | "link"; mentionable: (userIds: string[]) => Promise<string[]> },
 ): Promise<JSONContent> {
   const slugs = new Set<string>();
   walk(content, (node) => {
@@ -93,7 +107,7 @@ async function resolveMentions(
   }
 
   const asked = [...new Set([...idOf.values()].filter((id) => !heldIds.has(id)))];
-  const allowed = new Set(await mentionableAmong(actor, opts.docId, asked));
+  const allowed = new Set(await opts.mentionable(asked));
   const refused = [...slugs].filter((slug) => {
     const id = idOf.get(slug);
     return id !== undefined && !heldIds.has(id) && !allowed.has(id);
@@ -153,6 +167,7 @@ async function resolveCitations(content: JSONContent, held: JSONContent | null):
   if (deleted.length > 0) {
     throw new ApiError("unknown_chip", `The reference${deleted.length > 1 ? "s" : ""} ${keyList(deleted)} ${deleted.length > 1 ? "were" : "was"} deleted, and can't be cited until restored.`, {
       keys: deleted,
+      deleted: true,
     });
   }
 

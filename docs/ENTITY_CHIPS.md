@@ -49,8 +49,9 @@ date is refused".
   - step 2, mentions ([MENTIONS.md](MENTIONS.md));
   - step 3, references and citations ([CITATIONS.md](CITATIONS.md)).
 
-  Nothing exercises the kit without a chip kind, so steps 1 and 2 are built together. Section
-  styles, comments, and each chip kind's own later work come after.
+  Nothing exercises the kit without a chip kind, so steps 1 and 2 are built together. Chips in
+  comments came after (below); section styles and each chip kind's own later work are still to
+  come.
 
 ## Built so far
 
@@ -59,8 +60,8 @@ Steps 0 to 3 are built but for the items each entry says are not; step 3's are i
 
 - **Step 0, the gate:** all of it ([YDOC.md](YDOC.md)).
 - **Step 1, item 1:** the spike, with its result.
-- **Item 2, the node:** `entityChip` (`src/lib/entity-chips/node.ts`) in the doc and
-  annotation-body schemas, with `leafText`, the parse rule and its validation.
+- **Item 2, the node:** `entityChip` (`src/lib/entity-chips/node.ts`) in the doc,
+  annotation-body and comment schemas, with `leafText`, the parse rule and its validation.
 - **Item 3, instance ids:** a random id at insertion, and a fresh one for a pasted copy
   (`repairChipIids`). A duplicate that concurrent changes leave is repaired by every editor
   that receives it, with an id derived from the later chip's Yjs item (`repairSharedIids`,
@@ -237,6 +238,11 @@ Steps 0 to 3 are built but for the items each entry says are not; step 3's are i
   may be mentioned, the `@` menu in the doc editor and in a note's composer, the `mentions=`
   search filter with `@handle` in the search box, and the dashboard's "Mentions of you" card
   ([MENTIONS.md](MENTIONS.md)).
+- **Chips in comments** (below), from the Markdown box: the node in the comment schema and its
+  checks, the comment style on every surface, `body_text` with labels and its refresh, the
+  index tables' comment source with search and the dashboard, and a quotation that copies a
+  passage's chips. Not the menus, the public endpoint for a signed-out commenter's, or the
+  popover.
 
 `/docs`' Length counts a chip as no characters.
 
@@ -500,8 +506,8 @@ doesn't cover are in [YDOC.md](YDOC.md).
 12. **Index tables, one per chip kind** (`mention`, `citation`), of one shape:
     - the target, as the chip kind's identity points at it: a foreign key, for a row;
     - the chip's `iid`;
-    - exactly one source foreign key (doc, post or annotation, and comment later), under a
-      hand-written CHECK;
+    - exactly one source foreign key (doc, post, annotation or comment), under a hand-written
+      CHECK;
     - when the chip was first seen.
 
     The shape is shared and the tables are per chip kind, as with the anchor tables
@@ -589,8 +595,9 @@ So:
      round-trip tests (`citation-markdown.test.ts`) catch a TipTap change that breaks it.
    - Each chip parser has its own `new Marked()`, through the constructor's `marked` option, and
      the other managers in `markdown-import.ts` share marked's global instance. A chip tokenizer
-     registered on that instance would also run in the comment parse, which has no chip node and
-     drops the token, so a comment saying "@Andrew, see this" would lose "@Andrew".
+     registered on that instance would also run in every parse without chips, which drops the
+     token, so a body saying "@Andrew, see this" would lose "@Andrew". A comment's parse has an
+     instance of its own too, with the bracketed citation tokenizer only (Chips in comments).
    - A chip whose target is gone is written with its stored id where its slug or key would go, so
      a round trip keeps it.
 3. **Chips in quotes.** Every quote an agent sends resolves through `resolveQuote`
@@ -679,7 +686,9 @@ or reporting rather than guessing.
   - A chip carries no mark, so bold over a chip isn't kept. The chip is styled by CSS anyway.
 - **The reading views** (annotations, replies, anchored links, tags): offsets and a quote with
   U+FFFC, the chip record, and instance edges.
-- **Comment quotes** quote posts, which hold linked text, so nothing changes.
+- **Comment quotes** of a post quote linked text, so nothing changes; of a comment, they find a
+  chip by its label and copy it into the reply as a chip (Chips in comments, "Quoting a comment
+  that holds a chip").
 - **MCP notes, links, edits and `around`:** display text or identity text, mapped back (MCP,
   item 3).
 - **Stored quotes shown elsewhere** get current labels from the chip record.
@@ -697,6 +706,233 @@ Because anchors never contain a label, no restyle, rename or renumbering detache
     `taggedWhere` does.
   - With no query text they list matches, newest first.
 
+## Chips in comments
+
+Mentions and citations in a comment's body, written in the Markdown box. The menus are still a
+plan (below). Four things set a comment apart from a doc or a note, and each shapes what is
+built:
+
+- its body is JSON that `parseCommentBody` has accepted, with no ydoc behind it
+  ([COMMENTS.md](COMMENTS.md), "The body");
+- its commenter may be a stranger, signed out;
+- it is shown on a post's page, which is statically generated and open to anyone;
+- its default way in is a Markdown box, and "@Andrew, see this" is how one commenter
+  addresses another.
+
+### The body
+
+- **The node is in `commentContentExtensions`.** It is `entityChip`, as in a doc or a note:
+  identity only, with the label computed wherever it is shown. So a rename relabels every
+  comment that mentions the person.
+
+  **Freezing labels as linked text, as a post does at publish, is rejected.** A comment has no
+  republish to refresh them. Its rich editor would also let a commenter retype a label while the
+  link went on claiming the chip.
+- **No `SCHEMA_VERSION` bump.** The gate fingerprints the live editors' schemas, and a comment
+  has no ydoc.
+
+  An old tab's rich editor drops a chip from a comment it edits, since it doesn't know the node.
+  This holds for a tab opened before the deploy, and it is tolerated: a reload fixes it. The
+  Markdown box parses on the server, so it is safe.
+- **`conformCommentChips`** (`src/lib/comment-body.ts`), inside `parseCommentBody`, puts each
+  chip through its chip kind's validator, since the schema checks only that `data` is there,
+  and refuses a chip of a kind the build doesn't know or one its validator refuses, such as a
+  Markdown placeholder nobody resolved. It also:
+  - keeps no mark on a chip but a quotation's `quote`, which can span one;
+  - drops a citation's narrative form, which a comment doesn't have (The Markdown box, below);
+  - gives a missing or repeated instance id a fresh one, the first holder keeping its own;
+  - refuses more than 20 chips (`MAX_CHIPS_PER_COMMENT`), as quotations are capped at 20
+    (`MAX_QUOTES_PER_COMMENT`). The comment rate limits bound how many comments there are, and
+    this bounds what one of them holds, so a single comment can't mention everyone on the
+    site. The cap is on what the commenter submits; the chips a quotation copies come after.
+- **Every chip a submitted body holds passes the insertion check** (`checkCommentChips`,
+  `src/lib/comment-chips.ts`).
+  - It must be one the commenter may insert (Who may insert, below), or, on an edit, one the
+    comment already holds (`freshCommentChipTargets`).
+  - `resolveCommentBody` runs it after the parse, for both front doors, so rich JSON can't
+    name an account the Markdown box wouldn't take. It runs once the post is known, since who
+    a comment may mention is asked of the post.
+  - A quotation's chips are written by the server's rewrite after the check (Quoting, below).
+
+### The style
+
+**A comment's chips have one fixed style, `COMMENT_CHIP_STYLES`: a mention shows a name, and a
+citation is author-date.** It reads `(Radner 2012, p. 49)`, never `(BU p. 49)`.
+- **Why not `short`:** a short label is a doc's shorthand, and a stranger reading the post has no
+  way to learn it.
+- **Why not numbers:** a comment's `[1]` would collide with the post's own.
+- **Why not the post's style:** like a note's style, this one depends on nothing else, so
+  `body_text` never changes because another object's setting did.
+
+A chip's own overrides still apply. The cost is that a comment can show a work in a different
+form from the post above it. A comment has no bibliography, and its citations link as a doc's do.
+
+### Who may insert
+
+A commenter is offered what the site already shows them (`commentMentionableAmong`).
+
+- **Mentions.**
+  - **Anyone, signed in or not,** may mention the post's byline and the people on the landing
+    page's contributor list. These are the "public names" MENTIONS.md's Later promised.
+  - **An AUTHOR or above** may also mention everyone the doc rule offers them, with the post's
+    doc as "this doc" (MENTIONS.md, "Who is listed").
+  - **Commenting on the post puts no one in the list.** A comment never carries its commenter's
+    user id (COMMENTS.md, "What the page source holds"). Mentioning a commenter would tie the
+    name they commented under to their account's current name.
+- **Citations.** Any work in the library, deleted ones aside, since every reference's page is
+  public. A key typed into the Markdown box resolves for anyone.
+
+### The Markdown box
+
+The comment parse (`markdownToCommentContent`) reads the bracketed forms only, into the
+placeholders a doc's parse makes, and `resolveCommentBody` resolves them
+(`resolveParsedCommentChips`).
+
+- **A mention:** `[@Luke Breuer](/authors/luke-breuer)`, in a doc's syntax (MENTIONS.md,
+  "Markdown"). If the commenter may not mention that person, or nobody has the handle, it stays
+  the ordinary link it also is, as the `/docs` import leaves one. A comment's link may name an
+  author page for that reason (`isAllowedCommentHref`).
+- **A citation:** `[see @radner2012, p. 49]`, `[-@radner2012]`, `[@a; @b]`. An unknown key
+  refuses the submit, as a doc does. The message names the key and offers `\@`, since otherwise
+  a mistyped key would quietly stop being a citation.
+- **A bare `@word` stays text.** Comments depart from docs here, where a bare `@word` is always
+  a citation:
+  - "@Andrew, see this" is ordinary in a comment;
+  - a commenter is often not a member, and so has no key to mistype;
+  - refusing would bounce ordinary replies.
+
+  So a comment has no narrative form, and `@radner2012 [p. 49]` is what it says.
+- **The writer** (`commentMarkdownOf`) writes each chip in its chip kind's syntax, labelled in
+  the comment style, and escapes as a doc's writer does, except for a bare `@`
+  (`serializeWithEscapes`'s `bareAts: false`). Text that reads `@word` is written as it is, so
+  the edit box shows commenters their own words. A `[` is already escaped, and hand-written
+  link text that starts with `@` is written `[\@…]`.
+- **The comment parse has its own `new Marked()`**, which carries the bracketed tokenizer and
+  not the bare one.
+
+### Showing a comment
+
+- **Every surface that draws a comment body labels its chips**, through `renderWithChips` with
+  `commentContentExtensions` and the comment style (`CommentBody`, which takes the records as
+  `chipContext`). They are:
+  - the post page's cards and margin rail;
+  - the edit history, whose versions come with one context for all of them;
+  - the per-post queue, `/post/[id]/comments`;
+  - the quote picker's comment view (`loadQuotableTarget`);
+  - the rich editor's node views (`CommentEditor`, through `useChipInputs`).
+
+  MCP's comment reads write each chip in its chip kind's Markdown (`commentMarkdownOf`). MCP
+  writes no comments.
+- **The post page stays static.**
+  - `CommentSection` loads one chip context for every comment on the page
+    (`commentChipContext`), the server render computes the labels, and the context rides in the
+    payload beside the comments, through `CommentChipsProvider`. Nothing depends on the viewer
+    (rule 2).
+  - The context holds each mentioned person's name, initials and handle, which are on their
+    public author page, and each cited work's record, which is on its public page.
+  - A rename reaches the page at its next regeneration (`revalidate = 60`). The post's own text
+    keeps the labels it had at its last publish.
+- **The browser adds records the page didn't have.** A card's saved edit (`editComment`) and a
+  switch from Markdown to rich text (`convertCommentBody`) return the records for the body they
+  return, and the provider merges them in.
+- **`/api/chip-context` takes a comment as its target** (`?comment=<id>`,
+  `commentChipInputsFor`), under the comment's own read rule: a public comment for anyone,
+  signed in or not, and the comments that editing and `/post/[id]/comments` already open to
+  their commenter and moderators. Of the ids asked about beyond the body's own, it answers for
+  the people the asker may mention on that post and for any work. An edit's rich editor asks it
+  about a chip the page has no record of.
+- **`body_text` holds labels.** The capture writes it with each chip's label in the comment
+  style, so the labels reach `/comments`' filter, the spam check, excerpts and the comment
+  search vector.
+  - `refreshMentionLabels` and `refreshCitationLabels` find comments through the index tables
+    and rewrite `body_text` (step 1, item 10), and relabel the chip records of the anchors into
+    a comment.
+  - Each write is a compare-and-set on the text it read, in raw SQL, so neither `edited_at` nor
+    any revision moves.
+  - `check-comment-revisions.ts` derives the text with current labels, so a lost refresh is
+    reported there.
+
+### Quoting a comment that holds a chip
+
+A reply quotes a comment by typing its words, and those words include the chip's label.
+
+- **The matcher reads each comment candidate with its labels** (`flattenForMatch(node,
+  labels)`, as MCP's quotes do), so the typed label finds the chip. A quote that begins or ends
+  inside a label takes the whole chip (`verifyWidened`, in the exact tier).
+- **The rewrite copies the passage as nodes, not text** (`quotedContentIn`).
+  - Writing the passage's text would put U+FFFC in the reply.
+  - Its chips become chips in the reply, with new instance ids, so the quotation follows a rename
+    as the comment it came from does. A block quotation and an inline one alike.
+  - `quoted_text` keeps U+FFFC, and the anchor's selector records the chips with their labels
+    (step 1, item 11). So `check-comment-quotes.ts`, which reads a copied chip in the body as its
+    anchor text, still finds its three copies in agreement.
+- **The body's own spans are read with their labels** (`extractQuoteCandidates(node, labels)`),
+  so on an edit a quotation's copied chips read as what the commenter typed, and the span
+  matches again.
+
+A quotation of a post is unchanged, since a post holds linked text.
+
+### Indexing and search
+
+- **The `mention` and `citation` tables have a comment source** (migration
+  `comment_chip_index`):
+  - each has a `comment_id`, with its foreign key, a unique index and the CHECK's fourth
+    column;
+  - `mention_sync` and `citation_sync` take a fourth id, and the triggers that call them pass
+    it.
+- **Triggers on `comment` keep the rows from `body` and `status`.**
+  - **Only an APPROVED comment has rows**, as a DRAFT note has none. A mention in a PENDING or
+    SPAM comment has reached nobody, and approval is when it is first seen.
+  - A deleted comment keeps its rows, as a deleted note does, and every reader filters through
+    `publicCommentsWhere`.
+  - There is no backfill, since no comment held a chip before the migration.
+- **`mentions=` and `cites=` cover comments**, inside `publicCommentsWhere`, in MCP's `search`
+  too.
+- **"Mentions of you"** lists comments too, each linking to its permalink.
+- `check-mentions.ts` checks both tables' comment rows.
+- A reference's page doesn't list the comments that cite it.
+
+### Planned: the menus
+
+- **The rich editor gets the `@` and `[@` menus.**
+  - Mentions offer whom the commenter may mention (Who may insert, above).
+  - **Anyone signed in** gets the `[@` menu over the whole library, as `searchCitable` already
+    allows, with this post's works listed first.
+  - **A signed-out commenter's citation menu** offers only the works the post cites, which its
+    bibliography already shows.
+  - A menu seeds the records of what it inserts, so a new comment's chips are labelled as they
+    land.
+- **A signed-out commenter's two menus** ask one public endpoint, keyed on the post, and it
+  answers with those lists alone.
+- **The citation popover** edits a comment's citations. Its "In the sentence" is disabled in a
+  comment, and says why: a comment has no narrative form.
+- **e2e:** a signed-out commenter mentioning the post's author from the menu, with the label on
+  the static page.
+
+### Checks
+
+- **Unit tests** (`src/lib/comment-body-chips.test.ts`):
+  - the comment parse: the bracketed forms read, a bare `@word` kept as text, and an unresolved
+    placeholder refused;
+  - the writer's escapes, and a round trip over many comment shapes through both front doors;
+  - the validator, the marks, the narrative form, instance ids and the 20-chip cap;
+  - the insertion check's held chips;
+  - `body_text` with labels;
+  - capture finding a chip by its label, widening, copying chips, and matching again on an
+    edit.
+- **Integrity scripts:**
+  - `check-mentions.ts`: the index tables against comment bodies;
+  - `check-comment-revisions.ts`: `body_text` against the labels;
+  - `check-comment-quotes.ts`: a quotation's copied chips.
+- **e2e** (`e2e/comment-chips.spec.ts`), seeding comments wherever the form's per-IP budget
+  would run out:
+  - a member's Markdown comment mentioning the post's author and citing a work, labelled on the
+    page and indexed;
+  - an unknown key refused, and a mention a signed-out commenter may not make left a link;
+  - quoting a comment that holds a mention, and a rename relabelling both and the page;
+  - `mentions=` and the dashboard finding an approved comment, and not a pending one until it
+    is approved.
+
 ## Later
 
 - **The instance default style**, for every doc that hasn't set its own (Styling, above).
@@ -705,9 +941,6 @@ Because anchors never contain a label, no restyle, rename or renumbering detache
 - **The scrub bar showing each version in the style it had.** It shows the current one. The
   style is in the ydoc's settings map, so each version already holds its own.
 - **Section styles** (Styling, above).
-- **Comments.** The comment schema and its Markdown box gain the node. `parseCommentBody` then
-  runs each chip kind's validator, since the schema no longer checks a chip's fields. Each chip
-  kind decides what its menu offers a commenter.
 - Each chip kind's own later work is in its file.
 
 ## Risks and what is untested

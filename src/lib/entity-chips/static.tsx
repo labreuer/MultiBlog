@@ -48,20 +48,26 @@ export function StaticChip({ attrs, rendering }: { attrs: Record<string, unknown
   );
 }
 
+/** The static renderer's own options: a surface's mappings for the nodes and marks it draws itself. */
+export type StaticRenderOptions = NonNullable<Parameters<typeof renderToReactElement>[0]["options"]>;
+
 /**
  * `content` as React elements, each chip drawn with its rendering under
  * `inputs`. In place of a bare `renderToReactElement` for any body whose
- * schema has the chip node.
+ * schema has the chip node. `options` are the surface's own mappings (a
+ * comment draws its quotations), beside which the chip's is added.
  */
-export function renderWithChips(content: JSONContent, extensions: Extensions, inputs: ChipInputs): ReactNode {
+export function renderWithChips(content: JSONContent, extensions: Extensions, inputs: ChipInputs, options?: StaticRenderOptions): ReactNode {
   const chips = chipsInJSON(content);
-  if (chips.length === 0) return renderToReactElement({ content, extensions });
+  if (chips.length === 0) return renderToReactElement({ content, extensions, ...(options ? { options } : {}) });
   const byIid = renderingsByIid(chips, chipRenderings(chips, inputs.styles, inputs.context));
   return renderToReactElement({
     content,
     extensions,
     options: {
+      ...options,
       nodeMapping: {
+        ...options?.nodeMapping,
         [ENTITY_CHIP]: ({ node }) => (
           <StaticChip
             key={String(node.attrs.iid)}

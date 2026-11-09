@@ -4,7 +4,7 @@ import type { PendingQuoteHint } from "./comment-quote-pending";
 // PLAN.md §23m — the composer's value, in either of its two modes, and the
 // wire shape the server actions take. Browser-safe on purpose: the form, the
 // inline editor and the draft store all import this; the parse itself
-// (comment-body-resolve.ts) pulls in the Markdown parser and stays on the
+// (`resolveCommentBody`, comment-chips.ts) pulls in the Markdown parser and stays on the
 // server.
 
 export type CommentBodyMode = "markdown" | "rich";

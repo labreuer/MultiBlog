@@ -384,8 +384,9 @@ can read, or who wrote an annotation they can read, found through those kinds' r
 
 A mention filter keeps a kind's readable ids to those with a row in the `mention` table for one
 of the people named ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), step 1, item 12), so it goes by who a
-mention stands for and not by what its label says. Docs, posts and annotations can hold one;
-PDFs and comments can't, and drop out while a filter is set (`withoutMentions`).
+mention stands for and not by what its label says. Docs, posts, annotations and comments can
+hold one; PDFs can't, and drop out while a filter is set (`withoutMentions`). A comment has rows
+only while it is APPROVED ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), "Chips in comments").
 
 The filter is not checked against a picker, as an author is, and doesn't need to be. It only
 narrows what the viewer may already read, a handle that names nobody gives the same empty
@@ -396,8 +397,8 @@ rather than names.
 
 A citation filter keeps a kind's readable ids to those with a row in the `citation` table for a
 work it names ([CITATIONS.md](CITATIONS.md), "Search"), by identity as a mention filter is. Each
-filter set is one list of works, and a hit cites a work from every list. Docs, posts and
-annotations can cite; PDFs and comments drop out (`withoutCitations`). A work is a public record,
+filter set is one list of works, and a hit cites a work from every list. Docs, posts,
+annotations and comments can cite; PDFs drop out (`withoutCitations`). A work is a public record,
 so which works a filter names depends on nobody's access, and an unknown key gives what a key
 nothing cites gives.
 

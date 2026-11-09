@@ -12,7 +12,7 @@
 //
 // Three checks:
 //
-//   - `trigger`: each of the three triggers exists and is enabled. The other
+//   - `trigger`: each of the four triggers exists and is enabled. The other
 //     checks cannot tell a disabled trigger from bad luck, and `--repair`
 //     works by calling what they call.
 //   - `missing`: a mention chip in a document with no row. The expected rows
@@ -20,7 +20,7 @@
 //     `post_mentions_wanted`), so the two cannot disagree about what a
 //     document mentions. A chip naming no account is expected to have no row.
 //   - `extra`: a row whose chip its document no longer holds, or a row for a
-//     DRAFT annotation, which has none.
+//     DRAFT annotation or a comment that isn't APPROVED, which have none.
 //
 // `--repair` calls `mention_sync` for every drifted source, which is a diff:
 // rows whose chips are still there keep their `first_seen_at`. A row it adds
@@ -48,11 +48,11 @@ const repair = args.includes("--repair");
 // is what makes the $queryRawUnsafe calls that interpolate them safe.
 type Source = {
   table: string;
-  column: "doc_id" | "post_id" | "annotation_id";
+  column: "doc_id" | "post_id" | "annotation_id" | "comment_id";
   trigger: string;
   /** SQL over the source aliased `s`: the jsonb array of {iid, <target>} its rows should be. */
   wanted: string;
-  /** The sync function's three id arguments for a source row aliased `s`. */
+  /** The sync function's four id arguments for a source row aliased `s`. */
   syncArgs: string;
 };
 
@@ -68,15 +68,23 @@ type Index = {
 
 function sourcesOf(noun: string, wanted: string, postWanted: string): Source[] {
   return [
-    { table: "doc", column: "doc_id", trigger: `doc_sync_${noun}`, wanted: `public.${wanted}(s.prose_json)`, syncArgs: "s.id, NULL, NULL" },
+    { table: "doc", column: "doc_id", trigger: `doc_sync_${noun}`, wanted: `public.${wanted}(s.prose_json)`, syncArgs: "s.id, NULL, NULL, NULL" },
     {
       table: "annotation",
       column: "annotation_id",
       trigger: `annotation_sync_${noun}`,
       wanted: `CASE WHEN s.status = 'DRAFT' THEN '[]'::jsonb ELSE public.${wanted}(s.prose_json) END`,
-      syncArgs: "NULL, NULL, s.id",
+      syncArgs: "NULL, NULL, s.id, NULL",
     },
-    { table: "post", column: "post_id", trigger: `post_sync_${noun}`, wanted: `public.${postWanted}(s.prose_json)`, syncArgs: "NULL, s.id, NULL" },
+    { table: "post", column: "post_id", trigger: `post_sync_${noun}`, wanted: `public.${postWanted}(s.prose_json)`, syncArgs: "NULL, s.id, NULL, NULL" },
+    // Only an APPROVED comment has rows (migration `comment_chip_index`).
+    {
+      table: "comment",
+      column: "comment_id",
+      trigger: `comment_sync_${noun}`,
+      wanted: `CASE WHEN s.status = 'APPROVED' THEN public.${wanted}(s.body) ELSE '[]'::jsonb END`,
+      syncArgs: "NULL, NULL, NULL, s.id",
+    },
   ];
 }
 

@@ -112,8 +112,9 @@ non-empty since editing arrived. `/post/[id]/comments` is the per-post `PENDING`
 
 **The schema is the validation.** `commentContentExtensions` in `src/lib/tiptap-schema.ts`
 is `Document, Paragraph, Text, Bold, Italic, Strike, Code, Blockquote, BulletList,
-OrderedList, ListItem, HardBreak, Link, Quote`, with `blockquote` carrying an `anchorId`
-attribute; `pmCommentContentSchema` is `getSchema` over it. A node or mark the schema does
+OrderedList, ListItem, HardBreak, Link, Quote, EntityChip`, with `blockquote` carrying an
+`anchorId` attribute; `pmCommentContentSchema` is `getSchema` over it. The chip is a mention
+or a citation, as in a doc ("Mentions and citations", below). A node or mark the schema does
 not define makes `nodeFromJSON` throw, so there is never any HTML between commenter and
 reader and no sanitizer to keep in step. The list is stated on its own rather than derived
 from the doc or annotation lists, so that what a stranger may put in a comment can diverge
@@ -130,11 +131,15 @@ through: nesting depth against `MAX_COMMENT_DEPTH` (6 — `> > > > > >` and inde
 nest without limit from a textarea), then `nodeFromJSON` over the output of
 `hardenCommentLinks` (every link gets `rel="nofollow noopener"` and `target="_blank"`, and
 an href that is not `http`, `https` or `mailto` is dropped, unless it is a root-relative
-`/pdf/` path, which is how a PDF fragment link is written: docs/PDF_FRAGMENT_LINKS.md §8) plus `node.check()`, then the
-text against `MAX_COMMENT_CHARS` (5,000). Before it, `resolveCommentBody`
-(`comment-body-resolve.ts`) is where the two doors converge and where the wire is bounded:
+`/pdf/` path, which is how a PDF fragment link is written (docs/PDF_FRAGMENT_LINKS.md §8), or
+an `/authors/` one, which is what a mention's Markdown is) plus `node.check()`, then the text
+against `MAX_COMMENT_CHARS` (5,000). Before the schema, `conformCommentChips` puts each
+entity chip through its chip kind's validator (below). Before all of it, `resolveCommentBody`
+(`src/lib/comment-chips.ts`) is where the two doors converge and where the wire is bounded:
 rich JSON against `MAX_COMMENT_JSON_CHARS` (60,000), Markdown source against
-`MAX_COMMENT_MARKDOWN_CHARS` (8,000) before parsing. Links are hardened a second time by
+`MAX_COMMENT_MARKDOWN_CHARS` (8,000) before parsing. It runs on the server once the post is
+known, since who a comment may mention is asked of its post, and after `parseCommentBody` it
+runs the chips' insertion check. Links are hardened a second time by
 `Link.configure`'s HTML attributes on the renderer; neither depends on the other. Never
 store a parse result — from Markdown or from the rich editor — without `parseCommentBody`
 after it.
@@ -166,6 +171,9 @@ switching modes with content in the box is a round trip through `convertCommentB
 empty box switches instantly. Markdown source is capped at `MAX_COMMENT_MARKDOWN_CHARS`
 (8,000) before parsing.
 
+The parse reads a mention's link and the bracketed citations into chip placeholders, which
+`resolveCommentBody` resolves; a bare `@word` stays text ("Mentions and citations", below).
+
 The parse list is a **superset** of the schema: `commentContentExtensions` plus three
 parse-only shims, because `@tiptap/markdown`'s fallback emits a `heading` node and deletes
 fences and tables whatever is registered. A heading becomes a bold paragraph, a fence a
@@ -173,8 +181,9 @@ paragraph of `code`-marked lines joined by hard breaks, a table its raw source o
 line. A soft line break becomes a space. docs/DOC_IMPORT.md §11 has the measurement and the
 shim table; `src/lib/markdown-comment.test.ts` is the case-by-case proof.
 
-**Editing serializes the stored JSON back to Markdown** (`commentContentToMarkdown`, via
-`getCommentMarkdown`); there is deliberately no second stored form. A body parsed from
+**Editing serializes the stored JSON back to Markdown** (`commentMarkdownOf`, via
+`getCommentMarkdown`), each chip in its chip kind's syntax; there is deliberately no second
+stored form. A body parsed from
 Markdown and serialized again re-parses to itself, and the last case in the test file says
 so. An anchored blockquote renders as `> ` lines and an inline `Quote` mark as straight
 double quotes, which is exactly what the matcher below looks for on save.
@@ -186,6 +195,17 @@ reduced-set pattern, no collaboration extensions and no provider. Its value cros
 action as JSON through `toPlainJSON`. One trap it owns: `disabled={pending}` reaches TipTap
 as `setEditable(false)`, which emits an `update` with the document unchanged — docs/TIPTAP.md
 "`setEditable` emits an `update`". The draft store below is what has to absorb that.
+
+### Mentions and citations
+
+A body can hold mentions and citations, each an `entityChip` node that holds only who or what
+it stands for, its label computed wherever it is shown. Their rules are
+[ENTITY_CHIPS.md](ENTITY_CHIPS.md)'s, "Chips in comments": one fixed style (a name, and
+author-date), who a commenter may mention, the Markdown box's bracketed forms, how the static
+post page labels them, `body_text` with labels, the index rows an APPROVED comment has, and a
+quotation that copies them. Every surface that draws a body passes `CommentBody` the chip
+records it loaded (`commentChipContext`), and the post page's are one context for every
+comment on it, sent in the payload.
 
 ## Drafts live in the browser
 
@@ -637,6 +657,8 @@ From PLAN.md §23 (rich bodies and quotation):
 
 ## Not built, deferred
 
+- **A menu for mentions and citations** in the rich editor, and the public endpoint a
+  signed-out commenter's would ask: planned in docs/ENTITY_CHIPS.md, "Chips in comments".
 - **No inline quote gesture.** Both gestures insert a block; inline is typed. A gesture
   would insert the `Quote` mark with a pending id; the server needs nothing new.
 - **No highlight of quotations in the article or in a quoted comment's card.** The cards

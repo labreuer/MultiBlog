@@ -14,6 +14,7 @@
   "@" opens nothing rather than a list of nobody. A row says when the person couldn't read the
   doc, or the PDF a note is on.
 - the `mention` index table and the label refresh after a rename (the kit's items 12 and 10).
+- mentions in comments, written in the Markdown box (ENTITY_CHIPS.md, "Chips in comments").
 
 - the Markdown, both ways: a read writes `[@Label](/authors/slug)`, with a deleted or unknown
   account struck through and a hand-written link of that shape escaped; an MCP edit, note or
@@ -121,10 +122,10 @@ whose labels can name them.
   - A row says "can't read this doc" (or "this PDF", in a note on one) for someone who wouldn't
     see the mention.
 - **Search.** Built.
-  - `mentions=<slug>` keeps a search to the docs, posts and notes that mention that person,
-    by the `mention` table, inside each kind's readable ids (`mentionedWhere`,
-    `src/lib/search/context.ts`). Several handles mean any of them. PDFs and comments hold no
-    mention and are left out, and the page says so.
+  - `mentions=<slug>` keeps a search to the docs, posts, notes and comments that mention that
+    person, by the `mention` table, inside each kind's readable ids (`mentionedWhere`,
+    `src/lib/search/context.ts`). Several handles mean any of them. PDFs hold no mention and are
+    left out, and the page says so.
   - `me` is the searcher, and no account may have that handle (`RESERVED_USER_SLUGS`,
     `user-slug.ts`).
   - Typing `@me` or `@<slug>` in the search box applies it: every `@handle` that is a word of
@@ -137,7 +138,8 @@ whose labels can name them.
   - MCP's `search` and the export take `mentions`.
 - **The dashboard** has a "Mentions of you" card (`src/lib/mentions-of.ts`): one query per
   kind through its read rule, newest first by when the mention was first seen, one line per
-  doc, note or post. Its heading is `/search?mentions=me`. Built.
+  doc, note, post or comment, a comment's linking to its permalink. Its heading is
+  `/search?mentions=me`. Built.
 - **The notification stub** is the `mention` table's first-seen time, an outbox nothing reads
   yet. When notifications are built:
   - only new mentions count, at most once per person per item;
@@ -146,10 +148,9 @@ whose labels can name them.
 
 ## Later
 
-- **Comments.** Once the kit puts the node in comment bodies, commenters are strangers, so:
-  - the menu lists only public names;
-  - a PENDING comment notifies nobody;
-  - rate limits apply.
+- **The comment menu**, planned in [ENTITY_CHIPS.md](ENTITY_CHIPS.md), "Chips in comments".
+  A comment's mentions are built from its Markdown box, under their own rule for who may be
+  mentioned (that section, "Who may insert").
 - **Notifications**, as described under the stub (TODO.md).
 - **A control for a mention's `form`**, the per-chip override. Every label honours the field,
   and nothing sets it.

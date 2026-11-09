@@ -42,7 +42,10 @@
 
 import "dotenv/config";
 import { prismaIncludingDeleted as prisma } from "../../src/lib/prisma";
-import { commentBodyTextFromJSON } from "../../src/lib/comment-body";
+import { commentBodyTextFromJSON, commentChipLabels } from "../../src/lib/comment-body";
+import { commentChipContext } from "../../src/lib/comment-chips";
+import type { ChipContext } from "../../src/lib/entity-chips/types";
+import type { JSONContent } from "@tiptap/core";
 
 const args = process.argv.slice(2);
 const verbose = args.includes("--verbose");
@@ -51,9 +54,11 @@ const postId = postIndex >= 0 ? args[postIndex + 1] : null;
 
 // PLAN.md §23b — a body is ProseMirror JSON now; its text is derived the way
 // every writer derives `body_text`, so the two comparisons below are about
-// the same string.
-function bodyTextOf(body: unknown): string {
-  return commentBodyTextFromJSON(body);
+// the same string. Each entity chip reads as its label now, in the comment
+// style (docs/ENTITY_CHIPS.md, "Planned: chips in comments"), so a
+// `body_text` a lost label refresh left behind is reported here.
+function bodyTextOf(body: unknown, context: ChipContext): string {
+  return commentBodyTextFromJSON(body, body && typeof body === "object" ? commentChipLabels(body as JSONContent, context) : undefined);
 }
 
 type Finding = { commentId: string; check: string; detail: string };
@@ -88,8 +93,9 @@ async function main() {
 
     // 1. body is the newest revision.
     const newest = revisions[revisions.length - 1];
-    const cached = bodyTextOf(comment.body);
-    const stored = bodyTextOf(newest.body);
+    const context = await commentChipContext([comment.body, newest.body]);
+    const cached = bodyTextOf(comment.body, context);
+    const stored = bodyTextOf(newest.body, context);
     if (cached !== stored) {
       findings.push({
         commentId: comment.id,

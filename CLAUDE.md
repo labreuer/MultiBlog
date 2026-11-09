@@ -243,8 +243,8 @@ before changing the behavior it describes.
 - **An entity chip's label is computed, never stored, and a post never holds a chip.** Its
   `leafText` is U+FFFC, which is what a stored quote holds where a chip is: never put the label
   in a flattener, or a rename detaches the quote. Two paths fail no check when skipped: a static
-  render of a doc or note body goes through `renderWithChips`, and a doc's JSON on its way to a
-  post-side surface through `docJsonForPostSide`, whose renderer throws on a chip.
+  render of a doc, note or comment body goes through `renderWithChips`, and a doc's JSON on its
+  way to a post-side surface through `docJsonForPostSide`, whose renderer throws on a chip.
   `Doc.proseJson` is the ydoc plus each chip's label: write it through `docCacheFromYdoc`, and
   compare it with a ydoc through `withoutChipLabels`. An anchor whose passage holds a chip keeps
   a record of which (`src/lib/anchors/chips.ts`): hand it to `resolveAnchorInDoc`, or mentions

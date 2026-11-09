@@ -10,6 +10,7 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import path from "node:path";
 import readline from "node:readline";
 import type { Readable, Writable } from "node:stream";
+import type { JSONContent } from "@tiptap/core";
 import type {
   DbHandlers,
   TestUser,
@@ -329,6 +330,10 @@ export const getDocSearchText = (...args: Parameters<DbHandlers["getDocSearchTex
   call("getDocSearchText", ...args);
 export const getMentionSources = (...args: Parameters<DbHandlers["getMentionSources"]>): Promise<string[]> =>
   call("getMentionSources", ...args);
+export const getCommentBody = (...args: Parameters<DbHandlers["getCommentBody"]>): Promise<JSONContent | null> =>
+  call("getCommentBody", ...args);
+export const setTestCommentStatus = (...args: Parameters<DbHandlers["setTestCommentStatus"]>): Promise<void> =>
+  call("setTestCommentStatus", ...args);
 
 export const countDocYdocSnapshots = (...args: Parameters<DbHandlers["countDocYdocSnapshots"]>): Promise<number> =>
   call("countDocYdocSnapshots", ...args);

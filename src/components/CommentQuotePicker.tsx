@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } f
 import { renderToReactElement } from "@tiptap/static-renderer";
 import { loadQuotableTarget, searchQuotableTargets, type QuotableTargetBody, type QuotableTargetHit } from "@/app/actions/comments";
 import { commentContentExtensions, contentExtensions } from "@/lib/tiptap-schema";
+import { commentChipInputs } from "@/lib/comment-body";
+import { renderWithChips } from "@/lib/entity-chips/static";
 import type { QuoteRequest } from "./comment-quote-context";
 import proseStyles from "@/styles/prose.module.css";
 import bodyStyles from "./CommentBody.module.css";
@@ -109,10 +111,11 @@ export default function CommentQuotePicker({ hostPostId, onQuote, onClose }: Pro
   const rendered = useMemo<ReactNode>(() => {
     if (!chosen) return null;
     try {
-      return renderToReactElement({
-        content: chosen.body as never,
-        extensions: chosen.kind === "post" ? contentExtensions : commentContentExtensions,
-      });
+      // A comment's chips with their labels, which are what a selection
+      // copies and so what the matcher looks for.
+      return chosen.kind === "post"
+        ? renderToReactElement({ content: chosen.body as never, extensions: contentExtensions })
+        : renderWithChips(chosen.body, commentContentExtensions, commentChipInputs(chosen.chipContext));
     } catch {
       return <p>This {chosen.kind} could not be shown.</p>;
     }
