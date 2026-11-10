@@ -4968,3 +4968,9 @@ Built 2026-11-04 on `entity-chips`: its step 0, the schema-version gate. **As bu
 Planned 2026-11-09 and built 2026-11-10: reading a library from every common export format
 without loss, and downloading works as BibTeX, biblatex, RIS or CSL-JSON.
 **As built: [docs/CITATIONS.md](docs/CITATIONS.md), "Import and export".**
+
+## 31. One link to every work a citation names
+
+Planned 2026-11-10: a citation naming several works links to `/references/<key>,<key>,…`, one
+page listing them all, with the keys nothing answers to marked at the top rather than a 404.
+**Plan: [docs/CITATIONS.md](docs/CITATIONS.md), "Planned: one link to every work a citation names".**

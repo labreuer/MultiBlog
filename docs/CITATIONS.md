@@ -1,6 +1,7 @@
 # Citations and references
 
-**Status: built, but for what "Built so far" below names, and Later.** A *citation* is an entity chip
+**Status: built, but for what "Built so far" below names, and Later. One section, "Planned: one
+link to every work a citation names", is a plan, not an account.** A *citation* is an entity chip
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md)) that stands for one or more works at a page. It is shown as
 `(BU p. 49)`, `(Radner 2012, p. 49)` or `[3, p. 49]`, depending on the doc's style. The works are
 *references*: records in a library, which this file also covers. This file fills in the kit's kind
@@ -1001,6 +1002,202 @@ reads a public page doesn't fetch four files for each work on it.
     longest value was 69;
   - a Cyrillic author and a Japanese title, as BibTeX through `bibtexu` and as biblatex
     through biber and through Pandoc.
+
+## Planned: one link to every work a citation names
+
+A citation naming several works, such as `[@wimsatt1986; @wimsatt1997; @wimsatt2000]`, is one
+chip. It links to its first work alone (Labels, "The link"): `render` in `citation.ts` builds its
+`href` from `known[0]` and the first item's locator. So a reader following it sees one of the
+three works. The plan: such a citation links to one page that shows every work it names.
+
+### The address
+
+`/references/<key>,<key>,…`: the works' keys, each percent-encoded as `referencePath` encodes
+one, joined by commas, in the order the citation names them, each work once.
+
+- **A comma, because no key a citation writes holds one.** A chip writes a work's current key,
+  which is always a library key (`LIBRARY_KEY_RE`: letters, digits and `_`, with `:`, `.` or `-`
+  between). Pandoc's bare key holds none either (`BARE_KEY`, `citation-markdown.ts`).
+- **A segment with a comma is a list, whatever the library holds.** Each part must be a library
+  key (`isLibraryKey`), which every key a citation writes is, and every key a rename leaves
+  behind. There are at most `MAX_LIST_KEYS` parts. Anything else is a 404 before any query, as a
+  segment no key can be is now.
+- **`~` before a key that itself holds a comma.** Only an alias kept at import can: a CSL `id` or
+  `citation-key`, or a RIS `ID`, since `isKeyShaped` refuses only white space and braces.
+  - A segment that opens with `~` and holds a comma is one key, what follows the `~`. It is
+    looked up whole and never renders: it redirects permanently to the work's page, or is a 404.
+  - Without a comma a segment is a plain key, a leading `~` included, so every address that
+    works now still does.
+  - No library key opens with `~`, so no list does. An alias that opens with `~` and holds a
+    comma is written `~~…`.
+  - `referencePath(key)` writes the `~` for a key holding a comma, so a link built from an alias
+    works. `encodeURIComponent` leaves `~` as it is.
+- **Rejected: asking for the whole segment as a key before splitting it.** The address would
+  mean whatever the library held that day. Adding an alias `a,b` would turn the list of `a` and
+  `b` into one work's page, behind permanent redirects a browser keeps.
+- **Rejected: refusing a comma in `isKeyShaped`.** It would drop such an alias everywhere,
+  `@{a,b}` in an imported manuscript included, to settle what only the address asks.
+- **Not a word of its own under `/references/`**, such as `/references/works/<key>/<key>`. Any
+  such word is also a valid key, the reason the downloads sit under `/api` (Downloads).
+- **Not `/references?keys=`.** `/references` is the members' admin table, and a page that
+  reads `searchParams` can never be cached (Pages).
+- **Decoded before it is split.** Next hands a param over percent-encoded (CLAUDE.md, Gotchas),
+  so a comma arrives as `%2C` and a key's `:` as `%3A`. The page already decodes its param once,
+  and splits only what that gives.
+- **`MAX_LIST_KEYS` is 20**, in `src/lib/references/keys.ts`. `citation.ts` sets its `MAX_ITEMS`
+  from it, so a citation can't name more works than a list takes.
+
+### The link
+
+- **A citation naming two or more works links to the list.** One naming one work, which includes
+  `[@radner2012, p. 49; @radner2012, p. 51]`, links to that work, as it does now.
+- **A work's page is the first page of the first item naming it that has a locator**, as
+  `firstPage` reads one, for one work as for a list. `render` reads the first item's locator
+  alone now, so `[@a; @a, p. 51]`, which links to `/references/a`, comes to link to
+  `/references/a/p/51`.
+- **Each work's page goes in the fragment, by position:**
+  `/references/wimsatt1986,wimsatt1997,wimsatt2000#p=12,,3` for page 12 of the first work and
+  page 3 of the third.
+  - A work cited with no page has nothing at its place, commas at the end are left off, and a
+    citation with no page at all has no fragment.
+  - A fragment, as `#p=49` is on one work's page, so the server's answer for a list is the same
+    whatever pages are named.
+  - **By position, not by key** (`#wimsatt1986=12`). A post freezes its link. When a key in it
+    is renamed later, the list redirects to the new key and the browser keeps the fragment as it
+    was written, so a page named by the old key would be lost. A position survives a rename, and
+    a key that isn't found keeps its place.
+  - **Not through `/references/<key>/p/<page>`.** That route sends a reader into one PDF. A list
+    has a PDF per work, so its page offers each one under its work, at the page cited (below).
+- **`citedWorksPath(works)`** beside `citedPagePath` in `citation.ts`, taking each distinct
+  work's key and page, and `render` choosing between them by the count of distinct works.
+- **Nothing is stored or migrated.** A doc's, note's or comment's chip computes its link when it
+  is shown, so every one of them links to the list once this is deployed. A post froze its links
+  at publish (`chipsToLinkedText`, and `refresh.ts` leaves posts alone), and no published post
+  holds a citation of several works, so none keeps a link to its first work alone.
+- **No `SCHEMA_VERSION` bump.** The chip's fields are unchanged.
+
+### The page
+
+`src/app/references/[key]/page.tsx` serves both a single key and a list, so a list costs no
+second route, and a key in another case or an old alias still redirects.
+
+- **Reading the segment.** A pure `parseReferenceSegment(segment)` in
+  `src/lib/references/keys.ts` reads the decoded segment as one key, a list of keys, or nothing,
+  by the rules of The address, so a unit test can hold its rejections.
+  - One key, the `~` form included, is the single page as now, through `referenceByKey`.
+  - A list goes through one call to `referencesByKeys(parts)`, which answers by each key as it
+    was asked, and then `referencesById` for the rows, deleted ones included.
+  - The load is wrapped in React's `cache()`, so `generateMetadata` and the page share one
+    lookup. Nothing else spares the second: the page has no cache (below).
+- **Which keys were found.** A list in which at least one key names a work is a page, not a 404.
+  A key no reference has or had is reported at the top of the page:
+  - a warning box with `--warning`'s border, holding the page's full address, from
+    `appUrl(path)` (`src/lib/app-url.ts`);
+  - the address written with its keys as they were asked and not percent-encoded. Every
+    character a library key may hold stands in a path as it is, so what is shown is the address
+    and is also readable. It is text, not a link;
+  - each key nothing answered to in `--error`;
+  - and under it: "Keys in red were not found in the database."
+  - The works that were found are listed below it as usual.
+  - Each red key also carries a visually hidden "(not found)", so a screen reader, which can't
+    see red, reads the same thing. `page.module.css` gains the class; the repo has none.
+  - **The box sits on the page's background, with no fill.** `--error` on `--fill-warning` is
+    4.4:1 in the light theme, under the 4.5:1 WCAG AA asks of text. On the page it is 5:1.
+  - **A key whose record can't be read counts as not found.** `referencesByKeys` finds it and
+    `referencesById` drops it, and the single page is a 404 for it.
+  - **What a stranger can make the box show** is at most 20 keys of 80 characters each, in
+    letters, digits and `_`, `:`, `.` and `-`, under a line saying they were not found. Nothing
+    else in an address reaches the page: a part that is no library key is a 404, and the `~`
+    form never renders.
+- **A list in which no key names a work is a 404**, as a single unknown key is now.
+- **One redirect, to the list as it should be written.** If a found key is an old alias or in
+  another case, or a work is named twice (by two keys, or by one key twice), the page redirects
+  permanently to the list written with each found work's current key, once, in the order first
+  named. A key nothing answered to stays where it was first written, as it was written there,
+  once, so the warning still shows it. A list that comes down to one key, such as `a,a`,
+  redirects to `/references/a`. Dropping a repeat moves the keys after it up one place, and
+  their pages in `#p=` with them; no citation writes such a list.
+- **What it shows:**
+  - a kicker, `References · <key>, <key>, …`, and an `<h1>` naming how many works it lists;
+  - for each work, in order, a `<section>` labelled by its title, an `<h2>` here, holding what
+    the single page shows now: its entry, its details table with downloads, the
+    removed-from-the-library line for a deleted one, and its `CitedBy`;
+  - one "Cited in posts" list of the published posts citing any of the works, in the order every
+    listing uses, from `citations: { some: { referenceId: { in: ids } } }`.
+  - A single key's page is unchanged.
+- **`CitedBy` on a list** takes two more props, and without them is what it is now:
+  - `headingLevel`, so "Cited in docs" and "Cited in notes" are `<h3>`s under a work's `<h2>`
+    and not its equals;
+  - `position`, the work's place in the list as written. The island reads its work's page there
+    in `#p=`, and offers the PDF at it, so `#p=49` on a list names the first work's page alone.
+    Without `position` it reads the whole of `#p=`, as on a single page.
+  - With a `position` it also drops its own `aria-label`, "Where you can read it". The work's
+    section is the named region, and twenty regions of one name tell a screen reader nothing.
+- **Its title:** the first work's title, then "and 2 more".
+- **Not indexed:** `robots: { index: false }` on a list, as `/search` has. Every order of the
+  same keys is its own address, and each repeats the single pages. A single key's page stays
+  indexed.
+- **No cache, as the single page has none** (Pages). A list is rendered on every request, so it
+  shows an edit, or a work added under a key once reported missing, at once. It reads no session
+  and no `searchParams`, so it stays a page a cache could hold.
+  - **Before the route gains a cache, lists need a rule.** Every order of the same keys, and
+    every list with an unknown key beside a real one, is a 200 page a stranger could add to it.
+    A single unknown key is a 404.
+- **`/references/<list>/p/<page>` is a 404, and `/references/~<alias>/p/<page>` reaches the
+  alias's work.** `citedPageTarget` reads its segment through `parseReferenceSegment`, as the
+  page does: a list is no work, and the `~` form is its key. Asking `referenceByKey` for the
+  whole segment, as it does now, would find an alias `a,b` written bare and miss it written
+  with its `~`, the opposite of the page.
+
+### Choices to confirm
+
+- **`CitedBy` once per work.** Up to `MAX_LIST_KEYS` server-action calls on a list's page. One
+  batched action answering for every work is the alternative, if a long list's calls are a
+  problem: [PERFORMANCE.md](../PERFORMANCE.md), "A reference list's page asks once per work".
+- **One "Cited in posts" list**, rather than one per work, which would repeat a post citing
+  several of them under each.
+- **Red with a hidden "(not found)"**, rather than red alone. Colour alone fails WCAG 1.4.1.
+- **Pages by position in `#p=`**, rather than by key, for the rename above. The cost is a
+  fragment that says less to someone reading it.
+- **The island reads `#p=` from the first build**, rather than the link writing pages nothing
+  reads yet. It is one prop, and without it a reader who may open the PDFs loses the page a
+  citation named.
+- **A work's page from the first item naming it that has one**, rather than from its first
+  item alone, so one rule serves one work and a list. It changes where `[@a; @a, p. 51]` links.
+- **A box with a border and no fill**, rather than `--fill-warning` with the keys in `--danger`,
+  which passes on that fill (5.2:1 light, 4.5:1 dark) but is the token for delete controls.
+
+### Checks
+
+- **Unit tests:**
+  - `parseReferenceSegment`: a single key; a list; a list with an encoded `:`; more than
+    `MAX_LIST_KEYS` parts; an empty part (`a,,b`, refused); a part with white space, a brace, a
+    `/` or an accented letter; a part over 80 characters; `~a,b` as the key `a,b`; `~a` as the
+    key `~a`; `~~a,b` as the key `~a,b`; `a,~b` (refused, `~b` being no library key).
+  - `referencePath` for a key holding a comma.
+  - `render`'s `href` for one work, one work twice, and several: with no pages, with a page on
+    the first, and with a page on the last alone (`#p=,,3`). And a work named twice with a page
+    on its second item alone: `[@a; @a, p. 51]`, and `[@a; @b; @a, p. 51]` (`#p=51`).
+- **An e2e spec** with throwaway references:
+  - a list of two found keys and one missing one shows both works and the warning, the missing
+    key alone in `--error`;
+  - a list of missing keys alone, and a single unknown key, are 404s;
+  - a list written with an alias, in another case, or with a key twice redirects to its current
+    form, keeping the missing key in place, and a missing key written twice once;
+  - a list of 21 keys, and `/references/<list>/p/1`, are 404s;
+  - an alias holding a comma redirects to its work from `/references/~<alias>`, and from
+    `/references/~<alias>/p/1`, and without the `~` is read as a list in both places;
+  - a doc's citation of two works links to the list;
+  - a signed-in reader of `…#p=,2` is offered the second work's PDF at page 2 and the first's
+    with no page, and still is after a redirect from a renamed key. If Next's router drops the
+    fragment on that redirect, the reader gets the list with no pages, and this section says so.
+- **Once built:**
+  - "The link" and "Pages" above say what a list's link and page do, "Keys" names the `~` form
+    and `parseReferenceSegment` under "Where keys are read", and "Built so far" names the list;
+  - this section goes, with the sentence about it in this file's status line and in CLAUDE.md's
+    row for this file;
+  - PLAN.md §31 points to those sections as built;
+  - PERFORMANCE.md's entry drops "Not built yet".
 
 ## Later
 
