@@ -2,6 +2,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prismaIncludingDeleted as prisma } from "@/lib/prisma";
 import { cslOf, type CslItem } from "@/lib/references/csl";
 import { normalizeDoi, normalizeIsbn } from "@/lib/references/identifiers";
+import { isKeyShaped, lookupKey } from "@/lib/references/keys";
 
 // docs/CITATIONS.md — reading the reference library. A reference's record is
 // public (its page is what a published post's citations link to), so nothing
@@ -28,33 +29,44 @@ function toRow(row: { id: string; key: string; short: string | null; csl: unknow
 }
 
 /**
- * The reference a key names, or once named: `current` is its key now, which
- * differs when `key` is one it used to have. Deleted ones included, flagged.
+ * The reference a key names, or once named, ignoring case: `key` on the row
+ * is its key now, which differs when the key asked is one it used to have or
+ * is written in another case. Deleted ones included, flagged.
  */
 export async function referenceByKey(key: string): Promise<ReferenceRow | null> {
-  const direct = await prisma.reference.findUnique({ where: { key }, select: ROW_SELECT });
+  if (!isKeyShaped(key)) return null;
+  const folded = lookupKey(key);
+  const direct = await prisma.reference.findUnique({ where: { keyFolded: folded }, select: ROW_SELECT });
   if (direct) return toRow(direct);
-  const historic = await prisma.referenceKeyHistory.findUnique({ where: { key }, select: { reference: { select: ROW_SELECT } } });
+  const historic = await prisma.referenceKeyHistory.findUnique({ where: { keyFolded: folded }, select: { reference: { select: ROW_SELECT } } });
   return historic ? toRow(historic.reference) : null;
 }
 
 /**
- * The references these keys name, or once named, by the key asked: each one's
- * id and whether it is deleted. A key nothing answers to is absent. For the
- * Markdown parse, which names works by key (parsed-chips.ts).
+ * The references these keys name, or once named, ignoring case, by the key
+ * as it was asked, since each caller looks up its own spelling: each one's id
+ * and whether it is deleted. A key nothing answers to is absent. For the
+ * Markdown parse, which names works by key (parsed-chips.ts), and `cites`.
  */
 export async function referencesByKeys(keys: readonly string[]): Promise<Map<string, { id: string; deleted: boolean }>> {
   const found = new Map<string, { id: string; deleted: boolean }>();
-  if (keys.length === 0) return found;
-  const direct = await prisma.reference.findMany({ where: { key: { in: [...keys] } }, select: { id: true, key: true, deletedAt: true } });
-  for (const row of direct) found.set(row.key, { id: row.id, deleted: row.deletedAt !== null });
-  const rest = keys.filter((key) => !found.has(key));
+  const asked = keys.filter(isKeyShaped);
+  if (asked.length === 0) return found;
+  const folded = [...new Set(asked.map(lookupKey))];
+  const byFolded = new Map<string, { id: string; deleted: boolean }>();
+  const direct = await prisma.reference.findMany({ where: { keyFolded: { in: folded } }, select: { id: true, keyFolded: true, deletedAt: true } });
+  for (const row of direct) byFolded.set(row.keyFolded, { id: row.id, deleted: row.deletedAt !== null });
+  const rest = folded.filter((key) => !byFolded.has(key));
   if (rest.length > 0) {
     const historic = await prisma.referenceKeyHistory.findMany({
-      where: { key: { in: rest } },
-      select: { key: true, reference: { select: { id: true, deletedAt: true } } },
+      where: { keyFolded: { in: rest } },
+      select: { keyFolded: true, reference: { select: { id: true, deletedAt: true } } },
     });
-    for (const row of historic) found.set(row.key, { id: row.reference.id, deleted: row.reference.deletedAt !== null });
+    for (const row of historic) byFolded.set(row.keyFolded, { id: row.reference.id, deleted: row.reference.deletedAt !== null });
+  }
+  for (const key of asked) {
+    const reference = byFolded.get(lookupKey(key));
+    if (reference) found.set(key, reference);
   }
   return found;
 }

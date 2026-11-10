@@ -1,5 +1,5 @@
 import { prismaIncludingDeleted } from "../../prisma";
-import { citedNames, cslOf, yearOf } from "../../references/csl";
+import { citedNames, cslOf, titleOf, yearOf } from "../../references/csl";
 import type { ReferenceRow } from "../../reference-data";
 import { entryText, referenceEntry } from "../../references/entry";
 import type { CitationContext, CiteCandidate } from "./citation";
@@ -35,7 +35,7 @@ export async function loadCitationContext(refIds: readonly string[]): Promise<Ci
       short: row.short,
       names: item ? citedNames(item) : "",
       year: item ? yearOf(item) : null,
-      title: item?.title ?? row.key,
+      title: (item && titleOf(item)) || row.key,
       deleted: row.deletedAt !== null,
       entry: item ? referenceEntry(item) : { authors: "", year: "n.d.", title: row.key, titleIsContainer: true, source: "" },
     };

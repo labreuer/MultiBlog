@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { onceWithin } from "@/lib/api/idempotency";
-import { findReferences } from "@/lib/reference-data";
+import { findReferences, referenceByKey } from "@/lib/reference-data";
 import { readableFiles } from "@/lib/reference-files";
 import { createReference, referencePath } from "@/lib/reference-write";
 import { entryText } from "@/lib/references/entry";
@@ -66,7 +66,14 @@ export const createReferenceTool = defineTool({
       .describe(
         'A CSL-JSON item: type (book, chapter, article-journal, …), title, author and editor as [{family, given}], issued as {"date-parts": [[year]]}, container-title, publisher, publisher-place, volume, issue, page, DOI, ISBN, URL.',
       ),
-    key: z.string().min(1).max(80).optional().describe("The citation key, such as radner2012; made from the first author and the year when absent."),
+    key: z
+      .string()
+      .min(1)
+      .max(80)
+      .optional()
+      .describe(
+        "The citation key, such as radner2012 or Frank_1970: letters, digits and _, with :, . or - between them. Taken as given or refused, never altered. Made from the first author and the year when absent.",
+      ),
     short: z.string().min(1).max(40).optional().describe("An abbreviation a short citation shows, such as BU."),
     file: z
       .string()
@@ -85,7 +92,7 @@ export const createReferenceTool = defineTool({
     return onceWithin(ctx.token.id, "create_ref", rest, key, async () => {
       const fileId = rest.file ? (await readableFile(ctx.actor, rest.file)).id : undefined;
       const created = await createReference(ctx.actor, { csl: rest.csl, key: rest.key, short: rest.short, fileId });
-      const [reference] = await findReferences(created.key, 1);
+      const reference = await referenceByKey(created.key);
       return { key: created.key, url: referencePath(created.key), entry: reference ? entryText(reference.item) : "" };
     }) as Promise<never>;
   },

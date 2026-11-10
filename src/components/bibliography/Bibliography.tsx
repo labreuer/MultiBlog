@@ -3,6 +3,7 @@ import { BIBLIOGRAPHY_HEADING, citationBibliography, type Bibliography } from "@
 import { chipsInJSON } from "@/lib/entity-chips/renderings";
 import type { ChipInputs } from "@/lib/entity-chips/types";
 import { entryParts } from "@/lib/references/entry";
+import TitleRuns from "./TitleRuns";
 import styles from "./Bibliography.module.css";
 
 // docs/CITATIONS.md, "The bibliography" — a doc's bibliography as markup.
@@ -21,7 +22,7 @@ export default function BibliographyList({ bibliography }: { bibliography: Bibli
             {item.lead && <span className={styles.lead}>{item.lead} </span>}
             {entryParts(item.entry).map((part, index) => {
               if (!part.title) return <span key={index}>{part.text}</span>;
-              const title = item.entry.titleIsContainer ? <i>{part.text}</i> : part.text;
+              const title = <TitleRuns runs={part.runs ?? [{ text: part.text }]} />;
               return item.href ? (
                 <a key={index} href={item.href}>
                   {title}

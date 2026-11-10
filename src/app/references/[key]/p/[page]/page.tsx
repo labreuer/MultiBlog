@@ -16,15 +16,16 @@ import { citedPageTarget } from "@/lib/reference-cited-by";
 
 export default async function CitedPage({ params }: { params: Promise<{ key: string; page: string }> }) {
   const { key, page } = await params;
-  // A param arrives percent-encoded (CLAUDE.md, Gotchas); a malformed one is no page.
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(page);
-  } catch {
-    decoded = "";
-  }
+  // A param arrives percent-encoded (CLAUDE.md, Gotchas), a key's `:` as `%3A`; a malformed one is no page.
+  const decode = (value: string) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return "";
+    }
+  };
   const session = await auth();
-  const target = await citedPageTarget(session?.user ? actorFromSessionUser(session.user) : null, key, decoded);
+  const target = await citedPageTarget(session?.user ? actorFromSessionUser(session.user) : null, decode(key), decode(page));
   if (!target) notFound();
   redirect(target);
 }

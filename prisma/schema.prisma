@@ -2179,15 +2179,19 @@ model Citation {
 // key: an account is never hard-deleted, and each relation onto `user` is
 // more for the generated client to carry.
 model Reference {
-  id     String  @id @default(cuid())
-  key    String  @unique
-  csl    Json
+  id        String  @id @default(cuid())
+  key       String  @unique
+  // The key with its ASCII capitals lowercased, and nothing else: what every
+  // lookup by key reads, so case is ignored (docs/CITATIONS.md, "Keys"). A
+  // CHECK in the migration holds it to `key`; reference-write.ts writes both.
+  keyFolded String  @unique @map("key_folded")
+  csl       Json
   // The abbreviation a `short`-style citation shows, such as "BU". Optional:
   // a reference without one falls back to its author-date label.
-  short  String?
+  short     String?
   // The PDF of this work, when /files holds it. A citation with a locator
   // then links to the passage.
-  fileId String? @map("file_id")
+  fileId    String? @map("file_id")
 
   createdById String   @map("created_by_id")
   updatedById String?  @map("updated_by_id")
@@ -2242,6 +2246,8 @@ model ReferenceKeyHistory {
   id          String   @id @default(cuid())
   referenceId String   @map("reference_id")
   key         String   @unique
+  // As on `reference`: the key with A to Z lowercased, held to it by a CHECK.
+  keyFolded   String   @unique @map("key_folded")
   createdAt   DateTime @default(now()) @map("created_at")
 
   reference Reference @relation(fields: [referenceId], references: [id], onDelete: Cascade)

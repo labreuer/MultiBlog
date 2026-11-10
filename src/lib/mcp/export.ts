@@ -5,7 +5,7 @@ import { docsSearch } from "@/lib/search/docs";
 import { searchAuthorOptions } from "@/lib/search/authors";
 import { dayRangeToInstants } from "@/lib/search/dates";
 import { DEFAULT_TIME_ZONE, isTimeZone, MAX_CITED_LENGTH, parseDay } from "@/lib/search/params";
-import { REFERENCE_KEY_RE } from "@/lib/references/csl";
+import { isKeyShaped } from "@/lib/references/keys";
 import { loadDocState } from "@/lib/doc-state";
 import { docContentToMarkdown } from "@/lib/markdown-import";
 import { docText } from "@/lib/doc-text";
@@ -60,7 +60,7 @@ export async function selectByFilters(actor: Actor, params: URLSearchParams): Pr
   const mentions = listParam(params, "mentions");
   for (const slug of [...authors, ...tags, ...mentions]) if (!SLUG_RE.test(slug)) throw invalid(`${slug} isn't a slug.`);
   const cites = listParam(params, "cites");
-  for (const key of cites) if (!REFERENCE_KEY_RE.test(key)) throw invalid(`${key} isn't a reference key.`);
+  for (const key of cites) if (!isKeyShaped(key)) throw invalid(`${key} isn't a reference key.`);
   const cited = {
     cites,
     citedTitle: (params.get("cited_title") ?? "").trim().slice(0, MAX_CITED_LENGTH),

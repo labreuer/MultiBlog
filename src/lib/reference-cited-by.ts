@@ -8,7 +8,7 @@ import { firstPage, isPageLocator, normalizeLocator, pdfPageHref } from "@/lib/e
 import { readableFilesWhere } from "@/lib/file-authz";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { referenceByKey } from "@/lib/reference-data";
-import { REFERENCE_KEY_RE } from "@/lib/references/csl";
+import { isKeyShaped, referencePath } from "@/lib/references/keys";
 
 // docs/CITATIONS.md, "Pages" — what a reference's public page can't show
 // everyone: the docs and notes citing the work, and the work's PDF, for one
@@ -51,10 +51,10 @@ function pageLabelsOf(stored: unknown): string[] | null {
  */
 export async function citedPageTarget(actor: Actor | null, key: string, page: string): Promise<string | null> {
   // Shape first, as the reference's page checks it: a key that can't be one costs no query.
-  if (!REFERENCE_KEY_RE.test(key)) return null;
+  if (!isKeyShaped(key)) return null;
   const reference = await referenceByKey(key);
   if (!reference) return null;
-  const home = `/references/${reference.key}`;
+  const home = referencePath(reference.key);
   if (!isPageLocator(page)) return home;
   const first = firstPage(normalizeLocator(page));
   const fallback = `${home}#p=${encodeURIComponent(first)}`;

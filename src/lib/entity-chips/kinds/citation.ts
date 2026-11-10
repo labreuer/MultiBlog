@@ -171,7 +171,8 @@ function validateItem(raw: unknown): CitationItem | null {
 
 /** Where a citation of the work with this key, at this locator, links: `/references/<key>/p/<first page>`, or the reference's page. */
 export function citedPagePath(key: string, locator: string | undefined): string {
-  return locator ? `/references/${key}/p/${encodeURIComponent(firstPage(locator))}` : `/references/${key}`;
+  const home = `/references/${encodeURIComponent(key)}`;
+  return locator ? `${home}/p/${encodeURIComponent(firstPage(locator))}` : home;
 }
 
 function pages(locator: string): string {

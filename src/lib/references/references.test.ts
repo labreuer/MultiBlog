@@ -1,9 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { citedNames, keyBaseOf, normalizeKey, parseCslItem, yearOf } from "./csl";
+import { citedNames, keyBaseOf, parseCslItem, readCsl, yearOf, type CslData } from "./csl";
 import { entryText, referenceEntry } from "./entry";
 import { identifiersOf, normalizeDoi, normalizeIsbn } from "./identifiers";
 import { parseReferences } from "./import";
+
+/** A record as a reader of one is handed it. */
+const read = (data: CslData) => readCsl(data);
 
 // docs/CITATIONS.md, "Records" and "Duplicates are caught by DOI and ISBN" —
 // the reference library's pure half: what an identifier is stored as, what a
@@ -65,22 +68,26 @@ test("a record is built field by field: known fields, bounded, with a title", ()
     author: [{ family: "Barfield", given: "Owen" }, { literal: "The Inklings" }, { literal: "Solo" }],
     issued: { "date-parts": [[1957, 3]] },
   });
-  // A type this library doesn't list is a plain document; a year can arrive as text.
+  assert.deepEqual(parsed.ok && parsed.notes, [{ kind: "dropped", field: "user" }]);
+  // A type CSL doesn't list is a plain document, and the parse says so; a year can arrive as text.
   const loose = parseCslItem({ type: "hologram", title: "T", issued: "c. 1957" });
-  assert.deepEqual(loose.ok && [loose.item.type, yearOf(loose.item)], ["document", 1957]);
+  assert.deepEqual(loose.ok && [loose.item.type, yearOf(loose.item), loose.notes], ["document", 1957, [{ kind: "mapped", field: "type", from: "hologram", to: "document" }]]);
   assert.equal(parseCslItem({ type: "book" }).ok, false);
   assert.equal(parseCslItem("a string").ok, false);
-  assert.equal(parseCslItem({ type: "book", title: "T", abstract: "x".repeat(30_000) }).ok, false);
+  // A field past its bound is cut, and said to be; the record's size is measured once its fields are chosen.
+  const long = parseCslItem({ type: "book", title: "T", abstract: "x".repeat(30_000) });
+  assert.deepEqual(long.ok && [long.item.abstract?.toString().length, long.notes], [4000, [{ kind: "cut", field: "abstract" }]]);
+  assert.equal(parseCslItem({ type: "book", title: "T", reference: Array.from({ length: 500 }, (_, i) => ({ key: `ref${i}`, DOI: `10.1000/${i}` })) }).ok, true);
+  const fields = Object.fromEntries(["abstract", "note", "annote", "archive", "source", "genre"].map((field) => [field, "y".repeat(4000)]));
+  assert.equal(parseCslItem({ type: "book", title: "T", ...fields }).ok, false);
 });
 
-test("a key is made from the first creator and the year, and a typed one is brought into shape", () => {
-  const radner = { type: "book", title: "The Origin of Ideas", author: [{ family: "Radner", given: "Daisie" }], issued: { "date-parts": [[2012]] } };
+test("a key is made from the first creator and the year", () => {
+  const radner = read({ type: "book", title: "The Origin of Ideas", author: [{ family: "Radner", given: "Daisie" }], issued: { "date-parts": [[2012]] } });
   assert.equal(keyBaseOf(radner), "radner2012");
-  assert.equal(keyBaseOf({ type: "book", title: "Beowulf: A New Translation" }), "beowulf");
-  assert.equal(keyBaseOf({ type: "book", title: "T", editor: [{ family: "de la Mare" }] }), "delamare");
-  assert.equal(normalizeKey("Radner_2012"), "radner-2012");
-  assert.equal(normalizeKey("  BU  "), "bu");
-  assert.equal(normalizeKey("!!!"), null);
+  assert.equal(keyBaseOf(read({ type: "book", title: "Beowulf: A New Translation" })), "beowulf");
+  assert.equal(keyBaseOf(read({ type: "book", title: "T", editor: [{ family: "de la Mare" }] })), "delamare");
+  assert.equal(keyBaseOf(read({ type: "book", title: "T", author: [{ family: "Müller" }], issued: { "date-parts": [[1901]] } })), "muller1901");
   assert.equal(citedNames(radner), "Radner");
   assert.equal(citedNames({ ...radner, author: [{ family: "A" }, { family: "B" }] }), "A and B");
   assert.equal(citedNames({ ...radner, author: [{ family: "A" }, { family: "B" }, { family: "C" }] }), "A et al.");
@@ -108,8 +115,8 @@ test("BibTeX: entries, braces, accents, names and page ranges", () => {
       title = {Never closed
   `);
   assert.equal(result.format, "bibtex");
-  assert.deepEqual(result.references.map((r) => r.key), ["radner2012", "garcia-marquez"]);
-  const [book, article] = result.references.map((r) => r.item);
+  assert.deepEqual(result.references.map((r) => r.key), ["Radner2012", "garcia_marquez"]);
+  const [book, article] = result.references.map((r) => r.data);
   assert.deepEqual(book, {
     type: "book",
     title: "The Origin of Ideas: Café Talk",
@@ -143,7 +150,7 @@ test("RIS: one record per TY…ER, with repeated authors and a page range", () =
   );
   assert.equal(result.format, "ris");
   assert.equal(result.references.length, 2);
-  const [article, chapter] = result.references.map((r) => r.item);
+  const [article, chapter] = result.references.map((r) => r.data);
   assert.deepEqual(article, {
     type: "article-journal",
     title: "On Participation",
@@ -160,7 +167,10 @@ test("RIS: one record per TY…ER, with repeated authors and a page range", () =
 test("CSL-JSON: one item or many, each with its id as the key, and an item with no title reported", () => {
   const many = parseReferences(JSON.stringify([{ id: "Barfield1957", type: "book", title: "Saving the Appearances" }, { type: "book" }]));
   assert.equal(many.format, "csl-json");
-  assert.deepEqual(many.references, [{ key: "barfield1957", item: { type: "book", title: "Saving the Appearances" } }]);
+  assert.deepEqual(
+    many.references.map((r) => [r.key, r.data]),
+    [["Barfield1957", { type: "book", title: "Saving the Appearances" }]],
+  );
   assert.deepEqual(many.errors, ["Item 2: A reference needs a title."]);
   assert.equal(parseReferences('{"type":"book","title":"One"}').references.length, 1);
   assert.equal(parseReferences("{not json").errors.length, 1);
@@ -170,19 +180,19 @@ test("CSL-JSON: one item or many, each with its id as the key, and an item with 
 
 test("a bibliography entry: authors, year, title, then where it appeared", () => {
   assert.equal(
-    entryText({
+    entryText(read({
       type: "book",
       title: "Saving the Appearances",
       author: [{ family: "Barfield", given: "Owen" }],
       issued: { "date-parts": [[1957]] },
       publisher: "Faber",
       "publisher-place": "London",
-    }),
+    })),
     "Barfield, O. (1957). Saving the Appearances. London: Faber.",
   );
   // An article: its title quoted, the journal with volume, issue and pages.
   assert.equal(
-    entryText({
+    entryText(read({
       type: "article-journal",
       title: "On Rivers",
       author: [{ family: "García Márquez", given: "Gabriel José" }, { family: "Berg", given: "Jan" }, { literal: "The Water Group" }],
@@ -191,12 +201,12 @@ test("a bibliography entry: authors, year, title, then where it appeared", () =>
       volume: "12",
       issue: "3",
       page: "49–51",
-    }),
+    })),
     "García Márquez, G. J., Berg, J. and The Water Group (1999). “On Rivers.” Journal of Water 12(3), pp. 49–51.",
   );
   // A chapter names its book and the book's editors; one page is "p.".
   assert.equal(
-    entryText({
+    entryText(read({
       type: "chapter",
       title: "Is It True?",
       author: [{ family: "Lewis", given: "C. S." }],
@@ -204,12 +214,15 @@ test("a bibliography entry: authors, year, title, then where it appeared", () =>
       "container-title": "Essays",
       page: "7",
       publisher: "Collins",
-    }),
+    })),
     "Lewis, C. S. (n.d.). “Is It True?” In Essays, ed. Hooper, W., p. 7. Collins.",
   );
   // An edited volume is listed under its editors; a work with nobody is listed by its title.
-  assert.equal(entryText({ type: "collection", title: "Essays", editor: [{ family: "Hooper" }, { family: "Green" }], issued: { "date-parts": [[1966]] } }), "Hooper and Green (eds.) (1966). Essays.");
-  assert.equal(entryText({ type: "book", title: "Beowulf" }), "Beowulf. (n.d.).");
-  assert.equal(referenceEntry({ type: "book", title: "Beowulf" }).titleIsContainer, true);
-  assert.equal(referenceEntry({ type: "chapter", title: "A Part" }).titleIsContainer, false);
+  assert.equal(entryText(read({ type: "collection", title: "Essays", editor: [{ family: "Hooper" }, { family: "Green" }], issued: { "date-parts": [[1966]] } })), "Hooper and Green (eds.) (1966). Essays.");
+  assert.equal(entryText(read({ type: "book", title: "Beowulf" })), "Beowulf. (n.d.).");
+  // A title is quoted when its record has a container, whatever its type, and in italics otherwise.
+  assert.equal(referenceEntry(read({ type: "book", title: "Beowulf" })).titleIsContainer, true);
+  assert.equal(referenceEntry(read({ type: "chapter", title: "A Part", "container-title": "A Whole" })).titleIsContainer, false);
+  assert.equal(referenceEntry(read({ type: "chapter", title: "A Part" })).titleIsContainer, true);
+  assert.equal(entryText(read({ type: "post-weblog", title: "A Post", "container-title": "A Blog", issued: { "date-parts": [[2020]] } })), "“A Post.” (2020). A Blog.");
 });

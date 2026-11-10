@@ -1,4 +1,3 @@
-import type { CslItem } from "./csl";
 
 // docs/CITATIONS.md, "Duplicates are caught by DOI and ISBN" — the two
 // identifiers a reference is recognised by, each in the one form the
@@ -53,17 +52,33 @@ export function normalizeIsbn(raw: string): string | null {
   return null;
 }
 
-/** CSL types that are a whole book: the only ones an ISBN identifies. */
-const WHOLE_BOOK_TYPES = new Set(["book", "collection", "report", "thesis"]);
+/**
+ * Whether an ISBN identifies this record: one with no container whose type
+ * isn't a part's by name. A chapter's or a conference paper's ISBN is its
+ * book's, and `crossref` inheritance hands a paper its proceedings' ISBN, so
+ * an `@inproceedings` with no `booktitle` would otherwise match a second
+ * paper from the same proceedings.
+ */
+export function isbnIdentifies(record: { type: string; "container-title"?: unknown }): boolean {
+  const container = record["container-title"];
+  const hasContainer = typeof container === "string" ? container.trim() !== "" : typeof container === "object" && container !== null && Boolean((container as { text?: string }).text);
+  return !hasContainer && !/^(chapter|paper-conference|article|entry|post|review)(-|$)/.test(record.type);
+}
 
-/** A field that can hold several identifiers: a hardback's and a paperback's, however they were pasted. */
+/** An ISBN as it is found in a field: its shape, so `9780631175049 (pbk.)` reads as one. */
+const ISBN_SHAPE = /(?:97[89][\s-]?)?(?:\d[\s-]?){9}[\dXx]\b/g;
+
+/**
+ * A field that can hold several identifiers: a hardback's and a paperback's,
+ * however they were pasted. Each is found by its shape, so a note beside one,
+ * `(pbk.)`, and two ISBN-10s with one space between them read as ISBNs; a
+ * field with nothing of that shape is one identifier, to be checked and
+ * refused.
+ */
 function parts(value: unknown): string[] {
-  return typeof value === "string"
-    ? value
-        .split(/[,;]|\s+(?=97[89])|\s{2,}/)
-        .map((part) => part.trim())
-        .filter(Boolean)
-    : [];
+  if (typeof value !== "string" || !value.trim()) return [];
+  const found = [...value.replace(/^\s*isbn(-1[03])?:?\s*/i, "").matchAll(ISBN_SHAPE)].map((match) => match[0].trim());
+  return found.length > 0 ? found : [value.trim()];
 }
 
 /**
@@ -72,11 +87,12 @@ function parts(value: unknown): string[] {
  *
  * - Every ISBN on a book counts, so another format of the same edition is
  *   caught.
- * - **A chapter's ISBN is its book's**, so ISBNs are read only for whole
- *   books: otherwise a second chapter of one anthology would read as a
- *   duplicate of the first. A chapter is matched by its DOI alone.
+ * - **A chapter's ISBN is its book's**, so ISBNs are read only where they
+ *   identify the record (`isbnIdentifies`): otherwise a second chapter of
+ *   one anthology would read as a duplicate of the first. A chapter is
+ *   matched by its DOI alone.
  */
-export function identifiersOf(csl: CslItem): { identifiers: Identifier[]; invalid: { scheme: IdentifierScheme; raw: string }[] } {
+export function identifiersOf(csl: { type: string; DOI?: unknown; ISBN?: unknown; "container-title"?: unknown; [field: string]: unknown }): { identifiers: Identifier[]; invalid: { scheme: IdentifierScheme; raw: string }[] } {
   const identifiers: Identifier[] = [];
   const invalid: { scheme: IdentifierScheme; raw: string }[] = [];
   const add = (scheme: IdentifierScheme, raw: string, value: string | null) => {
@@ -84,7 +100,7 @@ export function identifiersOf(csl: CslItem): { identifiers: Identifier[]; invali
     else if (!identifiers.some((other) => other.scheme === scheme && other.value === value)) identifiers.push({ scheme, value });
   };
   if (typeof csl.DOI === "string" && csl.DOI.trim()) add("DOI", csl.DOI, normalizeDoi(csl.DOI));
-  if (WHOLE_BOOK_TYPES.has(csl.type)) {
+  if (isbnIdentifies(csl)) {
     for (const raw of parts(csl.ISBN)) add("ISBN", raw, normalizeIsbn(raw));
   }
   return { identifiers, invalid };

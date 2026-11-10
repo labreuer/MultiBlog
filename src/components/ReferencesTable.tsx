@@ -44,6 +44,7 @@ import {
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
 import SearchPicker from "@/components/SearchPicker";
+import { referencePath } from "@/lib/references/keys";
 import styles from "./ReferencesTable.module.css";
 
 // docs/CITATIONS.md, "Pages" — /references, built from the shared table kit
@@ -122,7 +123,10 @@ export default function ReferencesTable({
   function handleRenameKey(row: ReferenceTableRow) {
     // A prompt(), as a tag's rename is: rare, and wide in effect. The old key
     // keeps answering, which the prompt says so nobody fears a broken link.
-    const next = window.prompt(`Rename the key "${row.key}". Links and exports that use the old key keep working.`, row.key);
+    const next = window.prompt(
+      `Rename the key "${row.key}": letters, digits and _, with :, . or - between them, as a manuscript will cite it. Links and exports that use the old key keep working.`,
+      row.key,
+    );
     if (next === null || next.trim() === row.key) return;
     run(row, () => updateReferenceKey(row.id, next), "Failed to rename the key.");
   }
@@ -156,7 +160,7 @@ export default function ReferencesTable({
       // published post and from an export.
       cell: (row) => (
         <span className={styles.keyCell}>
-          <Link href={`/references/${row.key}`}>{row.key}</Link>
+          <Link href={referencePath(row.key)}>{row.key}</Link>
           {canWrite && !row.deleted && (
             <button
               type="button"

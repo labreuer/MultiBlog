@@ -1,4 +1,4 @@
-import { normalizeKey, parseCslItem, type CslItem, type CslName } from "./csl";
+import { parseCslItem, readCsl, type CslData, type CslItem, type CslName, type CslNote } from "./csl";
 
 // docs/CITATIONS.md, "Who writes them" — references are imported by pasting
 // BibTeX, RIS or CSL-JSON, one item or many. This reads any of the three into
@@ -10,9 +10,14 @@ import { normalizeKey, parseCslItem, type CslItem, type CslName } from "./csl";
 // anything is kept. Pure and browser-safe.
 
 export type ImportedReference = {
-  /** The key the source named (`@book{radner2012,`, a CSL `id`), in the library's shape; null for none. */
+  /** The key the source named (`@book{radner2012,`, a CSL `id`), as written; null for none. */
   key: string | null;
+  /** The record as it will be stored. */
+  data: CslData;
+  /** The same record read back, for the preview. */
   item: CslItem;
+  /** What the parse cut, dropped or read as something else. */
+  notes: CslNote[];
 };
 
 export type ImportResult = {
@@ -37,7 +42,7 @@ function finish(format: ImportResult["format"], raw: { key: string | null; field
   const errors: string[] = [];
   for (const entry of raw) {
     const parsed = parseCslItem(entry.fields);
-    if (parsed.ok) references.push({ key: entry.key ? normalizeKey(entry.key) : null, item: parsed.item });
+    if (parsed.ok) references.push({ key: entry.key?.trim() || null, data: parsed.item, item: readCsl(parsed.item), notes: parsed.notes });
     else errors.push(`${entry.label}: ${parsed.error}`);
   }
   return { format, references, errors };
