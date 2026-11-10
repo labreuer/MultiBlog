@@ -11,8 +11,7 @@ import { citedPageTarget } from "@/lib/reference-cited-by";
 // everyone who sees it, and whether a reader may open the PDF is asked when
 // they follow it, as /link/<id> asks of its targets.
 //
-// It reads the session, so it is dynamic; the reference's page beside it
-// reads none and stays cached.
+// It reads the session; the reference's page beside it reads none.
 
 export default async function CitedPage({ params }: { params: Promise<{ key: string; page: string }> }) {
   const { key, page } = await params;

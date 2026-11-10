@@ -185,7 +185,7 @@ post alike:
   ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)), or taken as the page itself for a file with
   none. Anyone else, and a page the labels don't name, goes to `/references/<key>#p=49`, where
   the page's client island offers the PDF to whoever may read it. A fragment, rather than a query
-  string, keeps that page static.
+  string, since a page that reads `searchParams` can never be cached (Pages).
 - **Without one**, to `/references/<key>`.
 
 Why the route decides, and not the label: a rendering never depends on who is looking
@@ -365,13 +365,15 @@ page of it for whoever may read it (Labels, "The link").
 - **`/references`**, through the admin table kit, for signed-in members.
 - **`/references/[key]`** is public. A published post's citations link to it, and it shows what
   a bibliography prints and where the work is cited publicly.
-  - The record, and the published posts citing it (found in the `citation` table), are cached
-    like an author page (`revalidate = 60`).
+  - The record, and the published posts citing it (found in the `citation` table), read no
+    session, so the page is one a cache could hold. It has none: a dynamic route with no
+    `generateStaticParams` is rendered on every request in this version of Next, whatever its
+    `revalidate = 60` says, as an author page is ([CACHING.md](../CACHING.md), 2026-11-10).
   - What only some viewers may see comes from a client island that asks the server once the
     reader is signed in, the way `TagChips` keeps the post page static. That covers the docs and
     notes citing it, the first 20 of each with a link to `cites=` for the rest, and its PDF, at
-    the page the citation's route names (`#p=49`, read in the browser so the page stays one
-    cached page). Each list goes through its read rule, a PDF included, so a PRIVATE file is
+    the page the citation's route names (`#p=49`, read in the browser, so the server's answer
+    is the same whatever page is named). Each list goes through its read rule, a PDF included, so a PRIVATE file is
     offered only to its owners.
 - **`/references/[key]/p/[page]`** is the citation's link at a page (Labels, "The link").
 - **A key is permanent once used.** Posts link to `/references/<key>`, and Markdown exports write

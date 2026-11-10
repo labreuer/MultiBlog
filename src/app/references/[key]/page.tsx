@@ -16,10 +16,12 @@ import styles from "./page.module.css";
 
 // docs/CITATIONS.md, "Pages" — a reference's own page. **Public**: a
 // published post's citations link here, and it shows what a bibliography
-// prints and the published posts citing the work. So it reads no session and
-// is cached like an author page; what only some viewers may see (the docs
-// and notes that cite the work, its PDF) is CitedBy, a client island that
-// asks the server on open, as `TagChips` keeps the post page static.
+// prints and the published posts citing the work. So it reads no session;
+// what only some viewers may see (the docs and notes that cite the work, its
+// PDF) is CitedBy, a client island that asks the server on open, as
+// `TagChips` keeps the post page static. That keeps it a page a cache could
+// hold. It has none: with no generateStaticParams it is rendered on every
+// request, and `revalidate` below does nothing (CACHING.md, 2026-11-10).
 //
 // A key the reference used to have, or its key in another case, redirects to
 // the one it has now, the way an author's old handle does.

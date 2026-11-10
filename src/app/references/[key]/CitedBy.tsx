@@ -10,13 +10,13 @@ import styles from "./page.module.css";
 
 // docs/CITATIONS.md, "Pages" — the part of a reference's page that depends on
 // who is looking: the docs and notes citing the work, and its PDF. The page
-// is public and cached, and reads no session, so this asks the server once
-// signed in, as TagChips keeps the post page static. The server answers
-// through each list's read rule.
+// is public and reads no session, so this asks the server once signed in, as
+// TagChips keeps the post page static. The server answers through each
+// list's read rule.
 //
 // A published post links here with the page it cited in the fragment,
 // `#p=49`, and the PDF is offered at that page: a fragment rather than a
-// query string, so the page stays one cached page.
+// query string, since a page that reads searchParams can never be cached.
 
 function subscribeHash(notify: () => void) {
   window.addEventListener("hashchange", notify);
