@@ -35,7 +35,7 @@ import { DEFAULT_CHIP_STYLES } from "./types";
 //    its card tells readers about (docs/FULLTEXT.md §6).
 //  - **A comment** gets `body_text` recomputed from its `body`, in the
 //    comment style, the same way and for the same reason: neither `edited_at`
-//    nor any revision moves (docs/ENTITY_CHIPS.md, "Planned: chips in
+//    nor any revision moves (docs/ENTITY_CHIPS.md, "Chips in
 //    comments"). Its page shows the new label at its next regeneration.
 //  - **An anchor into either** (a note's stored quote, a link's or a tag's
 //    part) gets its chip records' labels from the body they point into, by

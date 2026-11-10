@@ -66,12 +66,7 @@ export async function referencesById(ids: readonly string[]): Promise<Map<string
   return new Map(rows.flatMap((row) => (toRow(row) ? [[row.id, toRow(row)!] as const] : [])));
 }
 
-/**
- * Live references matching `query`, best first: one by its DOI or ISBN when
- * the query is one, otherwise by the words of its key, abbreviation, title,
- * people, container and year. A word still being typed matches as a prefix,
- * so "radn" finds Radner.
- */
+
 /**
  * The ids of the references a cited-work filter names (docs/CITATIONS.md,
  * "Search"): each word as a prefix, ANDed, over the title (the vector's
@@ -92,9 +87,16 @@ export async function referenceIdsMatching(text: string, field: "title" | "autho
   return rows.map((row) => row.id);
 }
 
-export async function findReferences(query: string, limit: number): Promise<ReferenceRow[]> {
+/**
+ * Live references matching `query`, best first: one by its DOI or ISBN when
+ * the query is one, otherwise by the words of its key, abbreviation, title,
+ * people, container and year. A word still being typed matches as a prefix,
+ * so "radn" finds Radner. `within`, when given, keeps to those ids: a post's
+ * own works, which a comment's menu lists first.
+ */
+export async function findReferences(query: string, limit: number, within?: readonly string[]): Promise<ReferenceRow[]> {
   const q = query.trim();
-  if (!q) return [];
+  if (!q || within?.length === 0) return [];
   const doi = normalizeDoi(q);
   const isbn = normalizeIsbn(q);
   if (doi || isbn) {
@@ -102,7 +104,7 @@ export async function findReferences(query: string, limit: number): Promise<Refe
       where: doi ? { scheme: "DOI", value: doi } : { scheme: "ISBN", value: isbn! },
       select: { reference: { select: ROW_SELECT } },
     });
-    const row = held && !held.reference.deletedAt ? toRow(held.reference) : null;
+    const row = held && !held.reference.deletedAt && (!within || within.includes(held.reference.id)) ? toRow(held.reference) : null;
     return row ? [row] : [];
   }
   // Each word as a prefix, ANDed: built from the words alone, so nothing typed is tsquery syntax.
@@ -113,6 +115,7 @@ export async function findReferences(query: string, limit: number): Promise<Refe
     SELECT r.id
     FROM "reference" r, to_tsquery('public.english_unaccent', ${tsquery}) AS query
     WHERE r.deleted_at IS NULL AND r.search_vector @@ query
+      ${within ? Prisma.sql`AND r.id = ANY(${[...within]}::text[])` : Prisma.empty}
     ORDER BY ts_rank_cd(r.search_vector, query) DESC, r.key ASC
     LIMIT ${limit}`);
   const byId = await referencesById(ranked.map((row) => row.id));

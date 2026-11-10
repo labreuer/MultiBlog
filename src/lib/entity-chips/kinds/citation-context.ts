@@ -1,7 +1,8 @@
 import { prismaIncludingDeleted } from "../../prisma";
 import { citedNames, cslOf, yearOf } from "../../references/csl";
-import { referenceEntry } from "../../references/entry";
-import type { CitationContext } from "./citation";
+import type { ReferenceRow } from "../../reference-data";
+import { entryText, referenceEntry } from "../../references/entry";
+import type { CitationContext, CiteCandidate } from "./citation";
 
 // docs/CITATIONS.md, "Context" — each cited reference's label parts, deleted
 // ones included. Server-only: the browser gets the same shape from the
@@ -40,4 +41,10 @@ export async function loadCitationContext(refIds: readonly string[]): Promise<Ci
     };
   }
   return context;
+}
+
+/** Found references as a citation menu's rows, in the order given. */
+export async function citeCandidatesOf(found: readonly ReferenceRow[]): Promise<CiteCandidate[]> {
+  const context = await loadCitationContext(found.map((reference) => reference.id));
+  return found.flatMap((reference) => (context[reference.id] ? [{ work: context[reference.id], entry: entryText(reference.item) }] : []));
 }

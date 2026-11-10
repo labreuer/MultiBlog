@@ -1,17 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor, type JSONContent } from "@tiptap/react";
 import { UndoRedo } from "@tiptap/extensions";
 import { ListKeymap } from "@tiptap/extension-list";
+import { searchCommentCitable, searchCommentMentionable } from "@/app/actions/comment-chips";
 import { commentContentExtensions } from "@/lib/tiptap-schema";
 import { commentChipInputs } from "@/lib/comment-body";
+import { CITATION, type CitedWork } from "@/lib/entity-chips/kinds/citation";
+import { MENTION, type MentionUser } from "@/lib/entity-chips/kinds/mention";
+import { mergeChipContexts } from "@/lib/entity-chips/renderings";
+import type { ChipContext } from "@/lib/entity-chips/types";
 import { useChipInputs } from "@/lib/entity-chips/use-chip-inputs";
 import { useCommentChips } from "./comment-chips-context";
 import { VirtualKeyboardEnter } from "@/lib/virtual-keyboard-enter-extension";
 import { Indent } from "@/lib/indent-extension";
 import { FormatInputEvents } from "@/lib/format-input-extension";
 import EditorToolbar, { type ToolbarTool } from "./EditorToolbar";
+import { MentionSuggestions, type MentionSource } from "./MentionMenu";
+import { CiteSuggestions, type CiteSource } from "./CiteMenu";
+import CitePopover from "./CitePopover";
 import proseStyles from "@/styles/prose.module.css";
 import bodyStyles from "./CommentBody.module.css";
 import styles from "./CommentEditor.module.css";
@@ -43,6 +51,8 @@ type Props = {
   autoFocus?: boolean;
   /** The live instance, for the quote gesture's insertContent; null on unmount. */
   onEditorReady?: (editor: Editor | null) => void;
+  /** The post the comment is on: what its `@` and `[@` menus are asked of. */
+  postId: string;
   /** The comment being edited: the endpoint the editor asks about a chip the page has no record of. */
   commentId?: string;
 };
@@ -60,6 +70,7 @@ export default function CommentEditor({
   disabled = false,
   autoFocus = false,
   onEditorReady,
+  postId,
   commentId,
 }: Props) {
   // A ref rather than a captured closure: useEditor's options are read once
@@ -83,14 +94,36 @@ export default function CommentEditor({
     editor?.setEditable(!disabled);
   }, [editor, disabled]);
 
-  // docs/ENTITY_CHIPS.md, "Planned: chips in comments" — the chips' labels,
-  // in the comment style, from the page's records; an edit asks the endpoint
-  // about any chip they don't hold. A new comment has nothing stored to ask
-  // about, and its chips come with the records that put them there.
+  // docs/ENTITY_CHIPS.md, "Chips in comments" — the chips' labels, in the
+  // comment style, from the page's records; an edit asks the endpoint about
+  // any chip they don't hold. A new comment has nothing stored to ask about,
+  // and its chips come with the records that put them there: the page's, a
+  // conversion's, or a menu's (`seeded`).
   const { context: chipContext } = useCommentChips();
   const initialChips = useMemo(() => commentChipInputs(chipContext), [chipContext]);
-  const chipSurface = useMemo(() => ({ target: commentId ? { comment: commentId } : null, initial: initialChips }), [commentId, initialChips]);
+  const [seeded, setSeeded] = useState<ChipContext>({});
+  const seed = useCallback((kind: string, id: string, record: unknown) => {
+    setSeeded((previous) => mergeChipContexts(previous, { [kind]: { [id]: record } }));
+  }, []);
+  const chipSurface = useMemo(
+    () => ({ target: commentId ? { comment: commentId } : null, initial: initialChips, seeded }),
+    [commentId, initialChips, seeded],
+  );
   useChipInputs(editor, chipSurface);
+
+  // The menus ask of the post, signed in or not: the server decides whom and
+  // what this commenter is offered (src/lib/comment-chips.ts).
+  const mentions = useMemo<MentionSource>(
+    () => ({
+      search: async (query) => (await searchCommentMentionable(query, postId)).map((user) => ({ user, note: null })),
+      seed: (user: MentionUser) => seed(MENTION, user.id, user),
+    }),
+    [postId, seed],
+  );
+  const citations = useMemo<CiteSource>(
+    () => ({ search: (words) => searchCommentCitable(words, postId), seed: (work: CitedWork) => seed(CITATION, work.id, work) }),
+    [postId, seed],
+  );
 
   useEffect(() => {
     onEditorReady?.(editor);
@@ -105,6 +138,9 @@ export default function CommentEditor({
     <div className={styles.frame}>
       <EditorToolbar editor={editor} disabled={disabled} tools={COMMENT_TOOLS} />
       <EditorContent editor={editor} className={`${styles.content} ${proseStyles.prose} ${bodyStyles.body}`} />
+      <MentionSuggestions editor={editor} disabled={disabled} source={mentions} />
+      <CiteSuggestions editor={editor} disabled={disabled} source={citations} emptyQueryHeading="Cited in this post" />
+      <CitePopover editor={editor} disabled={disabled} source={citations} narrativeForm={false} />
     </div>
   );
 }

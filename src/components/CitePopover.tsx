@@ -6,13 +6,21 @@ import { useEditorState, type Editor } from "@tiptap/react";
 import { NodeSelection, type EditorState } from "@tiptap/pm/state";
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { IconX } from "@tabler/icons-react";
-import { searchCitable, type CiteCandidate } from "@/app/actions/references";
+import { searchCitable } from "@/app/actions/references";
 import { useChipSurface, useSeedChipContext } from "@/lib/entity-chips/chip-surface";
-import { CITATION, citationKind, normalizeLocator, type CitationData, type CitationItem, type CitedWork } from "@/lib/entity-chips/kinds/citation";
+import {
+  CITATION,
+  citationKind,
+  normalizeLocator,
+  type CitationData,
+  type CitationItem,
+  type CiteCandidate,
+  type CitedWork,
+} from "@/lib/entity-chips/kinds/citation";
 import { chipRenderingIn, entityChipKey } from "@/lib/entity-chips/node";
 import { ENTITY_CHIP } from "@/lib/entity-chips/types";
 import { popoverBoundsElement } from "@/lib/popover-placement";
-import { splitLocator } from "./CiteMenu";
+import { splitLocator, type CiteSource } from "./CiteMenu";
 import styles from "./CitePopover.module.css";
 
 // docs/CITATIONS.md, "The popover" — what a citation says beyond which works:
@@ -31,6 +39,11 @@ import styles from "./CitePopover.module.css";
 // Open while the editor has focus and its selection is the chip, and after
 // that while focus is in the popover: `pinned` is the chip a press inside it
 // kept open as the editor's blur lands.
+//
+// A doc's or note's popover searches the library and seeds the page's chip
+// surface. A comment's editor names no surface and hands over a `source` of
+// its own instead, and turns the narrative form off: a comment has none
+// (docs/ENTITY_CHIPS.md, "The Markdown box").
 
 const POPOVER_GAP = 4;
 const SEARCH_DEBOUNCE_MS = 200;
@@ -103,8 +116,16 @@ function FieldInput({ label, value, onCommit, inputRef }: { label: string; value
   );
 }
 
-/** "Add a work": the library searched as the `[@` menu searches it, a page included ("radner 49"). */
-function AddWork({ exclude, onPick }: { exclude: readonly string[]; onPick: (candidate: CiteCandidate, locator: string | null) => void }) {
+/** "Add a work": searched as the `[@` menu searches, a page included ("radner 49"). */
+function AddWork({
+  exclude,
+  search,
+  onPick,
+}: {
+  exclude: readonly string[];
+  search: CiteSource["search"];
+  onPick: (candidate: CiteCandidate, locator: string | null) => void;
+}) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ query: string; candidates: CiteCandidate[] }>({ query: "", candidates: [] });
   const id = useId();
@@ -113,7 +134,7 @@ function AddWork({ exclude, onPick }: { exclude: readonly string[]; onPick: (can
     if (!words) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      void searchCitable(words)
+      void search(words)
         .catch(() => [])
         .then((candidates) => {
           if (!cancelled) setResults({ query, candidates });
@@ -123,7 +144,7 @@ function AddWork({ exclude, onPick }: { exclude: readonly string[]; onPick: (can
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query]);
+  }, [query, search]);
   const shown = splitLocator(query).words && results.query === query ? results.candidates.filter((c) => !exclude.includes(c.work.id)) : [];
   return (
     <div className={styles.add}>
@@ -153,9 +174,23 @@ function AddWork({ exclude, onPick }: { exclude: readonly string[]; onPick: (can
   );
 }
 
-export default function CitePopover({ editor, disabled }: { editor: Editor; disabled?: boolean }) {
+export default function CitePopover({
+  editor,
+  disabled,
+  source,
+  narrativeForm = true,
+}: {
+  editor: Editor;
+  disabled?: boolean;
+  /** Where added works come from and where their records go. Omitted, the library and the page's chip surface. */
+  source?: CiteSource;
+  /** Whether a citation here may be in the sentence; false in a comment. */
+  narrativeForm?: boolean;
+}) {
   const surface = useChipSurface();
-  const seed = useSeedChipContext();
+  const seedSurface = useSeedChipContext();
+  const search: CiteSource["search"] = source?.search ?? searchCitable;
+  const seed = (work: CitedWork) => (source ? source.seed(work) : seedSurface(CITATION, work.id, work));
   const [pinned, setPinned] = useState<string | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const firstFieldRef = useRef<HTMLInputElement | null>(null);
@@ -232,7 +267,7 @@ export default function CitePopover({ editor, disabled }: { editor: Editor; disa
     return autoUpdate(chip, popover, update);
   }, [editor, openIid, openPos]);
 
-  if (!open || !surface) return null;
+  if (!open || (!surface && !source)) return null;
 
   /** Writes the citation's fields, as its kind stores them; a value the kind refuses changes nothing. */
   const write = (next: CitationData) => {
@@ -266,7 +301,7 @@ export default function CitePopover({ editor, disabled }: { editor: Editor; disa
 
   const narrative = open.data.form === "narrative";
   // Pandoc's narrative form holds one work, with its author shown and nothing before it (docs/CITATIONS.md, "The chip").
-  const narrativeAllowed = open.data.items.length === 1 && !open.data.items[0].prefix && !open.data.items[0].suppressAuthor;
+  const narrativeAllowed = narrativeForm && open.data.items.length === 1 && !open.data.items[0].prefix && !open.data.items[0].suppressAuthor;
 
   return createPortal(
     <div
@@ -301,7 +336,11 @@ export default function CitePopover({ editor, disabled }: { editor: Editor; disa
         <label>
           <input type="radio" name={`form-${open.iid}`} checked={!narrative} onChange={() => write({ items: open.data.items })} /> In parentheses
         </label>
-        <label title={narrativeAllowed ? undefined : "A citation in the sentence names one work, with its author and nothing before it."}>
+        <label
+          title={
+            narrativeAllowed || !narrativeForm ? undefined : "A citation in the sentence names one work, with its author and nothing before it."
+          }
+        >
           <input
             type="radio"
             name={`form-${open.iid}`}
@@ -311,6 +350,7 @@ export default function CitePopover({ editor, disabled }: { editor: Editor; disa
           />{" "}
           In the sentence
         </label>
+        {!narrativeForm && <p className={styles.note}>In a comment, a citation is always in parentheses.</p>}
       </fieldset>
       {open.data.items.map((item, index) => {
         const work = open.works[index];
@@ -370,9 +410,10 @@ export default function CitePopover({ editor, disabled }: { editor: Editor; disa
       {!narrative && (
         <AddWork
           exclude={open.data.items.map((item) => item.refId)}
+          search={search}
           onPick={(candidate, locator) => {
             keepFocus();
-            seed(CITATION, candidate.work.id, candidate.work);
+            seed(candidate.work);
             write({ items: [...open.data.items, { refId: candidate.work.id, ...(locator ? { locator } : {}) }] });
           }}
         />

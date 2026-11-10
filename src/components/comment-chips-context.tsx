@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { mergeChipContexts } from "@/lib/entity-chips/renderings";
 import type { ChipContext } from "@/lib/entity-chips/types";
 
-// docs/ENTITY_CHIPS.md, "Planned: chips in comments" — the records a page's
+// docs/ENTITY_CHIPS.md, "Chips in comments" — the records a page's
 // comment bodies label their chips from. The page hands over what it loaded
 // for every comment it shows; a card's saved edit, a composer's switch to
 // rich text and the history panel add what they were answered with, since a

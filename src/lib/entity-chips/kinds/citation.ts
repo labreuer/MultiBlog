@@ -54,6 +54,14 @@ export type CitedWork = {
 
 export type CitationContext = Record<string, CitedWork>;
 
+/** One row of a citation menu: the work, and its bibliography entry for the row. */
+export type CiteCandidate = {
+  /** What a citation of this work is labelled from: the record a menu hands the editor as it inserts the chip. */
+  work: CitedWork;
+  /** The work's bibliography entry, for the menu's row. */
+  entry: string;
+};
+
 export const UNKNOWN_WORK = "unknown work";
 
 const MAX_ID_LENGTH = 64;

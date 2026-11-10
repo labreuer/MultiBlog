@@ -1,9 +1,10 @@
+import type { Prisma } from "@/generated/prisma/client";
 import type { Actor } from "@/lib/actor";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserReadFile } from "@/lib/file-authz";
 import { prisma } from "@/lib/prisma";
 import { resolveChipTarget, type ChipTarget } from "../context-for";
-import type { MentionCandidate } from "./mention";
+import type { MentionCandidate, MentionUser } from "./mention";
 import { mentionableUsersWhere } from "./mention-rule";
 
 // docs/MENTIONS.md, "The menu" — the people a mention menu lists for one
@@ -13,7 +14,8 @@ import { mentionableUsersWhere } from "./mention-rule";
 
 export const MENTION_MENU_LIMIT = 8;
 
-const SELECT = {
+/** What a menu row is built from, by `mentionUserOf`. */
+export const MENTION_USER_SELECT = {
   id: true,
   name: true,
   adminInitials: true,
@@ -21,6 +23,32 @@ const SELECT = {
   role: true,
   worksFor: { select: { name: true, slug: true } },
 } as const;
+
+type MentionUserRow = {
+  id: string;
+  name: string | null;
+  adminInitials: string;
+  slug: string;
+  worksFor: { name: string | null; slug: string } | null;
+};
+
+/** A selected account as a mention's record. */
+export function mentionUserOf(user: MentionUserRow): MentionUser {
+  return {
+    id: user.id,
+    name: user.name,
+    initials: user.adminInitials,
+    slug: user.slug,
+    deleted: false,
+    botOf: user.worksFor ? user.worksFor.name?.trim() || user.worksFor.slug : null,
+  };
+}
+
+/** A query as the menus match it: a name containing it, or a handle containing it hyphenated. */
+export function mentionMatching(query: string): Prisma.UserWhereInput {
+  const q = query.trim();
+  return q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { slug: { contains: q.toLowerCase().replace(/\s+/g, "-") } }] } : {};
+}
 
 /**
  * Up to `MENTION_MENU_LIMIT` people `actor` may mention in `target` whose
@@ -38,10 +66,7 @@ export async function mentionCandidates(actor: Actor, target: ChipTarget, query:
   const where = await mentionableUsersWhere(actor, resolved.doc?.id ?? null);
   if (!where) return [];
 
-  const q = query.trim();
-  const matching = q
-    ? { OR: [{ name: { contains: q, mode: "insensitive" as const } }, { slug: { contains: q.toLowerCase().replace(/\s+/g, "-") } }] }
-    : {};
+  const matching = mentionMatching(query);
 
   const docId = resolved.doc?.id ?? null;
   const participantIds = docId
@@ -59,7 +84,7 @@ export async function mentionCandidates(actor: Actor, target: ChipTarget, query:
     participantIds.length > 0
       ? await prisma.user.findMany({
           where: { AND: [where, matching, { id: { in: participantIds } }] },
-          select: SELECT,
+          select: MENTION_USER_SELECT,
           orderBy: { name: "asc" },
           take: MENTION_MENU_LIMIT,
         })
@@ -68,7 +93,7 @@ export async function mentionCandidates(actor: Actor, target: ChipTarget, query:
     participants.length < MENTION_MENU_LIMIT
       ? await prisma.user.findMany({
           where: { AND: [where, matching, { id: { notIn: participantIds } }] },
-          select: SELECT,
+          select: MENTION_USER_SELECT,
           orderBy: { name: "asc" },
           take: MENTION_MENU_LIMIT - participants.length,
         })
@@ -76,14 +101,7 @@ export async function mentionCandidates(actor: Actor, target: ChipTarget, query:
 
   return Promise.all(
     [...participants, ...others].map(async (user) => ({
-      user: {
-        id: user.id,
-        name: user.name,
-        initials: user.adminInitials,
-        slug: user.slug,
-        deleted: false,
-        botOf: user.worksFor ? user.worksFor.name?.trim() || user.worksFor.slug : null,
-      },
+      user: mentionUserOf(user),
       canRead: resolved.doc
         ? await canUserReadDoc(user.id, user.role, resolved.doc)
         : resolved.file

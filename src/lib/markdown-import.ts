@@ -307,7 +307,7 @@ const CITATION_TOKEN = "citation";
  * The citation tokenizer. With `bare`, a doc's, which also reads the
  * narrative `@key`; without it, a comment's, which reads only the bracketed
  * forms, since "@Andrew, see this" is how one commenter addresses another
- * (docs/ENTITY_CHIPS.md, "Planned: chips in comments").
+ * (docs/ENTITY_CHIPS.md, "Chips in comments").
  */
 function citationParsing(bare: boolean) {
   return Extension.create({
@@ -610,7 +610,7 @@ const commentMarkdownShims = [
   }),
 ];
 
-// docs/ENTITY_CHIPS.md, "Planned: chips in comments" — the comment parse
+// docs/ENTITY_CHIPS.md, "Chips in comments" — the comment parse
 // reads a mention's link and the bracketed citations, never a bare `@key`,
 // into the placeholders a doc's parse makes; the server resolves them under
 // the comment's own rule for who may be named (comment-chips.ts). Its writer
