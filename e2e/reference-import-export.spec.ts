@@ -6,7 +6,7 @@ import {
   createTestDoc,
   createTestPost,
   deleteTestDoc,
-  deleteTestImportRows,
+  deleteTestImportReceipts,
   deleteTestPost,
   deleteTestReferences,
   getCitationSources,
@@ -78,7 +78,7 @@ test("an import replaces a duplicate's record from the preview, and a deleted du
   } finally {
     await page.goto("about:blank");
     await deleteTestReferences(prefix);
-    await deleteTestImportRows(prefix);
+    await deleteTestImportReceipts(prefix);
     await agent.dispose();
   }
 });
@@ -118,7 +118,7 @@ test("an import interrupted part-way resumes after a reload, a batch the server 
   } finally {
     await page.goto("about:blank");
     await deleteTestReferences(prefix);
-    await deleteTestImportRows(prefix);
+    await deleteTestImportReceipts(prefix);
   }
 });
 
@@ -151,7 +151,7 @@ test("one import resumed from two tabs at once creates each record once, and ans
     await second.close();
     await page.goto("about:blank");
     await deleteTestReferences(prefix);
-    await deleteTestImportRows(prefix);
+    await deleteTestImportReceipts(prefix);
   }
 });
 

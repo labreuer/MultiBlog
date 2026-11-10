@@ -23,7 +23,7 @@ import styles from "./ReferencesTable.module.css";
 // library already holds it, with the choice of replacing that record. Import
 // then sends the records in batches, one server action each, with a running
 // count. The batches still to send are kept in IndexedDB, so a reload offers
-// the import to resume; the report is read from the rows the server keeps.
+// the import to resume; the report is read from the receipts the server keeps.
 
 /** How many records one preview question asks about. */
 const PREVIEW_CHUNK = 500;
@@ -126,7 +126,7 @@ export default function ReferenceImport({ userId }: { userId: string }) {
     await send(importId, batches, records.length);
   }
 
-  /** Sends `batches` in order, dropping each from what is kept once answered, then reads the report from the server's rows. */
+  /** Sends `batches` in order, dropping each from what is kept once answered, then reads the report from the server's receipts. */
   async function send(importId: string, batches: PendingRecord[][], total: number) {
     setFailure(null);
     setPending(null);

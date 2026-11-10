@@ -9,7 +9,7 @@ import {
   deleteTestDoc,
   deleteTestFile,
   deleteTestPost,
-  deleteTestImportRows,
+  deleteTestImportReceipts,
   deleteTestReferences,
   deleteTestUser,
   setTestReferenceFile,
@@ -169,7 +169,7 @@ test("the library's page: pasted BibTeX is imported once, listed, and a second p
   } finally {
     await page.goto("about:blank");
     await deleteTestReferences(prefix);
-    await deleteTestImportRows(prefix);
+    await deleteTestImportReceipts(prefix);
   }
 });
 

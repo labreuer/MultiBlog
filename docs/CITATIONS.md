@@ -736,7 +736,7 @@ export that is read, so the refusal says which, not just "That isn't BibTeX, RIS
 - **Parsed in the browser, checked on the server.** Import sends the parsed records in
   batches, one server action each, with a running count (`cutBatches`,
   `src/lib/references/batches.ts`). Every record is sent, a duplicate included, so each has a
-  row and the report covers the whole import. Each record is sent as `parseCslItem`
+  receipt and the report covers the whole import. Each record is sent as `parseCslItem`
   built it in the browser, with its source key and its `shorthand`, so one is never larger than
   a stored record may be. A batch is at most a hundred records and at most 500,000 bytes as
   UTF-8, half of Next's 1 MB body limit, which counts bytes: a record may be 20,000 characters
@@ -752,27 +752,30 @@ export that is read, so the refusal says which, not just "That isn't BibTeX, RIS
   discard. Resuming starts at the oldest batch with no answer, the one in flight when the page
   went away.
 - **A record is imported once.** Each carries the import's id and its place in the import, and
-  the server writes a row for it, `reference_import_record` (the user, the import's id, the
-  place, the outcome and the key).
-  - A record sent again answers what its row says: after a reload, from a second tab, or in a
+  the server writes a receipt for it, `reference_import_receipt` (the user, the import's id, the
+  place, the outcome and the key). The record itself is written straight into the library, in
+  the same transaction; a receipt only says what became of it.
+  - A record sent again answers what its receipt says: after a reload, from a second tab, or in a
     batch the server died part-way through. A record with no DOI or ISBN would otherwise be
     added twice.
-  - **The row is the first write of the transaction** that creates or replaces the reference.
-    The three are unique together, so of two sends at once the second waits on the first's
-    row, fails, and reads it. Written later in the transaction, the second would fail first on
+  - **The receipt is the first write of the transaction** that creates or replaces the
+    reference. The three are unique together, so of two sends at once the second waits on the
+    first's receipt, fails, and reads it. Written later in the transaction, the second would fail first on
     the reference's key or identifier, and report the record as a duplicate of its own first
     send.
-  - **Every outcome has a row.** A record refused, or reported as a duplicate, gets its row
-    written alone, there being no reference to write it with. So a resumed import's report is
-    read from the rows, and the browser keeps no copy of it.
+  - **Every outcome has a receipt.** A record refused, or reported as a duplicate, gets its
+    receipt written alone, there being no reference to write it with. So a resumed import's
+    report is read from the receipts, and the browser keeps no copy of it.
   - **But for a failure another try might not meet**, such as a key taken while the record was
-    being saved. That writes no row, and the record is tried again when it is sent again.
-  - Rejected: a row per batch, claimed as `src/lib/api/idempotency.ts` claims a write. That
+    being saved. That writes no receipt, and the record is tried again when it is sent again.
+  - Rejected: a receipt per batch, claimed as `src/lib/api/idempotency.ts` claims a write. That
     helper runs a failed or abandoned claim again, which is right for one write and wrong for a
     hundred of which sixty are already in.
-  - Rows are kept a week, and an unfinished import is offered for that week and then dropped,
-    since past it a resent record could no longer be told from a new one. A user's older rows
-    are deleted when they next send a batch, so nothing sweeps them.
+  - Receipts are kept a week, and an unfinished import is offered for that week and then
+    dropped, since past it a resent record could no longer be told from a new one. A user's
+    older receipts are deleted when they next send a batch, so nothing sweeps them.
+    - A receipt answers only a record of its own import: a second import of the same file has
+      another id, and finds what the library holds by DOI and ISBN, as any import does.
 - **An identifier that fails its check drops the identifier, not the record**, and the preview
   says so, so it can be corrected in the box first. Kept without it, the record has nothing to
   catch a later copy of the work by. An ISBN field keeps the ISBNs that pass, written as
@@ -967,7 +970,7 @@ reads a public page doesn't fetch four files for each work on it.
   deleted one; and every download, an attachment under its name, behind its gate. And in
   `e2e/references.spec.ts`, the preview and a key in another case redirecting to its own.
   - Not covered: a batch the server died part-way through, with only some of its records
-    written. Its rows answer it record by record, as they answer the batch above.
+    written. Its receipts answer it record by record, as they answer the batch above.
   - Not covered: `Frank_1970` not finding `FrankX1970`, an alias with an accented capital, and
     a rename in case alone, which need the database and so no unit test.
 - **Not yet checked by hand:**

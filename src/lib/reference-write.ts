@@ -164,7 +164,7 @@ export async function createReference(actor: Actor, input: ReferenceInput): Prom
   }
 }
 
-/** The insert itself, inside the caller's transaction: an import's runs after its record's row. */
+/** The insert itself, inside the caller's transaction: an import's runs after its record's receipt. */
 async function insertReference(
   tx: Prisma.TransactionClient,
   actor: Actor,
@@ -239,7 +239,7 @@ export async function replaceReference(
 /**
  * The replacement, in one transaction, and the relabelling once it commits.
  * `around` runs inside the same transaction, first and last: an import's
- * claim on its record's row, and the row's outcome.
+ * claim on its record's receipt, and the receipt's outcome.
  */
 async function replaceRecord(
   actor: Actor,
@@ -410,10 +410,10 @@ export function importBatchOf(raw: unknown): ImportRecordInput[] {
   });
 }
 
-type ImportRow = { place: number; outcome: string; key: string | null; detail: unknown };
+type ImportReceipt = { place: number; outcome: string; key: string | null; detail: unknown };
 
-/** A row as the outcome it records. */
-function outcomeOf(row: ImportRow): ImportOutcome {
+/** A receipt as the outcome it records. */
+function outcomeOf(row: ImportReceipt): ImportOutcome {
   const detail = (row.detail && typeof row.detail === "object" ? row.detail : {}) as Record<string, unknown>;
   const title = typeof detail.title === "string" ? detail.title : "";
   switch (row.outcome) {
@@ -428,7 +428,7 @@ function outcomeOf(row: ImportRow): ImportOutcome {
   }
 }
 
-/** An outcome as its row's columns. */
+/** An outcome as its receipt's columns. */
 function rowOf(outcome: ImportOutcome): { outcome: string; key: string | null; detail: Prisma.InputJsonValue } {
   const { place: _place, status, ...rest } = outcome;
   void _place;
@@ -447,56 +447,57 @@ const isUniqueViolation = (err: unknown) => (err as { code?: unknown })?.code ==
  * it; one that can't be kept is reported with why; and the rest are created,
  * each with its source's key where that fits and is free.
  *
- * A record sent before answers what its row says, so nothing is added twice.
+ * A record sent before answers what its receipt says, so nothing is added
+ * twice.
  */
 export async function importReferenceBatch(actor: Actor, importId: string, records: readonly ImportRecordInput[]): Promise<ImportOutcome[]> {
   requireWriter(actor);
-  // A user's rows past their week, deleted as they next import, so nothing sweeps them.
-  await prisma.referenceImportRecord.deleteMany({ where: { userId: actor.userId, createdAt: { lt: new Date(Date.now() - IMPORT_KEPT_MS) } } });
+  // A user's receipts past their week, deleted as they next send a batch, so nothing sweeps them.
+  await prisma.referenceImportReceipt.deleteMany({ where: { userId: actor.userId, createdAt: { lt: new Date(Date.now() - IMPORT_KEPT_MS) } } });
   const outcomes: ImportOutcome[] = [];
   for (const record of records) outcomes.push(await importOne(actor, importId, record));
   return outcomes;
 }
 
-/** The row for this record, if it has one. */
-async function rowFor(actor: Actor, importId: string, place: number): Promise<ImportOutcome | null> {
-  const row = await prisma.referenceImportRecord.findUnique({
+/** The receipt for this record, if it has one. */
+async function receiptFor(actor: Actor, importId: string, place: number): Promise<ImportOutcome | null> {
+  const row = await prisma.referenceImportReceipt.findUnique({
     where: { userId_importId_place: { userId: actor.userId, importId, place } },
     select: { place: true, outcome: true, key: true, detail: true },
   });
   return row ? outcomeOf(row) : null;
 }
 
-/** An outcome with no reference to write it with, its row written alone; of two sends at once, the second reads the first's. */
-async function recordAlone(actor: Actor, importId: string, outcome: ImportOutcome): Promise<ImportOutcome> {
+/** An outcome with no reference to write it with, its receipt written alone; of two sends at once, the second reads the first's. */
+async function receiptAlone(actor: Actor, importId: string, outcome: ImportOutcome): Promise<ImportOutcome> {
   try {
-    await prisma.referenceImportRecord.create({ data: { userId: actor.userId, importId, place: outcome.place, ...rowOf(outcome) } });
+    await prisma.referenceImportReceipt.create({ data: { userId: actor.userId, importId, place: outcome.place, ...rowOf(outcome) } });
     return outcome;
   } catch (err) {
     if (!isUniqueViolation(err)) throw err;
-    return (await rowFor(actor, importId, outcome.place)) ?? outcome;
+    return (await receiptFor(actor, importId, outcome.place)) ?? outcome;
   }
 }
 
 async function importOne(actor: Actor, importId: string, record: ImportRecordInput): Promise<ImportOutcome> {
-  const answered = await rowFor(actor, importId, record.place);
+  const answered = await receiptFor(actor, importId, record.place);
   if (answered) return answered;
 
   const parsed = parseCslItem(record.csl);
-  if (!parsed.ok) return recordAlone(actor, importId, { place: record.place, status: "refused", title: "", error: parsed.error });
+  if (!parsed.ok) return receiptAlone(actor, importId, { place: record.place, status: "refused", title: "", error: parsed.error });
   const { data } = withoutFailedIdentifiers(parsed.item);
   const { identifiers } = identifiersOf(data);
   const title = titleOf(readCsl(data));
   const place = record.place;
 
-  // The row first: of two sends of this record at once, the second waits here on the
+  // The receipt first: of two sends of this record at once, the second waits here on the
   // first's, fails, and reads it, rather than failing later on the reference's key or
   // identifier and reporting the record as a duplicate of its own first send.
   const where = { userId_importId_place: { userId: actor.userId, importId, place } };
   const claim = async (tx: Prisma.TransactionClient) => {
-    await tx.referenceImportRecord.create({ data: { userId: actor.userId, importId, place, outcome: "pending", detail: {} } });
+    await tx.referenceImportReceipt.create({ data: { userId: actor.userId, importId, place, outcome: "pending", detail: {} } });
   };
-  const settle = (tx: Prisma.TransactionClient, done: ImportOutcome) => tx.referenceImportRecord.update({ where, data: rowOf(done) });
+  const settle = (tx: Prisma.TransactionClient, done: ImportOutcome) => tx.referenceImportReceipt.update({ where, data: rowOf(done) });
   try {
     if (record.replace) {
       const target = record.replace;
@@ -522,20 +523,20 @@ async function importOne(actor: Actor, importId: string, record: ImportRecordInp
     });
   } catch (err) {
     if (err instanceof ApiError && err.code === "duplicate") {
-      return recordAlone(actor, importId, { place, status: "duplicate", key: String(err.details.key), title, deleted: err.details.deleted === true });
+      return receiptAlone(actor, importId, { place, status: "duplicate", key: String(err.details.key), title, deleted: err.details.deleted === true });
     }
     if (err instanceof ApiError && (err.code === "invalid" || err.code === "not_found")) {
-      return recordAlone(actor, importId, { place, status: "refused", title, error: err.message });
+      return receiptAlone(actor, importId, { place, status: "refused", title, error: err.message });
     }
     if (err instanceof ApiError) {
       // A failure another try might not meet, such as a key taken while this was saved: no
-      // row, so the record is tried again when it is sent again.
+      // receipt, so the record is tried again when it is sent again.
       return { place, status: "refused", title, error: err.message };
     }
     if (isUniqueViolation(err)) {
-      // This record's row, written by another send of it; or a key or an identifier taken as
+      // This record's receipt, written by another send of it; or a key or an identifier taken as
       // this was saved, which another try may not meet.
-      const row = await rowFor(actor, importId, place);
+      const row = await receiptFor(actor, importId, place);
       if (row) return row;
       return { place, status: "refused", title, error: "Another write reached that key or work as this was saved; import it again." };
     }
@@ -558,10 +559,10 @@ async function refuseReplacingMore(tx: Prisma.TransactionClient, identifiers: Id
   if (holders.size > 1) throw invalid(`That record matches ${[...holders.values()].join(" and ")}, by its DOI and its ISBN, so it replaces neither.`);
 }
 
-/** An import's report, read from its rows (docs/CITATIONS.md, "Every outcome has a row"): the browser keeps no copy of it. */
+/** An import's report, read from its receipts (docs/CITATIONS.md, "Every outcome has a receipt"): the browser keeps no copy of it. */
 export async function importReport(actor: Actor, importId: string): Promise<ImportOutcome[]> {
   requireWriter(actor);
-  const rows = await prisma.referenceImportRecord.findMany({
+  const rows = await prisma.referenceImportReceipt.findMany({
     where: { userId: actor.userId, importId },
     orderBy: { place: "asc" },
     select: { place: true, outcome: true, key: true, detail: true },

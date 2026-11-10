@@ -1262,10 +1262,10 @@ export async function countTestReferences(keyPrefix: string): Promise<number> {
   return prisma.reference.count({ where: { key: { startsWith: keyPrefix } } });
 }
 
-/** An import's rows whose record named this e2e prefix in its key or title: what an import spec leaves behind. */
-export async function deleteTestImportRows(prefix: string): Promise<void> {
-  if (!/^e2e[a-z0-9-]{4,}$/.test(prefix)) throw new Error(`deleteTestImportRows: "${prefix}" isn't an e2e prefix.`);
-  await prisma.$executeRaw`DELETE FROM reference_import_record WHERE key LIKE ${`${prefix}%`} OR detail->>'title' LIKE ${`%${prefix}%`}`;
+/** An import's receipts whose record named this e2e prefix in its key or title: what an import spec leaves behind. */
+export async function deleteTestImportReceipts(prefix: string): Promise<void> {
+  if (!/^e2e[a-z0-9-]{4,}$/.test(prefix)) throw new Error(`deleteTestImportReceipts: "${prefix}" isn't an e2e prefix.`);
+  await prisma.$executeRaw`DELETE FROM reference_import_receipt WHERE key LIKE ${`${prefix}%`} OR detail->>'title' LIKE ${`%${prefix}%`}`;
 }
 
 /** Ties a test reference to a file, or unties it: the state the reference pickers leave, set directly. */
@@ -2883,7 +2883,7 @@ const handlers = {
   setTestReferenceDeleted,
   getTestReferenceTitle,
   countTestReferences,
-  deleteTestImportRows,
+  deleteTestImportReceipts,
   setTestReferenceFile,
   getTestReference,
   getDocChipIids,

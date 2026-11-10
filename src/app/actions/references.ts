@@ -62,7 +62,7 @@ export async function importReferenceBatchAction(importId: unknown, records: unk
   return outcomes;
 }
 
-/** An import's report, from the rows its records left: every outcome so far, in the import's order. */
+/** An import's report, from the receipts its records left: every outcome so far, in the import's order. */
 export async function importReportAction(importId: unknown): Promise<ImportOutcome[]> {
   const actor = await requireActor();
   return Promise.resolve()
