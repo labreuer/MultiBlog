@@ -282,6 +282,9 @@ export const deleteTestImportReceipts = (...args: Parameters<DbHandlers["deleteT
 export const ageTestImportReceipts = (...args: Parameters<DbHandlers["ageTestImportReceipts"]>): Promise<void> => call("ageTestImportReceipts", ...args);
 export const setTestReferenceFile = (...args: Parameters<DbHandlers["setTestReferenceFile"]>): Promise<void> =>
   call("setTestReferenceFile", ...args);
+export const fillTestFileMetadata = (...args: Parameters<DbHandlers["fillTestFileMetadata"]>): Promise<string[] | null> =>
+  call("fillTestFileMetadata", ...args);
+export const addTestReferenceAlias = (...args: Parameters<DbHandlers["addTestReferenceAlias"]>): Promise<void> => call("addTestReferenceAlias", ...args);
 export const getCitationSources = (...args: Parameters<DbHandlers["getCitationSources"]>): Promise<string[]> =>
   call("getCitationSources", ...args);
 export const getReferenceId = (...args: Parameters<DbHandlers["getReferenceId"]>) => call("getReferenceId", ...args);

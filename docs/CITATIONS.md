@@ -20,10 +20,11 @@ and export"). Everything below not listed here is still a plan: Later.
   three forms with their narrative
   and author-suppressed shapes, numbering by first appearance, the year-then-key
   disambiguation of a shared abbreviation, the per-work fallback to author-date for a
-  reference with no abbreviation, and Pandoc's syntax on the way out. A citation at a page
-  links, in a doc and a post alike, to `/references/<key>/p/<page>`, which sends whoever
-  follows it to the PDF at that page if they may open it, and to the reference's page
-  otherwise (Labels, "The link").
+  reference with no abbreviation, and Pandoc's syntax on the way out. A citation of one work
+  at a page links, in a doc and a post alike, to `/references/<key>/p/<page>`, which sends
+  whoever follows it to the PDF at that page if they may open it, and to the reference's page
+  otherwise; a citation of several links to `/references/<key>,<key>,…`, the page listing them
+  all (Labels, "The link").
 - **Its context:** `citation-context.ts` loads the cited references, deleted ones included.
   The chip-context endpoint answers for any work asked about, a reference's record being
   public.
@@ -89,7 +90,9 @@ and export"). Everything below not listed here is still a plan: Later.
   it, the abbreviation, the DOI, ISBN and URL, and the published posts citing it. A key the
   reference used to have redirects to its current one. `CitedBy.tsx`, a client island, asks
   `referenceCitedBy` (`src/lib/reference-cited-by.ts`) for the docs and notes citing it and its
-  PDF, each through its read rule, and offers the PDF at the page a post's link names.
+  PDF, each through its read rule, and offers the PDF at the page a post's link names. The
+  same route lists several works, `/references/<key>,<key>,…`, warning of the keys nothing
+  answers to (Pages, below).
 - **The entry format:** `src/lib/references/entry.ts`, the one bibliography entry the house
   styles share.
 - **MCP:** `find_refs` and `create_ref` (`src/lib/mcp/tools/references.ts`). The names are
@@ -175,18 +178,39 @@ or link reads one.
 **Refresh** (the kit's step 1, item 10): a reference's record changes. Nothing about a PDF calls
 for one, since the link below decides when it is followed.
 
-**The link.** A citation links to its first work, the same for every reader, in a doc and in a
-post alike:
+**The link.** A citation links to the same place for every reader, in a doc and in a post
+alike. Each work it names counts once, in the order first named, at the first page of the first
+item naming it that has a locator, as `firstPage` reads one, so `[@a; @a, p. 51]` links to
+`/references/a/p/51`. `render` in `citation.ts` works that out, and links by the count of
+distinct works.
 
-- **With a page**, to `/references/<key>/p/<first page>`, which renders nothing
-  (`src/app/references/[key]/p/[page]/page.tsx`, `citedPageTarget` in
+- **One work, with a page**, to `/references/<key>/p/<first page>` (`citedPagePath`), which
+  renders nothing (`src/app/references/[key]/p/[page]/page.tsx`, `citedPageTarget` in
   `src/lib/reference-cited-by.ts`). A reader who may open the work's PDF, under the files' read
   rule, is sent to `/pdf/<slug>#page=<sheet>`, the sheet found by the file's `pageLabels`
   ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)), or taken as the page itself for a file with
   none. Anyone else, and a page the labels don't name, goes to `/references/<key>#p=49`, where
   the page's client island offers the PDF to whoever may read it. A fragment, rather than a query
-  string, keeps that page static.
-- **Without one**, to `/references/<key>`.
+  string, since a page that reads `searchParams` can never be cached (Pages).
+- **One work without one**, to `/references/<key>`. This includes
+  `[@radner2012, p. 49; @radner2012, p. 51]`, which names one work.
+- **Two or more works**, to the page listing them (Pages), `/references/<key>,<key>,…`, with
+  each work's page in the fragment by its place (`citedWorksPath`):
+  `/references/wimsatt1986,wimsatt1997,wimsatt2000#p=12,,3` for page 12 of the first work and
+  page 3 of the third.
+  - A work cited with no page has nothing at its place, commas at the end are left off, and a
+    citation with no page at all has no fragment.
+  - A fragment, as `#p=49` is on one work's page, so the server's answer for a list is the same
+    whatever pages are named.
+  - **By position, not by key** (`#wimsatt1986=12`). A post freezes its link. When a key in it
+    is renamed later, the list redirects to the new key and the browser keeps the fragment as it
+    was written, so a page named by the old key would be lost. A position survives a rename, and
+    a key that isn't found keeps its place. The cost is a fragment that says less to someone
+    reading it.
+  - **Not through `/references/<key>/p/<page>`.** That route sends a reader into one PDF. A list
+    has a PDF per work, so its page offers each one under its work, at the page cited.
+  - A citation names at most `MAX_LIST_KEYS` works (`MAX_ITEMS` is set from it), so its list is
+    always one the page takes.
 
 Why the route decides, and not the label: a rendering never depends on who is looking
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md), rule 2), and a link straight to a PDF would show every
@@ -365,14 +389,73 @@ page of it for whoever may read it (Labels, "The link").
 - **`/references`**, through the admin table kit, for signed-in members.
 - **`/references/[key]`** is public. A published post's citations link to it, and it shows what
   a bibliography prints and where the work is cited publicly.
-  - The record, and the published posts citing it (found in the `citation` table), are cached
-    like an author page (`revalidate = 60`).
+  - The record, and the published posts citing it (found in the `citation` table), read no
+    session, so the page is one a cache could hold. It has none: a dynamic route with no
+    `generateStaticParams` is rendered on every request in this version of Next, whatever its
+    `revalidate = 60` says, as an author page is ([CACHING.md](../CACHING.md), 2026-11-10).
   - What only some viewers may see comes from a client island that asks the server once the
     reader is signed in, the way `TagChips` keeps the post page static. That covers the docs and
     notes citing it, the first 20 of each with a link to `cites=` for the rest, and its PDF, at
-    the page the citation's route names (`#p=49`, read in the browser so the page stays one
-    cached page). Each list goes through its read rule, a PDF included, so a PRIVATE file is
+    the page the citation's route names (`#p=49`, read in the browser, so the server's answer
+    is the same whatever page is named). Each list goes through its read rule, a PDF included, so a PRIVATE file is
     offered only to its owners.
+- **`/references/<key>,<key>,…`** lists several works, where a citation of several links
+  (Labels, "The link"). The same route serves it (`src/app/references/[key]/page.tsx`), so a
+  list costs no second route, and a key in another case or an old alias still redirects.
+  - **The load.** A list goes through one call to `referencesByKeys(parts)`, which answers by
+    each key as it was asked, and then `referencesById` for the rows, deleted ones included. The
+    load is wrapped in React's `cache()`, so `generateMetadata` and the page share one lookup;
+    nothing else spares the second, the page having no cache.
+  - **A list in which at least one key names a work is a page**, and one in which none does is a
+    404, as a single unknown key is. A key whose record can't be read counts as not found:
+    `referencesByKeys` finds it and `referencesById` drops it, and the single page is a 404 for
+    it.
+  - **The keys nothing answered to are reported at the top**, in a box with `--warning`'s
+    border holding the page's full address, from `appUrl(path)`, with its keys as they were
+    asked and not percent-encoded. Every character a library key may hold stands in a path as it
+    is, so what is shown is the address and is also readable. It is text, not a link. Each key
+    nothing answered to is in `--error`, and carries a visually hidden "(not found)", since
+    colour alone fails WCAG 1.4.1. Under it: "Keys in red were not found in the database." The
+    works found are listed below it as usual.
+    - **The box sits on the page's background, with no fill.** `--error` on `--fill-warning` is
+      4.4:1 in the light theme, under the 4.5:1 WCAG AA asks of text; on the page it is 5:1.
+      `--danger` passes on that fill but is the token for delete controls.
+    - **What a stranger can make the box show** is at most 20 keys of 80 characters each, in
+      letters, digits and `_`, `:`, `.` and `-`, under a line saying they were not found.
+      Nothing else in an address reaches the page: a part that is no library key is a 404, and
+      the `~` form never renders.
+  - **One redirect, to the list as it should be written.** If a found key is an old alias or in
+    another case, or a work is named twice (by two keys, or by one key twice), the page redirects
+    permanently to the list written with each found work's current key, once, in the order first
+    named. A key nothing answered to stays where it was first written, as it was written there,
+    once (a repeat in another case included), so the warning still shows it. A list that comes
+    down to one key, such as `a,a`, redirects to `/references/a`. Dropping a repeat moves the
+    keys after it up one place, and their pages in `#p=` with them; no citation writes such a
+    list. A browser keeps the fragment across the redirect, so `#p=` survives a renamed key.
+  - **What it shows:** a kicker, `References · <key>, <key>, …`, and an `<h1>` naming how many
+    works it lists; for each work, in order, a `<section>` labelled by its title, an `<h2>` here,
+    holding what the single page shows (its entry, its details table with downloads, the
+    removed-from-the-library line for a deleted one, and its `CitedBy`); then one "Cited in
+    posts" list of the published posts citing any of the works, in the order every listing uses,
+    rather than one per work, which would repeat a post citing several of them under each.
+  - **`CitedBy` on a list** takes two more props, and without them is what it is on one work's
+    page. `headingLevel` makes "Cited in docs" and "Cited in notes" `<h3>`s under a work's
+    `<h2>`. `position`, the work's place in the list as written, is where the island reads its
+    work's page in `#p=`, and it offers the PDF at it, so `#p=49` on a list names the first
+    work's page alone. With a `position` it drops its own `aria-label`: the work's section is the
+    named region, and twenty regions of one name tell a screen reader nothing. Each island asks
+    for its own answer, up to `MAX_LIST_KEYS` server-action calls on one page; one batched action
+    is the alternative if a long list's calls are a problem ([PERFORMANCE.md](../PERFORMANCE.md),
+    "A reference list's page asks once per work").
+  - **Its title** is the first work's title, then "and 2 more".
+  - **Not indexed:** `robots: { index: false }` on a list, as `/search` has. Every order of the
+    same keys is its own address, and each repeats the single pages. A single key's page stays
+    indexed.
+  - **No cache, as the single page has none.** A list is rendered on every request, so it shows
+    an edit, or a work added under a key once reported missing, at once. It reads no session and
+    no `searchParams`, so it stays a page a cache could hold. **Before the route gains a cache,
+    lists need a rule**: every order of the same keys, and every list with an unknown key beside
+    a real one, is a 200 page a stranger could add to it.
 - **`/references/[key]/p/[page]`** is the citation's link at a page (Labels, "The link").
 - **A key is permanent once used.** Posts link to `/references/<key>`, and Markdown exports write
   `[@key]`. So renaming a key keeps the old one redirecting through a key history, as
@@ -699,11 +782,45 @@ export that is read, so the refusal says which, not just "That isn't BibTeX, RIS
     through `findUnique` or `in`.
   - Rejected: Prisma's `mode: "insensitive"`. It is `ILIKE`, in which the `_` a key may now hold
     matches any character, so `Frank_1970` would also find `FrankX1970`.
+- **A list of keys is one segment, the keys joined by commas**: `/references/<key>,<key>,…`
+  (Pages), each percent-encoded as `referencePath` encodes one, in the order the citation names
+  them, each work once. `parseReferenceSegment` (`keys.ts`) reads a decoded segment as one key,
+  a list, or nothing, by these rules:
+  - **A comma, because no key a citation writes holds one.** A chip writes a work's current key,
+    which is always a library key. Pandoc's bare key holds none either (`BARE_KEY`,
+    `citation-markdown.ts`).
+  - **A segment with a comma is a list, whatever the library holds.** Each part must be a library
+    key (`isLibraryKey`), which every key a citation writes is, and every key a rename leaves
+    behind. There are at most `MAX_LIST_KEYS` (20) parts. Anything else is a 404 before any
+    query, as a segment no key can be is.
+  - **`~` before a key that itself holds a comma.** Only an alias kept at import can: a CSL `id`
+    or `citation-key`, or a RIS `ID`, since `isKeyShaped` refuses only white space and braces.
+    A segment that opens with `~` and holds a comma is one key, what follows the `~`. It is looked
+    up whole and never renders: it redirects permanently to the work's page, or is a 404. Without
+    a comma a segment is a plain key, a leading `~` included. No library key opens with `~`, so
+    no list does, and an alias that opens with `~` and holds a comma is written `~~…`.
+    `referencePath(key)` writes the `~` for a key holding a comma; `encodeURIComponent` leaves
+    `~` as it is.
+  - **Decoded before it is split.** Next hands a param over percent-encoded, so a comma arrives
+    as `%2C` and a key's `:` as `%3A`.
+  - **Rejected: asking for the whole segment as a key before splitting it.** The address would
+    mean whatever the library held that day. Adding an alias `a,b` would turn the list of `a` and
+    `b` into one work's page, behind permanent redirects a browser keeps.
+  - **Rejected: refusing a comma in `isKeyShaped`.** It would drop such an alias everywhere,
+    `@{a,b}` in an imported manuscript included, to settle what only the address asks.
+  - **Not a word of its own under `/references/`**, such as `/references/works/<key>/<key>`. Any
+    such word is also a valid key, the reason the downloads sit under `/api` (Downloads).
+  - **Not `/references?keys=`.** `/references` is the members' admin table, and a page that
+    reads `searchParams` can never be cached (Pages).
 - **A key made from a record** is the first creator's family name, its accents taken off, and
   the year: `radner2012`, then `radner2012b`; `muller1901` for Müller.
 - **Where keys are read:**
-  - `/references/[key]`, `citedPageTarget`, `search`'s `cites` in the MCP schema and the bulk
-    export's `cites` check test a key with `isKeyShaped` before any query;
+  - `/references/[key]` and `citedPageTarget` read their segment through
+    `parseReferenceSegment`, which tests a key with `isKeyShaped` and a list's parts with
+    `isLibraryKey`, before any query. So `/references/<list>/p/<page>` is a 404, a list being
+    no work, and `/references/~<alias>/p/<page>` reaches the alias's work;
+  - `search`'s `cites` in the MCP schema and the bulk export's `cites` check test a key with
+    `isKeyShaped` before any query;
   - `parseCites` (`search/params.ts`) keeps a key as given, one key in two cases being one
     filter;
   - every lookup reads `key_folded`: `referenceByKey`, `referencesByKeys`,
@@ -1072,7 +1189,10 @@ reads a public page doesn't fetch four files for each work on it.
   - DOI and ISBN normalizing: prefixes, case, hyphens, check digits, ISBN-10 to ISBN-13;
   - the Pandoc round trip, every override included, and text straight beside a chip: `:`, `(`
     and key characters after it, a letter before a bare one, and `@radner2012.` ending a sentence;
-  - `[@handle](https://x.com/handle)` staying a link.
+  - `[@handle](https://x.com/handle)` staying a link;
+  - `parseReferenceSegment`'s keys, lists and `~` form, and what it refuses; `referencePath` for
+    a key holding a comma; a citation's link for one work, one work twice, and several, by
+    where their pages are.
 - **e2e:**
   - a duplicate refused, from an import and through `create_ref`;
   - a post's citation linking to the reference page, and the page offering the PDF to a member;
@@ -1085,4 +1205,7 @@ reads a public page doesn't fetch four files for each work on it.
     refused by MCP;
   - a reference's page listing the posts citing it to everyone and the docs only to a reader
     who may read them. Not covered: the PDF offered at the page a post's link names, which
-    needs a reference with a file.
+    needs a reference with a file;
+  - a list of works (`e2e/reference-lists.spec.ts`): the warning, the 404s, each redirect to its
+    written form, the `~` form, a doc's citation linking to the list, and each work's PDF offered
+    at its place in `#p=`, also after a renamed key redirects.

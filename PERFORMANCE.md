@@ -536,3 +536,25 @@ reported as a finding.
 not get "fixed" again on the same reasoning. The idle row is the other half of the reassurance:
 nothing fires when nothing moves, so there is no background churn either — the handler is
 noisy per scroll, not noisy per second.
+
+## 2026-11-10 — A reference list's page asks once per work: consider batching
+
+Not measured: a consideration for the list page that docs/CITATIONS.md's "Pages" describes.
+That page, `/references/<key>,<key>,…`,
+renders a `CitedBy` island under each work, and each island asks the server for its own
+answer through the `referenceCitedBy` server action once the reader is signed in.
+
+- **The cost:** one action per work, up to `MAX_LIST_KEYS` (20), each a POST running a
+  `findUnique` and then three queries in parallel (docs, notes, the PDF).
+- **Why it may matter more than the count suggests:** Next's client sends server actions one at
+  a time and waits for each, by its docs, so the islands' calls queue rather than overlap. The
+  last work's list arrives after every round trip before it, on a public page served from the
+  1-vCPU boxes.
+- **The batch:** one action, `referencesCitedBy(ids)`, called once by the page, answering for
+  every work. It can keep `referenceCitedBy` as it is and run it per id in a `Promise.all` on the
+  server, since `CITED_BY_LIMIT` is per work and a single `in` query would need a window
+  function to keep it. One round trip, and queries bounded by the connection pool rather than by
+  the client's queue.
+- **When to do it:** measure first, on a deployed instance with a citation of 3 works and one of
+  20, time to the last island's answer. Most citations name two to four works, so it may never
+  be worth doing; this entry exists so the per-work calls are a choice, not an oversight.

@@ -1,5 +1,6 @@
 import { inlineRuns, mergeRuns, runsHaveMarks, runsText, type InlineRun } from "../../inline-markdown";
 import type { ReferenceEntry } from "../../references/entry";
+import { MAX_LIST_KEYS, referenceListPath, referencePath } from "../../references/keys";
 import type { ChipKind, ChipRendering } from "../types";
 import { citationField, escapeCitationField, writeKey } from "./citation-markdown";
 
@@ -65,7 +66,8 @@ export type CiteCandidate = {
 export const UNKNOWN_WORK = "unknown work";
 
 const MAX_ID_LENGTH = 64;
-const MAX_ITEMS = 20;
+// No more works than a list's page takes, so a citation's link is always one.
+const MAX_ITEMS = MAX_LIST_KEYS;
 const MAX_TEXT = 200;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -171,8 +173,21 @@ function validateItem(raw: unknown): CitationItem | null {
 
 /** Where a citation of the work with this key, at this locator, links: `/references/<key>/p/<first page>`, or the reference's page. */
 export function citedPagePath(key: string, locator: string | undefined): string {
-  const home = `/references/${encodeURIComponent(key)}`;
+  const home = referencePath(key);
   return locator ? `${home}/p/${encodeURIComponent(firstPage(locator))}` : home;
+}
+
+/**
+ * Where a citation of several works links (docs/CITATIONS.md, "The link"):
+ * `/references/<key>,<key>,…`, in the order the citation names them, with
+ * each work's first page by its place in the fragment, `#p=12,,3`. A work
+ * with no page has nothing at its place, commas at the end are left off, and
+ * a citation with no page at all has no fragment.
+ */
+export function citedWorksPath(works: readonly { key: string; locator?: string }[]): string {
+  const pages = works.map((work) => (work.locator ? encodeURIComponent(firstPage(work.locator)) : ""));
+  while (pages.length > 0 && pages[pages.length - 1] === "") pages.pop();
+  return `${referenceListPath(works.map((work) => work.key))}${pages.length > 0 ? `#p=${pages.join(",")}` : ""}`;
 }
 
 function pages(locator: string): string {
@@ -228,7 +243,8 @@ function itemLabel(item: CitationItem, form: CitationForm, name: string): Label 
 /**
  * `/pdf/<slug>#page=<sheet>` for a locator the file's page labels name, else
  * null: its first page, found among the printed labels, or taken as the
- * sheet itself for a file that has none, if the file has that many.
+ * sheet itself for a file that has none, if the file has that many. A file
+ * with none stores `[]` once its metadata is read, and null before.
  */
 export function pdfPageHref(
   file: { slug: string; pageLabels: string[] | null; pageCount?: number | null } | null,
@@ -236,7 +252,7 @@ export function pdfPageHref(
 ): string | null {
   if (!file || !locator) return null;
   const first = firstPage(locator);
-  const labels = file.pageLabels;
+  const labels = file.pageLabels?.length ? file.pageLabels : null;
   const sheet = labels ? labels.indexOf(first) + 1 : /^\d+$/.test(first) ? Number(first) : 0;
   return sheet > 0 && (typeof file.pageCount !== "number" || sheet <= file.pageCount) ? `/pdf/${file.slug}#page=${sheet}` : null;
 }
@@ -376,11 +392,18 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
       const formatted = runsHaveMarks(runs) ? { runs } : {};
 
       if (known.some((work) => work.deleted)) return { label, ...formatted, href: null, postHref: null, status: "deleted" };
-      // One link per chip, to its first work, the same for every reader: with a page, to the route that sends
-      // whoever follows it to the PDF at that page if they may open it, and to the reference's page otherwise
-      // (docs/CITATIONS.md, "The link"). Without one, to the reference's page.
-      const first = data.items[0];
-      const href = citedPagePath(known[0].key, first.locator);
+      // One link per chip, the same for every reader (docs/CITATIONS.md, "The link"). Each work once, in the
+      // order first named, at the first page of the first item naming it that has one. One work links to its
+      // page, at a page through the route that sends whoever follows it to the PDF there if they may open it;
+      // several link to the page listing them all.
+      const cited: { id: string; key: string; locator?: string }[] = [];
+      data.items.forEach((item, index) => {
+        const work = known[index];
+        const seen = cited.find((entry) => entry.id === work.id);
+        if (!seen) cited.push({ id: work.id, key: work.key, ...(item.locator ? { locator: item.locator } : {}) });
+        else if (!seen.locator && item.locator) seen.locator = item.locator;
+      });
+      const href = cited.length === 1 ? citedPagePath(cited[0].key, cited[0].locator) : citedWorksPath(cited);
       return { label, ...formatted, href, postHref: href, status: "live" };
     });
   },

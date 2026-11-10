@@ -44,7 +44,48 @@ export function lookupKey(key: string): string {
   return foldKey(key.normalize("NFC"));
 }
 
-/** A reference's page. A key may hold `:`, which a link writes percent-encoded. */
+/**
+ * A reference's page. A key may hold `:`, which a link writes percent-encoded,
+ * and a kept alias may hold a comma, which would make the segment a list: it
+ * is written `~<key>` (docs/CITATIONS.md, "The address").
+ */
 export function referencePath(key: string): string {
-  return `/references/${encodeURIComponent(key)}`;
+  return `/references/${key.includes(",") ? "~" : ""}${encodeURIComponent(key)}`;
+}
+
+/** How many works one `/references/<key>,<key>,…` lists, and so how many one citation may name. */
+export const MAX_LIST_KEYS = 20;
+
+/**
+ * What a `/references/[key]` segment names, once decoded:
+ *
+ *  - `key`: one key, the single page as ever, a leading `~` included;
+ *  - `alias`: `~` and then a key holding a comma, which only an alias kept at
+ *    import can. Looked up whole, and never rendered: it redirects to the
+ *    work's page;
+ *  - `list`: several library keys, joined by commas.
+ */
+export type ReferenceSegment = { kind: "key"; key: string } | { kind: "alias"; key: string } | { kind: "list"; keys: string[] };
+
+/**
+ * Reads a decoded segment by docs/CITATIONS.md, "The address", or null for
+ * one that can name nothing, which is a 404 before any query. A segment with
+ * a comma is a list whatever the library holds, so an address never comes to
+ * mean something else because an alias was added: each part a library key,
+ * at most `MAX_LIST_KEYS` of them.
+ */
+export function parseReferenceSegment(segment: string): ReferenceSegment | null {
+  if (!segment.includes(",")) return isKeyShaped(segment) ? { kind: "key", key: segment } : null;
+  if (segment.startsWith("~")) {
+    const key = segment.slice(1);
+    return isKeyShaped(key) ? { kind: "alias", key } : null;
+  }
+  const keys = segment.split(",");
+  if (keys.length > MAX_LIST_KEYS || !keys.every(isLibraryKey)) return null;
+  return { kind: "list", keys };
+}
+
+/** A list's page: each key percent-encoded as `referencePath` encodes one, joined by commas. Every part is a library key, so none needs the `~`. */
+export function referenceListPath(keys: readonly string[]): string {
+  return `/references/${keys.map(encodeURIComponent).join(",")}`;
 }

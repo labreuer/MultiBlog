@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { CSL_TYPES, citedNames, cslOf, keyBaseOf, parseCslItem, readCsl, titleOf, type CslData } from "./csl";
 import { entryParts, entryText, referenceEntry } from "./entry";
 import { identifiersOf } from "./identifiers";
-import { foldKey, isKeyShaped, isLibraryKey, lookupKey, referencePath } from "./keys";
+import { MAX_LIST_KEYS, foldKey, isKeyShaped, isLibraryKey, lookupKey, parseReferenceSegment, referenceListPath, referencePath } from "./keys";
 import { decodeCharacterReferences, markupOf, titleRuns } from "./markup";
 
 // docs/CITATIONS.md, "What a record keeps" and "Keys" — what a record holds
@@ -143,4 +143,41 @@ test("a library key is as given when it fits; a lookup folds A to Z and nothing 
   assert.equal(isKeyShaped("DBLP:conf/nips/VaswaniSPHGTS17"), true);
   assert.equal(isKeyShaped("a b"), false);
   assert.equal(referencePath("a:b"), "/references/a%3Ab");
+});
+
+// docs/CITATIONS.md, "The address" — one segment of /references/, decoded.
+test("a reference segment is one key, a list of library keys, or a ~ before a key holding a comma", () => {
+  assert.deepEqual(parseReferenceSegment("radner2012"), { kind: "key", key: "radner2012" });
+  assert.deepEqual(parseReferenceSegment("wimsatt1986,wimsatt1997,wimsatt2000"), { kind: "list", keys: ["wimsatt1986", "wimsatt1997", "wimsatt2000"] });
+  // Decoded before it is split: a key's `:` arrives as `%3A`.
+  assert.deepEqual(parseReferenceSegment(decodeURIComponent("a%3Ab%2Cc")), { kind: "list", keys: ["a:b", "c"] });
+  // An alias may be a single key that no list part could be.
+  assert.deepEqual(parseReferenceSegment("DBLP:conf/nips/X"), { kind: "key", key: "DBLP:conf/nips/X" });
+
+  const keys = (count: number) => Array.from({ length: count }, (_, index) => `k${index}`).join(",");
+  assert.equal(parseReferenceSegment(keys(MAX_LIST_KEYS))?.kind, "list");
+  assert.equal(parseReferenceSegment(keys(MAX_LIST_KEYS + 1)), null);
+  // Each part a library key, or the whole is nothing.
+  for (const segment of ["a,,b", "a,", ",a", "a, b", "a,{b}", "a,b/c", "a,Müller", `a,${"x".repeat(81)}`, "a,~b"]) {
+    assert.equal(parseReferenceSegment(segment), null, segment);
+  }
+  assert.equal(parseReferenceSegment("a b"), null);
+
+  // `~` and a comma: one key, what follows the `~`. Without a comma, `~` is part of a plain key.
+  assert.deepEqual(parseReferenceSegment("~a,b"), { kind: "alias", key: "a,b" });
+  assert.deepEqual(parseReferenceSegment("~a"), { kind: "key", key: "~a" });
+  assert.deepEqual(parseReferenceSegment("~~a,b"), { kind: "alias", key: "~a,b" });
+  assert.equal(parseReferenceSegment("~a, b"), null);
+});
+
+test("a key holding a comma is written with its ~, and a list's keys joined by commas", () => {
+  assert.equal(referencePath("a,b"), "/references/~a%2Cb");
+  assert.equal(referencePath("~a,b"), "/references/~~a%2Cb");
+  assert.equal(referencePath("~a"), "/references/~a");
+  // What the page reads back from each is the key it was written from.
+  for (const key of ["a,b", "~a,b", "~a", "a:b"]) {
+    const parsed = parseReferenceSegment(decodeURIComponent(referencePath(key).slice("/references/".length)));
+    assert.equal(parsed && parsed.kind !== "list" ? parsed.key : null, key);
+  }
+  assert.equal(referenceListPath(["a:b", "c"]), "/references/a%3Ab,c");
 });

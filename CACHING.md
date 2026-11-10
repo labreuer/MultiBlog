@@ -488,3 +488,16 @@ its first request; not done, and not measured here. docs/BLOG.md §8 has the cur
   production.
 
 Which one happens depends on whether the build or a request reaches the call first.
+
+## 2026-11-10 — a reference's page is not cached either
+
+`/references/[key]` is the shape the 2026-10-23 entry measured: a dynamic route with
+`revalidate = 60`, no `generateStaticParams` and no dynamic API. Measured on a deployed
+instance, it answers `private, no-cache, no-store, max-age=0, must-revalidate` with no
+`x-nextjs-cache`, where `/` answers `s-maxage=60`. So it is rendered on every request, and the
+`revalidatePath(referencePath(key))` calls in `src/app/actions/references.ts` change nothing.
+
+What its design keeps is the option: it reads no session and no `searchParams`, with what
+depends on the viewer in a client island and a cited page in the fragment. docs/CITATIONS.md's
+"Pages" says what a list of works, `/references/<key>,<key>,…`, would need before the route is
+given a cache.

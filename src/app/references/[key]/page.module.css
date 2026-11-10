@@ -73,3 +73,54 @@
 .title {
   font-style: normal;
 }
+
+.citedBy h3 {
+  font-size: 1rem;
+  margin: 1.25rem 0 0.4rem;
+}
+
+/* A list's page, /references/<key>,<key>,…: one section per work. */
+.work {
+  margin-top: 2.5rem;
+}
+
+.work h2 {
+  font-size: 1.35rem;
+}
+
+/* The keys of a list nothing answered to. On the page's background, with no
+   fill: --error on --fill-warning is 4.4:1 in the light theme, under the
+   4.5:1 AA asks of text, and 5:1 on the page. */
+.missing {
+  margin-top: 1.5rem;
+  padding: 0.75rem 1rem;
+  border: 2px solid var(--warning);
+  border-radius: 6px;
+}
+
+.missing p + p {
+  margin-top: 0.5rem;
+}
+
+.address {
+  font-family: var(--font-geist-mono), monospace;
+  overflow-wrap: anywhere;
+}
+
+.notFound {
+  color: var(--error);
+  font-weight: 600;
+}
+
+/* Read by a screen reader, not shown: what the red says to a sighted one. */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
