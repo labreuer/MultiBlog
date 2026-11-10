@@ -275,6 +275,10 @@ export const getDocChipIids = (...args: Parameters<DbHandlers["getDocChipIids"]>
 export const deleteTestReferences = (...args: Parameters<DbHandlers["deleteTestReferences"]>): Promise<number> =>
   call("deleteTestReferences", ...args);
 export const getTestReference = (...args: Parameters<DbHandlers["getTestReference"]>) => call("getTestReference", ...args);
+export const setTestReferenceDeleted = (...args: Parameters<DbHandlers["setTestReferenceDeleted"]>): Promise<void> => call("setTestReferenceDeleted", ...args);
+export const getTestReferenceTitle = (...args: Parameters<DbHandlers["getTestReferenceTitle"]>): Promise<string | null> => call("getTestReferenceTitle", ...args);
+export const countTestReferences = (...args: Parameters<DbHandlers["countTestReferences"]>): Promise<number> => call("countTestReferences", ...args);
+export const deleteTestImportRows = (...args: Parameters<DbHandlers["deleteTestImportRows"]>): Promise<void> => call("deleteTestImportRows", ...args);
 export const setTestReferenceFile = (...args: Parameters<DbHandlers["setTestReferenceFile"]>): Promise<void> =>
   call("setTestReferenceFile", ...args);
 export const getCitationSources = (...args: Parameters<DbHandlers["getCitationSources"]>): Promise<string[]> =>

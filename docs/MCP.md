@@ -772,6 +772,10 @@ characters. The export (§5) is one request.
   - `format=json` gives each doc's ProseMirror JSON instead, as `<id>.json`, for a program
     that wants what Markdown loses. No tool offers it (above).
   - The manifest lists each doc's id, slug, title, size, `version`, byline and tags.
+  - **The works the exported docs cite**, when there are any, as `references.json` (CSL-JSON)
+    and `references.biblatex.bib`, which the manifest lists under `references`, so
+    `pandoc --citeproc --bibliography=references.json <id>.md` resolves the `[@key]`s the
+    Markdown holds ([CITATIONS.md](CITATIONS.md), "Downloads").
 - **`catalog`** answers with JSON alone: each doc's id, slug, title and size, and the newest
   entry in its log, `max(ydoc_update.id)`, from one grouped query with the doc rows.
   - **It is an index Claude can grep.** Saved as a local file, it finds a doc by its title

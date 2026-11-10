@@ -221,7 +221,7 @@ export default async function PublicDocPage({
   ) : (
     <>
       {renderWithChips(bodyJSON, docContentExtensions, chipInputs)}
-      <StaticBibliography body={bodyJSON} inputs={chipInputs} />
+      <StaticBibliography body={bodyJSON} inputs={chipInputs} download={`doc=${doc.id}`} />
     </>
   );
 

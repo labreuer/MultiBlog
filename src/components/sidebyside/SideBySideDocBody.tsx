@@ -235,7 +235,7 @@ export default function SideBySideDocBody({
         style={{ display: ready ? "block" : "none" }}
       >
         <EditorContent editor={editor} />
-        <LiveBibliography editor={editor} />
+        <LiveBibliography editor={editor} download={`doc=${docId}`} />
       </div>
       {pending && editor && (
         <DocLinkPopover

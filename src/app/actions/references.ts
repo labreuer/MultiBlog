@@ -19,6 +19,7 @@ import {
   importReport,
   previewReferenceImport,
   referencePath,
+  replaceReference,
   type PreviewAnswer,
   type PreviewQuery,
   setReferenceDeleted,
@@ -90,6 +91,19 @@ export async function previewReferenceImportAction(queries: unknown, reserved: u
     };
   });
   return previewReferenceImport(actor, asked, reserved.filter((key): key is string => typeof key === "string").map((key) => key.slice(0, 400))).catch(said);
+}
+
+/**
+ * Replaces a reference's record with one the browser parsed: "Replace record"
+ * on a row of /references (docs/CITATIONS.md, "Replacing a record"). A
+ * deleted reference is refused, as `update_ref` refuses one; restore it first.
+ */
+export async function replaceReferenceRecord(id: unknown, csl: unknown): Promise<{ key: string }> {
+  if (typeof id !== "string") throw new Error("That isn't a reference.");
+  const replaced = await replaceReference(await requireActor(), id, csl, { restore: false }).catch(said);
+  revalidatePath("/references");
+  revalidatePath(referencePath(replaced.key));
+  return { key: replaced.key };
 }
 
 export async function deleteReference(id: string): Promise<void> {

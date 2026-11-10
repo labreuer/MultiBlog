@@ -4,6 +4,7 @@ import { referenceByKey } from "@/lib/reference-data";
 import { titleOf, type CslItem } from "@/lib/references/csl";
 import { entryParts, referenceEntry } from "@/lib/references/entry";
 import { isKeyShaped, referencePath } from "@/lib/references/keys";
+import { downloadHref, EXPORT_FORMAT_ORDER, EXPORT_FORMATS } from "@/lib/references/export-formats";
 import { normalizeDoi } from "@/lib/references/identifiers";
 import { prisma } from "@/lib/prisma";
 import { publishedPostWhere } from "@/lib/post-status";
@@ -102,6 +103,20 @@ export default async function ReferencePage({ params }: { params: Promise<{ key:
               <td>{item.ISBN}</td>
             </tr>
           )}
+          <tr>
+            <th scope="row">Download</th>
+            <td>
+              {/* Plain links, so the page stays static, and nofollow, so a crawler fetches none. */}
+              {EXPORT_FORMAT_ORDER.map((format, index) => (
+                <span key={format}>
+                  {index > 0 && " · "}
+                  <a href={downloadHref(format, `key=${encodeURIComponent(reference.key)}`)} rel="nofollow">
+                    {EXPORT_FORMATS[format].label}
+                  </a>
+                </span>
+              ))}
+            </td>
+          </tr>
           {item.URL && /^https?:\/\//.test(item.URL) && (
             <tr>
               <th scope="row">URL</th>

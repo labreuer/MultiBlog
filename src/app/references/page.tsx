@@ -6,7 +6,8 @@ import { Prisma } from "@/generated/prisma/client";
 import { canViewReferences, canWriteReferences } from "@/lib/role-checks";
 import { toURLSearchParams } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
-import { parseReferencesFilters, type ReferencesFilters, type ReferencesSortKey } from "@/lib/references-query";
+import { parseReferencesFilters, type ReferencesSortKey } from "@/lib/references-query";
+import { referencesWhere } from "@/lib/references-where";
 import type { SortColumn } from "@/lib/table-sort";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import ReferencesTable from "@/components/ReferencesTable";
@@ -33,16 +34,6 @@ export const metadata: Metadata = { title: "References" };
 // shown as one, unnamed, and the column sorts by whether a reference has a
 // PDF, never by its title, which would order rows by titles some viewers
 // may not see (docs/CITATIONS.md, "A work's PDF").
-
-/** The ids whose search vector matches every word typed, each as a prefix: what the search box narrows to. */
-async function matchingIds(q: string): Promise<string[] | null> {
-  const words = q.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  if (words.length === 0) return null;
-  const tsquery = words.map((word) => `${word}:*`).join(" & ");
-  const rows = await prismaIncludingDeleted.$queryRaw<{ id: string }[]>(Prisma.sql`
-    SELECT r.id FROM "reference" r WHERE r.search_vector @@ to_tsquery('public.english_unaccent', ${tsquery})`);
-  return rows.map((row) => row.id);
-}
 
 function buildOrderBy(sort: SortColumn<ReferencesSortKey>[]): Prisma.ReferenceOrderByWithRelationInput[] {
   return sort.map(({ key, dir }): Prisma.ReferenceOrderByWithRelationInput => {
@@ -74,16 +65,6 @@ function buildOrderBy(sort: SortColumn<ReferencesSortKey>[]): Prisma.ReferenceOr
   });
 }
 
-async function buildWhere(filters: ReferencesFilters): Promise<Prisma.ReferenceWhereInput> {
-  const where: Prisma.ReferenceWhereInput = {};
-  if (!filters.deleted) where.deletedAt = null;
-  if (filters.q) {
-    const ids = await matchingIds(filters.q);
-    if (ids) where.id = { in: ids };
-  }
-  return where;
-}
-
 export default async function ReferencesPage({
   searchParams,
 }: {
@@ -107,7 +88,7 @@ export default async function ReferencesPage({
 
   const prefs = await getTablePrefs(session.user.id, "references");
   const filters = parseReferencesFilters(urlSearchParams, prefs);
-  const where = await buildWhere(filters);
+  const where = await referencesWhere(filters);
 
   const [references, totalCount] = await Promise.all([
     prismaIncludingDeleted.reference.findMany({

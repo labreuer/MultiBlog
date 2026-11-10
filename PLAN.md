@@ -4965,6 +4965,6 @@ Built 2026-11-04 on `entity-chips`: its step 0, the schema-version gate. **As bu
 
 ## 30. Importing and exporting reference libraries
 
-Planned 2026-11-09: reading a library from every common export format without loss, and
-downloading works as BibTeX, biblatex, RIS or CSL-JSON.
-**Plan: [docs/CITATIONS.md](docs/CITATIONS.md), "Planned: import and export".**
+Planned 2026-11-09 and built 2026-11-10: reading a library from every common export format
+without loss, and downloading works as BibTeX, biblatex, RIS or CSL-JSON.
+**As built: [docs/CITATIONS.md](docs/CITATIONS.md), "Import and export".**

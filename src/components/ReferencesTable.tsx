@@ -44,6 +44,9 @@ import {
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
 import SearchPicker from "@/components/SearchPicker";
+import DownloadMenu from "@/components/bibliography/DownloadMenu";
+import ReferenceReplaceBox from "@/components/ReferenceReplaceBox";
+import { downloadHref, EXPORT_FORMAT_ORDER, EXPORT_FORMATS } from "@/lib/references/export-formats";
 import { referencePath } from "@/lib/references/keys";
 import styles from "./ReferencesTable.module.css";
 
@@ -92,6 +95,8 @@ export default function ReferencesTable({
   const [error, setError] = useState<string | null>(null);
   // The row whose PDF picker is open (docs/CITATIONS.md, "A work's PDF").
   const [pickingFile, setPickingFile] = useState<string | null>(null);
+  // The row whose record is being replaced (docs/CITATIONS.md, "Replacing a record").
+  const [replacing, setReplacing] = useState<ReferenceTableRow | null>(null);
 
   const { navigate, updateFilters, searchDraft, onSearchChange, handleSort, searchParams } = useTableFilters({
     filters,
@@ -102,9 +107,29 @@ export default function ReferencesTable({
   const { selectedIds, selectedRows, allVisibleSelected, toggleSelectAll, toggleRow, clearSelection } =
     useRowSelection(displayRows);
 
-  const bulkActions: BulkAction<ReferenceTableRow>[] = canWrite
-    ? softDeleteBulkActions<ReferenceTableRow>("references", bulkDeleteReferences, bulkRestoreReferences)
-    : [];
+  // Downloading the selected rows is every member's; the rest are an author's.
+  const downloadAction: BulkAction<ReferenceTableRow> = {
+    key: "download",
+    label: "Download as…",
+    kind: "select",
+    options: EXPORT_FORMAT_ORDER.map((format) => EXPORT_FORMATS[format].label),
+    applicableTo: () => true,
+    run: async (ids, label) => {
+      const format = EXPORT_FORMAT_ORDER.find((candidate) => EXPORT_FORMATS[candidate].label === label);
+      if (format) {
+        // An attachment, so following it downloads and leaves the page where it is.
+        const link = document.createElement("a");
+        link.href = downloadHref(format, `ids=${ids.map(encodeURIComponent).join(",")}`);
+        link.rel = "nofollow";
+        link.click();
+      }
+      return { failed: [] };
+    },
+  };
+  const bulkActions: BulkAction<ReferenceTableRow>[] = [
+    downloadAction,
+    ...(canWrite ? softDeleteBulkActions<ReferenceTableRow>("references", bulkDeleteReferences, bulkRestoreReferences) : []),
+  ];
 
   function run(row: ReferenceTableRow, action: () => Promise<unknown>, failure: string) {
     setError(null);
@@ -199,7 +224,26 @@ export default function ReferencesTable({
     },
     people: { sortKey: "people", cell: (row) => row.people },
     year: { sortKey: "year", nowrap: true, cell: (row) => (row.year === null ? "" : String(row.year)) },
-    title: { sortKey: "title", cell: (row) => row.title },
+    title: {
+      sortKey: "title",
+      cell: (row) => (
+        <>
+          {row.title}
+          {canWrite && !row.deleted && (
+            <button
+              type="button"
+              className={styles.editButton}
+              onClick={() => setReplacing(row)}
+              disabled={pending}
+              title={`Replace the record of ${row.key}`}
+              aria-label={`Replace record of ${row.key}`}
+            >
+              ↺
+            </button>
+          )}
+        </>
+      ),
+    },
     file: {
       sortKey: "file",
       cell: (row) => (
@@ -317,7 +361,11 @@ export default function ReferencesTable({
           }}
           isDefault={sameCols(filters.cols, prefs.cols)}
         />
+        {/* Every page of what the search matches, read with the page's own filters (src/lib/references-where.ts). */}
+        <DownloadMenu selection={searchParams.toString()} label="Download every reference this search matches" />
       </div>
+
+      {replacing && <ReferenceReplaceBox key={replacing.id} id={replacing.id} referenceKey={replacing.key} onClose={() => setReplacing(null)} />}
 
       <BulkToolbar
         selectedRows={selectedRows}

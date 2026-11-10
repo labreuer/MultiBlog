@@ -32,6 +32,8 @@ const AUTHOR_STATS_DEBOUNCE_MS = 400;
 export type AuthorStat = { authorId: string; chars: number; name: string; color: string };
 
 type Props = {
+  /** The selection the References list's download icon names (`doc=<id>`); none on a surface that isn't a doc's. */
+  bibliographyDownload?: string;
   provider: HocuspocusProvider;
   ydoc: Y.Doc;
   userId: string;
@@ -133,6 +135,7 @@ export default function CollabEditorBody({
   onSelectionUpdate,
   onContentUpdate,
   annotationAnchors = EMPTY_ANCHORS,
+  bibliographyDownload,
 }: Props) {
   const [authorIds, setAuthorIds] = useState<string[]>([]);
   const [authorCharCounts, setAuthorCharCounts] = useState<Record<string, number>>({});
@@ -349,7 +352,7 @@ export default function CollabEditorBody({
           Beside the editor rather than in the toolbar, since the annotation
           editor's toolbar is hidden by default and this shouldn't be. */}
       {/* docs/CITATIONS.md, "The bibliography": inside the scrolling box, after the text. */}
-      <LiveBibliography editor={editor} host={contentElement} />
+      <LiveBibliography editor={editor} host={contentElement} download={bibliographyDownload} />
       <DocRefMenu editor={editor} disabled={!editable} />
       <MentionMenu editor={editor} disabled={!editable} />
       <CiteMenu editor={editor} disabled={!editable} />

@@ -48,7 +48,7 @@ async function staticBodyOf(bodyJSON: JSONContent, doc: LoadedDoc): Promise<Reac
   return (
     <>
       {renderWithChips(bodyJSON, docContentExtensions, inputs)}
-      <StaticBibliography body={bodyJSON} inputs={inputs} />
+      <StaticBibliography body={bodyJSON} inputs={inputs} download={`doc=${doc.id}`} />
     </>
   );
 }

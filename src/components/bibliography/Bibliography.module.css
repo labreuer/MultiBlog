@@ -43,3 +43,63 @@
   order: 1;
   flex: none;
 }
+
+/* The heading and its download icon in one row: the `<details>` sits beside
+   the `<h2>`, not inside it, where only text-level elements may go. */
+.headingRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5em;
+}
+
+/* A post's References heading is its text, so the icon can't share a row
+   with it: it sits before the heading, floated to the right of the heading's
+   line, at the heading's own size, top margin and line height (prose.module.css),
+   so the two lines are one. */
+.download.floated {
+  float: right;
+  font-size: 1.5em;
+  line-height: 1.3;
+  margin-top: 1.5em;
+}
+
+.download.floated .downloadMenu {
+  right: 0;
+  font-size: 1rem;
+}
+
+.download {
+  position: relative;
+  font-size: 0.9rem;
+}
+
+.download > summary {
+  list-style: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.download > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Two classes, to outrank `.prose ul`'s indent and bullets. */
+.download .downloadMenu {
+  position: absolute;
+  z-index: 2;
+  list-style: none;
+  padding: 0.3em 0;
+  margin: 0;
+  min-width: 8em;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px var(--shadow-color);
+}
+
+.download .downloadMenu li {
+  margin: 0;
+  padding: 0.15em 0.75em;
+  text-indent: 0;
+}

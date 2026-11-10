@@ -1243,6 +1243,31 @@ export async function deleteTestReferences(keyPrefix: string): Promise<number> {
   return removed.count;
 }
 
+/** Deletes or restores a test reference by key, as the table's button does, set directly. */
+export async function setTestReferenceDeleted(key: string, deleted: boolean): Promise<void> {
+  if (!/^e2e[A-Za-z0-9_:.-]{4,}$/.test(key)) throw new Error(`setTestReferenceDeleted: "${key}" isn't an e2e key.`);
+  await prisma.reference.update({ where: { key }, data: { deletedAt: deleted ? new Date() : null } });
+}
+
+/** A test reference's title as stored, by key; null for no such key. */
+export async function getTestReferenceTitle(key: string): Promise<string | null> {
+  const row = await prisma.reference.findUnique({ where: { key }, select: { csl: true } });
+  const title = (row?.csl as { title?: unknown } | undefined)?.title;
+  return typeof title === "string" ? title : null;
+}
+
+/** How many references have a key starting with this e2e prefix. */
+export async function countTestReferences(keyPrefix: string): Promise<number> {
+  if (!/^e2e[a-z0-9-]{4,}$/.test(keyPrefix)) throw new Error(`countTestReferences: "${keyPrefix}" isn't an e2e key prefix.`);
+  return prisma.reference.count({ where: { key: { startsWith: keyPrefix } } });
+}
+
+/** An import's rows whose record named this e2e prefix in its key or title: what an import spec leaves behind. */
+export async function deleteTestImportRows(prefix: string): Promise<void> {
+  if (!/^e2e[a-z0-9-]{4,}$/.test(prefix)) throw new Error(`deleteTestImportRows: "${prefix}" isn't an e2e prefix.`);
+  await prisma.$executeRaw`DELETE FROM reference_import_record WHERE key LIKE ${`${prefix}%`} OR detail->>'title' LIKE ${`%${prefix}%`}`;
+}
+
 /** Ties a test reference to a file, or unties it: the state the reference pickers leave, set directly. */
 export async function setTestReferenceFile(key: string, fileId: string | null): Promise<void> {
   if (!/^e2e[a-z0-9-]{4,}$/.test(key)) throw new Error(`setTestReferenceFile: "${key}" isn't an e2e key.`);
@@ -2855,6 +2880,10 @@ const handlers = {
   annotationSearchHolds,
   setAnchorChipLabels,
   deleteTestReferences,
+  setTestReferenceDeleted,
+  getTestReferenceTitle,
+  countTestReferences,
+  deleteTestImportRows,
   setTestReferenceFile,
   getTestReference,
   getDocChipIids,

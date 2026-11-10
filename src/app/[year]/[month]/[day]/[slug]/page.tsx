@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { notFound, permanentRedirect } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -19,6 +20,8 @@ import { CommentQuoteProvider } from "@/components/comment-quote-context";
 import CommentQuoteSelectionPopover from "@/components/CommentQuoteSelectionPopover";
 import TagChips from "@/components/tags/TagChips";
 import PostNeighbours from "@/components/PostNeighbours";
+import DownloadMenu from "@/components/bibliography/DownloadMenu";
+import { referencesHeadingIndex } from "@/lib/post-references-download";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
@@ -109,7 +112,24 @@ export default async function PublicPostPage({ params }: { params: Params }) {
   }
 
   const doc = post.proseJson as JSONContent;
-  const staticContent = renderToReactElement({ content: doc, extensions: contentExtensions });
+  // docs/CITATIONS.md, "A post's References": a download icon before its References heading,
+  // drawn beside the text and never written into it, for a post that cites a work.
+  const citesWorks = (await prisma.citation.count({ where: { postId: post.id } })) > 0;
+  const blocks = doc.content ?? [];
+  const referencesAt = citesWorks ? referencesHeadingIndex(blocks) : -1;
+  const referencesDownload = referencesAt >= 0 ? `post=${post.id}` : null;
+  const render = (content: JSONContent[]) => renderToReactElement({ content: { ...doc, content }, extensions: contentExtensions });
+  const staticContent =
+    referencesAt >= 0 ? (
+      // Keyed, since this crosses into a client component as a prop (CLAUDE.md, Gotchas).
+      <>
+        <Fragment key="before">{render(blocks.slice(0, referencesAt))}</Fragment>
+        <DownloadMenu key="download" selection={referencesDownload!} floated />
+        <Fragment key="references">{render(blocks.slice(referencesAt))}</Fragment>
+      </>
+    ) : (
+      renderToReactElement({ content: doc, extensions: contentExtensions })
+    );
 
   const threads = await getPostThreadsWithApprovedComments(post.id);
   const quoteHighlights = threads
@@ -163,6 +183,7 @@ export default async function PublicPostPage({ params }: { params: Params }) {
                 doc={doc}
                 threads={quoteHighlights}
                 staticContent={<div className={proseStyles.prose}>{staticContent}</div>}
+                referencesDownload={referencesDownload}
               />
               {/* PLAN.md §20d — a published post is public, so its chips are
                   too; the gate that matters is publishedPostWhere above, which

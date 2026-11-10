@@ -258,6 +258,7 @@ export default function DocColumn({
                   userColor={userColor}
                   userInitials={userInitials}
                   onEditorReady={() => {}}
+                  bibliographyDownload={`doc=${docId}`}
                   ariaLabel={aria.body}
                   editable={!outOfDate}
                   suppressAnnotations

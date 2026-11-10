@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import TableDownloadButtons from "./TableDownloadButtons";
 import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
 import { contentExtensions } from "@/lib/tiptap-schema";
+import { ReferencesDownload } from "@/lib/post-references-download";
+import bibliographyStyles from "./bibliography/Bibliography.module.css";
 import { QuoteHighlight, type QuoteHighlightThread } from "@/lib/quote-highlight-extension";
 import { activatePseudoBordersForThread } from "@/lib/pseudo-border";
 import { flashHighlight } from "@/lib/flash-highlight";
@@ -27,9 +29,11 @@ type Props = {
   doc: JSONContent;
   threads: QuoteHighlightThread[];
   staticContent: ReactNode;
+  /** The selection a download icon beside the post's References heading names (`post=<id>`), for a post that cites a work. */
+  referencesDownload?: string | null;
 };
 
-export default function AnnotatableArticle({ postId, doc, threads, staticContent }: Props) {
+export default function AnnotatableArticle({ postId, doc, threads, staticContent, referencesDownload = null }: Props) {
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -38,6 +42,11 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
   const editor = useEditor({
     extensions: [
       ...contentExtensions,
+      // A widget, never the text: docs/CITATIONS.md, "A post's References".
+      ReferencesDownload.configure({
+        selection: referencesDownload,
+        classes: { download: bibliographyStyles.download, floated: bibliographyStyles.floated, menu: bibliographyStyles.downloadMenu },
+      }),
       QuoteHighlight.configure({
         threads,
         onIndicatorClick: (threadId) => {
