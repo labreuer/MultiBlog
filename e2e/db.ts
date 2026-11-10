@@ -279,6 +279,7 @@ export const setTestReferenceDeleted = (...args: Parameters<DbHandlers["setTestR
 export const getTestReferenceTitle = (...args: Parameters<DbHandlers["getTestReferenceTitle"]>): Promise<string | null> => call("getTestReferenceTitle", ...args);
 export const countTestReferences = (...args: Parameters<DbHandlers["countTestReferences"]>): Promise<number> => call("countTestReferences", ...args);
 export const deleteTestImportReceipts = (...args: Parameters<DbHandlers["deleteTestImportReceipts"]>): Promise<void> => call("deleteTestImportReceipts", ...args);
+export const ageTestImportReceipts = (...args: Parameters<DbHandlers["ageTestImportReceipts"]>): Promise<void> => call("ageTestImportReceipts", ...args);
 export const setTestReferenceFile = (...args: Parameters<DbHandlers["setTestReferenceFile"]>): Promise<void> =>
   call("setTestReferenceFile", ...args);
 export const getCitationSources = (...args: Parameters<DbHandlers["getCitationSources"]>): Promise<string[]> =>

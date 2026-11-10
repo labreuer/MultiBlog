@@ -2,6 +2,7 @@ import type { Page, Route } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   ADMIN_EMAIL,
+  ageTestImportReceipts,
   countTestReferences,
   createTestDoc,
   createTestPost,
@@ -17,8 +18,9 @@ import {
 } from "./db";
 import { createAgent } from "./mcp";
 
-// docs/CITATIONS.md, "Planned: import and export" as built — an import that
-// replaces a duplicate's record, survives a reload, and adds nothing twice;
+// docs/CITATIONS.md, "Import and export" — an import that replaces a
+// duplicate's record, survives a reload, adds nothing twice, and stops after
+// the six days it may be sent;
 // update_ref; and the downloads, each an attachment under its name.
 
 let isbnCounter = 0;
@@ -149,6 +151,61 @@ test("one import resumed from two tabs at once creates each record once, and ans
     expect(await countTestReferences(prefix)).toBe(3);
   } finally {
     await second.close();
+    await page.goto("about:blank");
+    await deleteTestReferences(prefix);
+    await deleteTestImportReceipts(prefix);
+  }
+});
+
+test("an import resumed after the six days it may be sent is refused whole, and dropped, before a receipt it relies on is deleted", async ({ page }) => {
+  const prefix = `e2eexpire${Date.now().toString(36)}`;
+  let cut = false;
+  try {
+    // The first batch is answered; the second never leaves the browser.
+    await page.route(
+      (url) => url.pathname === "/references",
+      async (route) => {
+        const body = route.request().postDataBuffer()?.toString() ?? "";
+        if (!cut && isImportBatch(route) && body.includes('"place":100,')) {
+          cut = true;
+          await route.abort();
+          return;
+        }
+        await route.continue();
+      },
+    );
+    await page.goto("/references");
+    await preview(page, books(prefix, 150));
+    await page.getByRole("button", { name: "Import 150" }).click();
+    await expect(page.getByText("reload to resume the rest")).toBeVisible();
+    await page.unrouteAll();
+    expect(await countTestReferences(prefix)).toBe(100);
+
+    // The import's first receipt is now past six days, though short of the seven they are kept.
+    await ageTestImportReceipts(prefix, 6.5);
+    await page.reload();
+    await expect(page.getByText("An import you started is unfinished: 50 of 150 records left.")).toBeVisible();
+    await page.getByRole("button", { name: "Resume", exact: true }).click();
+    await expect(page.getByText("That import was started more than six days ago and can no longer be resumed.")).toBeVisible();
+    expect(await countTestReferences(prefix)).toBe(100);
+    // What the browser kept is dropped, so nothing is offered again.
+    const kept = await page.evaluate(
+      () =>
+        new Promise<number>((resolve, reject) => {
+          const open = indexedDB.open("multiblog-reference-imports");
+          open.onerror = () => reject(open.error);
+          open.onsuccess = () => {
+            const all = open.result.transaction("imports", "readonly").objectStore("imports").getAll();
+            all.onerror = () => reject(all.error);
+            all.onsuccess = () => {
+              resolve(all.result.length);
+              open.result.close();
+            };
+          };
+        }),
+    );
+    expect(kept).toBe(0);
+  } finally {
     await page.goto("about:blank");
     await deleteTestReferences(prefix);
     await deleteTestImportReceipts(prefix);

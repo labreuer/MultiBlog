@@ -12,12 +12,21 @@ export const BATCH_RECORDS = 100;
  */
 export const BATCH_BYTES = 500_000;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /**
- * How long the server keeps an import's rows, and the browser offers an
- * unfinished import: past it, a resent record could no longer be told from a
- * new one.
+ * How long an import may be sent, from its first receipt on the server and
+ * from its start in the browser, which offers an unfinished one to resume
+ * for as long. A batch past it is refused.
  */
-export const IMPORT_KEPT_MS = 7 * 24 * 60 * 60 * 1000;
+export const IMPORT_RESUMABLE_MS = 6 * DAY_MS;
+
+/**
+ * How long the server keeps an import's receipts: a day past the last batch
+ * it accepts, so no receipt is deleted while its import may still be sent.
+ * Without its receipt, a resent record could no longer be told from a new one.
+ */
+export const IMPORT_KEPT_MS = 7 * DAY_MS;
 
 const encoder = new TextEncoder();
 

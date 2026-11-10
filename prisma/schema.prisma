@@ -2245,8 +2245,9 @@ model ReferenceIdentifier {
 // second tab or in a batch the server died part-way through, answers what its
 // receipt says rather than being added twice. The receipt is the first write
 // of the transaction that creates or replaces the reference, so of two sends
-// at once the second waits on the first's receipt, fails, and reads it. Kept
-// a week, and a user's older receipts are deleted when they next send a batch.
+// at once the second waits on the first's receipt, fails, and reads it. An
+// import is accepted for six days from its first receipt, and receipts are
+// kept seven, deleted when their user next sends a batch.
 model ReferenceImportReceipt {
   id        String   @id @default(cuid())
   userId    String   @map("user_id")

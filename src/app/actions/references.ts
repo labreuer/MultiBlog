@@ -25,6 +25,7 @@ import {
   setReferenceDeleted,
   untieReferenceFromFile as untieFromFile,
   updateReference,
+  type ImportBatchAnswer,
   type ImportOutcome,
 } from "@/lib/reference-write";
 import { entryText } from "@/lib/references/entry";
@@ -51,9 +52,10 @@ function said(err: unknown): never {
  * box"): at most a hundred records and 500,000 bytes, each built again here.
  * Each record is created, replaces the record of a duplicate the preview
  * offered, is reported as already held, or is refused with why; one sent
- * before answers what it answered then.
+ * before answers what it answered then. An import past the days it may be
+ * sent is refused whole, `expired`.
  */
-export async function importReferenceBatchAction(importId: unknown, records: unknown): Promise<ImportOutcome[]> {
+export async function importReferenceBatchAction(importId: unknown, records: unknown): Promise<ImportBatchAnswer> {
   const actor = await requireActor();
   const outcomes = await Promise.resolve()
     .then(() => importReferenceBatch(actor, importIdOf(importId), importBatchOf(records)))

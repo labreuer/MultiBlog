@@ -1268,6 +1268,12 @@ export async function deleteTestImportReceipts(prefix: string): Promise<void> {
   await prisma.$executeRaw`DELETE FROM reference_import_receipt WHERE key LIKE ${`${prefix}%`} OR detail->>'title' LIKE ${`%${prefix}%`}`;
 }
 
+/** Moves back by `days` the receipts whose record named this e2e prefix: an import started that long ago. */
+export async function ageTestImportReceipts(prefix: string, days: number): Promise<void> {
+  if (!/^e2e[a-z0-9-]{4,}$/.test(prefix)) throw new Error(`ageTestImportReceipts: "${prefix}" isn't an e2e prefix.`);
+  await prisma.$executeRaw`UPDATE reference_import_receipt SET created_at = created_at - make_interval(secs => ${days * 86400}) WHERE key LIKE ${`${prefix}%`} OR detail->>'title' LIKE ${`%${prefix}%`}`;
+}
+
 /** Ties a test reference to a file, or unties it: the state the reference pickers leave, set directly. */
 export async function setTestReferenceFile(key: string, fileId: string | null): Promise<void> {
   if (!/^e2e[a-z0-9-]{4,}$/.test(key)) throw new Error(`setTestReferenceFile: "${key}" isn't an e2e key.`);
@@ -2884,6 +2890,7 @@ const handlers = {
   getTestReferenceTitle,
   countTestReferences,
   deleteTestImportReceipts,
+  ageTestImportReceipts,
   setTestReferenceFile,
   getTestReference,
   getDocChipIids,

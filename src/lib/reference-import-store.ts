@@ -93,8 +93,8 @@ export async function discardPendingImport(userId: string, importId: string): Pr
 
 /**
  * This user's unfinished import, newest first, if one is younger than
- * `maxAgeMs`; older ones are dropped, since past the server's week a resent
- * record could no longer be told from a new one.
+ * `maxAgeMs`; older ones are dropped, since the server refuses a batch of
+ * an import past it.
  */
 export async function unfinishedImport(userId: string, maxAgeMs: number): Promise<PendingImport | null> {
   const all = (await run<PendingImport[]>("readonly", (store) => store.getAll())) ?? [];

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { importReferenceBatchAction, importReportAction, previewReferenceImportAction } from "@/app/actions/references";
 import { discardPendingImport, dropAnsweredBatch, keepPendingImport, unfinishedImport, type PendingImport, type PendingRecord } from "@/lib/reference-import-store";
 import type { ImportOutcome, KeyNote, PreviewAnswer } from "@/lib/reference-write";
-import { cutBatches, IMPORT_KEPT_MS } from "@/lib/references/batches";
+import { cutBatches, IMPORT_RESUMABLE_MS } from "@/lib/references/batches";
 import { citedNames, keyBaseOf, titleOf, yearOf } from "@/lib/references/csl";
 import { identifiersOf } from "@/lib/references/identifiers";
 import { parseReferences, type ImportedReference, type ReadNote } from "@/lib/references/import";
@@ -75,7 +75,7 @@ export default function ReferenceImport({ userId }: { userId: string }) {
 
   useEffect(() => {
     let live = true;
-    void unfinishedImport(userId, IMPORT_KEPT_MS).then((found) => live && setPending(found));
+    void unfinishedImport(userId, IMPORT_RESUMABLE_MS).then((found) => live && setPending(found));
     return () => {
       live = false;
     };
@@ -137,7 +137,13 @@ export default function ReferenceImport({ userId }: { userId: string }) {
     setProgress({ done, total });
     try {
       for (const batch of batches) {
-        await importReferenceBatchAction(importId, batch);
+        const answer = await importReferenceBatchAction(importId, batch);
+        if (answer.expired) {
+          await discardPendingImport(userId, importId);
+          setFailure("That import was started more than six days ago and can no longer be resumed. What it sent is in the library. Importing the file again adds the rest, but also adds a second copy of any work it already sent that has no DOI or ISBN.");
+          setPhase(rows.length > 0 ? "preview" : "edit");
+          return;
+        }
         await dropAnsweredBatch(userId, importId, batch[0].place);
         done += batch.length;
         setProgress({ done, total });

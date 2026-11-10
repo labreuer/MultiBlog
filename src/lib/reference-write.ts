@@ -8,7 +8,7 @@ import { PDF_CONTENT_TYPE } from "@/lib/reference-files";
 import { canWriteReferences } from "@/lib/role-checks";
 import { keyBaseOf, parseCslItem, readCsl, titleOf, type CslData } from "@/lib/references/csl";
 import { identifiersOf, withoutFailedIdentifiers, type Identifier, type IdentifierScheme } from "@/lib/references/identifiers";
-import { BATCH_BYTES, BATCH_RECORDS, IMPORT_KEPT_MS } from "@/lib/references/batches";
+import { BATCH_BYTES, BATCH_RECORDS, IMPORT_KEPT_MS, IMPORT_RESUMABLE_MS } from "@/lib/references/batches";
 import { foldKey, isKeyShaped, isLibraryKey, lookupKey, referencePath } from "@/lib/references/keys";
 
 // docs/CITATIONS.md, "Who writes them" — every write to the reference
@@ -383,6 +383,9 @@ export type ImportRecordInput = {
   replace: string | null;
 };
 
+/** A batch's answer: each record's outcome, or `expired` for an import past the days it may be sent. */
+export type ImportBatchAnswer = { expired: false; outcomes: ImportOutcome[] } | { expired: true };
+
 export type ImportOutcome =
   | { place: number; status: "created"; key: string; title: string; keyNote?: KeyNote }
   | { place: number; status: "replaced"; key: string; title: string; restored: boolean }
@@ -448,15 +451,20 @@ const isUniqueViolation = (err: unknown) => (err as { code?: unknown })?.code ==
  * each with its source's key where that fits and is free.
  *
  * A record sent before answers what its receipt says, so nothing is added
- * twice.
+ * twice. An import whose first receipt is older than `IMPORT_RESUMABLE_MS`
+ * is refused whole, `expired`, so a send that runs past the limit stops
+ * before the receipts it relies on are deleted.
  */
-export async function importReferenceBatch(actor: Actor, importId: string, records: readonly ImportRecordInput[]): Promise<ImportOutcome[]> {
+export async function importReferenceBatch(actor: Actor, importId: string, records: readonly ImportRecordInput[]): Promise<ImportBatchAnswer> {
   requireWriter(actor);
-  // A user's receipts past their week, deleted as they next send a batch, so nothing sweeps them.
+  const first = await prisma.referenceImportReceipt.findFirst({ where: { userId: actor.userId, importId }, orderBy: { createdAt: "asc" }, select: { createdAt: true } });
+  if (first && Date.now() - first.createdAt.getTime() > IMPORT_RESUMABLE_MS) return { expired: true };
+  // A user's receipts past their week, deleted as they next send a batch, so nothing sweeps
+  // them. None is this import's: it was accepted, so its first is younger than six days.
   await prisma.referenceImportReceipt.deleteMany({ where: { userId: actor.userId, createdAt: { lt: new Date(Date.now() - IMPORT_KEPT_MS) } } });
   const outcomes: ImportOutcome[] = [];
   for (const record of records) outcomes.push(await importOne(actor, importId, record));
-  return outcomes;
+  return { expired: false, outcomes };
 }
 
 /** The receipt for this record, if it has one. */

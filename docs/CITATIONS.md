@@ -771,9 +771,14 @@ export that is read, so the refusal says which, not just "That isn't BibTeX, RIS
   - Rejected: a receipt per batch, claimed as `src/lib/api/idempotency.ts` claims a write. That
     helper runs a failed or abandoned claim again, which is right for one write and wrong for a
     hundred of which sixty are already in.
-  - Receipts are kept a week, and an unfinished import is offered for that week and then
-    dropped, since past it a resent record could no longer be told from a new one. A user's
-    older receipts are deleted when they next send a batch, so nothing sweeps them.
+  - **An import may be sent for six days, and its receipts are kept for seven**
+    (`src/lib/references/batches.ts`). The browser offers an unfinished import for six days
+    from its start, and the server refuses a batch of an import whose first receipt is older
+    than that, whole, and the browser then drops what it kept. A user's receipts older than
+    seven days are deleted when they next send a batch, so nothing sweeps them. The day between
+    the two is what keeps a receipt from being deleted while its import may still be sent: a
+    send that crosses the sixth day stops, rather than resending records whose receipts are
+    gone, which would add a second copy of each with no DOI or ISBN.
     - A receipt answers only a record of its own import: a second import of the same file has
       another id, and finds what the library holds by DOI and ISBN, as any import does.
 - **An identifier that fails its check drops the identifier, not the record**, and the preview
@@ -966,8 +971,9 @@ reads a public page doesn't fetch four files for each work on it.
 - **e2e:** `e2e/reference-import-export.spec.ts`: an import with a duplicate replaced and a
   deleted duplicate replaced and restored; an import whose second batch the server wrote but
   the browser never heard, reloaded and resumed with nothing added twice; one import resumed
-  from two tabs at once; `update_ref` correcting a record in another case and refusing a
-  deleted one; and every download, an attachment under its name, behind its gate. And in
+  from two tabs at once; one resumed past its six days, refused and dropped; `update_ref`
+  correcting a record in another case and refusing a deleted one; and every download, an
+  attachment under its name, behind its gate. And in
   `e2e/references.spec.ts`, the preview and a key in another case redirecting to its own.
   - Not covered: a batch the server died part-way through, with only some of its records
     written. Its receipts answer it record by record, as they answer the batch above.
