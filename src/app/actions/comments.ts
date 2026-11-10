@@ -93,7 +93,7 @@ export async function submitComment(
   // PLAN.md §23m — two front doors, one validated document. Anything but an
   // explicit "rich" is read as Markdown, which is also what a form with no
   // JavaScript at all submits. After the post, since who a comment may
-  // mention is asked of the post (docs/ENTITY_CHIPS.md, "Planned: chips in
+  // mention is asked of the post (docs/ENTITY_CHIPS.md, "Chips in
   // comments").
   const writer: CommentWriter = session?.user ? actorFromSessionUser(session.user) : null;
   const parsedBody = await resolveCommentBody(
@@ -514,7 +514,7 @@ export async function getCommentMarkdown(commentId: string): Promise<{ markdown:
 // parser: parsed there, an HTML token becomes a real node, the opposite of
 // what the server does with the same text. Nothing is written, and the
 // result is what a submit of the same content would store, so its chips are
-// resolved under the same rule (docs/ENTITY_CHIPS.md, "Planned: chips in
+// resolved under the same rule (docs/ENTITY_CHIPS.md, "Chips in
 // comments"): `where` is the post, and on an edit the comment, whose own
 // chips may be written back. The JSON comes with its chips' records, so the
 // rich editor shows their labels.

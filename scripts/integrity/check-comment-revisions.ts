@@ -55,7 +55,7 @@ const postId = postIndex >= 0 ? args[postIndex + 1] : null;
 // PLAN.md §23b — a body is ProseMirror JSON now; its text is derived the way
 // every writer derives `body_text`, so the two comparisons below are about
 // the same string. Each entity chip reads as its label now, in the comment
-// style (docs/ENTITY_CHIPS.md, "Planned: chips in comments"), so a
+// style (docs/ENTITY_CHIPS.md, "Chips in comments"), so a
 // `body_text` a lost label refresh left behind is reported here.
 function bodyTextOf(body: unknown, context: ChipContext): string {
   return commentBodyTextFromJSON(body, body && typeof body === "object" ? commentChipLabels(body as JSONContent, context) : undefined);

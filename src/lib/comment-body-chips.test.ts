@@ -22,7 +22,7 @@ import { CHIP_ANCHOR_TEXT, ENTITY_CHIP } from "./entity-chips/types";
 import { commentContentToMarkdown, markdownToCommentContent } from "./markdown-import";
 import { pmCommentContentSchema, pmSchema } from "./tiptap-schema";
 
-// docs/ENTITY_CHIPS.md, "Planned: chips in comments" — the browser-safe half:
+// docs/ENTITY_CHIPS.md, "Chips in comments" — the browser-safe half:
 // the comment parse and writer, what a stored chip may be, the labelled
 // text, and a quotation that copies a passage's chips. Who may be named, and
 // a key the library doesn't have, are the server's (comment-chips.ts), and

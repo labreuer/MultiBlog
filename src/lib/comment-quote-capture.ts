@@ -36,7 +36,7 @@ import { canQuoteTargetInto } from "./comment-quote-authz";
 // it is never trusted as the answer. The stored `quoted_text` is always
 // `quotedTextAt` a verified range.
 //
-// A comment can hold entity chips (docs/ENTITY_CHIPS.md, "Planned: chips in
+// A comment can hold entity chips (docs/ENTITY_CHIPS.md, "Chips in
 // comments"), and a quotation is typed with their labels. So every comment
 // candidate is flattened with its chips' labels, in the comment style, and
 // the body's own spans are read the same way; what is stored is unchanged,

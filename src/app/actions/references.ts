@@ -5,8 +5,8 @@ import { auth } from "@/lib/auth";
 import { actorFromSessionUser, type Actor } from "@/lib/actor";
 import { ApiError } from "@/lib/api/errors";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
-import type { CitedWork } from "@/lib/entity-chips/kinds/citation";
-import { loadCitationContext } from "@/lib/entity-chips/kinds/citation-context";
+import type { CiteCandidate } from "@/lib/entity-chips/kinds/citation";
+import { citeCandidatesOf } from "@/lib/entity-chips/kinds/citation-context";
 import { canUserReadFile } from "@/lib/file-authz";
 import { prisma } from "@/lib/prisma";
 import { findReferences } from "@/lib/reference-data";
@@ -141,13 +141,6 @@ export async function searchReferencesForFile(fileId: string, query: string): Pr
     .map((reference) => ({ id: reference.id, key: reference.key, entry: entryText(reference.item), elsewhere: reference.fileId !== null }));
 }
 
-export type CiteCandidate = {
-  /** What a citation of this work is labelled from: the record a menu hands the editor as it inserts the chip. */
-  work: CitedWork;
-  /** The work's bibliography entry, for the menu's row. */
-  entry: string;
-};
-
 /**
  * The citation menu's search (docs/CITATIONS.md, "The menu"): works by key,
  * abbreviation, title or author. For anyone signed in, since a reference's
@@ -156,9 +149,7 @@ export type CiteCandidate = {
 export async function searchCitable(query: string): Promise<CiteCandidate[]> {
   const session = await auth();
   if (!session?.user || typeof query !== "string") return [];
-  const found = await findReferences(query.slice(0, 100), 8);
-  const context = await loadCitationContext(found.map((reference) => reference.id));
-  return found.flatMap((reference) => (context[reference.id] ? [{ work: context[reference.id], entry: entryText(reference.item) }] : []));
+  return citeCandidatesOf(await findReferences(query.slice(0, 100), 8));
 }
 
 /**

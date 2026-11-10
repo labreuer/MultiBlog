@@ -2,7 +2,10 @@ import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { Actor } from "@/lib/actor";
 import { ApiError } from "@/lib/api/errors";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { publishedPostWhere } from "@/lib/post-status";
+import { findReferences, referencesById } from "@/lib/reference-data";
 import {
   COMMENT_CHIP_STYLES,
   commentBodyText,
@@ -19,16 +22,18 @@ import {
 } from "@/lib/comment-body";
 import type { CommentBodyInput } from "@/lib/comment-body-value";
 import { loadChipContext } from "@/lib/entity-chips/context";
-import { CITATION } from "@/lib/entity-chips/kinds/citation";
-import { canInsertMentions, MENTION } from "@/lib/entity-chips/kinds/mention";
-import { mentionableAmong } from "@/lib/entity-chips/kinds/mention-rule";
+import { CITATION, type CiteCandidate } from "@/lib/entity-chips/kinds/citation";
+import { citeCandidatesOf } from "@/lib/entity-chips/kinds/citation-context";
+import { canInsertMentions, MENTION, type MentionUser } from "@/lib/entity-chips/kinds/mention";
+import { mentionableAmong, mentionableUsersWhere } from "@/lib/entity-chips/kinds/mention-rule";
+import { MENTION_MENU_LIMIT, MENTION_USER_SELECT, mentionMatching, mentionUserOf } from "@/lib/entity-chips/kinds/mention-search";
 import { resolveParsedCommentChips } from "@/lib/entity-chips/parsed-chips";
 import { chipLabelsIn } from "@/lib/entity-chips/text";
 import { chipMarkdowns, chipsInJSON } from "@/lib/entity-chips/renderings";
 import type { ChipContext } from "@/lib/entity-chips/types";
 import { commentContentToMarkdown, markdownToCommentContent } from "@/lib/markdown-import";
 
-// docs/ENTITY_CHIPS.md, "Planned: chips in comments" — the server half of a
+// docs/ENTITY_CHIPS.md, "Chips in comments" — the server half of a
 // comment's mentions and citations: who a commenter may name, the one write
 // path's chip resolution and insertion check, and the chips' records for
 // every surface that shows or writes a comment body. Server-only.
@@ -45,6 +50,9 @@ import { commentContentToMarkdown, markdownToCommentContent } from "@/lib/markdo
 /** Who is writing a comment: an account, or nobody signed in. */
 export type CommentWriter = Actor | null;
 
+/** The people on the landing page's contributor list: with the post's byline, whom anyone may mention in a comment. */
+const LISTED_CONTRIBUTOR: Prisma.UserWhereInput = { isListedContributor: true, name: { not: null }, NOT: { name: "" } };
+
 /** Of `userIds`, the ones `writer` may mention in a comment on `postId`, in the order given. */
 export async function commentMentionableAmong(writer: CommentWriter, postId: string, userIds: readonly string[]): Promise<string[]> {
   const ids = [...new Set(userIds)];
@@ -56,7 +64,7 @@ export async function commentMentionableAmong(writer: CommentWriter, postId: str
   const shown = await prisma.user.findMany({
     where: {
       id: { in: ids },
-      OR: [{ postAuthors: { some: { postId } } }, { isListedContributor: true, name: { not: null }, NOT: { name: "" } }],
+      OR: [{ postAuthors: { some: { postId } } }, LISTED_CONTRIBUTOR],
     },
     select: { id: true },
   });
@@ -65,6 +73,69 @@ export async function commentMentionableAmong(writer: CommentWriter, postId: str
     for (const id of await mentionableAmong(writer, post.docId, ids.filter((id) => !allowed.has(id)))) allowed.add(id);
   }
   return ids.filter((id) => allowed.has(id));
+}
+
+export const COMMENT_MENU_LIMIT = MENTION_MENU_LIMIT;
+
+/** The post a comment may be written on, by id: a published one. */
+async function commentablePost(postId: string): Promise<{ docId: string } | null> {
+  if (typeof postId !== "string") return null;
+  return prisma.post.findFirst({ where: { AND: [{ id: postId }, publishedPostWhere()] }, select: { docId: true } });
+}
+
+/**
+ * The `@` menu of a comment on `postId`: up to `COMMENT_MENU_LIMIT` people
+ * `writer` may mention there (`commentMentionableAmong`'s rule, as a search)
+ * whose name or handle contains `query`. The post's byline comes first, in
+ * its order, then everyone else by name. Signed out, that is the byline and
+ * the listed contributors alone. Empty for a post nobody may comment on.
+ */
+export async function commentMentionCandidates(writer: CommentWriter, postId: string, query: string): Promise<MentionUser[]> {
+  const post = await commentablePost(postId);
+  if (!post) return [];
+  const docRule = writer ? await mentionableUsersWhere(writer, post.docId) : null;
+  const matching = mentionMatching(query);
+
+  // The default client leaves soft-deleted accounts out, as commentMentionableAmong does.
+  const byline = await prisma.user.findMany({
+    where: { AND: [matching, { postAuthors: { some: { postId } } }] },
+    select: { ...MENTION_USER_SELECT, postAuthors: { where: { postId }, select: { bylineOrder: true } } },
+  });
+  byline.sort((a, b) => (a.postAuthors[0]?.bylineOrder ?? 0) - (b.postAuthors[0]?.bylineOrder ?? 0));
+  const first = byline.slice(0, COMMENT_MENU_LIMIT);
+  const others =
+    first.length < COMMENT_MENU_LIMIT
+      ? await prisma.user.findMany({
+          where: {
+            AND: [matching, docRule ? { OR: [LISTED_CONTRIBUTOR, docRule] } : LISTED_CONTRIBUTOR, { id: { notIn: first.map((user) => user.id) } }],
+          },
+          select: MENTION_USER_SELECT,
+          orderBy: { name: "asc" },
+          take: COMMENT_MENU_LIMIT - first.length,
+        })
+      : [];
+  return [...first, ...others].map(mentionUserOf);
+}
+
+/**
+ * The `[@` menu of a comment on `postId`: the works the post cites that
+ * match `query`, then, for anyone signed in, the rest of the library. A
+ * signed-out commenter is offered only what the post's bibliography already
+ * shows. An empty query lists the post's works. Empty for a post nobody may
+ * comment on.
+ */
+export async function commentCiteCandidates(writer: CommentWriter, postId: string, query: string): Promise<CiteCandidate[]> {
+  if (!(await commentablePost(postId))) return [];
+  const cited = await prisma.citation.findMany({ where: { postId }, select: { referenceId: true }, distinct: ["referenceId"] });
+  const ids = cited.map((row) => row.referenceId);
+  if (!query.trim()) {
+    const works = await citeCandidatesOf([...(await referencesById(ids)).values()].filter((reference) => !reference.deleted));
+    return works.sort((a, b) => a.entry.localeCompare(b.entry)).slice(0, COMMENT_MENU_LIMIT);
+  }
+  const own = await findReferences(query, COMMENT_MENU_LIMIT, ids);
+  const rest = writer && own.length < COMMENT_MENU_LIMIT ? await findReferences(query, COMMENT_MENU_LIMIT) : [];
+  const seen = new Set(own.map((reference) => reference.id));
+  return citeCandidatesOf([...own, ...rest.filter((reference) => !seen.has(reference.id))].slice(0, COMMENT_MENU_LIMIT));
 }
 
 /** Where a comment body is being written: its post, the writer, and on an edit the body as it stands. */

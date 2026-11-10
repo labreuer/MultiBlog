@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   const annotation = params.get("annotation");
   const comment = params.get("comment");
   // A comment can be public, and its commenter signed out (docs/ENTITY_CHIPS.md,
-  // "Planned: chips in comments"); a doc or a note needs an account.
+  // "Chips in comments"); a doc or a note needs an account.
   if (!session?.user && !comment) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

@@ -147,6 +147,13 @@
   color: var(--text-secondary);
 }
 
+/* Why a choice is off here, on a line of its own under the choices. */
+.note {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
 .check {
   display: inline-flex;
   align-items: center;

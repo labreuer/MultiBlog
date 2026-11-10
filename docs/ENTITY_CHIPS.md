@@ -238,11 +238,11 @@ Steps 0 to 3 are built but for the items each entry says are not; step 3's are i
   may be mentioned, the `@` menu in the doc editor and in a note's composer, the `mentions=`
   search filter with `@handle` in the search box, and the dashboard's "Mentions of you" card
   ([MENTIONS.md](MENTIONS.md)).
-- **Chips in comments** (below), from the Markdown box: the node in the comment schema and its
-  checks, the comment style on every surface, `body_text` with labels and its refresh, the
+- **Chips in comments** (below): the node in the comment schema and its checks, the Markdown
+  box's forms, the rich editor's `@` and `[@` menus and citation popover for a commenter signed
+  in or out, the comment style on every surface, `body_text` with labels and its refresh, the
   index tables' comment source with search and the dashboard, and a quotation that copies a
-  passage's chips. Not the menus, the public endpoint for a signed-out commenter's, or the
-  popover.
+  passage's chips.
 
 `/docs`' Length counts a chip as no characters.
 
@@ -708,8 +708,8 @@ Because anchors never contain a label, no restyle, rename or renumbering detache
 
 ## Chips in comments
 
-Mentions and citations in a comment's body, written in the Markdown box. The menus are still a
-plan (below). Four things set a comment apart from a doc or a note, and each shapes what is
+Mentions and citations in a comment's body, written in the Markdown box or put in by the rich
+editor's menus. Four things set a comment apart from a doc or a note, and each shapes what is
 built:
 
 - its body is JSON that `parseCommentBody` has accepted, with no ydoc behind it
@@ -780,7 +780,8 @@ A commenter is offered what the site already shows them (`commentMentionableAmon
     user id (COMMENTS.md, "What the page source holds"). Mentioning a commenter would tie the
     name they commented under to their account's current name.
 - **Citations.** Any work in the library, deleted ones aside, since every reference's page is
-  public. A key typed into the Markdown box resolves for anyone.
+  public. A key typed into the Markdown box resolves for anyone. The `[@` menu offers a
+  signed-out commenter less than that (The menus, below).
 
 ### The Markdown box
 
@@ -892,22 +893,33 @@ A quotation of a post is unchanged, since a post holds linked text.
 - `check-mentions.ts` checks both tables' comment rows.
 - A reference's page doesn't list the comments that cite it.
 
-### Planned: the menus
+### The menus
 
-- **The rich editor gets the `@` and `[@` menus.**
-  - Mentions offer whom the commenter may mention (Who may insert, above).
-  - **Anyone signed in** gets the `[@` menu over the whole library, as `searchCitable` already
-    allows, with this post's works listed first.
-  - **A signed-out commenter's citation menu** offers only the works the post cites, which its
-    bibliography already shows.
-  - A menu seeds the records of what it inserts, so a new comment's chips are labelled as they
-    land.
-- **A signed-out commenter's two menus** ask one public endpoint, keyed on the post, and it
-  answers with those lists alone.
-- **The citation popover** edits a comment's citations. Its "In the sentence" is disabled in a
-  comment, and says why: a comment has no narrative form.
-- **e2e:** a signed-out commenter mentioning the post's author from the menu, with the label on
-  the static page.
+The rich editor (`CommentEditor`) has the `@` and `[@` menus and the citation popover, the same
+components as a doc's (`MentionSuggestions`, `CiteSuggestions`, `CitePopover`), each handed a
+search of the comment's own rather than a chip surface.
+
+- **Both menus ask the server, keyed on the post, signed in or not:** `searchCommentMentionable`
+  and `searchCommentCitable` (`src/app/actions/comment-chips.ts`), over
+  `commentMentionCandidates` and `commentCiteCandidates` (`src/lib/comment-chips.ts`). A post
+  that isn't published answers nothing.
+  - **`@`** offers whom the commenter may mention (Who may insert, above): the post's byline
+    first, in its order, then everyone else by name. Signed out, that is the byline and the
+    contributor list.
+  - **`[@`** offers the works the post cites first, then the rest of the library to anyone
+    signed in. A signed-out commenter is offered only the post's works, which its bibliography
+    already shows. `[@` alone lists them, under "Cited in this post".
+  - **One server-side search for every commenter.** Sending a signed-out commenter the post's
+    lists whole, for the browser to filter, is rejected: a filter in the browser would match
+    works by other rules than the library's search (stemming, accent folding), so the same words
+    could find a work for a stranger that they don't find for a member, or the reverse.
+- **A menu seeds the record of what it inserts** into the editor's chip inputs, so a new
+  comment's chips are labelled as they land.
+- **The popover** edits a comment's citations as a doc's, with "Add a work" searching as the
+  `[@` menu does. "In the sentence" is disabled, and a line under it says why: a comment has no
+  narrative form (The Markdown box, above).
+- **What a menu inserts passes the insertion check** on submit like any other chip, so the
+  menus are a convenience, not the gate.
 
 ### Checks
 
@@ -931,7 +943,10 @@ A quotation of a post is unchanged, since a post holds linked text.
   - an unknown key refused, and a mention a signed-out commenter may not make left a link;
   - quoting a comment that holds a mention, and a rename relabelling both and the page;
   - `mentions=` and the dashboard finding an approved comment, and not a pending one until it
-    is approved.
+    is approved;
+  - a signed-out commenter's menus offering the post's byline and its works and not someone
+    off the list or another work that matches, the popover's narrative form disabled, and the
+    chips labelled on the page and indexed. It is the spec's one submission through the form.
 
 ## Later
 

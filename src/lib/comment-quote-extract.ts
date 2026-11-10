@@ -28,7 +28,7 @@ import { CHIP_ANCHOR_TEXT, ENTITY_CHIP, type ChipAttrs } from "./entity-chips/ty
 // null `anchorId`, an existing mark comes off and the words stay between
 // literal quotes. Never an error.
 //
-// **Entity chips** (docs/ENTITY_CHIPS.md, "Planned: chips in comments"). A
+// **Entity chips** (docs/ENTITY_CHIPS.md, "Chips in comments"). A
 // passage holding a mention or a citation is copied as nodes, never as its
 // text, whose chips are U+FFFC: each chip becomes a chip in the reply, with
 // an instance id of its own, so the quotation follows a rename as the

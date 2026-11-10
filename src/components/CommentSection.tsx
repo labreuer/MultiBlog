@@ -44,7 +44,7 @@ export default async function CommentSection({ postId }: { postId: string }) {
     }
   }
 
-  // docs/ENTITY_CHIPS.md, "Planned: chips in comments" — one context for
+  // docs/ENTITY_CHIPS.md, "Chips in comments" — one context for
   // every comment on the page, computed here and sent in the payload beside
   // the comments. Each record is on a public page already (an author page, a
   // reference's), and none depends on who is looking, so the page stays

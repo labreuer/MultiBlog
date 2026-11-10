@@ -21,7 +21,7 @@ import { CHIP_ANCHOR_TEXT, ENTITY_CHIP, type ChipContext, type ChipInputs, type 
 // sanitize and no allowlist to keep in step with the editor. What is added on
 // top is the two caps §23b asks for, link hardening, which the schema
 // cannot express because it is a rule about attribute *values*, and each
-// entity chip's own validation (docs/ENTITY_CHIPS.md, "Planned: chips in
+// entity chip's own validation (docs/ENTITY_CHIPS.md, "Chips in
 // comments"), since the schema checks only that a chip's `data` is there.
 
 /** The longest plain text a comment may carry — the old textarea's maxLength. */
@@ -58,7 +58,7 @@ export const MAX_CHIPS_PER_COMMENT = 20;
 
 /**
  * The one style every comment's chips are shown in (docs/ENTITY_CHIPS.md,
- * "Planned: chips in comments", "The style"): a mention by name, a citation
+ * "Chips in comments", "The style"): a mention by name, a citation
  * author-date. Not a doc's `short`, a shorthand a stranger has no way to
  * learn; not numbers, which would collide with the post's own; and not the
  * post's style, so that a comment's labels depend on nothing but the records
@@ -170,7 +170,7 @@ const RELATIVE_PATHS = ["/pdf/", "/authors/"];
  * how a PDF fragment link is written (docs/PDF_FRAGMENT_LINKS.md §8), or to
  * an author page (`/authors/<slug>`), which is what a mention's Markdown is
  * and what one the commenter may not insert stays (docs/ENTITY_CHIPS.md,
- * "Planned: chips in comments"). Every other relative or protocol-less URL
+ * "Chips in comments"). Every other relative or protocol-less URL
  * is refused.
  *
  * The path test is made on the path the URL parser settles on, not on the

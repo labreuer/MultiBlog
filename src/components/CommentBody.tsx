@@ -26,7 +26,7 @@ import styles from "./CommentBody.module.css";
 // or a row this render was not handed — still shows the quote, just without
 // the line under it. That is §23f's degradation, done at render.
 //
-// docs/ENTITY_CHIPS.md, "Planned: chips in comments" — a mention or citation
+// docs/ENTITY_CHIPS.md, "Chips in comments" — a mention or citation
 // in the body is drawn with its label, in the comment style, from
 // `chipContext`: the records the page loaded for every comment it shows, which
 // depend on nobody's session, so the post page stays static.

@@ -14,7 +14,8 @@
   "@" opens nothing rather than a list of nobody. A row says when the person couldn't read the
   doc, or the PDF a note is on.
 - the `mention` index table and the label refresh after a rename (the kit's items 12 and 10).
-- mentions in comments, written in the Markdown box (ENTITY_CHIPS.md, "Chips in comments").
+- mentions in comments, written in the Markdown box or from the rich editor's `@` menu, which
+  asks of the post (ENTITY_CHIPS.md, "Chips in comments").
 
 - the Markdown, both ways: a read writes `[@Label](/authors/slug)`, with a deleted or unknown
   account struck through and a hand-written link of that shape escaped; an MCP edit, note or
@@ -148,9 +149,6 @@ whose labels can name them.
 
 ## Later
 
-- **The comment menu**, planned in [ENTITY_CHIPS.md](ENTITY_CHIPS.md), "Chips in comments".
-  A comment's mentions are built from its Markdown box, under their own rule for who may be
-  mentioned (that section, "Who may insert").
 - **Notifications**, as described under the stub (TODO.md).
 - **A control for a mention's `form`**, the per-chip override. Every label honours the field,
   and nothing sets it.

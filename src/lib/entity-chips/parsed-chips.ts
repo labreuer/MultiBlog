@@ -63,7 +63,7 @@ export async function resolveParsedChips(
 }
 
 /**
- * The same for a comment body (docs/ENTITY_CHIPS.md, "Planned: chips in
+ * The same for a comment body (docs/ENTITY_CHIPS.md, "Chips in
  * comments"), whose rule for who may be named is its own (`mentionable`,
  * comment-chips.ts) and whose commenter may be signed out. A mention the rule
  * refuses, or a handle nobody has, stays the link its Markdown also is, as an

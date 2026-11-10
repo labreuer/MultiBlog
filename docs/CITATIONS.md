@@ -372,7 +372,8 @@ page of it for whoever may read it (Labels, "The link").
 mentions; a `[` before the `@` keeps the mention menu shut, since `[` isn't one of its allowed
 prefixes.
 
-- It sits in the doc editor and the annotation composer.
+- It sits in the doc editor and the annotation composer, and in a comment's rich editor, which
+  lists the post's works first (ENTITY_CHIPS.md, "Chips in comments", "The menus").
 - It searches by key, short label, title and authors.
 - "radner 49" sets the locator.
 
@@ -380,8 +381,8 @@ prefixes.
 page, the words before and after it (inline Markdown, as in the Markdown), and whether its author
 is left out; the form; and further works, found as the menu finds them, "radner 7" included.
 
-- **Where.** Beside the menu, in the doc editor and the annotation composer, and only in an
-  editor that can be typed in. Selecting a citation opens it, by a click or the arrow keys, and
+- **Where.** Beside the menu, in the doc editor, the annotation composer and a comment's rich
+  editor, and only in an editor that can be typed in. Selecting a citation opens it, by a click or the arrow keys, and
   Enter moves into it.
 - **Each edit is one attribute set** on the chip's `data`, run through the kind's validation as
   every other way in is. So the chip keeps its instance id and its place, and an anchor on it
@@ -394,7 +395,8 @@ is left out; the form; and further works, found as the menu finds them, "radner 
   moved, as validation moves it: "49 n. 3" leaves 49 in Page and puts "n. 3" in After, and the
   popover says what went, until the next edit or until it closes.
 - **"In the sentence" is offered only where Pandoc has the form**: one work, its author shown,
-  nothing before it. Otherwise the choice is disabled and says why.
+  nothing before it. Otherwise the choice is disabled and says why. In a comment it is always
+  disabled, since a comment has no narrative form.
 - **Open while it is wanted.** It shows while the editor has focus and its selection is the
   citation. Once focus moves into the popover, by a press, a key or a script, it holds the
   popover open until focus or a press goes somewhere else.

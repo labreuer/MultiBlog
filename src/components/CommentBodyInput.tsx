@@ -224,6 +224,7 @@ export default function CommentBodyInput({
           disabled={disabled || switching}
           autoFocus={autoFocus}
           onEditorReady={onEditorReady}
+          postId={postId}
           commentId={commentId}
         />
       )}

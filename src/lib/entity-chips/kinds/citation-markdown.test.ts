@@ -88,7 +88,7 @@ test("parse: nothing in code, link text, an address or an escape is a citation",
 test("parse: a note's body reads citations too, and a comment's reads only the bracketed forms", () => {
   const note = markdownToAnnotationContent("see [@x, p. 4]", { chips: true });
   assert.equal(note.content?.[0].content?.[1].attrs?.kind, CITATION);
-  // A comment's bare @word is how one commenter addresses another (docs/ENTITY_CHIPS.md, "Planned: chips in comments").
+  // A comment's bare @word is how one commenter addresses another (docs/ENTITY_CHIPS.md, "Chips in comments").
   const comment = markdownToCommentContent("@Andrew, see [@x]").content?.[0].content;
   assert.deepEqual(comment?.[0], { type: "text", text: "@Andrew, see " });
   assert.equal(comment?.[1].attrs?.kind, CITATION);

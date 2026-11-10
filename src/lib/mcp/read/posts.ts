@@ -134,7 +134,7 @@ async function postComments(post: { id: string; publishEventId: string | null },
     select: { id: true, quotedText: true, status: true, anchoredEventId: true },
   });
   // Each chip in its chip kind's Markdown, labelled in the comment style
-  // from one context for every comment (docs/ENTITY_CHIPS.md, "Planned: chips in comments").
+  // from one context for every comment (docs/ENTITY_CHIPS.md, "Chips in comments").
   const chipContext = format === "text" ? {} : await commentChipContext(comments.map((c) => c.body));
   const markdownOf = new Map(
     format === "text" ? [] : await Promise.all(comments.map(async (c) => [c.id, (await commentMarkdownOf(c.body as JSONContent, chipContext)).trim()] as const)),

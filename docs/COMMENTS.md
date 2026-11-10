@@ -201,9 +201,9 @@ as `setEditable(false)`, which emits an `update` with the document unchanged —
 A body can hold mentions and citations, each an `entityChip` node that holds only who or what
 it stands for, its label computed wherever it is shown. Their rules are
 [ENTITY_CHIPS.md](ENTITY_CHIPS.md)'s, "Chips in comments": one fixed style (a name, and
-author-date), who a commenter may mention, the Markdown box's bracketed forms, how the static
-post page labels them, `body_text` with labels, the index rows an APPROVED comment has, and a
-quotation that copies them. Every surface that draws a body passes `CommentBody` the chip
+author-date), who a commenter may mention, the Markdown box's bracketed forms, the rich
+editor's `@` and `[@` menus, how the static post page labels them, `body_text` with labels, the
+index rows an APPROVED comment has, and a quotation that copies them. Every surface that draws a body passes `CommentBody` the chip
 records it loaded (`commentChipContext`), and the post page's are one context for every
 comment on it, sent in the payload.
 
@@ -657,8 +657,6 @@ From PLAN.md §23 (rich bodies and quotation):
 
 ## Not built, deferred
 
-- **A menu for mentions and citations** in the rich editor, and the public endpoint a
-  signed-out commenter's would ask: planned in docs/ENTITY_CHIPS.md, "Chips in comments".
 - **No inline quote gesture.** Both gestures insert a block; inline is typed. A gesture
   would insert the `Quote` mark with a pending id; the server needs nothing new.
 - **No highlight of quotations in the article or in a quoted comment's card.** The cards

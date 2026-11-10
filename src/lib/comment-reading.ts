@@ -111,7 +111,7 @@ export async function commentHistoryFor(viewer: Viewer, commentId: string): Prom
 }
 
 /**
- * docs/ENTITY_CHIPS.md, "Planned: chips in comments" — the chip context for
+ * docs/ENTITY_CHIPS.md, "Chips in comments" — the chip context for
  * one comment, as `actor` (null: signed out) may have it, or null when they
  * may not read the comment: `GET /api/chip-context?comment=<id>`, under the
  * comment's own read rule. It answers for the chips the stored body holds,
