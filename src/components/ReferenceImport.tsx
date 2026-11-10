@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { importReferenceBatchAction, importReportAction, previewReferenceImportAction } from "@/app/actions/references";
@@ -61,6 +61,7 @@ function keyNoteText(note: KeyNote): string {
 
 export default function ReferenceImport({ userId }: { userId: string }) {
   const router = useRouter();
+  const panel = useRef<HTMLDetailsElement>(null);
   const [pending, setPending] = useState<PendingImport | null>(null);
   const [replacing, setReplacing] = useState<Set<number>>(new Set());
   const [text, setText] = useState("");
@@ -130,12 +131,14 @@ export default function ReferenceImport({ userId }: { userId: string }) {
     setFailure(null);
     setPending(null);
     setPhase("importing");
+    // A resume starts from the banner, above a panel a reload has closed: the progress and the report are in it.
+    if (panel.current) panel.current.open = true;
     let done = total - batches.reduce((sum, batch) => sum + batch.length, 0);
     setProgress({ done, total });
     try {
       for (const batch of batches) {
         await importReferenceBatchAction(importId, batch);
-        await dropAnsweredBatch(userId, importId);
+        await dropAnsweredBatch(userId, importId, batch[0].place);
         done += batch.length;
         setProgress({ done, total });
       }
@@ -191,7 +194,7 @@ export default function ReferenceImport({ userId }: { userId: string }) {
           </button>
         </p>
       )}
-      <details className={styles.importPanel}>
+      <details ref={panel} className={styles.importPanel}>
         <summary>Add references</summary>
         {(phase === "edit" || phase === "reading") && (
           <>

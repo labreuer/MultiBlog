@@ -110,7 +110,7 @@ test("an import interrupted part-way resumes after a reload, a batch the server 
     await page.unrouteAll();
     await page.reload();
     await expect(page.getByText("An import you started is unfinished: 50 of 150 records left.")).toBeVisible();
-    await page.getByRole("button", { name: "Resume" }).click();
+    await page.getByRole("button", { name: "Resume", exact: true }).click();
     // The report is the server's, read from every record's row: all 150, the resent ones as they were answered.
     await expect(page.getByRole("list", { name: "Import results" }).getByRole("listitem")).toHaveCount(150);
     await expect(page.getByRole("list", { name: "Import results" })).toContainText(`Added ${prefix}1949: Work 149 ${prefix}`);
@@ -140,7 +140,7 @@ test("one import resumed from two tabs at once creates each record once, and ans
     await page.reload();
     await second.goto("/references");
     for (const tab of [page, second]) await expect(tab.getByText("An import you started is unfinished: 3 of 3 records left.")).toBeVisible();
-    await Promise.all([page.getByRole("button", { name: "Resume" }).click(), second.getByRole("button", { name: "Resume" }).click()]);
+    await Promise.all([page.getByRole("button", { name: "Resume", exact: true }).click(), second.getByRole("button", { name: "Resume", exact: true }).click()]);
     for (const tab of [page, second]) {
       const report = tab.getByRole("list", { name: "Import results" });
       await expect(report.getByRole("listitem")).toHaveCount(3);

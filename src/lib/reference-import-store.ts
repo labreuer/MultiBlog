@@ -73,13 +73,18 @@ export async function keepPendingImport(pending: Omit<PendingImport, "id">): Pro
   await run("readwrite", (store) => store.put({ ...pending, id: idOf(pending.userId, pending.importId) }));
 }
 
-/** Drops an import's first batch, once the server has answered it; the import itself once none is left. */
-export async function dropAnsweredBatch(userId: string, importId: string): Promise<void> {
+/**
+ * Drops the batch that begins at `firstPlace`, once the server has answered
+ * it; the import itself once none is left. By its place, not as "the first":
+ * two tabs resuming one import each answer the same batch, and the second to
+ * drop "the first" would drop a batch neither has sent.
+ */
+export async function dropAnsweredBatch(userId: string, importId: string, firstPlace: number): Promise<void> {
   const pending = await run<PendingImport | undefined>("readonly", (store) => store.get(idOf(userId, importId)));
   if (!pending) return;
-  const batches = pending.batches.slice(1);
+  const batches = pending.batches.filter((batch) => batch[0]?.place !== firstPlace);
   if (batches.length === 0) await discardPendingImport(userId, importId);
-  else await run("readwrite", (store) => store.put({ ...pending, batches }));
+  else if (batches.length < pending.batches.length) await run("readwrite", (store) => store.put({ ...pending, batches }));
 }
 
 export async function discardPendingImport(userId: string, importId: string): Promise<void> {
