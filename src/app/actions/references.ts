@@ -13,11 +13,19 @@ import { findReferences } from "@/lib/reference-data";
 import { referenceCitedBy as citedByFor, type ReferenceCitedBy } from "@/lib/reference-cited-by";
 import { findReadablePdfs, referencesOfFile, type FileReference, type PdfCandidate } from "@/lib/reference-files";
 import {
-  importReferences,
+  importBatchOf,
+  importIdOf,
+  importReferenceBatch,
+  importReport,
+  previewReferenceImport,
   referencePath,
+  replaceReference,
+  type PreviewAnswer,
+  type PreviewQuery,
   setReferenceDeleted,
   untieReferenceFromFile as untieFromFile,
   updateReference,
+  type ImportBatchAnswer,
   type ImportOutcome,
 } from "@/lib/reference-write";
 import { entryText } from "@/lib/references/entry";
@@ -39,15 +47,65 @@ function said(err: unknown): never {
   throw err;
 }
 
-export type ImportReport = { format: string | null; outcomes: ImportOutcome[]; errors: string[] };
-
-/** Imports pasted BibTeX, RIS or CSL-JSON. Each record is created, reported as already held, or refused with why. */
-export async function importReferencesAction(text: string): Promise<ImportReport> {
+/**
+ * One batch of an import the browser parsed (docs/CITATIONS.md, "The import
+ * box"): at most a hundred records and 500,000 bytes, each built again here.
+ * Each record is created, replaces the record of a duplicate the preview
+ * offered, is reported as already held, or is refused with why; one sent
+ * before answers what it answered then. An import past the days it may be
+ * sent is refused whole, `expired`.
+ */
+export async function importReferenceBatchAction(importId: unknown, records: unknown): Promise<ImportBatchAnswer> {
   const actor = await requireActor();
-  if (typeof text !== "string" || text.length > 2_000_000) throw new Error("That is too much to import at once.");
-  const report = await importReferences(actor, text).catch(said);
+  const outcomes = await Promise.resolve()
+    .then(() => importReferenceBatch(actor, importIdOf(importId), importBatchOf(records)))
+    .catch(said);
   revalidatePath("/references");
-  return report;
+  return outcomes;
+}
+
+/** An import's report, from the receipts its records left: every outcome so far, in the import's order. */
+export async function importReportAction(importId: unknown): Promise<ImportOutcome[]> {
+  const actor = await requireActor();
+  return Promise.resolve()
+    .then(() => importReport(actor, importIdOf(importId)))
+    .catch(said);
+}
+
+/** How many records one preview question may ask about. */
+const PREVIEW_LIMIT = 500;
+
+/** What only the server knows of the records an import would add: the key each would get now, and which references hold it. */
+export async function previewReferenceImportAction(queries: unknown, reserved: unknown): Promise<PreviewAnswer[]> {
+  const actor = await requireActor();
+  if (!Array.isArray(queries) || queries.length > PREVIEW_LIMIT || !Array.isArray(reserved) || reserved.length > 50_000) throw new Error("That isn't an import's preview.");
+  const text = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
+  const asked = queries.map((raw): PreviewQuery => {
+    const query = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const identifiers = Array.isArray(query.identifiers) ? query.identifiers.slice(0, 20) : [];
+    return {
+      sourceKey: text(query.sourceKey, 400) || null,
+      keyBase: text(query.keyBase, 80),
+      identifiers: identifiers.flatMap((id) => {
+        const { scheme, value } = (id ?? {}) as { scheme?: unknown; value?: unknown };
+        return (scheme === "DOI" || scheme === "ISBN") && typeof value === "string" && value.length <= 400 ? [{ scheme, value }] : [];
+      }),
+    };
+  });
+  return previewReferenceImport(actor, asked, reserved.filter((key): key is string => typeof key === "string").map((key) => key.slice(0, 400))).catch(said);
+}
+
+/**
+ * Replaces a reference's record with one the browser parsed: "Replace record"
+ * on a row of /references (docs/CITATIONS.md, "Replacing a record"). A
+ * deleted reference is refused, as `update_ref` refuses one; restore it first.
+ */
+export async function replaceReferenceRecord(id: unknown, csl: unknown): Promise<{ key: string }> {
+  if (typeof id !== "string") throw new Error("That isn't a reference.");
+  const replaced = await replaceReference(await requireActor(), id, csl, { restore: false }).catch(said);
+  revalidatePath("/references");
+  revalidatePath(referencePath(replaced.key));
+  return { key: replaced.key };
 }
 
 export async function deleteReference(id: string): Promise<void> {

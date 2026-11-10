@@ -1,0 +1,917 @@
+
+PMID- 33301246
+OWN - NLM
+STAT- MEDLINE
+DCOM- 20210112
+LR  - 20260518
+IS  - 1533-4406 (Electronic)
+IS  - 0028-4793 (Print)
+IS  - 0028-4793 (Linking)
+VI  - 383
+IP  - 27
+DP  - 2020 Dec 31
+TI  - Safety and Efficacy of the BNT162b2 mRNA Covid-19 Vaccine.
+PG  - 2603-2615
+LID - 10.1056/NEJMoa2034577 [doi]
+LID - NEJMoa2034577
+AB  - BACKGROUND: Severe acute respiratory syndrome coronavirus 2 (SARS-CoV-2) 
+      infection and the resulting coronavirus disease 2019 (Covid-19) have afflicted 
+      tens of millions of people in a worldwide pandemic. Safe and effective vaccines 
+      are needed urgently. METHODS: In an ongoing multinational, placebo-controlled, 
+      observer-blinded, pivotal efficacy trial, we randomly assigned persons 16 years 
+      of age or older in a 1:1 ratio to receive two doses, 21 days apart, of either 
+      placebo or the BNT162b2 vaccine candidate (30 mug per dose). BNT162b2 is a lipid 
+      nanoparticle-formulated, nucleoside-modified RNA vaccine that encodes a prefusion 
+      stabilized, membrane-anchored SARS-CoV-2 full-length spike protein. The primary 
+      end points were efficacy of the vaccine against laboratory-confirmed Covid-19 and 
+      safety. RESULTS: A total of 43,548 participants underwent randomization, of whom 
+      43,448 received injections: 21,720 with BNT162b2 and 21,728 with placebo. There 
+      were 8 cases of Covid-19 with onset at least 7 days after the second dose among 
+      participants assigned to receive BNT162b2 and 162 cases among those assigned to 
+      placebo; BNT162b2 was 95% effective in preventing Covid-19 (95% credible 
+      interval, 90.3 to 97.6). Similar vaccine efficacy (generally 90 to 100%) was 
+      observed across subgroups defined by age, sex, race, ethnicity, baseline 
+      body-mass index, and the presence of coexisting conditions. Among 10 cases of 
+      severe Covid-19 with onset after the first dose, 9 occurred in placebo recipients 
+      and 1 in a BNT162b2 recipient. The safety profile of BNT162b2 was characterized 
+      by short-term, mild-to-moderate pain at the injection site, fatigue, and 
+      headache. The incidence of serious adverse events was low and was similar in the 
+      vaccine and placebo groups. CONCLUSIONS: A two-dose regimen of BNT162b2 conferred 
+      95% protection against Covid-19 in persons 16 years of age or older. Safety over 
+      a median of 2 months was similar to that of other viral vaccines. (Funded by 
+      BioNTech and Pfizer; ClinicalTrials.gov number, NCT04368728.).
+CI  - Copyright (c) 2020 Massachusetts Medical Society.
+FAU - Polack, Fernando P
+AU  - Polack FP
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Thomas, Stephen J
+AU  - Thomas SJ
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Kitchin, Nicholas
+AU  - Kitchin N
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Absalon, Judith
+AU  - Absalon J
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Gurtman, Alejandra
+AU  - Gurtman A
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Lockhart, Stephen
+AU  - Lockhart S
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Perez, John L
+AU  - Perez JL
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Perez Marc, Gonzalo
+AU  - Perez Marc G
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Moreira, Edson D
+AU  - Moreira ED
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Zerbini, Cristiano
+AU  - Zerbini C
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Bailey, Ruth
+AU  - Bailey R
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Swanson, Kena A
+AU  - Swanson KA
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Roychoudhury, Satrajit
+AU  - Roychoudhury S
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Koury, Kenneth
+AU  - Koury K
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Li, Ping
+AU  - Li P
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Kalina, Warren V
+AU  - Kalina WV
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Cooper, David
+AU  - Cooper D
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Frenck, Robert W Jr
+AU  - Frenck RW Jr
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Hammitt, Laura L
+AU  - Hammitt LL
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Tureci, Ozlem
+AU  - Tureci O
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Nell, Haylene
+AU  - Nell H
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Schaefer, Axel
+AU  - Schaefer A
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Unal, Serhat
+AU  - Unal S
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Tresnan, Dina B
+AU  - Tresnan DB
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Mather, Susan
+AU  - Mather S
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Dormitzer, Philip R
+AU  - Dormitzer PR
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Sahin, Ugur
+AU  - Sahin U
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Jansen, Kathrin U
+AU  - Jansen KU
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+FAU - Gruber, William C
+AU  - Gruber WC
+AD  - From Fundacion INFANT (F.P.P.) and iTrials-Hospital Militar Central (G.P.M.), 
+      Buenos Aires; State University of New York, Upstate Medical University, Syracuse 
+      (S.J.T.), and Vaccine Research and Development, Pfizer, Pearl River (J.A., A.G., 
+      K.A.S., K.K., W.V.K., D.C., P.R.D., K.U.J., W.C.G.) - both in New York; Vaccine 
+      Research and Development, Pfizer, Hurley, United Kingdom (N.K., S.L., R.B.); 
+      Vaccine Research and Development (J.L.P., P.L.) and Worldwide Safety, Safety 
+      Surveillance and Risk Management (S.M.), Pfizer, Collegeville, PA; Associacao 
+      Obras Sociais Irma Dulce and Oswaldo Cruz Foundation, Bahia (E.D.M.), and Centro 
+      Paulista de Investigacao Clinica, Sao Paulo (C.Z.) - both in Brazil; Global 
+      Product Development, Pfizer, Peapack, NJ (S.R.); Cincinnati Children's Hospital, 
+      Cincinnati (R.W.F.); Johns Hopkins Bloomberg School of Public Health, Baltimore 
+      (L.L.H.); BioNTech, Mainz (OT., U.S.), and Medizentrum Essen Borbeck, Essen 
+      (A.S.) - both in Germany; Tiervlei Trial Centre, Karl Bremer Hospital, Cape Town, 
+      South Africa (H.N.); Hacettepe University, Ankara, Turkey (S.U.); and Worldwide 
+      Safety, Safety Surveillance and Risk Management, Pfizer, Groton, CT (D.B.T.).
+CN  - C4591001 Clinical Trial Group
+LA  - eng
+SI  - ClinicalTrials.gov/NCT04368728
+PT  - Clinical Trial, Phase II
+PT  - Clinical Trial, Phase III
+PT  - Journal Article
+PT  - Multicenter Study
+PT  - Randomized Controlled Trial
+PT  - Research Support, Non-U.S. Gov't
+DEP - 20201210
+PL  - United States
+TA  - N Engl J Med
+JT  - The New England journal of medicine
+JID - 0255562
+RN  - 0 (BNT162 Vaccine)
+RN  - 0 (COVID-19 Vaccines)
+RN  - 0 (Vaccines, Synthetic)
+RN  - 0 (mRNA Vaccines)
+SB  - IM
+CIN - N Engl J Med. 2020 Dec 31;383(27):2677-2678. doi: 10.1056/NEJMe2034717. PMID: 
+      33301245
+CIN - Nature. 2020 Dec;588(7838):377-378. doi: 10.1038/d41586-020-03542-4. PMID: 
+      33311629
+CIN - Semergen. 2021 Jan-Feb;47(1):1-3. doi: 10.1016/j.semerg.2020.12.005. PMID: 
+      33478841
+CIN - Panminerva Med. 2022 Mar;64(1):131-132. doi: 10.23736/S0031-0808.21.04286-5. 
+      PMID: 33480519
+CIN - Ann Intern Med. 2021 Feb;174(2):JC15. doi: 10.7326/ACPJ202102160-015. PMID: 
+      33524290
+CIN - MMW Fortschr Med. 2021 Feb;163(2):24-25. doi: 10.1007/s15006-021-9577-4. PMID: 
+      33527275
+CIN - N Engl J Med. 2021 Apr 22;384(16):1576-1577. doi: 10.1056/NEJMc2036242. PMID: 
+      33596348
+CIN - N Engl J Med. 2021 Apr 22;384(16):1577. doi: 10.1056/NEJMc2036242. PMID: 33596349
+CIN - N Engl J Med. 2021 Apr 22;384(16):1577-1578. doi: 10.1056/NEJMc2036242. PMID: 
+      33596350
+CIN - Virol Sin. 2021 Oct;36(5):1097-1103. doi: 10.1007/s12250-021-00408-5. PMID: 
+      34061319
+CIN - N Engl J Med. 2022 Mar 24;386(12):1176-1179. doi: 10.1056/NEJMe2202547. PMID: 
+      35196425
+MH  - Adolescent
+MH  - Adult
+MH  - Aged
+MH  - BNT162 Vaccine
+MH  - COVID-19/immunology/*prevention & control
+MH  - COVID-19 Vaccines/administration & dosage/adverse effects/*immunology
+MH  - Fatigue/etiology
+MH  - Female
+MH  - Headache/etiology
+MH  - Humans
+MH  - Immunization, Secondary
+MH  - Male
+MH  - Middle Aged
+MH  - *SARS-CoV-2/genetics
+MH  - Single-Blind Method
+MH  - Treatment Outcome
+MH  - Vaccines, Synthetic
+MH  - Young Adult
+MH  - mRNA Vaccines
+PMC - PMC7745181
+FIR - Aberg, Judith
+IR  - Aberg J
+FIR - Addo, Marylyn
+IR  - Addo M
+FIR - Akhan, Sila
+IR  - Akhan S
+FIR - Albertson, Timothy
+IR  - Albertson T
+FIR - Al-Ibrahim, Mohamed
+IR  - Al-Ibrahim M
+FIR - Altin, Sedat
+IR  - Altin S
+FIR - Anderson, Corey
+IR  - Anderson C
+FIR - Andrews, Charles
+IR  - Andrews C
+FIR - Arora, Samir
+IR  - Arora S
+FIR - Balik, Ismail
+IR  - Balik I
+FIR - Barnett, Elizabeth
+IR  - Barnett E
+FIR - Bauer, George
+IR  - Bauer G
+FIR - Baumann-Noss, Sybille
+IR  - Baumann-Noss S
+FIR - Berhe, Mezgebe
+IR  - Berhe M
+FIR - Bradley, Paul
+IR  - Bradley P
+FIR - Brandon, Donald
+IR  - Brandon D
+FIR - Brune, Daniel
+IR  - Brune D
+FIR - Burgher, Abram
+IR  - Burgher A
+FIR - Butcher, Bain
+IR  - Butcher B
+FIR - Butuk, David
+IR  - Butuk D
+FIR - Cannon, Kevin
+IR  - Cannon K
+FIR - Cardona, Jose
+IR  - Cardona J
+FIR - Cavelli, Rachael
+IR  - Cavelli R
+FIR - Chalhoub, Fadi
+IR  - Chalhoub F
+FIR - Christensen, Shane
+IR  - Christensen S
+FIR - Christensen, Tom
+IR  - Christensen T
+FIR - Chu, Laurence
+IR  - Chu L
+FIR - Cox, Steven
+IR  - Cox S
+FIR - Crook, Gretchen
+IR  - Crook G
+FIR - Davis, Matthew
+IR  - Davis M
+FIR - Davit, Rajesh
+IR  - Davit R
+FIR - Denham, Douglas
+IR  - Denham D
+FIR - Dever, Michael
+IR  - Dever M
+FIR - Donskey, Curtis
+IR  - Donskey C
+FIR - Doust, Matthew
+IR  - Doust M
+FIR - Dunn, Michael
+IR  - Dunn M
+FIR - Earl, John
+IR  - Earl J
+FIR - Eder, Frank
+IR  - Eder F
+FIR - Eich, Andreas
+IR  - Eich A
+FIR - Ensz, David
+IR  - Ensz D
+FIR - Essink, Brandon
+IR  - Essink B
+FIR - Falcone, Robert
+IR  - Falcone R
+FIR - Falsey, Ann
+IR  - Falsey A
+FIR - Farrington, Cecil
+IR  - Farrington C
+FIR - Finberg, Robert
+IR  - Finberg R
+FIR - Finn, Daniel
+IR  - Finn D
+FIR - Fitz-Patrick, David
+IR  - Fitz-Patrick D
+FIR - Fortmann, Stephen
+IR  - Fortmann S
+FIR - Fouche, Leon
+IR  - Fouche L
+FIR - Fragoso, Veronica
+IR  - Fragoso V
+FIR - Frenck, Robert
+IR  - Frenck R
+FIR - Fried, David
+IR  - Fried D
+FIR - Fuller, Gregory
+IR  - Fuller G
+FIR - Fussell, Suzanne
+IR  - Fussell S
+FIR - Garcia-Diaz, Julia
+IR  - Garcia-Diaz J
+FIR - Gentry, Andrew
+IR  - Gentry A
+FIR - Glover, Richard
+IR  - Glover R
+FIR - Greenbaum, Carla
+IR  - Greenbaum C
+FIR - Grubb, Stephen
+IR  - Grubb S
+FIR - Hammitt, Laura
+IR  - Hammitt L
+FIR - Harper, Charles
+IR  - Harper C
+FIR - Harper, Wayne
+IR  - Harper W
+FIR - Hartman, Aaron
+IR  - Hartman A
+FIR - Heller, Robert
+IR  - Heller R
+FIR - Hendrix, Ernest
+IR  - Hendrix E
+FIR - Herrington, Darrell
+IR  - Herrington D
+FIR - Jennings, Timothy
+IR  - Jennings T
+FIR - Karabay, Oguz
+IR  - Karabay O
+FIR - Kaster, Steven
+IR  - Kaster S
+FIR - Katzman, Steven
+IR  - Katzman S
+FIR - Kingsley, Jeffrey
+IR  - Kingsley J
+FIR - Klein, Nicola
+IR  - Klein N
+FIR - Klein, Tracy
+IR  - Klein T
+FIR - Koch, Mark
+IR  - Koch M
+FIR - Koksal, Iftahar
+IR  - Koksal I
+FIR - Koren, Michael
+IR  - Koren M
+FIR - Kutner, Mark
+IR  - Kutner M
+FIR - Lee, Marcus
+IR  - Lee M
+FIR - Leibowitz, Mark
+IR  - Leibowitz M
+FIR - Levin, Michael
+IR  - Levin M
+FIR - Libster, Romina
+IR  - Libster R
+FIR - Lillestol, Michael
+IR  - Lillestol M
+FIR - Lucasti, Christopher
+IR  - Lucasti C
+FIR - Luttermann, Matthias
+IR  - Luttermann M
+FIR - Manning, Mary Beth Earl
+IR  - Manning MBE
+FIR - Martin, Martin
+IR  - Martin M
+FIR - Matherne, Paul
+IR  - Matherne P
+FIR - McMurray, James
+IR  - McMurray J
+FIR - Mert, Ali
+IR  - Mert A
+FIR - Middleton, Randle
+IR  - Middleton R
+FIR - Mitha, Essack
+IR  - Mitha E
+FIR - Morawski, Emily
+IR  - Morawski E
+FIR - Moreira, Edson
+IR  - Moreira E
+FIR - Mulligan, Mark
+IR  - Mulligan M
+FIR - Murray, Alexander
+IR  - Murray A
+FIR - Mussaji, Murtaza
+IR  - Mussaji M
+FIR - Musungaie, Dany
+IR  - Musungaie D
+FIR - Nell, Haylene
+IR  - Nell H
+FIR - Odekirk, Larry
+IR  - Odekirk L
+FIR - Ogbuagu, Onyema
+IR  - Ogbuagu O
+FIR - Paolino, Kristopher
+IR  - Paolino K
+FIR - Patel, Suchet
+IR  - Patel S
+FIR - Peterson, James
+IR  - Peterson J
+FIR - Pickrell, Paul
+IR  - Pickrell P
+FIR - Polack, Fernando
+IR  - Polack F
+FIR - Poretz, Donald
+IR  - Poretz D
+FIR - Raad, George
+IR  - Raad G
+FIR - Randall, William
+IR  - Randall W
+FIR - Rankin, Bruce
+IR  - Rankin B
+FIR - Reynolds, Steven
+IR  - Reynolds S
+FIR - Riesenberg, Robert
+IR  - Riesenberg R
+FIR - Rodriguez, Hector
+IR  - Rodriguez H
+FIR - Rosen, Jeffrey
+IR  - Rosen J
+FIR - Rubino, John
+IR  - Rubino J
+FIR - Rupp, Richard
+IR  - Rupp R
+FIR - Saiger, Salma
+IR  - Saiger S
+FIR - Salata, Robert
+IR  - Salata R
+FIR - Saleh, Jamshid
+IR  - Saleh J
+FIR - Schaefer, Axel
+IR  - Schaefer A
+FIR - Schear, Martin
+IR  - Schear M
+FIR - Schultz, Armin
+IR  - Schultz A
+FIR - Schwartz, Howard
+IR  - Schwartz H
+FIR - Segall, Nathan
+IR  - Segall N
+FIR - Seger, William
+IR  - Seger W
+FIR - Senders, Shelly
+IR  - Senders S
+FIR - Sharp, Stephan
+IR  - Sharp S
+FIR - Shoffner, Sylvia
+IR  - Shoffner S
+FIR - Simsek Yavuz, Serap
+IR  - Simsek Yavuz S
+FIR - Sligh, Teresa
+IR  - Sligh T
+FIR - Smith, William
+IR  - Smith W
+FIR - Stacey, Helen
+IR  - Stacey H
+FIR - Stephens, Michael
+IR  - Stephens M
+FIR - Studdard, Harry
+IR  - Studdard H
+FIR - Tabak, Fehmi
+IR  - Tabak F
+FIR - Talaat, Kawsar
+IR  - Talaat K
+FIR - Thomas, Stephen
+IR  - Thomas S
+FIR - Towner, William
+IR  - Towner W
+FIR - Tran, Van
+IR  - Tran V
+FIR - Unal, Serhat
+IR  - Unal S
+FIR - Usdan, Lisa
+IR  - Usdan L
+FIR - Vanchiere, John
+IR  - Vanchiere J
+FIR - Varano, Susann
+IR  - Varano S
+FIR - Wadsworth, Edward Tyler L
+IR  - Wadsworth ETL
+FIR - Walsh, Walsh
+IR  - Walsh W
+FIR - Walter, Emmanuel
+IR  - Walter E
+FIR - Wappner, Diego
+IR  - Wappner D
+FIR - Whiles, Rick
+IR  - Whiles R
+FIR - Williams, Hayes
+IR  - Williams H
+FIR - Wilson, Jonathan
+IR  - Wilson J
+FIR - Winkle, Peter
+IR  - Winkle P
+FIR - Winokur, Patricia
+IR  - Winokur P
+FIR - Wolf, Thomas
+IR  - Wolf T
+FIR - Yozviak, Joseph
+IR  - Yozviak J
+FIR - Zerbini, Cristiano
+IR  - Zerbini C
+EDAT- 2020/12/11 06:00
+MHDA- 2021/01/13 06:00
+PMCR- 2020/12/17
+CRDT- 2020/12/10 12:20
+PHST- 2020/12/11 06:00 [pubmed]
+PHST- 2021/01/13 06:00 [medline]
+PHST- 2020/12/10 12:20 [entrez]
+PHST- 2020/12/17 00:00 [pmc-release]
+AID - NJ202012103832702 [pii]
+AID - 10.1056/NEJMoa2034577 [doi]
+PST - ppublish
+SO  - N Engl J Med. 2020 Dec 31;383(27):2603-2615. doi: 10.1056/NEJMoa2034577. Epub 
+      2020 Dec 10.

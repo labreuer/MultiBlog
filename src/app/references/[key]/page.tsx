@@ -1,13 +1,16 @@
 import { notFound, permanentRedirect } from "next/navigation";
 import type { Metadata } from "next";
 import { referenceByKey } from "@/lib/reference-data";
-import { REFERENCE_KEY_RE, type CslItem } from "@/lib/references/csl";
-import { referenceEntry } from "@/lib/references/entry";
+import { titleOf, type CslItem } from "@/lib/references/csl";
+import { entryParts, referenceEntry } from "@/lib/references/entry";
+import { isKeyShaped, referencePath } from "@/lib/references/keys";
+import { downloadHref, EXPORT_FORMAT_ORDER, EXPORT_FORMATS } from "@/lib/references/export-formats";
 import { normalizeDoi } from "@/lib/references/identifiers";
 import { prisma } from "@/lib/prisma";
 import { publishedPostWhere } from "@/lib/post-status";
 import { postListOrderBy } from "@/lib/post-pages";
 import PostListing, { postListingInclude } from "@/components/PostListing";
+import TitleRuns from "@/components/bibliography/TitleRuns";
 import CitedBy from "./CitedBy";
 import styles from "./page.module.css";
 
@@ -18,41 +21,51 @@ import styles from "./page.module.css";
 // and notes that cite the work, its PDF) is CitedBy, a client island that
 // asks the server on open, as `TagChips` keeps the post page static.
 //
-// A key the reference used to have redirects to the one it has now, the way
-// an author's old handle does.
+// A key the reference used to have, or its key in another case, redirects to
+// the one it has now, the way an author's old handle does.
 export const revalidate = 60;
 
-async function load(key: string) {
+/** The segment as the key it spells: Next hands a param over percent-encoded, so a `:` arrives as `%3A`. */
+function keyOfParam(param: string): string | null {
+  try {
+    return decodeURIComponent(param);
+  } catch {
+    return null;
+  }
+}
+
+async function load(param: string) {
   // Shape first, as every page that takes a slug-like segment does: a key
   // that can't be one costs no query.
-  if (!REFERENCE_KEY_RE.test(key)) return null;
-  return referenceByKey(key);
+  const key = keyOfParam(param);
+  if (key === null || !isKeyShaped(key)) return null;
+  const reference = await referenceByKey(key);
+  return reference ? { reference, key } : null;
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
-  const reference = await load((await params).key);
-  return { title: reference ? (reference.item.title ?? reference.key) : "Reference" };
+  const loaded = await load((await params).key);
+  return { title: loaded ? titleOf(loaded.reference.item) || loaded.reference.key : "Reference" };
 }
 
-/** The entry as a bibliography sets it: a whole work's title in italics, a part's in quotation marks. */
+/** The entry as a bibliography sets it: a whole work's title in italics, a part's in quotation marks, its markup kept. */
 function Entry({ item }: { item: CslItem }) {
-  const entry = referenceEntry(item);
-  const stop = (text: string) => (/[.?!]$/.test(text) ? text : `${text}.`);
   return (
     <p className={styles.entry}>
-      {entry.authors && `${entry.authors} (${entry.year}). `}
-      {entry.titleIsContainer ? <cite>{stop(entry.title)}</cite> : `“${stop(entry.title)}”`}
-      {!entry.authors && ` (${entry.year}).`}
-      {entry.source && ` ${stop(entry.source)}`}
+      {entryParts(referenceEntry(item)).map((part, index) =>
+        part.title ? <cite key={index} className={styles.title}>
+            <TitleRuns runs={part.runs ?? [{ text: part.text }]} />
+          </cite> : <span key={index}>{part.text}</span>,
+      )}
     </p>
   );
 }
 
 export default async function ReferencePage({ params }: { params: Promise<{ key: string }> }) {
-  const { key } = await params;
-  const reference = await load(key);
-  if (!reference) notFound();
-  if (reference.key !== key) permanentRedirect(`/references/${reference.key}`);
+  const loaded = await load((await params).key);
+  if (!loaded) notFound();
+  const { reference } = loaded;
+  if (reference.key !== loaded.key) permanentRedirect(referencePath(reference.key));
 
   const { item } = reference;
   const doi = item.DOI ? normalizeDoi(item.DOI) : null;
@@ -65,7 +78,7 @@ export default async function ReferencePage({ params }: { params: Promise<{ key:
   return (
     <main className={styles.container}>
       <p className={styles.kicker}>Reference · {reference.key}</p>
-      <h1>{item.title}</h1>
+      <h1>{item.title ? <TitleRuns runs={item.title.runs} /> : reference.key}</h1>
       <Entry item={item} />
       {reference.deleted && <p className={styles.deleted}>This reference has been removed from the library.</p>}
       <table className={styles.details}>
@@ -90,6 +103,20 @@ export default async function ReferencePage({ params }: { params: Promise<{ key:
               <td>{item.ISBN}</td>
             </tr>
           )}
+          <tr>
+            <th scope="row">Download</th>
+            <td>
+              {/* Plain links, so the page stays static, and nofollow, so a crawler fetches none. */}
+              {EXPORT_FORMAT_ORDER.map((format, index) => (
+                <span key={format}>
+                  {index > 0 && " · "}
+                  <a href={downloadHref(format, `key=${encodeURIComponent(reference.key)}`)} rel="nofollow">
+                    {EXPORT_FORMATS[format].label}
+                  </a>
+                </span>
+              ))}
+            </td>
+          </tr>
           {item.URL && /^https?:\/\//.test(item.URL) && (
             <tr>
               <th scope="row">URL</th>

@@ -371,6 +371,7 @@ export default function DocEditor({
             onSelectionUpdate={widget.capture}
             onContentUpdate={widget.reresolve}
             annotationAnchors={annotationAnchors}
+            bibliographyDownload={`doc=${docId}`}
           />
         ) : (
           <p>Connecting to live editor…</p>

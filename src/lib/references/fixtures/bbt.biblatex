@@ -1,0 +1,33 @@
+@book{radnerOriginIdeas2012,
+  title = {The Origin of Ideas},
+  subtitle = {A Study in Cartesian Psychology},
+  author = {Radner, Daisie},
+  translator = {Anscombe, G. E. M.},
+  date = {2012-03},
+  location = {{Oxford}},
+  publisher = {{Clarendon Press}},
+  isbn = {978-0-631-17504-9},
+  shorthand = {OI},
+  langid = {english}
+}
+@thesis{smithDissertation2001,
+  title = {A Dissertation},
+  author = {Smith, Jane},
+  date = {2001},
+  institution = {Yale University},
+  type = {phdthesis}
+}
+@online{doeBlogPost2020,
+  title = {A Post},
+  author = {Doe, Jane},
+  date = {2020-05-03},
+  url = {https://example.org/a--b/},
+  urldate = {2021-01-02},
+  organization = {Example Blog}
+}
+@software{doeTool2021,
+  title = {A Tool}, author = {Doe, Jane}, date = {2021}, version = {1.2.3}, url = {https://github.com/x/y}
+}
+@dataset{doeData2021,
+  title = {A Dataset}, author = {Doe, Jane}, date = {2021}, doi = {10.5281/zenodo.123456}, publisher = {Zenodo}
+}

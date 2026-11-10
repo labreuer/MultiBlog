@@ -112,7 +112,8 @@ test("mention handles must look like slugs, me among them, and a filter by one i
 // docs/CITATIONS.md, "Search" — what cites a work, by its key, its title or its author.
 
 test("cited-work filters: keys as a citation writes them, and text trimmed and capped", () => {
-  assert.deepEqual(parse("cites=radner2012,@Barfield1957, radner2012,../x").cites, ["radner2012", "barfield1957"]);
+  // Kept as given, since a lookup ignores case; one key in two cases is one filter, and a key with a brace no citation writes.
+  assert.deepEqual(parse("cites=radner2012,@Barfield1957, radner2012,RADNER2012,a{b}").cites, ["radner2012", "Barfield1957"]);
   assert.equal(parse(`cited_title=%20${"a".repeat(150)}`).citedTitle.length, 100);
   for (const query of ["cites=radner2012", "cited_title=origin", "cited_author=radner"]) assert.equal(hasFilters(parse(query)), true, query);
   assert.equal(hasFilters(parse("cited_title=%20%20")), false);

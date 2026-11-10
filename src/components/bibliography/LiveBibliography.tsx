@@ -36,9 +36,10 @@ function bibliographyOf(editor: Editor | null): Bibliography {
 /**
  * `editor`'s bibliography, where this is rendered or, given `host`, at the
  * end of that element: the doc editor's scrolling box, so the list scrolls
- * with the text rather than taking room beneath it.
+ * with the text rather than taking room beneath it. `download` is the
+ * selection a download icon beside the heading names (`doc=<id>`).
  */
-export default function LiveBibliography({ editor, host }: { editor: Editor | null; host?: HTMLElement | null }) {
+export default function LiveBibliography({ editor, host, download }: { editor: Editor | null; host?: HTMLElement | null; download?: string }) {
   const subscribe = useCallback(
     (notify: () => void) => {
       if (!editor) return () => {};
@@ -67,7 +68,7 @@ export default function LiveBibliography({ editor, host }: { editor: Editor | nu
     return () => container.remove();
   }, [host, container]);
 
-  const list = <BibliographyList bibliography={bibliography} />;
+  const list = <BibliographyList bibliography={bibliography} download={download} />;
   if (host === undefined) return list;
   return container ? createPortal(list, container) : null;
 }

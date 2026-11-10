@@ -44,6 +44,10 @@ import {
 } from "@/components/table/TableControls";
 import adminStyles from "@/components/table/AdminTable.module.css";
 import SearchPicker from "@/components/SearchPicker";
+import DownloadMenu from "@/components/bibliography/DownloadMenu";
+import ReferenceReplaceBox from "@/components/ReferenceReplaceBox";
+import { downloadHref, EXPORT_FORMAT_ORDER, EXPORT_FORMATS } from "@/lib/references/export-formats";
+import { referencePath } from "@/lib/references/keys";
 import styles from "./ReferencesTable.module.css";
 
 // docs/CITATIONS.md, "Pages" — /references, built from the shared table kit
@@ -91,6 +95,8 @@ export default function ReferencesTable({
   const [error, setError] = useState<string | null>(null);
   // The row whose PDF picker is open (docs/CITATIONS.md, "A work's PDF").
   const [pickingFile, setPickingFile] = useState<string | null>(null);
+  // The row whose record is being replaced (docs/CITATIONS.md, "Replacing a record").
+  const [replacing, setReplacing] = useState<ReferenceTableRow | null>(null);
 
   const { navigate, updateFilters, searchDraft, onSearchChange, handleSort, searchParams } = useTableFilters({
     filters,
@@ -101,9 +107,29 @@ export default function ReferencesTable({
   const { selectedIds, selectedRows, allVisibleSelected, toggleSelectAll, toggleRow, clearSelection } =
     useRowSelection(displayRows);
 
-  const bulkActions: BulkAction<ReferenceTableRow>[] = canWrite
-    ? softDeleteBulkActions<ReferenceTableRow>("references", bulkDeleteReferences, bulkRestoreReferences)
-    : [];
+  // Downloading the selected rows is every member's; the rest are an author's.
+  const downloadAction: BulkAction<ReferenceTableRow> = {
+    key: "download",
+    label: "Download as…",
+    kind: "select",
+    options: EXPORT_FORMAT_ORDER.map((format) => EXPORT_FORMATS[format].label),
+    applicableTo: () => true,
+    run: async (ids, label) => {
+      const format = EXPORT_FORMAT_ORDER.find((candidate) => EXPORT_FORMATS[candidate].label === label);
+      if (format) {
+        // An attachment, so following it downloads and leaves the page where it is.
+        const link = document.createElement("a");
+        link.href = downloadHref(format, `ids=${ids.map(encodeURIComponent).join(",")}`);
+        link.rel = "nofollow";
+        link.click();
+      }
+      return { failed: [] };
+    },
+  };
+  const bulkActions: BulkAction<ReferenceTableRow>[] = [
+    downloadAction,
+    ...(canWrite ? softDeleteBulkActions<ReferenceTableRow>("references", bulkDeleteReferences, bulkRestoreReferences) : []),
+  ];
 
   function run(row: ReferenceTableRow, action: () => Promise<unknown>, failure: string) {
     setError(null);
@@ -122,7 +148,10 @@ export default function ReferencesTable({
   function handleRenameKey(row: ReferenceTableRow) {
     // A prompt(), as a tag's rename is: rare, and wide in effect. The old key
     // keeps answering, which the prompt says so nobody fears a broken link.
-    const next = window.prompt(`Rename the key "${row.key}". Links and exports that use the old key keep working.`, row.key);
+    const next = window.prompt(
+      `Rename the key "${row.key}": letters, digits and _, with :, . or - between them, as a manuscript will cite it. Links and exports that use the old key keep working.`,
+      row.key,
+    );
     if (next === null || next.trim() === row.key) return;
     run(row, () => updateReferenceKey(row.id, next), "Failed to rename the key.");
   }
@@ -156,7 +185,7 @@ export default function ReferencesTable({
       // published post and from an export.
       cell: (row) => (
         <span className={styles.keyCell}>
-          <Link href={`/references/${row.key}`}>{row.key}</Link>
+          <Link href={referencePath(row.key)}>{row.key}</Link>
           {canWrite && !row.deleted && (
             <button
               type="button"
@@ -195,7 +224,26 @@ export default function ReferencesTable({
     },
     people: { sortKey: "people", cell: (row) => row.people },
     year: { sortKey: "year", nowrap: true, cell: (row) => (row.year === null ? "" : String(row.year)) },
-    title: { sortKey: "title", cell: (row) => row.title },
+    title: {
+      sortKey: "title",
+      cell: (row) => (
+        <>
+          {row.title}
+          {canWrite && !row.deleted && (
+            <button
+              type="button"
+              className={styles.editButton}
+              onClick={() => setReplacing(row)}
+              disabled={pending}
+              title={`Replace the record of ${row.key}`}
+              aria-label={`Replace record of ${row.key}`}
+            >
+              ↺
+            </button>
+          )}
+        </>
+      ),
+    },
     file: {
       sortKey: "file",
       cell: (row) => (
@@ -313,7 +361,11 @@ export default function ReferencesTable({
           }}
           isDefault={sameCols(filters.cols, prefs.cols)}
         />
+        {/* Every page of what the search matches, read with the page's own filters (src/lib/references-where.ts). */}
+        <DownloadMenu selection={searchParams.toString()} label="Download every reference this search matches" />
       </div>
+
+      {replacing && <ReferenceReplaceBox key={replacing.id} id={replacing.id} referenceKey={replacing.key} onClose={() => setReplacing(null)} />}
 
       <BulkToolbar
         selectedRows={selectedRows}

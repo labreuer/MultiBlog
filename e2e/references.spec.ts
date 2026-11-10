@@ -9,6 +9,7 @@ import {
   deleteTestDoc,
   deleteTestFile,
   deleteTestPost,
+  deleteTestImportReceipts,
   deleteTestReferences,
   deleteTestUser,
   setTestReferenceFile,
@@ -119,12 +120,15 @@ test("the library's page: pasted BibTeX is imported once, listed, and a second p
     await page.goto("/references");
     await page.getByText("Add references").click();
     await page.getByRole("textbox", { name: "References to import" }).fill(bibtex);
-    await page.getByRole("button", { name: "Import" }).click();
+    await page.getByRole("button", { name: "Preview" }).click();
+    // The preview says what each record is and the key it will get, and names the one with no title.
+    const preview = page.getByRole("list", { name: "Import preview" });
+    await expect(preview).toContainText(`Key ${prefix}-barfield1957`);
+    await expect(page.getByRole("list", { name: "What couldn’t be read" })).toContainText("A reference needs a title.");
+    await page.getByRole("button", { name: "Import 2" }).click();
     const report = page.getByRole("list", { name: "Import results" });
     await expect(report).toContainText(`Added ${prefix}-barfield1957: Saving the Appearances ${prefix}`);
     await expect(report).toContainText(`Added ${prefix}-noauthor`);
-    // The one with no title is refused by name, and left in the box to be corrected.
-    await expect(report).toContainText("A reference needs a title.");
     expect(await getTestReference(`${prefix}-barfield1957`)).toMatchObject({ identifiers: [`ISBN:${isbn}`], deleted: false });
 
     // The table lists it, found by a word of its title, with the columns read from its record.
@@ -137,8 +141,8 @@ test("the library's page: pasted BibTeX is imported once, listed, and a second p
     // The same record pasted again is not a second copy.
     await page.getByText("Add references").click();
     await page.getByRole("textbox", { name: "References to import" }).fill(bibtex.split("@article")[0]);
-    await page.getByRole("button", { name: "Import" }).click();
-    await expect(page.getByRole("list", { name: "Import results" })).toContainText(`Already in the library as ${prefix}-barfield1957`);
+    await page.getByRole("button", { name: "Preview" }).click();
+    await expect(page.getByRole("list", { name: "Import preview" })).toContainText(`Already in the library as ${prefix}-barfield1957`);
 
     // Its own page is public: a signed-out reader gets the entry, as a published post's citation will link to it.
     const anonymous = await browser.newContext({ storageState: { cookies: [], origins: [] } });
@@ -158,10 +162,14 @@ test("the library's page: pasted BibTeX is imported once, listed, and a second p
     await expect(page.getByRole("link", { name: `${prefix}-barfield-appearances` })).toBeVisible();
     await visitor.goto(`/references/${prefix}-barfield1957`);
     await expect(visitor).toHaveURL(new RegExp(`/references/${prefix}-barfield-appearances$`));
+    // A key in another case finds it, and redirects to its own.
+    await visitor.goto(`/references/${prefix.toUpperCase()}-BARFIELD-APPEARANCES`);
+    await expect(visitor).toHaveURL(new RegExp(`/references/${prefix}-barfield-appearances$`));
     await anonymous.close();
   } finally {
     await page.goto("about:blank");
     await deleteTestReferences(prefix);
+    await deleteTestImportReceipts(prefix);
   }
 });
 

@@ -7,7 +7,7 @@
 // /docs checks its own against its option list. The page and the API (§8) both
 // go through this parser, so the two can't read the same URL differently.
 
-import { REFERENCE_KEY_RE } from "@/lib/references/csl";
+import { isKeyShaped, lookupKey } from "@/lib/references/keys";
 
 /** The five kinds, in the order the page shows their sections (§7). */
 export const SEARCH_KINDS = ["docs", "posts", "pdfs", "annotations", "comments"] as const;
@@ -85,9 +85,11 @@ function parseMentions(params: URLSearchParams): string[] {
 }
 
 function parseCites(params: URLSearchParams): string[] {
-  // Written as a citation writes one, `@radner2012`, or in capitals, it is still the key.
-  const keys = listParam(params, "cites").map((key) => key.replace(/^@/, "").toLowerCase());
-  return [...new Set(keys.filter((key) => REFERENCE_KEY_RE.test(key)))];
+  // Written as a citation writes one, `@radner2012`, it is still the key. Kept
+  // as given: a lookup ignores case (docs/CITATIONS.md, "Keys").
+  const keys = listParam(params, "cites").map((key) => key.replace(/^@/, ""));
+  const seen = new Set<string>();
+  return keys.filter((key) => isKeyShaped(key) && !seen.has(lookupKey(key)) && seen.add(lookupKey(key)));
 }
 
 /** A cited work's title or author asks for, as typed; capped as a reference search is. */

@@ -1,5 +1,7 @@
 import type { JSONContent } from "@tiptap/core";
 import { entryParts, type ReferenceEntry } from "../../references/entry";
+import { referencePath } from "../../references/keys";
+import type { TitleMark } from "../../references/markup";
 import type { ChipOccurrence, ChipContext, ChipStyles } from "../types";
 import { CITATION, citationKind, citationLabelling, formFor, type CitationData, type CitationForm } from "./citation";
 
@@ -64,7 +66,7 @@ export function citationBibliography(chips: readonly ChipOccurrence[], styles: C
     const work = works[refId];
     items.push({
       refId,
-      href: work.deleted ? null : `/references/${work.key}`,
+      href: work.deleted ? null : referencePath(work.key),
       lead: form === "numeric" ? `[${number}]` : formFor(work, form) === "short" ? shortLabel(work) : null,
       entry: work.entry,
       deleted: work.deleted,
@@ -74,6 +76,9 @@ export function citationBibliography(chips: readonly ChipOccurrence[], styles: C
   if (form !== "numeric") items.sort(byAuthor);
   return { form, items };
 }
+
+/** The title marks a post's schema can hold, as its mark names. */
+const POST_MARKS: Partial<Record<TitleMark, string>> = { italic: "italic", bold: "bold" };
 
 /**
  * A bibliography as post-side content: a heading and a paragraph per work,
@@ -87,10 +92,14 @@ export function bibliographyContent(bibliography: Bibliography): JSONContent[] {
     const runs: JSONContent[] = [];
     if (item.lead) runs.push({ type: "text", text: `${item.lead} `, marks: [{ type: "bold" }] });
     for (const part of entryParts(item.entry)) {
-      const marks: NonNullable<JSONContent["marks"]> = [];
-      if (part.title && item.entry.titleIsContainer) marks.push({ type: "italic" });
-      if (part.title && item.href) marks.push({ type: "link", attrs: { href: item.href } });
-      runs.push({ type: "text", text: part.text, ...(marks.length > 0 ? { marks } : {}) });
+      // A title's runs, in the marks a post's schema has: italics and bold. Small capitals, a
+      // superscript and a subscript are the text alone there.
+      for (const run of part.title && part.runs ? part.runs : [{ text: part.text }]) {
+        const marks: NonNullable<JSONContent["marks"]> = [];
+        for (const mark of (run as { marks?: TitleMark[] }).marks ?? []) if (POST_MARKS[mark]) marks.push({ type: POST_MARKS[mark] });
+        if (part.title && item.href) marks.push({ type: "link", attrs: { href: item.href } });
+        runs.push({ type: "text", text: run.text, ...(marks.length > 0 ? { marks } : {}) });
+      }
     }
     const content = item.deleted ? runs.map((run) => ({ ...run, marks: [...(run.marks ?? []), { type: "strike" }] })) : runs;
     return { type: "paragraph", content };

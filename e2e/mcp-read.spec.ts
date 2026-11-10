@@ -159,6 +159,7 @@ test("every listed name fits claude.ai's limit, and every description and the in
       "multiblog_tag",
       "multiblog_untag",
       "multiblog_create_ref",
+      "multiblog_update_ref",
       "multiblog_manage",
     ]);
     for (const tool of tools) {

@@ -3,7 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { search, PAGE_SIZE, OVERVIEW_SIZE } from "@/lib/search";
 import { SEARCH_KINDS, DEFAULT_TIME_ZONE, isTimeZone, MAX_CITED_LENGTH, parseDay, type SearchParams } from "@/lib/search/params";
-import { REFERENCE_KEY_RE } from "@/lib/references/csl";
+import { KEY_SHAPE_RE } from "@/lib/references/keys";
 import { referencesByKeys } from "@/lib/reference-data";
 import { isEmptyQuery, websearchQuery, headlineTexts, sqlConfig, type TsQuery } from "@/lib/search/sql";
 import { correctQuery } from "@/lib/search/correct";
@@ -51,7 +51,7 @@ const input = z.strictObject({
     .optional()
     .describe("Author slugs, or me for yourself: docs, posts and annotations that mention any of them."),
   cites: z
-    .array(z.string().regex(REFERENCE_KEY_RE, "a reference key"))
+    .array(z.string().regex(KEY_SHAPE_RE, "a reference key"))
     .min(1)
     .max(20)
     .optional()

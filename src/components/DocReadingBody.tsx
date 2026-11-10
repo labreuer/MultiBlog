@@ -255,7 +255,7 @@ export default function DocReadingBody({
       <div className={proseStyles.prose} style={{ display: ready ? "block" : "none" }}>
         <EditorContent editor={editor} />
         <TableDownloadButtons editor={editor} ready={ready} />
-        <LiveBibliography editor={editor} />
+        <LiveBibliography editor={editor} download={`doc=${docId}`} />
       </div>
       {selection.pending && (
         <AnnotationPopover

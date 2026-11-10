@@ -5,7 +5,7 @@ import { docsSearch } from "@/lib/search/docs";
 import { searchAuthorOptions } from "@/lib/search/authors";
 import { dayRangeToInstants } from "@/lib/search/dates";
 import { DEFAULT_TIME_ZONE, isTimeZone, MAX_CITED_LENGTH, parseDay } from "@/lib/search/params";
-import { REFERENCE_KEY_RE } from "@/lib/references/csl";
+import { isKeyShaped } from "@/lib/references/keys";
 import { loadDocState } from "@/lib/doc-state";
 import { docContentToMarkdown } from "@/lib/markdown-import";
 import { docText } from "@/lib/doc-text";
@@ -15,6 +15,8 @@ import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { searchActorOf, type Actor } from "@/lib/actor";
 import { ApiError, invalid } from "@/lib/api/errors";
 import { tarEnd, tarEntry } from "@/lib/tar";
+import { referencesInLibraryOrder } from "@/lib/reference-export";
+import { writeReferences } from "@/lib/references/export";
 import { bylineOf } from "./shape";
 import { parse, readableDocByParam } from "./resolve";
 
@@ -60,7 +62,7 @@ export async function selectByFilters(actor: Actor, params: URLSearchParams): Pr
   const mentions = listParam(params, "mentions");
   for (const slug of [...authors, ...tags, ...mentions]) if (!SLUG_RE.test(slug)) throw invalid(`${slug} isn't a slug.`);
   const cites = listParam(params, "cites");
-  for (const key of cites) if (!REFERENCE_KEY_RE.test(key)) throw invalid(`${key} isn't a reference key.`);
+  for (const key of cites) if (!isKeyShaped(key)) throw invalid(`${key} isn't a reference key.`);
   const cited = {
     cites,
     citedTitle: (params.get("cited_title") ?? "").trim().slice(0, MAX_CITED_LENGTH),
@@ -229,7 +231,16 @@ export function exportTar(selection: ExportSelection, format: ExportFormat): Rea
         controller.enqueue(tarEntry(name, encoder.encode(body), row.updatedAt));
         return;
       }
-      const tail = { docs: manifest, ...(selection.missing.length > 0 ? { missing: selection.missing } : {}) };
+      // Every work the exported docs cite, so `pandoc --citeproc --bibliography=references.json`
+      // resolves the `[@key]`s their Markdown holds: CSL-JSON, and biblatex, the fuller of the
+      // two BibTeX forms, which Pandoc reads as well (docs/CITATIONS.md, "Downloads").
+      const works = await referencesInLibraryOrder({ citations: { some: { docId: { in: selection.docIds } } } });
+      const bibliography = works.length > 0 ? ["references.json", "references.biblatex.bib"] : [];
+      if (works.length > 0) {
+        controller.enqueue(tarEntry("references.json", encoder.encode(writeReferences(works, "csl-json"))));
+        controller.enqueue(tarEntry("references.biblatex.bib", encoder.encode(writeReferences(works, "biblatex"))));
+      }
+      const tail = { docs: manifest, ...(bibliography.length > 0 ? { references: bibliography } : {}), ...(selection.missing.length > 0 ? { missing: selection.missing } : {}) };
       controller.enqueue(tarEntry("manifest.json", encoder.encode(JSON.stringify(tail, null, 1))));
       controller.enqueue(tarEnd());
       controller.close();

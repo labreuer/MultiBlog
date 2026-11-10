@@ -772,6 +772,10 @@ characters. The export (§5) is one request.
   - `format=json` gives each doc's ProseMirror JSON instead, as `<id>.json`, for a program
     that wants what Markdown loses. No tool offers it (above).
   - The manifest lists each doc's id, slug, title, size, `version`, byline and tags.
+  - **The works the exported docs cite**, when there are any, as `references.json` (CSL-JSON)
+    and `references.biblatex.bib`, which the manifest lists under `references`, so
+    `pandoc --citeproc --bibliography=references.json <id>.md` resolves the `[@key]`s the
+    Markdown holds ([CITATIONS.md](CITATIONS.md), "Downloads").
 - **`catalog`** answers with JSON alone: each doc's id, slug, title and size, and the newest
   entry in its log, `max(ydoc_update.id)`, from one grouped query with the doc rows.
   - **It is an index Claude can grep.** Saved as a local file, it finds a doc by its title
@@ -2044,6 +2048,7 @@ comment's writer and the post's moderators. So a hit never leads to `not_found`.
 | `edit_link` | write | A link's name; removing and reordering its parts (§10) |
 | `tag` · `untag` | write | Apply a term, minting it when it is new, to anything but a published or scheduled post; remove one's own assignment, or anyone's as ADMIN/EDITOR (§11) |
 | `create_ref` | write | A work added to the reference library from its CSL-JSON record, with its PDF as `file` if given; `duplicate`, with the key to cite, for one the library holds by DOI or ISBN ([CITATIONS.md](CITATIONS.md)) |
+| `update_ref` | write | A work's record replaced whole, by its key: its key, abbreviation, PDF and citations kept and the citations relabelled; `duplicate` for a DOI or ISBN another work holds, and `conflict` for a deleted work, never restored ([CITATIONS.md](CITATIONS.md), "Replacing a record") |
 | `manage` | manage | A doc's or file's visibility, slug, byline or owners, and whether a doc is a record; tagging a published or scheduled post; deleting or restoring a doc, file, annotation or link |
 
 Uploading, downloading and exporting go through §5's byte routes, not through a tool's
