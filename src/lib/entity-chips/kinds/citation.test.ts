@@ -105,6 +105,8 @@ test("the route finds the page cited in the PDF by the file's page labels", () =
   // With no labels, a number is the sheet.
   assert.equal(pdfPageHref({ slug: "saving", pageLabels: null }, "49"), "/pdf/saving#page=49");
   assert.equal(pdfPageHref({ slug: "saving", pageLabels: null }, "xii"), null);
+  // As a file with no labels stores them once its metadata is read.
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: [] }, "49"), "/pdf/saving#page=49");
   // But not past the file's last sheet.
   assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 40 }, "49"), null);
   assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 49 }, "49"), "/pdf/saving#page=49");

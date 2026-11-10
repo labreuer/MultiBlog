@@ -228,7 +228,8 @@ function itemLabel(item: CitationItem, form: CitationForm, name: string): Label 
 /**
  * `/pdf/<slug>#page=<sheet>` for a locator the file's page labels name, else
  * null: its first page, found among the printed labels, or taken as the
- * sheet itself for a file that has none, if the file has that many.
+ * sheet itself for a file that has none, if the file has that many. A file
+ * with none stores `[]` once its metadata is read, and null before.
  */
 export function pdfPageHref(
   file: { slug: string; pageLabels: string[] | null; pageCount?: number | null } | null,
@@ -236,7 +237,7 @@ export function pdfPageHref(
 ): string | null {
   if (!file || !locator) return null;
   const first = firstPage(locator);
-  const labels = file.pageLabels;
+  const labels = file.pageLabels?.length ? file.pageLabels : null;
   const sheet = labels ? labels.indexOf(first) + 1 : /^\d+$/.test(first) ? Number(first) : 0;
   return sheet > 0 && (typeof file.pageCount !== "number" || sheet <= file.pageCount) ? `/pdf/${file.slug}#page=${sheet}` : null;
 }

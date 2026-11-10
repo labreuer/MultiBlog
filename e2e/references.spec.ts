@@ -12,6 +12,7 @@ import {
   deleteTestImportReceipts,
   deleteTestReferences,
   deleteTestUser,
+  fillTestFileMetadata,
   setTestReferenceFile,
   uniqueEmail,
   getCitationSources,
@@ -345,6 +346,9 @@ test("a citation's link at a page sends a reader who may open the work's PDF to 
     expect(await follow(`${home}/p/2`)).toBe(`${home}#p=2`);
     // A shared PDF, at the page cited; a page it doesn't have, and a locator that is no page, go to the reference.
     await setTestReferenceFile(key, shared.id);
+    expect(await follow(`${home}/p/2`)).toBe(`/pdf/${shared.slug}#page=2`);
+    // Still, once the PDF has been read and its labels stored: none, for a PDF without them, and a page is still the sheet.
+    expect(await fillTestFileMetadata(shared.id)).toEqual([]);
     expect(await follow(`${home}/p/2`)).toBe(`/pdf/${shared.slug}#page=2`);
     expect(await follow(`${home}/p/3`)).toBe(`${home}#p=3`);
     expect(await follow(`${home}/p/${encodeURIComponent("ch. 3")}`)).toBe(home);

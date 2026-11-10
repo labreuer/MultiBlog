@@ -38,6 +38,7 @@ import { changeTagSlug, uniqueTagSlug } from "@/lib/tag-slug";
 import { targetFromColumns, targetToColumns, type AnchorTarget } from "@/lib/anchors";
 import { deleteBytesIfUnreferenced, storagePathFor, storeUploadStream } from "@/lib/file-storage";
 import { extractPdf } from "@/lib/pdf-extract";
+import { pdfMetadata } from "@/lib/pdf-metadata";
 import { parsePdfTarget } from "@/lib/pdf-anchor";
 import { buildTestPdf, type TestOutlineItem, type TestPageLabelRange } from "../scripts/make-test-pdf";
 import {
@@ -1272,6 +1273,18 @@ export async function deleteTestImportReceipts(prefix: string): Promise<void> {
 export async function ageTestImportReceipts(prefix: string, days: number): Promise<void> {
   if (!/^e2e[a-z0-9-]{4,}$/.test(prefix)) throw new Error(`ageTestImportReceipts: "${prefix}" isn't an e2e prefix.`);
   await prisma.$executeRaw`UPDATE reference_import_receipt SET created_at = created_at - make_interval(secs => ${days * 86400}) WHERE key LIKE ${`${prefix}%`} OR detail->>'title' LIKE ${`%${prefix}%`}`;
+}
+
+/**
+ * Reads a test PDF's page labels and outline and stores them, as a first
+ * read of the file does (pdf-metadata.ts). A test PDF is made with neither
+ * stored, where a real one has them once read: `[]` for a PDF with no labels.
+ */
+export async function fillTestFileMetadata(fileId: string): Promise<string[] | null> {
+  const owner = await prisma.fileOwner.findFirst({ where: { fileId }, select: { user: { select: { email: true } } } });
+  if (!owner) throw new Error(`fillTestFileMetadata: no file ${fileId}.`);
+  assertSafe(owner.user.email);
+  return (await pdfMetadata(fileId))?.pageLabels ?? null;
 }
 
 /** Ties a test reference to a file, or unties it: the state the reference pickers leave, set directly. */
@@ -2892,6 +2905,7 @@ const handlers = {
   deleteTestImportReceipts,
   ageTestImportReceipts,
   setTestReferenceFile,
+  fillTestFileMetadata,
   getTestReference,
   getDocChipIids,
   markPresentAtStamp,
