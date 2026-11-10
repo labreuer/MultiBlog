@@ -91,25 +91,41 @@ visited.
 
 ## Every session GET re-issues the cookie, so overlapping requests can disagree about who you are
 
-Measured 2026-09-14 from Playwright traces (Firefox, production build, under load): every
+Measured from Playwright traces (production build, under load; Firefox and Chromium): every
 `GET /api/auth/session` answers with a `Set-Cookie` for `authjs.session-token` — `@auth/core`
 re-encodes the JWT on each read to push its expiry out. Harmless alone. It stops being
 harmless when two requests carrying the cookie overlap and one of them *changes* the session,
-because the browser keeps whichever response lands last:
+because the browser keeps whichever response lands last. So "signed in as X" is a property of
+the last response to land, not of the sign-in, and "row is gone → cookie cleared" above holds
+only when nothing else was reading the session at that moment.
 
-- The credentials callback set the new user's cookie at +460 ms. A session GET the header's
-  `SessionProvider` had issued 8 ms *before* the POST answered at +463 ms and set the previous
-  user's token again. `/files` then rendered as the admin the browser had been
-  (`files.spec.ts:194`, about once in five under load).
-- `SessionRefresh`'s `update({})` cleared the cookie for a deleted user; a GET in flight re-set
-  it; the confirming GET `SessionRefresh.tsx` makes before acting saw a live session and stood
-  down, so the dashboard stayed up (`session-refresh.spec.ts:108`, same rate).
+**Something else usually is.** `SessionProvider` reads the session twice on every page load:
+`getSession` announces each fetch on a *new* `BroadcastChannel`, the provider's own listener in
+the same page hears that as another tab's news, and fetches again. The second GET leaves as
+the first answers — the moment `status` turns `"authenticated"`, which is when `SessionRefresh`
+sends its POST — so on `/dashboard` the two always overlap and only the order of their answers
+varies.
 
-So the "row is gone → cookie cleared" sentence above holds only when nothing else was reading
-the session at that moment, and "signed in as X" is a property of the last response to land,
-not of the sign-in. Not fixed; TODO.md has the options. Worth knowing before adding any fetch
-of the session to the sign-in page, and before reading a redirect-to-`/sign-in` failure as a
-fault in `SessionRefresh`'s logic.
+Both places that change the session therefore check what they changed, and act once more if
+it did not hold:
+
+- **`sign-in-form.tsx`** asks whose session the browser holds after a successful `signIn`, and
+  signs in again if it is not the account just entered. Without that, a GET that left before
+  the credentials POST and answered 3 ms after it left `/files` rendering as the admin the
+  browser had been.
+- **`SessionRefresh.tsx`** sends its update again when the first answered `null` and the
+  confirming read still found a session. Without that, the second GET above put a deleted
+  user's cookie back and the dashboard stayed up.
+
+One retry each, because by the time the check is sent the late GET has landed: the check
+carried its cookie. Neither closes the race. A GET slower than the check itself still wins,
+and signing *out* has no check at all; TODO.md has what closing it would take. Worth knowing
+before adding any fetch of the session to the sign-in page, and before reading a
+redirect-to-`/sign-in` failure as a fault in `SessionRefresh`'s logic.
+
+Regression coverage: `e2e/sign-in-stale-session.spec.ts` and the last test of
+`e2e/session-refresh.spec.ts` arrange the late answer rather than wait for load to produce it,
+by putting the old cookie back just before the read that follows the change.
 
 ## Why the form uses client `signIn` — and still keeps a server action
 

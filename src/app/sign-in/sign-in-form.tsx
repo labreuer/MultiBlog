@@ -3,10 +3,13 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { signIn } from "next-auth/react";
+import { getSession, signIn } from "next-auth/react";
 import { signInAction } from "@/app/actions/sign-in";
 import { DEFAULT_SIGN_IN_DESTINATION, withArrivalFragment } from "@/lib/sign-in-redirect";
 import styles from "@/styles/account.module.css";
+
+/** The sign-in, and one more if the browser's session is then someone else's. */
+const SIGN_IN_ATTEMPTS = 2;
 
 export default function SignInForm({
   initialError,
@@ -40,16 +43,31 @@ export default function SignInForm({
     setPending(true);
     setError(null);
 
-    const result = await signIn("credentials", {
-      email: String(form.get("email") ?? ""),
-      password: String(form.get("password") ?? ""),
-      redirect: false,
-    });
+    const email = String(form.get("email") ?? "");
+    const password = String(form.get("password") ?? "");
 
-    if (!result || result.error) {
-      setError("Invalid email or password.");
-      setPending(false);
-      return;
+    // **A sign-in that succeeded is not yet a browser signed in as that
+    // person.** Every session GET re-issues the cookie it was sent
+    // (NOTES.md, "Every session GET re-issues the cookie"), so one that left
+    // before the sign-in and answers after it puts the previous cookie back:
+    // the account this browser was already signed in as, or none. So ask whose
+    // session the browser holds, and sign in once more if it is not the one
+    // just entered — by then that GET has landed and nothing is left to undo
+    // the second sign-in. A mismatch that survives the second attempt goes on
+    // to the destination regardless, whose own gate answers for whoever
+    // arrives: the check can only ever cost a round trip, never a sign-in.
+    for (let attempt = 0; attempt < SIGN_IN_ATTEMPTS; attempt += 1) {
+      const result = await signIn("credentials", { email, password, redirect: false });
+      if (!result || result.error) {
+        setError("Invalid email or password.");
+        setPending(false);
+        return;
+      }
+      // `broadcast: false`, or the provider hears the fetch and makes another.
+      const session = await getSession({ broadcast: false });
+      if (session?.user?.email?.toLowerCase() === email.trim().toLowerCase()) {
+        break;
+      }
     }
 
     // Leave `pending` set: the button stays disabled through the navigation.

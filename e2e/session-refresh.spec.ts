@@ -119,3 +119,48 @@ test("visiting /dashboard as a deleted user clears the session", async ({ second
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/sign-in/);
 });
+
+// The test above meets this only when load orders two answers a certain way;
+// this one arranges it. Every session GET re-issues the cookie it was sent
+// (src/app/sign-in/NOTES.md), and the provider always has one in flight beside
+// SessionRefresh's POST, so the cookie that POST cleared can come back a moment
+// later. Putting the cookie back here, just before the read SessionRefresh
+// confirms with, is that answer landing at the worst possible time.
+test("a session read that answers after the clearing does not keep a deleted user signed in", async ({ secondUser }) => {
+  const { user, page } = await secondUser({ role: "ADMIN" });
+  const context = page.context();
+
+  await visitDashboard(page);
+  await deleteTestUser(user.email);
+
+  let live: Awaited<ReturnType<typeof context.cookies>> = [];
+  let restored = false;
+  let updates = 0;
+  await page.route("**/api/auth/session", async (route) => {
+    const request = route.request();
+    if (request.method() === "POST") {
+      updates += 1;
+      // What the clearing is about to take away.
+      if (!restored) {
+        live = (await context.cookies()).filter((cookie) => cookie.name.includes("session-token"));
+      }
+    } else if (!restored && live.length > 0 && !("content-type" in request.headers())) {
+      // SessionRefresh's own confirming read, told from next-auth's by its
+      // headers: `fetchData` sends a Content-Type on a GET and a bare `fetch`
+      // does not. It leaves only once the POST has answered, so the cookie is
+      // certainly gone by now, and it goes out with whatever the jar holds
+      // when it is continued.
+      restored = true;
+      await context.addCookies(live);
+    }
+    await route.continue();
+  });
+
+  await page.goto("/dashboard");
+  await expect(page).toHaveURL(/\/sign-in/);
+  // Both, or the redirect above proves nothing about the race: the cookie was
+  // put back, and it took a second update to clear it again.
+  expect(restored).toBe(true);
+  expect(updates).toBe(2);
+  expect((await context.cookies()).filter((cookie) => cookie.name.includes("session-token"))).toEqual([]);
+});

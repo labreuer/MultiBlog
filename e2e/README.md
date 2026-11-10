@@ -192,10 +192,12 @@ why). What is left is not the suite's to fix:
   sign-in.** Auth.js re-issues `authjs.session-token` on every `GET
   /api/auth/session`, so a GET in flight across the credentials POST — or
   across the POST that clears a dead session — answers a few milliseconds
-  later and wins. Seen as `files.spec.ts:194` rendering `/files` as the admin
-  after signing in as another user, and `session-refresh.spec.ts:108` keeping
-  a deleted user signed in; each about once in five under load.
-  src/app/sign-in/NOTES.md has the measured sequence, TODO.md the options.
+  later and wins. Seen as `files.spec.ts` rendering `/files` as the admin
+  after signing in as another user, and `session-refresh.spec.ts` keeping a
+  deleted user signed in. The app checks and retries in both places, which
+  covers a GET that lands before the check and not a slower one, so either
+  test can still go red on it. src/app/sign-in/NOTES.md has the mechanism and
+  the two tests that arrange the late answer, TODO.md what is left.
 - **A navigation Playwright believes is still in flight.** The call log ends
   in `waiting for "…" navigation to finish...`, the element is on the page,
   and the action waits out the whole expect budget: Firefox reported a
