@@ -72,7 +72,7 @@ and export"). Everything below not listed here is still a plan: Later.
   `updateReference`, `replaceReference`, `setReferenceDeleted`, `importReferenceBatch`. AUTHOR and above
   (`canWriteReferences`). A duplicate is refused as `duplicate`, naming the record that holds
   the identifier, a deleted one included.
-- **Import:** pasted or picked as files, read in the browser by `src/lib/references/import.ts`
+- **Import:** pasted, or picked or dropped as files, read in the browser by `src/lib/references/import.ts`
   (citation-js for BibTeX, biblatex, RIS and `CITATION.cff`; `nbib.ts` for PubMed), previewed,
   and sent in batches that survive a reload (`ReferenceImport.tsx`, Import and export, below).
 - **Downloads:** BibTeX, biblatex, RIS and CSL-JSON, from `/api/references/export`, linked from
@@ -297,7 +297,7 @@ address names the reference rather than the PDF.
   the MCP tool both wrap it.
 - A token acts with its account's role (PERMISSIONS.md, "API tokens"), so the same rule binds
   people and agents.
-- In the UI, import is by pasting or picking a library in any common export format, one item or
+- In the UI, import is by pasting, picking or dropping a library in any common export format, one item or
   many (Import and export, below).
 - MCP agents create references through `create_ref` and correct a record through
   `update_ref` (MCP, below). Renaming a key and setting an abbreviation or a PDF stay in the UI.
@@ -723,8 +723,17 @@ export that is read, so the refusal says which, not just "That isn't BibTeX, RIS
 
 ### The import box
 
-- **A file picker** beside the paste box, taking several files at once. Both are read in the
+- **Files, picked or dropped**, beside the paste box, several at once. Both are read in the
   browser into one list.
+  - **"Add files…" and a drop each add to the files chosen**, which are listed below the
+    button, each with a × to remove it. The picker is cleared after each pick, so a second pick
+    adds rather than replacing. A file already chosen, by its name, size and modified time, is
+    skipped, so a file dropped twice isn't previewed twice.
+  - **The drop target is the whole panel**, not only the box, and a file dragged onto the closed
+    panel opens it. A drag of selected text is the browser's, so it still lands in the box. A
+    drag of files has its default prevented across the panel even while a preview is shown,
+    where it is refused, since the browser's default opens the file in place of the page
+    (`src/components/useFileDrop.ts`).
 - **A preview before anything is written.** It shows each record's title, people, year and type, and the key it will get, with why that
   differs from its source key. It also shows what was dropped, cut or mapped (a field no CSL
   variable holds, a field cut at its bound, a type read as another, an identifier that failed
@@ -805,7 +814,8 @@ reference's record with another, each through `replaceReference` (`reference-wri
   `ReferenceReplaceBox.tsx`): paste one record in any format the import
   reads, parsed in the browser as the box parses, see which fields change, and save. A field
   the pasted record lacks is removed. This is the repair for a record with no DOI or ISBN,
-  which no import can match. The box starts from the reference's CSL-JSON download. A deleted
+  which no import can match. The box starts from the reference's CSL-JSON download, and a
+  file dropped on it, one only, puts its text in the box. A deleted
   reference has none: restore it first.
 - **`update_ref`**, an MCP tool beside `create_ref`: a reference's key and a CSL-JSON record,
   through `replaceReference`, so an agent can correct a record it added. `create_ref` refuses
@@ -971,7 +981,8 @@ reads a public page doesn't fetch four files for each work on it.
 - **e2e:** `e2e/reference-import-export.spec.ts`: an import with a duplicate replaced and a
   deleted duplicate replaced and restored; an import whose second batch the server wrote but
   the browser never heard, reloaded and resumed with nothing added twice; one import resumed
-  from two tabs at once; one resumed past its six days, refused and dropped; `update_ref`
+  from two tabs at once; one resumed past its six days, refused and dropped; files picked and
+  dropped into one list, a file chosen twice skipped and one removed left out; `update_ref`
   correcting a record in another case and refusing a deleted one; and every download, an
   attachment under its name, behind its gate. And in
   `e2e/references.spec.ts`, the preview and a key in another case redirecting to its own.

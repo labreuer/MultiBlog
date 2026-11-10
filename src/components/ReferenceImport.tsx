@@ -12,12 +12,13 @@ import { identifiersOf } from "@/lib/references/identifiers";
 import { parseReferences, type ImportedReference, type ReadNote } from "@/lib/references/import";
 import { referencePath } from "@/lib/references/keys";
 import TitleRuns from "@/components/bibliography/TitleRuns";
+import { useFileDrop } from "@/components/useFileDrop";
 import account from "@/styles/account.module.css";
 import styles from "./ReferencesTable.module.css";
 
 // docs/CITATIONS.md, "The import box" — adding works to the library from
-// what another tool exports: pasted, or picked as files, several at once,
-// read in the browser into one list. A preview shows each record before
+// what another tool exports: pasted, or picked or dropped as files, several
+// at once, read in the browser into one list. A preview shows each record before
 // anything is written: what it is, the key it will get and why that isn't
 // its source's, what reading it dropped, cut or mapped, and whether the
 // library already holds it, with the choice of replacing that record. Import
@@ -29,6 +30,11 @@ import styles from "./ReferencesTable.module.css";
 const PREVIEW_CHUNK = 500;
 
 type Row = { reference: ImportedReference; answer: PreviewAnswer };
+
+/** A file chosen to import, read as text. `id` is its name, size and modified time: added again, by a pick or a drop, it is skipped. */
+type ChosenFile = { id: string; name: string; text: string };
+
+const fileId = (file: File) => `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
 type Phase = "edit" | "reading" | "preview" | "importing" | "done";
 
 /** A note as the preview words it. */
@@ -62,10 +68,11 @@ function keyNoteText(note: KeyNote): string {
 export default function ReferenceImport({ userId }: { userId: string }) {
   const router = useRouter();
   const panel = useRef<HTMLDetailsElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<PendingImport | null>(null);
   const [replacing, setReplacing] = useState<Set<number>>(new Set());
   const [text, setText] = useState("");
-  const [files, setFiles] = useState<{ name: string; text: string }[]>([]);
+  const [files, setFiles] = useState<ChosenFile[]>([]);
   const [phase, setPhase] = useState<Phase>("edit");
   const [rows, setRows] = useState<Row[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
@@ -81,9 +88,23 @@ export default function ReferenceImport({ userId }: { userId: string }) {
     };
   }, [userId]);
 
-  async function pickFiles(list: FileList | null) {
-    setFiles(await Promise.all([...(list ?? [])].map(async (file) => ({ name: file.name, text: await file.text() }))));
+  /** Adds `list` to the files chosen, skipping one already there: a pick and a drop each add. */
+  async function addFiles(list: readonly File[]) {
+    const read = await Promise.all(list.map(async (file): Promise<ChosenFile> => ({ id: fileId(file), name: file.name, text: await file.text() })));
+    setFiles((before) => {
+      const seen = new Set(before.map((file) => file.id));
+      return [...before, ...read.filter((file) => !seen.has(file.id) && seen.add(file.id))];
+    });
   }
+
+  const drop = useFileDrop(
+    (dropped) => void addFiles(dropped),
+    phase === "edit",
+    // A file dragged onto the closed panel opens it, so the drop lands where the files are listed.
+    () => {
+      if (panel.current && !panel.current.open) panel.current.open = true;
+    },
+  );
 
   async function read() {
     setFailure(null);
@@ -200,12 +221,12 @@ export default function ReferenceImport({ userId }: { userId: string }) {
           </button>
         </p>
       )}
-      <details ref={panel} className={styles.importPanel}>
+      <details ref={panel} className={`${styles.importPanel} ${drop.over ? styles.importDropping : ""}`} {...drop.handlers}>
         <summary>Add references</summary>
         {(phase === "edit" || phase === "reading") && (
           <>
             <label>
-              Paste BibTeX, biblatex, RIS, CSL-JSON, PubMed’s .nbib or a CITATION.cff, one record or many.
+              Paste BibTeX, biblatex, RIS, CSL-JSON, PubMed’s .nbib or a CITATION.cff, one record or many, or drop files here.
               <textarea
                 className={styles.importBox}
                 aria-label="References to import"
@@ -215,9 +236,42 @@ export default function ReferenceImport({ userId }: { userId: string }) {
                 disabled={busy}
               />
             </label>
-            <label className={styles.importFiles}>
-              Or pick files: <input type="file" multiple aria-label="Files to import" onChange={(event) => void pickFiles(event.target.files)} disabled={busy} />
-            </label>
+            <div className={styles.importFiles}>
+              <input
+                ref={picker}
+                type="file"
+                multiple
+                hidden
+                aria-label="Files to import"
+                onChange={(event) => {
+                  void addFiles([...(event.target.files ?? [])]);
+                  // Cleared, so the next pick adds to these and the same file picked again is still seen.
+                  event.target.value = "";
+                }}
+              />
+              <button type="button" className={account.button} onClick={() => picker.current?.click()} disabled={busy}>
+                Add files…
+              </button>
+              {files.length > 0 && (
+                <ul className={styles.importFileList} aria-label="Files chosen">
+                  {files.map((file) => (
+                    <li key={file.id}>
+                      {file.name}{" "}
+                      <button
+                        type="button"
+                        className={styles.editButton}
+                        aria-label={`Remove ${file.name}`}
+                        title={`Remove ${file.name}`}
+                        onClick={() => setFiles((before) => before.filter((other) => other.id !== file.id))}
+                        disabled={busy}
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
             <button type="button" className={account.button} onClick={() => void read()} disabled={busy || (text.trim() === "" && files.length === 0)}>
               {phase === "reading" ? "Reading…" : "Preview"}
             </button>

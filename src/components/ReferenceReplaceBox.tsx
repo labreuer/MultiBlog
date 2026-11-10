@@ -6,6 +6,7 @@ import { replaceReferenceRecord } from "@/app/actions/references";
 import type { CslData } from "@/lib/references/csl";
 import { downloadHref } from "@/lib/references/export-formats";
 import { parseReferences } from "@/lib/references/import";
+import { useFileDrop } from "@/components/useFileDrop";
 import account from "@/styles/account.module.css";
 import styles from "./ReferencesTable.module.css";
 
@@ -14,7 +15,8 @@ import styles from "./ReferencesTable.module.css";
 // browser as the import box parses, the fields that change shown, and saved
 // in place of the reference's record. A field the pasted record lacks is
 // removed. The repair for a record with no DOI or ISBN, which no import can
-// match. The box starts from the reference's CSL-JSON download.
+// match. The box starts from the reference's CSL-JSON download, and a file
+// dropped on it puts the file's text in the box.
 
 type Change = { field: string; before: string | null; after: string | null };
 
@@ -33,6 +35,17 @@ export default function ReferenceReplaceBox({ id, referenceKey, onClose }: { id:
   const [next, setNext] = useState<{ data: CslData; notes: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const drop = useFileDrop((files) => {
+    if (files.length !== 1) {
+      setError("Drop one file: the box holds one record.");
+      return;
+    }
+    void files[0].text().then((dropped) => {
+      setError(null);
+      setNext(null);
+      setText(dropped);
+    });
+  }, !busy);
 
   useEffect(() => {
     let live = true;
@@ -79,10 +92,10 @@ export default function ReferenceReplaceBox({ id, referenceKey, onClose }: { id:
 
   const changes = next && current ? changesBetween(current, next.data) : null;
   return (
-    <section className={styles.replaceBox} aria-label={`Replace the record of ${referenceKey}`}>
+    <section className={`${styles.replaceBox} ${drop.over ? styles.importDropping : ""}`} aria-label={`Replace the record of ${referenceKey}`} {...drop.handlers}>
       <h2>Replace the record of {referenceKey}</h2>
       <p>
-        Paste one record, in any format the import reads; the record it has now is here to start from. A field the new record lacks
+        Paste one record, in any format the import reads, or drop a file holding one; the record it has now is here to start from. A field the new record lacks
         is removed. Its key, abbreviation, PDF and citations stay.
       </p>
       <textarea className={styles.importBox} aria-label="The new record" value={text} onChange={(event) => (setText(event.target.value), setNext(null))} spellCheck={false} disabled={busy} />

@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import type { Page, Route } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
@@ -210,6 +211,44 @@ test("an import resumed after the six days it may be sent is refused whole, and 
     await deleteTestReferences(prefix);
     await deleteTestImportReceipts(prefix);
   }
+});
+
+test("files picked and dropped are added to one list: a second pick adds, a file chosen twice is skipped, one removed is left out, and a drag onto the closed panel opens it", async ({ page }, testInfo) => {
+  const prefix = `e2efiles${Date.now().toString(36)}`;
+  const work = (title: string) => ({ type: "book", title: `${title} ${prefix}`, author: [{ family: prefix }], issued: { "date-parts": [[1900]] } });
+  // Files on disk, so a file picked twice is the same file, modified time and all.
+  const write = async (name: string, records: object[]) => {
+    const path = testInfo.outputPath(name);
+    await writeFile(path, JSON.stringify(records));
+    return path;
+  };
+  const a = await write("a.json", [work("A one"), work("A two")]);
+  const b = await write("b.json", [work("B")]);
+
+  await page.goto("/references");
+  const panel = page.locator("details", { has: page.getByText("Add references", { exact: true }) });
+  // Files dragged onto the closed panel open it.
+  const dataTransfer = await page.evaluateHandle((text) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([text], "c.json", { type: "application/json" }));
+    return transfer;
+  }, JSON.stringify([work("C")]));
+  await panel.locator("summary").dispatchEvent("dragenter", { dataTransfer });
+  await expect(page.getByRole("textbox", { name: "References to import" })).toBeVisible();
+  await panel.dispatchEvent("drop", { dataTransfer });
+
+  const picker = page.getByLabel("Files to import");
+  await picker.setInputFiles(a);
+  await picker.setInputFiles(b);
+  await picker.setInputFiles(a);
+  const chosen = page.getByRole("list", { name: "Files chosen" }).getByRole("listitem");
+  await expect(chosen).toHaveText(["c.json ×", "a.json ×", "b.json ×"]);
+
+  await page.getByRole("button", { name: "Remove b.json" }).click();
+  await expect(chosen).toHaveText(["c.json ×", "a.json ×"]);
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByText("3 records: 3 to add, 0 already in the library.")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Import preview" })).not.toContainText(`B ${prefix}`);
 });
 
 test("update_ref corrects a work's record, keeping its key and abbreviation, and refuses a deleted one", async ({ request }) => {
