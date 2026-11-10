@@ -1,6 +1,7 @@
 # Citations and references
 
-**Status: built, but for what "Built so far" below names, and Later.** A *citation* is an entity chip
+**Status: built, but for what "Built so far" below names, "Planned: a passage in a citation",
+which is a plan, and Later.** A *citation* is an entity chip
 ([ENTITY_CHIPS.md](ENTITY_CHIPS.md)) that stands for one or more works at a page. It is shown as
 `(BU p. 49)`, `(Radner 2012, p. 49)` or `[3, p. 49]`, depending on the doc's style. The works are
 *references*: records in a library, which this file also covers. This file fills in the kit's kind
@@ -1117,6 +1118,192 @@ reads a public page doesn't fetch four files for each work on it.
   - a Cyrillic author and a Japanese title, as BibTeX through `bibtexu` and as biblatex
     through biber and through Pandoc.
 
+## Planned: a passage in a citation
+
+**Not built.** A citation names a page. With a passage it also names the words on that page,
+and following it outlines them in the PDF, as following a fragment link does
+([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)). The passage is given by a link around the
+citation, so nothing is stored twice. Words the prose already quotes stay in the prose, and the
+citation points at them. Words the prose doesn't quote are stored once, in a fragment link's
+URL. "Converting the hand-written citations" (Later) depends on this.
+
+**The syntax.**
+
+```
+"could not yet call his soul his own" [[@bu, p. 49]](quote:prev)
+Barfield [@bu [p. 49]](quote:next) writes that "could not yet call his soul his own"
+Rose's summary [[@rose, p. 219]](/pdf/rose-…#page=255&text=also+pronouncing,culture+narcissistic)
+see [[@wimsatt1986, p. 12; @wimsatt1997, p. 3]](/link/abc123)
+```
+
+- **A link whose whole text is exactly one bracketed citation is that citation**: `[[@…]](…)`,
+  or the narrative `[@key [p. 49]](…)`. The link's destination is stored as the citation's
+  `data.referent`.
+- **One referent per citation, not per work**, since Pandoc links a whole citation, never one
+  work inside it.
+- **A bare `[@key](url)` stays an ordinary link**, so `[@handle](https://x.com/handle)` keeps
+  working. A mention's `[@Name](/authors/<slug>)` is unchanged.
+- **It amends "Link text holds no citation"** (Markdown, above), for exactly this shape.
+- **No stored doc changes meaning.** Today `[[@bu, p. 49]](quote:prev)` and
+  `[@bu [p. 49]](quote:next)` both read as plain links with the citation as literal text, and
+  hand-written text in that shape exports escaped (`[\[@bu, p. 49\]](…)`), which the new rule
+  doesn't match.
+- **The parse** goes in `ChipParsingLink` (`src/lib/markdown-import.ts`), which already turns a
+  mention's link into a chip. **The writer** emits `[`, the citation's Markdown, `](`, the
+  referent and `)`.
+
+**What a referent may be, and where the citation then links.**
+
+| Referent | Allowed on | The citation links to |
+|---|---|---|
+| `quote:prev`, `quote:next` | one work, with pages | the cited-page route, the quotation's pieces as its query |
+| `/pdf/<slug>#…` | one work, with pages, and that work's own file | the same route, the fragment's own page and `text` pairs as its query |
+| `/link/<id>`, another path, an `https` URL | any citation | the referent itself |
+
+- **A `/pdf/` referent goes through the route too**, so the PDF's slug stays out of the HTML and
+  out of published posts, and each reader is asked at the click.
+- **`/link/<id>` already checks each viewer** ([ANCHORED_LINKS.md](ANCHORED_LINKS.md)). A
+  multi-part anchored link is how a citation of several works points at a passage in each.
+
+**What `quote:prev` and `quote:next` find.**
+
+- **`quote:prev`** walks back within the textblock over spaces, closing punctuation and other
+  citation chips. Skipping chips lets `[[@dc, p. 87]](quote:prev) [[@sa, p. 211]](quote:prev)`
+  share one quotation.
+  - If the next character back is a closing `"` or `”`, the passage is that double-quoted run.
+  - If the chip ends a blockquote, or stands alone in the paragraph right after one, the passage
+    is the blockquote.
+- **`quote:next`** takes the first quotation after the chip, before the next citation, in the
+  same textblock, or else the blockquote right after the chip's paragraph. Prose such as
+  "Barfield (p. 49) writes that "…"" puts more between the two than `quote:prev` meets, so it
+  picks wrong more often.
+- **Ellipses and brackets standing alone split the passage into segments**, so nothing elided is
+  stored, and the viewer can show what was left out. A bracket attached to a word, such as
+  `[T]he`, is settled against the page instead (PDF_FRAGMENT_LINKS.md §13, "Elided passages").
+- **When nothing is found**, the link falls back to the page, and the check reports it.
+- **The link now depends on text beside the chip**, which stretches ENTITY_CHIPS.md rule 2. That
+  rule says so.
+
+**The link.** `/references/<key>/p/<first page>?…`, whose query the route turns into the PDF's
+fragment.
+
+- **For `quote:*`, the query is the quotation as one `text`**, in the fragment grammar with its
+  elided segments (PDF_FRAGMENT_LINKS.md §13, "Elided passages"):
+  `?text=could+not+yet+call...his+own`.
+  - **A bracket standing alone and `[…]` are written `...`**, since telling them from the
+    quoted words needs no page text.
+  - **A bracket attached to a word keeps its brackets** (`%5BT%5Dhe`). Whether its letters are
+    the source's is a question only the page text answers, so the route settles it, through
+    `passagePieces`. The fragment the viewer receives never holds a bracket.
+  - **A segment longer than eight words goes as its first and last three**, the writer's form's
+    length rule (PDF_FRAGMENT_LINKS.md §8) without its step for uniqueness, which needs the
+    page. So a block quote doesn't make an href thousands of characters long, and the check
+    reports a shortened segment that repeats.
+  - **Unless the locator names more than one page**, a range or a list. Splitting a quotation at
+    a page break needs the words where the break falls, and page n's text ends in its folio and
+    running head (PDF_FRAGMENT_LINKS.md §5), so a shortened segment can't be split. The locator
+    says when a break may fall without any page text, so rendering stays a pure function. A
+    long href for a block quote over two pages is the cost: 56 of the measured copy's 1,793
+    links name more than one page.
+  - **No page break is in the query.** The route finds each one from the stored page text.
+- **For a `/pdf/` referent, the query is the fragment's own page and `text` pairs**, already in
+  the grammar.
+- **A query string, not a fragment.** The route answers with a redirect whose `Location` has a
+  fragment of its own (`#page=…`), and a `Location` with a fragment replaces the one the browser
+  had (RFC 9110 §10.2.2), so a passage in the fragment would be lost. The route already reads
+  the session, so reading `searchParams` costs it no cache. The reference's page, which is
+  cached, never gets the query.
+- **A reader who may open the PDF** is sent to `/pdf/<slug>#p=<label>&text=…`, or to
+  `#page=<sheet>&text=…` on a file without usable labels (PDF_FRAGMENT_LINKS.md §13).
+  - A quotation that runs onto the next page is split there from the stored page text, and goes
+    as two passages, each `text` paired with its page. A segment straddling the break splits at
+    a word boundary, and an elision straddling it ends one page's passage and starts the next.
+  - **The quoted and elided segments reach the viewer** in PDF_FRAGMENT_LINKS.md §13's `...`
+    grammar. That grammar is the one contract between this plan and that file's. How the viewer
+    shows the gaps is held there.
+- **Anyone else** goes to `/references/<key>#p=49` as now, without the words.
+- **What it discloses:** the words, in the href, to every reader of the doc, as a fragment link
+  does (PDF_FRAGMENT_LINKS.md §10).
+- **A post freezes the href at publish**, as it freezes every chip's link.
+
+**Its checks**, run over referents:
+
+- **`scripts/integrity/check-pdf-fragment-links.ts`** reads them beside link marks: a `/pdf/`
+  referent as the fragment link it is, and a `quote:*` passage against the cited page.
+- **MCP writes refuse**, as `no_match`, a `/pdf/` referent or a `quote:*` passage not found on
+  the cited page, and a `/pdf/` referent naming another work's file.
+- **Both match what the href carries**, not the doc's quotation whole, as fragment links are
+  checked today. So an OCR error inside a shortened segment doesn't refuse a correct quote,
+  which the link itself survives. The cost is that a misquote there goes unreported.
+
+**The editor.** `CitePopover` gets a "Points at" control: nothing, the quotation before, the
+quotation after, or a link. It highlights the quotation it found.
+
+**Exporting for Pandoc.** The Markdown export writes the form above as it is. An export meant
+for Pandoc, which doesn't exist yet, rewrites only the destination, to the route's URL, which
+is absolute because the file leaves the site:
+
+```
+"could not yet call his soul his own" [[@bu, p. 49]](quote:prev)
+"could not yet call his soul his own" [[@bu, p. 49]](https://<origin>/references/bu/p/49?text=could+not+yet+call+his+soul+his+own)
+```
+
+Given the Markdown as it stands, Pandoc gets a dead `quote:prev` link around a working
+citation. **Unverified:** that Pandoc reads `[[@bu, p. 49]](url)` as a link around the
+citation. Markdown, above, says Pandoc reads citations inside link text, but there was no Pandoc
+to run it through.
+
+**Converting the hand-written citations** (Later) loses nothing.
+
+- **A link becomes `quote:prev`** where the quotation just before it holds all the link's words,
+  and otherwise its own URL becomes the referent.
+- **Measured over the 1,793 links in a stale copy** of the docs that hold them, about 65% become
+  `quote:prev`:
+  - 84% have a quotation directly before. For 16% of those, the old link outlines more than the
+    prose quotes, usually from the start of its sentence.
+  - 3% are block quotes.
+  - 3% have the quotation elsewhere in the paragraph.
+  - 9% quote nothing.
+
+**A tab from before the deploy drops the referent.** A new field needs no `SCHEMA_VERSION` bump
+(ENTITY_CHIPS.md, rule 6). But an older bundle's `validate` rebuilds a citation's `data` from the
+fields it knows. So `data.referent` is lost wherever that tab writes a chip's `data`:
+
+- an edit in `CitePopover`, which reads the data back through `validate` before writing it;
+- a cut and paste, through `parseHTML`, then `conformChipAttrs`, then `validate`.
+
+Losing a URL loses its words. Losing `quote:*` loses only the pointer, since the quotation is
+still in the prose. The gate can't see either, since the schema is unchanged. At the deploy no
+chip holds a referent, and only newer bundles write one. So a loss needs a tab that stays open
+and, before it reloads, edits or cuts the very citation someone else just gave one. A bump would
+refuse every open tab to close that gap, so there is none.
+
+**Rejected.**
+
+- **The quoted words inside the citation**, as a `passage` field written `[@bu, p. 49 "…"]`. A
+  quotation in the prose would then be stored twice, once there and once in the chip.
+- **A keyword inside the brackets**, `[@bu, p. 49 quote:prev]`.
+  - Without a comma it is stored with no locator: "p. 49 quote:prev" becomes suffix words, as
+    Pandoc reads `[@key, p. 49 n. 3]`.
+  - With a comma it is a reserved word in a free-text suffix, and Pandoc prints it.
+  - A URL can't go inside the brackets at all. `closingBracket` stops at a nested `[`, and the
+    `;` in `[@bu, p. 49 </pdf/…;…>]` stops it reading as a citation.
+- **A mark in the doc over the quotation.** It needs a `SCHEMA_VERSION` bump, it has no Markdown
+  form short of Pandoc's bracketed spans, and its tie to the citation would be positional in
+  Markdown anyway.
+
+**Open.**
+
+- **Whether a citation without pages may take `quote:*`.**
+- **Which brackets count as gaps.** PDF_FRAGMENT_LINKS.md §13 proposes a rule: a bracket
+  standing alone is a gap, and one attached to a word is tried with its letters and without. It
+  stays open until an author's own docs, which will hold more brackets than the measured copy's
+  two, have been checked against it. A bracketed word can also be the source's own text.
+- **A citation of several works carrying passages on its list page.** A `/link/<id>` referent
+  already points at a passage in each work. The list page's own link carries each work's page by
+  position (`#p=12,,3`), and a passage there needs a grammar whose separators can't be confused
+  with a passage's own commas, or with the page and `text` pairs of a passage on two pages.
+
 ## Later
 
 - **CSL styles through citeproc-js** (CPAL-1.0 OR AGPL-1.0, about 1 MB). A doc's Citations
@@ -1135,9 +1322,11 @@ reads a public page doesn't fetch four files for each work on it.
   - **Which styles.** A few bundled, or any from the CSL repository, which needs somewhere to
     upload one, and the locale files the styles need.
 - **Converting the hand-written citations.**
-  - The docs hold many links such as `[BU p. 49](/pdf/…#page=53&text=…)`, about 1,830 in a stale
+  - The docs hold many links such as `[BU p. 49](/pdf/…#page=53&text=…)`, 1,793 in a stale
     copy.
-  - Each becomes a citation, one position where it was several.
+  - Each becomes a citation, one position where it was several, with a referent: `quote:prev`
+    where the quotation before it holds the link's words, and the link's own URL otherwise
+    ("Planned: a passage in a citation").
   - Every stored quote across one is re-stamped at the conversion, with its positions mapped
     through it and its quote re-derived. That was 58 of 140 annotation quotes in that copy.
   - An editor annotation whose mark covered only the label loses it.
