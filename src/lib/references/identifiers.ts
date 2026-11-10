@@ -105,3 +105,26 @@ export function identifiersOf(csl: { type: string; DOI?: unknown; ISBN?: unknown
   }
   return { identifiers, invalid };
 }
+
+/**
+ * The record with each identifier that fails its check taken out, and which
+ * (docs/CITATIONS.md, "The import box"): an import keeps the record, since
+ * kept without it a record still has its other identifier to catch a later
+ * copy by, and the preview says which, to be corrected first. An ISBN field
+ * keeps the ISBNs that pass. `create_ref` refuses instead, since an agent can
+ * correct it.
+ */
+export function withoutFailedIdentifiers<T extends { type: string; DOI?: unknown; ISBN?: unknown; "container-title"?: unknown }>(
+  record: T,
+): { data: T; dropped: { scheme: IdentifierScheme; raw: string }[] } {
+  const { invalid } = identifiersOf(record);
+  if (invalid.length === 0) return { data: record, dropped: [] };
+  const out: T = { ...record };
+  if (invalid.some((id) => id.scheme === "DOI")) delete out.DOI;
+  if (invalid.some((id) => id.scheme === "ISBN")) {
+    const kept = identifiersOf({ type: record.type, ISBN: record.ISBN }).identifiers.filter((id) => id.scheme === "ISBN");
+    if (kept.length > 0) out.ISBN = kept.map((id) => id.value).join(", ");
+    else delete out.ISBN;
+  }
+  return { data: out, dropped: invalid };
+}

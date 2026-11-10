@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { citedNames, keyBaseOf, parseCslItem, readCsl, yearOf, type CslData } from "./csl";
 import { entryText, referenceEntry } from "./entry";
 import { identifiersOf, normalizeDoi, normalizeIsbn } from "./identifiers";
-import { parseReferences } from "./import";
 
 /** A record as a reader of one is handed it. */
 const read = (data: CslData) => readCsl(data);
@@ -91,91 +90,6 @@ test("a key is made from the first creator and the year", () => {
   assert.equal(citedNames(radner), "Radner");
   assert.equal(citedNames({ ...radner, author: [{ family: "A" }, { family: "B" }] }), "A and B");
   assert.equal(citedNames({ ...radner, author: [{ family: "A" }, { family: "B" }, { family: "C" }] }), "A et al.");
-});
-
-test("BibTeX: entries, braces, accents, names and page ranges", () => {
-  const result = parseReferences(`
-    % a comment line
-    @string{oup = "Oxford University Press"}
-    @book{Radner2012,
-      author    = {Radner, Daisie and Michael J. Radner and {The Research Group}},
-      title     = {The {O}rigin of Ideas: Caf\\'e Talk},
-      publisher = "Clarendon " # "Press",
-      year      = 2012,
-      isbn      = {978-0-19-973136-7},
-    }
-    @article{garcia_marquez,
-      author = "Gabriel Garc{\\'i}a M{\\'a}rquez and Jan van der Berg",
-      title = {On Rivers},
-      journal = {Journal of Water},
-      volume = {12}, number = {3}, pages = {49--51},
-      year = {1999}, doi = {10.1000/ABC}
-    }
-    @incollection{broken,
-      title = {Never closed
-  `);
-  assert.equal(result.format, "bibtex");
-  assert.deepEqual(result.references.map((r) => r.key), ["Radner2012", "garcia_marquez"]);
-  const [book, article] = result.references.map((r) => r.data);
-  assert.deepEqual(book, {
-    type: "book",
-    title: "The Origin of Ideas: Café Talk",
-    publisher: "Clarendon Press",
-    ISBN: "978-0-19-973136-7",
-    author: [{ family: "Radner", given: "Daisie" }, { family: "Radner", given: "Michael J." }, { literal: "The Research Group" }],
-    issued: { "date-parts": [[2012]] },
-  });
-  // Written "Given Family", the last word is the family name, as BibTeX reads
-  // it, unless a lowercase particle says where it starts; "Family, Given" is
-  // how a two-word family name is given.
-  assert.deepEqual(article.author, [
-    { family: "Márquez", given: "Gabriel García" },
-    { family: "van der Berg", given: "Jan" },
-  ]);
-  assert.deepEqual([article.type, article["container-title"], article.volume, article.issue, article.page, article.DOI], [
-    "article-journal",
-    "Journal of Water",
-    "12",
-    "3",
-    "49–51",
-    "10.1000/ABC",
-  ]);
-  assert.equal(result.errors.length, 1);
-  assert.match(result.errors[0], /@incollection entry/);
-});
-
-test("RIS: one record per TY…ER, with repeated authors and a page range", () => {
-  const result = parseReferences(
-    ["TY  - JOUR", "AU  - Radner, Daisie", "AU  - Barfield, Owen", "TI  - On Participation", "JO  - Mind", "PY  - 1957/03//", "SP  - 49", "EP  - 51", "DO  - 10.1000/xyz", "ER  - ", "", "TY  - CHAP", "A1  - Lewis, C. S.", "T1  - A Chapter", "T2  - The Book", "SN  - 0-631-17504-0", "ER  - "].join("\n"),
-  );
-  assert.equal(result.format, "ris");
-  assert.equal(result.references.length, 2);
-  const [article, chapter] = result.references.map((r) => r.data);
-  assert.deepEqual(article, {
-    type: "article-journal",
-    title: "On Participation",
-    "container-title": "Mind",
-    page: "49–51",
-    DOI: "10.1000/xyz",
-    author: [{ family: "Radner", given: "Daisie" }, { family: "Barfield", given: "Owen" }],
-    issued: { "date-parts": [[1957]] },
-  });
-  // A chapter's ISBN is its book's, and isn't kept as the chapter's own.
-  assert.deepEqual(chapter, { type: "chapter", title: "A Chapter", "container-title": "The Book", author: [{ family: "Lewis", given: "C. S." }] });
-});
-
-test("CSL-JSON: one item or many, each with its id as the key, and an item with no title reported", () => {
-  const many = parseReferences(JSON.stringify([{ id: "Barfield1957", type: "book", title: "Saving the Appearances" }, { type: "book" }]));
-  assert.equal(many.format, "csl-json");
-  assert.deepEqual(
-    many.references.map((r) => [r.key, r.data]),
-    [["Barfield1957", { type: "book", title: "Saving the Appearances" }]],
-  );
-  assert.deepEqual(many.errors, ["Item 2: A reference needs a title."]);
-  assert.equal(parseReferences('{"type":"book","title":"One"}').references.length, 1);
-  assert.equal(parseReferences("{not json").errors.length, 1);
-  assert.deepEqual(parseReferences("Just some prose about a book."), { format: null, references: [], errors: ["That isn't BibTeX, RIS or CSL-JSON."] });
-  assert.deepEqual(parseReferences("   "), { format: null, references: [], errors: [] });
 });
 
 test("a bibliography entry: authors, year, title, then where it appeared", () => {

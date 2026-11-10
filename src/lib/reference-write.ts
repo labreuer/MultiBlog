@@ -6,9 +6,9 @@ import { canUserReadFile } from "@/lib/file-authz";
 import { prisma, prismaIncludingDeleted as base } from "@/lib/prisma";
 import { PDF_CONTENT_TYPE } from "@/lib/reference-files";
 import { canWriteReferences } from "@/lib/role-checks";
-import { keyBaseOf, parseCslItem, readCsl, type CslData } from "@/lib/references/csl";
-import { identifiersOf, type Identifier } from "@/lib/references/identifiers";
-import { parseReferences } from "@/lib/references/import";
+import { keyBaseOf, parseCslItem, readCsl, titleOf, type CslData } from "@/lib/references/csl";
+import { identifiersOf, withoutFailedIdentifiers, type Identifier, type IdentifierScheme } from "@/lib/references/identifiers";
+import { BATCH_BYTES, BATCH_RECORDS } from "@/lib/references/batches";
 import { foldKey, isKeyShaped, isLibraryKey, lookupKey, referencePath } from "@/lib/references/keys";
 
 // docs/CITATIONS.md, "Who writes them" — every write to the reference
@@ -112,15 +112,17 @@ async function keyTaken(tx: Prisma.TransactionClient, key: string, exceptId?: st
 }
 
 /** `base`, or `base` with the first free letter after it: radner2012, radner2012b, radner2012c. */
-async function freeKey(tx: Prisma.TransactionClient, base: string): Promise<string> {
-  if (!(await keyTaken(tx, base))) return base;
+async function firstFree(base: string, free: (key: string) => Promise<boolean>): Promise<string> {
+  if (await free(base)) return base;
   for (let n = 1; n < 26 * 27; n++) {
     const suffix = n < 26 ? String.fromCharCode(97 + n) : `${String.fromCharCode(96 + Math.floor(n / 26))}${String.fromCharCode(97 + (n % 26))}`;
     const candidate = `${base}${suffix}`;
-    if (!(await keyTaken(tx, candidate))) return candidate;
+    if (await free(candidate)) return candidate;
   }
   throw new ApiError("conflict", `No key like ${base} is free; give one.`);
 }
+
+const freeKey = (tx: Prisma.TransactionClient, base: string) => firstFree(base, async (key) => !(await keyTaken(tx, key)));
 
 async function requireFile(actor: Actor, fileId: string): Promise<void> {
   const file = await prisma.storedFile.findUnique({ where: { id: fileId }, select: { id: true, visibility: true, contentType: true } });
@@ -287,38 +289,129 @@ export async function setReferenceDeleted(actor: Actor, id: string, deleted: boo
   });
 }
 
+
+/** One record of an import, as the browser parsed it: never trusted, built again here. */
+export type ImportRecordInput = {
+  /** Its place in the import. */
+  place: number;
+  /** The key its source gave it, as written. */
+  sourceKey: string | null;
+  /** biblatex's `shorthand`, the abbreviation of a reference that has none. */
+  short: string | null;
+  /** The CSL-JSON record. */
+  csl: unknown;
+};
+
 export type ImportOutcome =
-  | { status: "created"; key: string; title: string; keyNote?: KeyNote }
-  | { status: "duplicate"; key: string; title: string; deleted: boolean }
-  | { status: "refused"; title: string; error: string };
+  | { place: number; status: "created"; key: string; title: string; keyNote?: KeyNote }
+  | { place: number; status: "duplicate"; key: string; title: string; deleted: boolean }
+  | { place: number; status: "refused"; title: string; error: string };
+
+/** A batch's records, or the refusal of a batch that isn't one: what a server action is sent is whatever its caller likes. */
+export function importBatchOf(raw: unknown): ImportRecordInput[] {
+  if (!Array.isArray(raw) || raw.length === 0) throw invalid("An import batch is a list of records.");
+  if (raw.length > BATCH_RECORDS) throw invalid(`An import batch is at most ${BATCH_RECORDS} records.`);
+  if (new TextEncoder().encode(JSON.stringify(raw)).length > BATCH_BYTES) throw invalid("That import batch is too large.");
+  return raw.map((record): ImportRecordInput => {
+    const entry = record && typeof record === "object" ? (record as Record<string, unknown>) : {};
+    const text = (value: unknown, max: number) => (typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null);
+    return {
+      place: Number.isSafeInteger(entry.place) ? (entry.place as number) : -1,
+      sourceKey: text(entry.sourceKey, 400),
+      short: text(entry.short, 400),
+      csl: entry.csl,
+    };
+  });
+}
 
 /**
- * Imports pasted BibTeX, RIS or CSL-JSON, one record or many. Each record
- * stands alone: one already in the library is reported with the key it has
- * there, one that can't be kept is reported with why, and the rest are
- * created. A key the source gave is used when it is free.
+ * Imports one batch of records the browser parsed (docs/CITATIONS.md, "The
+ * import box"). Each stands alone: it is built again from its CSL-JSON, an
+ * identifier that fails its check dropped, as the preview said; one already
+ * in the library is reported with the key it has there; one that can't be
+ * kept is reported with why; and the rest are created, each with its
+ * source's key where that fits and is free.
  */
-export async function importReferences(actor: Actor, text: string): Promise<{ format: string | null; outcomes: ImportOutcome[]; errors: string[] }> {
+export async function importReferenceBatch(actor: Actor, records: readonly ImportRecordInput[]): Promise<ImportOutcome[]> {
   requireWriter(actor);
-  const parsed = parseReferences(text);
   const outcomes: ImportOutcome[] = [];
-  for (const reference of parsed.references) {
-    const title = reference.item.title?.text ?? "";
+  for (const record of records) {
+    const parsed = parseCslItem(record.csl);
+    if (!parsed.ok) {
+      outcomes.push({ place: record.place, status: "refused", title: "", error: parsed.error });
+      continue;
+    }
+    const { data } = withoutFailedIdentifiers(parsed.item);
+    const title = titleOf(readCsl(data));
     try {
-      // The source's key if it fits and nobody has it; otherwise one is made, since a clash is not the importer's mistake.
-      const created = await createReference(actor, { csl: reference.data, sourceKey: reference.key });
-      outcomes.push({ status: "created", key: created.key, title, ...(created.keyNote ? { keyNote: created.keyNote } : {}) });
+      const created = await createReference(actor, { csl: data, sourceKey: record.sourceKey, short: record.short });
+      outcomes.push({ place: record.place, status: "created", key: created.key, title, ...(created.keyNote ? { keyNote: created.keyNote } : {}) });
     } catch (err) {
       if (err instanceof ApiError && err.code === "duplicate") {
-        outcomes.push({ status: "duplicate", key: String(err.details.key), title, deleted: err.details.deleted === true });
+        outcomes.push({ place: record.place, status: "duplicate", key: String(err.details.key), title, deleted: err.details.deleted === true });
       } else if (err instanceof ApiError) {
-        outcomes.push({ status: "refused", title, error: err.message });
+        outcomes.push({ place: record.place, status: "refused", title, error: err.message });
       } else {
         throw err;
       }
     }
   }
-  return { format: parsed.format, outcomes, errors: parsed.errors };
+  return outcomes;
+}
+
+/** What the preview asks of one record: the key its source gave it, the key one would be made from, and what identifies it. */
+export type PreviewQuery = { sourceKey: string | null; keyBase: string; identifiers: Identifier[] };
+
+/** The reference holding one of a record's identifiers. */
+export type HeldReference = { id: string; key: string; title: string; deleted: boolean };
+
+/** What only the server knows about a record (docs/CITATIONS.md, "The import box"): the key the import would give it now, and which references hold it. */
+export type PreviewAnswer = { key: string; keyNote?: KeyNote; held: HeldReference[] };
+
+/**
+ * The preview's question, asked of the library as it is now. `reserved` is
+ * the keys earlier records of the same import were given, so two records
+ * from one source don't both get `radner2012`. A key here is the one an
+ * import would give now; the report says the one it gave.
+ */
+export async function previewReferenceImport(actor: Actor, queries: readonly PreviewQuery[], reserved: readonly string[]): Promise<PreviewAnswer[]> {
+  requireWriter(actor);
+  const taken = new Set(reserved.map(lookupKey));
+  const ids = queries.flatMap((query) => query.identifiers);
+  const held = ids.length
+    ? await prisma.referenceIdentifier.findMany({
+        where: { OR: ids.map((id) => ({ scheme: id.scheme as IdentifierScheme, value: id.value })) },
+        select: { scheme: true, value: true, reference: { select: { id: true, key: true, csl: true, deletedAt: true } } },
+      })
+    : [];
+  const byIdentifier = new Map(held.map((row) => [`${row.scheme} ${row.value}`, row.reference]));
+  return base.$transaction(async (tx) => {
+    const free = async (key: string) => !taken.has(lookupKey(key)) && !(await keyTaken(tx, key));
+    const answers: PreviewAnswer[] = [];
+    for (const query of queries) {
+      const holders = new Map<string, HeldReference>();
+      for (const id of query.identifiers) {
+        const reference = byIdentifier.get(`${id.scheme} ${id.value}`);
+        if (reference) holders.set(reference.id, { id: reference.id, key: reference.key, title: titleFromStored(reference.csl), deleted: reference.deletedAt !== null });
+      }
+      const source = query.sourceKey?.trim().normalize("NFC") || null;
+      let key: string;
+      let keyNote: KeyNote | undefined;
+      if (source && isLibraryKey(source) && (await free(source))) key = source;
+      else {
+        if (source) keyNote = { reason: !(await free(source)) ? "taken" : isKeyShaped(source) ? "alias" : "unfit", sourceKey: source };
+        key = await firstFree(query.keyBase && isLibraryKey(query.keyBase) ? query.keyBase : "ref", free);
+      }
+      if (holders.size === 0) taken.add(lookupKey(key));
+      answers.push({ key, ...(keyNote ? { keyNote } : {}), held: [...holders.values()] });
+    }
+    return answers;
+  });
+}
+
+function titleFromStored(csl: unknown): string {
+  const parsed = parseCslItem(csl, { decode: false });
+  return parsed.ok ? titleOf(readCsl(parsed.item)) : "";
 }
 
 /** The reference a key names now, or once did, ignoring case: its id and current key. Deleted ones included. */

@@ -1,0 +1,6 @@
+[{"id":"http://zotero.org/users/local/AbCdEfGh/items/XYZ12345","type":"book","title":"Symphony Notes","translator":[{"family":"Grove","given":"George"}],"container-title-short":"SN","ISSN":"1234-5678","number-of-pages":"320","call-number":"ML410","author":[{"family":"Beethoven","given":"Ludwig","non-dropping-particle":"van"},{"family":"Sammartino","given":"Giovanni Battista","suffix":"Jr."},{"family":"Humboldt","given":"Alexander","dropping-particle":"von"}],"issued":{"date-parts":[["2012",3,14]]},"accessed":{"date-parts":[["2020",1,1]]}},
+{"id":"smithdata2021","citation-key":"smithData2021","type":"dataset","title":"A dataset","author":[{"family":"Smith","given":"J"}],"issued":{"date-parts":[[2021]]},"publisher":"Zenodo","DOI":"10.5281/zenodo.123456"},
+{"id":"brown1954","type":"legal_case","title":"Brown v. Board of Education","container-title":"U.S.","volume":"347","page":"483","authority":"Supreme Court of the United States","issued":{"date-parts":[[1954]]}},
+{"id":"p1","type":"post-weblog","title":"A post","container-title":"A blog","URL":"https://example.org"},
+{"id":"s1","type":"software","title":"A tool","version":"1.2.3"},
+{"id":"m1","type":"manuscript","title":"A manuscript","archive":"Beinecke","archive_location":"Box 3"}]

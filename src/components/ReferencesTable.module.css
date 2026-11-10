@@ -96,3 +96,33 @@
 .refused {
   color: var(--error);
 }
+
+.importFiles {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+/* The preview: a record to a row, its key and what reading it did below. */
+.importPreview {
+  margin: 0.5rem 0 0.75rem 1.5rem;
+  max-height: 28rem;
+  overflow-y: auto;
+}
+
+.importPreview > li {
+  margin-top: 0.4rem;
+}
+
+.previewHeld {
+  color: var(--text-secondary);
+}
+
+.previewKey {
+  font-size: 0.9rem;
+}
+
+.previewNotes {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-left: 1.25rem;
+}

@@ -13,8 +13,12 @@ import { findReferences } from "@/lib/reference-data";
 import { referenceCitedBy as citedByFor, type ReferenceCitedBy } from "@/lib/reference-cited-by";
 import { findReadablePdfs, referencesOfFile, type FileReference, type PdfCandidate } from "@/lib/reference-files";
 import {
-  importReferences,
+  importBatchOf,
+  importReferenceBatch,
+  previewReferenceImport,
   referencePath,
+  type PreviewAnswer,
+  type PreviewQuery,
   setReferenceDeleted,
   untieReferenceFromFile as untieFromFile,
   updateReference,
@@ -39,15 +43,39 @@ function said(err: unknown): never {
   throw err;
 }
 
-export type ImportReport = { format: string | null; outcomes: ImportOutcome[]; errors: string[] };
-
-/** Imports pasted BibTeX, RIS or CSL-JSON. Each record is created, reported as already held, or refused with why. */
-export async function importReferencesAction(text: string): Promise<ImportReport> {
+/**
+ * One batch of an import the browser parsed (docs/CITATIONS.md, "The import
+ * box"): at most a hundred records and 500,000 bytes, each built again here.
+ * Each record is created, reported as already held, or refused with why.
+ */
+export async function importReferenceBatchAction(records: unknown): Promise<ImportOutcome[]> {
   const actor = await requireActor();
-  if (typeof text !== "string" || text.length > 2_000_000) throw new Error("That is too much to import at once.");
-  const report = await importReferences(actor, text).catch(said);
+  const outcomes = await importReferenceBatch(actor, importBatchOf(records)).catch(said);
   revalidatePath("/references");
-  return report;
+  return outcomes;
+}
+
+/** How many records one preview question may ask about. */
+const PREVIEW_LIMIT = 500;
+
+/** What only the server knows of the records an import would add: the key each would get now, and which references hold it. */
+export async function previewReferenceImportAction(queries: unknown, reserved: unknown): Promise<PreviewAnswer[]> {
+  const actor = await requireActor();
+  if (!Array.isArray(queries) || queries.length > PREVIEW_LIMIT || !Array.isArray(reserved) || reserved.length > 50_000) throw new Error("That isn't an import's preview.");
+  const text = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
+  const asked = queries.map((raw): PreviewQuery => {
+    const query = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const identifiers = Array.isArray(query.identifiers) ? query.identifiers.slice(0, 20) : [];
+    return {
+      sourceKey: text(query.sourceKey, 400) || null,
+      keyBase: text(query.keyBase, 80),
+      identifiers: identifiers.flatMap((id) => {
+        const { scheme, value } = (id ?? {}) as { scheme?: unknown; value?: unknown };
+        return (scheme === "DOI" || scheme === "ISBN") && typeof value === "string" && value.length <= 400 ? [{ scheme, value }] : [];
+      }),
+    };
+  });
+  return previewReferenceImport(actor, asked, reserved.filter((key): key is string => typeof key === "string").map((key) => key.slice(0, 400))).catch(said);
 }
 
 export async function deleteReference(id: string): Promise<void> {

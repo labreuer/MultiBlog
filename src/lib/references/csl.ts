@@ -176,7 +176,6 @@ const TEXT_FIELDS = [
   "jurisdiction",
   "keyword",
   "language",
-  "license",
   "medium",
   "note",
   "number",
@@ -211,6 +210,36 @@ const TEXT_FIELDS = [
   "volume-title-short",
 ] as const;
 
+/**
+ * Crossref's own type names, which its JSON gives where CSL's would go: each
+ * read as the CSL type it is, and the preview says so.
+ */
+const CROSSREF_TYPES: Record<string, string> = {
+  "journal-article": "article-journal",
+  "book-chapter": "chapter",
+  "book-section": "chapter",
+  "book-part": "chapter",
+  "book-track": "chapter",
+  "proceedings-article": "paper-conference",
+  "posted-content": "article",
+  "reference-entry": "entry",
+  "peer-review": "review",
+  "edited-book": "book",
+  "reference-book": "book",
+  "book-set": "book",
+  monograph: "book",
+  proceedings: "book",
+  "proceedings-series": "collection",
+  "report-component": "report",
+  "report-series": "report",
+  "journal-volume": "periodical",
+  "journal-issue": "periodical",
+  journal: "periodical",
+  "standard-series": "standard",
+  database: "dataset",
+  dissertation: "thesis",
+};
+
 /** Older names Zotero and citeproc-js still write, read as the variable they became. */
 const LEGACY_FIELDS: Record<string, string> = { journalAbbreviation: "container-title-short", shortTitle: "title-short" };
 
@@ -236,8 +265,21 @@ type Reading = { decode: boolean; cut: (field: string) => void };
 /** A run of white space, a paragraph break included, as one space. */
 const squash = (value: string) => value.replace(/\s+/g, " ").trim();
 
+/**
+ * A list given where CSL has one value, as Crossref gives a journal's two
+ * ISSNs and a title as a list of one: a title's first entry, and any other
+ * field's entries joined.
+ */
+function oneValue(value: unknown, field: string): unknown {
+  if (!Array.isArray(value)) return value;
+  const parts = value.filter((part) => (typeof part === "string" && part.trim()) || (typeof part === "number" && Number.isFinite(part))).map(String);
+  if (parts.length === 0) return undefined;
+  return (TITLE_FIELDS as readonly string[]).includes(field) ? parts[0] : [...new Set(parts)].join(", ");
+}
+
 /** A plain field: references decoded, tags taken out (Crossref's abstracts are JATS), bounded. */
 function plainText(value: unknown, field: string, reading: Reading): string | undefined {
+  value = oneValue(value, field);
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (typeof value !== "string") return undefined;
   const decoded = reading.decode ? decodeCharacterReferences(value) : value;
@@ -252,6 +294,7 @@ function plainText(value: unknown, field: string, reading: Reading): string | un
 
 /** A title field: its kept tags in their one spelling, the rest taken out, its text bounded. */
 function titleText(value: unknown, field: string, reading: Reading): string | undefined {
+  value = oneValue(value, field);
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (typeof value !== "string") return undefined;
   const decoded = reading.decode ? decodeCharacterReferences(value) : value;
@@ -350,7 +393,7 @@ export function parseCslItem(raw: unknown, options: { decode?: boolean } = {}): 
   };
 
   const rawType = typeof raw.type === "string" ? raw.type : "";
-  const type = (CSL_TYPES as readonly string[]).includes(rawType) ? rawType : "document";
+  const type = (CSL_TYPES as readonly string[]).includes(rawType) ? rawType : (CROSSREF_TYPES[rawType] ?? "document");
   if (type !== rawType) notes.push({ kind: "mapped", field: "type", from: rawType || "(none)", to: type });
   const item: CslData = { type };
 
