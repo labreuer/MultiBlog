@@ -1573,46 +1573,36 @@ still painted *after* `live-doc-synced` appears, not merely at first paint.
 
 ---
 
-## Auth.js re-issues the session cookie on every session GET, so a stale GET can undo a sign-in
+## Auth.js re-issues the session cookie on every session GET, so a late GET can undo a session change
 
-**Status:** found 2026-09-14 by the Firefox worker matrix; not fixed. Two e2e tests show it,
-each about once in five under load: `files.spec.ts:194` (a fresh sign-in as another user
-renders `/files` as the *admin* the browser had been) and `session-refresh.spec.ts:108` (a
-deleted user stays signed in). Neither is a test fault, and the suite is right to keep
-catching it.
+**Status:** narrowed, not closed. The sign-in form and `SessionRefresh` each check what they
+changed and act once more if it did not hold (src/app/sign-in/NOTES.md, "Every session GET
+re-issues the cookie", has the mechanism and both checks). What is left:
 
-**Mechanism**, measured from the traces (every `GET /api/auth/session` in them answered with a
-`Set-Cookie`): `@auth/core`'s session action re-encodes the JWT and sets `authjs.session-token`
-again on every read, to push the expiry out. That makes the cookie last-writer-wins across
-concurrent requests, and the header's `SessionProvider` fetch — issued on every page,
-`/sign-in` included — is routinely in flight when a session-changing POST answers:
+- **A GET slower than the check.** The retry assumes the late GET has landed by the time the
+  check is sent. One that answers later still puts the old cookie back.
+- **Signing out has no check.** Not observed, but it follows from the mechanism: a session GET
+  that answers after the sign-out POST would leave the reader signed in. On any page that GET
+  is the provider's second read, so the exposure is a sign-out within a few hundred
+  milliseconds of a page load.
 
-```
-+248 ms  GET  /api/auth/session              (admin token)  → answered +463 ms, Set-Cookie: admin, re-issued
-+256 ms  POST /api/auth/callback/credentials                → answered +460 ms, Set-Cookie: owner, the sign-in
-```
+**Closing it** means the read no longer writes. `@auth/core`'s JWT re-encode on GET is
+unconditional (`lib/actions/session.js`; `updateAge` governs database sessions only), so that
+is a wrapper round the route's `GET` export dropping the session cookie from
+`/api/auth/session` responses. Nothing else on a read path writes it: the app calls `auth()`
+only with no arguments, which sets no cookie. The costs, which are why it is not done:
 
-Three milliseconds later the admin is back, and every request after carries that lineage. The
-same shape defeats `SessionRefresh`'s dead-session path: its `update({})` POST clears the
-cookie, a GET that started earlier re-sets it, and the confirming GET then sees a live session
-and stands down. src/app/sign-in/NOTES.md has the account.
+- A session stops sliding. It ends `maxAge` after sign-in or the last `/dashboard` visit, even
+  for a daily reader, so it wants a longer `maxAge` or a rule that re-issues only an old token.
+- The wrapper matches the cookie by name, `__Secure-` prefix and `.0`/`.1` chunks included, and
+  an Auth.js upgrade can change those.
+- The `adminInitials` backfill (below) relies on the re-issue and goes first.
 
-**A real reader hits this too**: sign in while the header's session fetch is slow and you may
-stay who you were; a deleted account may keep the session `/dashboard` was meant to end.
+With that in, both retries can go.
 
-**Options**, none taken:
-
-1. Check whether the installed `@auth/core` has any way to not re-issue on GET (the
-   `updateAge` setting governs database sessions, and the JWT re-encode looked unconditional).
-   If not, an upstream request with the trace above is the honest first step.
-2. Make sign-in a full navigation whose response sets the cookie, and have the landing page
-   verify that the session's user is the one who just signed in — re-signing in once if not.
-   Covers the sign-in case, not the dead-session one.
-3. Have the sign-in form wait for the provider's in-flight fetch before posting, and have
-   `SessionRefresh` re-check after a settle rather than at once. Narrows the window; does not
-   close it, and depends on `next-auth/react` internals.
-
-Whatever lands, keep the two tests as they are: they are the only thing that sees this.
+`session-refresh.spec.ts`'s deleted-user test and `files.spec.ts`'s second sign-in still meet
+the race by chance under load, and a red from either is this item's first bullet, not a test
+fault. The two tests that arrange it are named in NOTES.md.
 
 ---
 
