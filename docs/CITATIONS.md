@@ -7,6 +7,9 @@
 contract. The kit says how every chip is stored, rendered, quoted and searched. Citations are step
 3 of the kit's order.
 
+**One section is a plan, not an account:** "Planned: import and export", reading a library from
+the tools people keep one in and downloading works for them. Nothing in it is built.
+
 ## Built so far
 
 The reference library (its data, its pages and its machine door), the citation chip itself
@@ -477,6 +480,493 @@ post's labels, and a republish refreshes both.
 - `search` takes `cites`, `cited_title` and `cited_author`, and refuses a key nothing has
   ([MCP.md](MCP.md)).
 
+## Planned: import and export
+
+Reading a library from the tools people keep one in, without losing what the library can hold,
+and downloading works in the formats those tools read: one work, a doc's or a post's references,
+the library as `/references` searches it, and the bulk export's bibliography.
+
+### What each source exports
+
+| Source | Its export to read | Read by |
+|---|---|---|
+| Zotero, Mendeley, JabRef, LaTeX | BibTeX or biblatex | the BibTeX reader |
+| Zotero with Better BibTeX | biblatex, or CSL-JSON | the BibTeX reader, or `parseCslItem` |
+| EndNote | RIS ("RefMan (RIS) Export"), or BibTeX | the RIS or BibTeX reader |
+| Web of Science, Scopus | RIS | the RIS reader |
+| PubMed | `.nbib`, its only citation-manager format | a MEDLINE reader |
+| Crossref, doi.org | BibTeX, RIS or CSL-JSON | any of the three |
+| arXiv, INSPIRE, ADS, dblp | BibTeX | the BibTeX reader |
+| HeinOnline | RIS or BibTeX | the RIS or BibTeX reader |
+| Software (GitHub, Zenodo) | `CITATION.cff`, or Zenodo's BibTeX | a CFF reader, or the BibTeX reader |
+
+**Refused, naming the export to use instead:** EndNote XML and `.enw`, Web of Science's plain
+text and tab-delimited files, Scopus CSV, CSL-YAML, MODS and MARC. Each source above has an
+export that is read, so the refusal says which, not just "That isn't BibTeX, RIS or CSL-JSON."
+
+### The readers
+
+- **They run in the browser only.** The import box and "Replace record" parse there and send
+  CSL-JSON, which the server runs through `parseCslItem` as it does `create_ref`'s (The import
+  box). So no reader is a server dependency, and `importReferences` takes records, not text.
+  `import.ts` keeps the detection, the `.nbib` reader and the passes below over what citation-js
+  yields. Its BibTeX and RIS readers go.
+- **Detection stays ours.** `parseReferences` sniffs the format, `.nbib`'s `PMID- ` and CFF's
+  `cff-version:` added, and calls that format's reader by name: citation-js's synchronous
+  `plugins.input.chain` with `forceType`. A library's own detection is never used, and neither
+  is an asynchronous form (`chainAsync`, `Cite.async`). citation-js's detection reads a URL as
+  something to fetch, and only its asynchronous forms can fetch. Called by name, its BibTeX and
+  RIS readers read a URL or a DOI as no records.
+- **BibTeX and biblatex: citation-js** (`@citation-js/plugin-bibtex` 0.9, MIT), as
+  `@biblatex/text`, in place of the hand-written reader.
+  - **What it reads that ours doesn't:** every TeX accent, where ours reads seven and not `\H`,
+    `\L`, `\=`, `\i` or an unbraced `\v r`; `@string` macros; `crossref` inheritance; BibTeX's
+    name grammar (`von Last, Jr, First`), as particles and a suffix; a month and a day;
+    biblatex's `@software` and `@dataset`; translators. It keeps `url` and `doi` verbatim, where
+    ours unescapes TeX across a URL, so `~` becomes a space and `--` a dash. An entry's key
+    comes as written, its case and punctuation kept.
+  - **Rejected: extending ours.** A real `.bib` needs a TeX parser.
+  - **What a pass of ours mends:**
+    - `and others` comes as an author named "others", and is dropped.
+    - `eprint` is not mapped, with `archivePrefix`, arXiv's own form, or with `eprinttype`,
+      biblatex's. Neither is `shorthand`. The pass reads them from the entries, which the chain
+      yields with `target: "@biblatex/entries+list"`. An arXiv id becomes `archive` and
+      `archive_location`, and `shorthand` the abbreviation (What a record keeps).
+    - ADS writes a journal as an AASTeX macro (`\prl`), which comes through as written. A table
+      of those macros names the journal.
+    - A bare word no `@string` defines (`journal = PNAS`) is dropped, and the preview says the
+      field was.
+    - A month joined to a day, `month = jun # "~15"`, the form BibTeX's manual gives, comes as
+      a year alone. The entries hold it as `06~15`, which the pass reads as both.
+  - `parse.sentenceCase` stays `never`, its default, so a title's case is as written and the
+    braces that protect capitals leave nothing behind. `\emph{…}` and `\textit{…}` come as
+    `<i>…</i>` (What a record keeps, "Markup in a field").
+- **RIS: citation-js** (`@citation-js/plugin-ris` 0.9), as `@ris/file`. It maps `SN` by type:
+  an ISBN for a book, an ISSN for a serial, the report number for a report. Two `SN` lines come
+  as a list, which the pass joins. Rejected: ours, which reads `SN` as an ISBN for every type
+  but a chapter, so a journal's ISSN is shown as its ISBN, and a report number refuses the
+  record.
+- **`.nbib` (MEDLINE):** by hand, the size of a RIS reader: `PMID`, `PMC`, `TI`, `FAU`/`AU`,
+  `DP`, `JT`, `VI`, `IP`, `PG`, `AID … [doi]` and `LID … [doi]`, which is where a paper online
+  ahead of print keeps its DOI, `AB`, `IS`, `PT`. citation-js's PubMed plugin only fetches a
+  record by its id.
+- **`CITATION.cff`:** citation-js's `plugin-cff` (0.7), reached as `@else/yaml`, never the
+  fetchers packaged beside it in `plugin-software-formats`. It brings `plugin-yaml` and
+  `js-yaml`.
+  - Only the file's own work is taken, the record the plugin marks `_cff_mainReference`. The
+    plugin also yields every entry of the file's `references` list, which are the works the
+    software cites, not the software.
+  - That record comes with no type, and is a `software`.
+  - CSL-YAML stays refused: Pandoc's form of it, a `references:` list between `---` lines,
+    doesn't parse as one YAML document.
+- **Loaded with the import panel**, by a dynamic import, never in an editor or a reading view.
+  Never `plugin-csl`, which brings citeproc and its licences (Later).
+
+### What a record keeps
+
+- **Every variable of the CSL 1.0.2 schema**, each by its schema type (text, number, names,
+  date), in place of the eighteen fields `parseCslItem` names. It still builds the record field by
+  field with the same bounds, and drops what isn't in the schema, such as Crossref's
+  `reference` list and `plugin-cff`'s `_orcid`.
+- **A bound that cuts is reported.** A text field is cut at 4,000 characters and a list of names
+  at 200, and a run of white space, a paragraph break included, becomes one space. The preview
+  names each field it cut (The import box), since a collaboration's paper has more than 200
+  authors.
+- **All 45 CSL types**, in place of twelve and `document` for the rest. Two rules that list
+  types today read the record instead:
+  - `entry.ts` shows a container for any record that has one, not only its six part types, so a
+    blog post shows its blog and a case its reporter. A title is in quotation marks when the
+    record has a container and in italics otherwise, in place of `PART_TYPES`, so a new type
+    needs no list kept.
+  - An ISBN identifies a record that has no container and whose type is not a part's by name:
+    `chapter`, `paper-conference`, and the types that begin `article`, `entry`, `post` or
+    `review`. That replaces `WHOLE_BOOK_TYPES` (`identifiers.ts`), whose four types leave out
+    every other whole work. A chapter's or a conference paper's ISBN is still its book's, and
+    `crossref` inheritance hands a paper its proceedings' ISBN.
+    - Rejected: the container alone. An `@inproceedings` with no `booktitle` has none, so a
+      second paper from one proceedings would match the first by the proceedings' ISBN, be
+      refused as its duplicate, and be offered as its replacement.
+- **Names keep their particles and suffix** (`non-dropping-particle`, `dropping-particle`,
+  `suffix`), so "van Beethoven" and "King, Jr." survive. The BibTeX reader gives every particle
+  as non-dropping, BibTeX having one kind. A dropping one comes from CSL-JSON, as Zotero
+  writes it.
+  - **A non-dropping particle is part of the family name wherever a name is used**, through one
+    function beside `shortName`: a label, `(van Beethoven 1801)`; an entry, "van Beethoven,
+    L."; the bibliography's order, under V; and a made key, `vanbeethoven1801`. That is APA's
+    rule, and what the hand-written BibTeX reader stores today, with the particle inside
+    `family`.
+  - A dropping particle follows the initials, "Humboldt, A. von", and a suffix follows both,
+    "King, M. L., Jr.". Neither is in a label.
+  - **Two pieces of SQL read a name's parts and gain these three**: the `reference_listing`
+    view's `people`, which `/references` shows and sorts by, and `reference_people()`, which
+    feeds the search vector. One migration replaces both. No stored record holds a particle
+    yet, since `parseCslItem` drops them today, so no row needs rewriting and no label changes
+    until a record is replaced.
+- **Markup in a field.** A CSL-JSON text field may hold a little markup: `<i>`, `<b>`, `<sup>`,
+  `<sub>`, and a `<span>` for small capitals or `nocase`. Crossref's titles hold it, and
+  citation-js's BibTeX reader writes `\emph{…}` as `<i>…</i>`.
+  - **A title keeps those tags** (`title`, `container-title`, `collection-title`), and one
+    function splits such a field into runs, as `inlineRuns` does a chip's words.
+  - **What draws an entry takes the runs**: a doc's bibliography, a reference's page, and a
+    post's appended References, in the marks a post's schema has. Italics inside a title that
+    is itself set in italics are roman, as CSL sets them: the play's name in a book whose
+    title is `A Commentary on <i>Hamlet</i>`.
+  - **Everything else takes the text alone**: a label, a made key, the citation menu,
+    `/references`' Title column and its sort, and the search vector. So the view and the vector
+    function take the tags out too.
+  - **No reader is handed a marked-up title as a string.** `cslOf` gives each of the three
+    fields as its text and its runs, a type no string slot takes, so the compiler finds every
+    reader that hasn't chosen one. A reader that forgot would otherwise show the tags as
+    written, and no check would fail.
+  - **Every other tag is removed on the way in**, and every tag in a field that isn't a
+    title, the text inside it kept: Crossref's abstracts are JATS XML.
+    - A tag is a `<`, a `/` or not, and a letter, up to the next `>`. Any other `<` is text, so
+      "p < 0.05" keeps its sign.
+    - Character references are decoded before the tags are read: `&amp;`, `&lt;`, `&#x2013;`.
+      Crossref writes them, and its `&lt;i&gt;` is italics it meant.
+  - Rejected: taking all markup out on the way in. A species' name, or a book's title inside an
+    article's, would lose its italics in every entry and every download.
+- **Dates keep their month and day** from every format, as CSL-JSON's already do.
+- **The size limit measures the record after its fields are chosen**, not the input. Crossref's
+  CSL-JSON is mostly its list of cited works, and is refused as too large today. DOI lookup
+  (Later) needs this too.
+- **ISSN, PMID and PMCID are kept as fields.** Only DOI and ISBN find duplicates, as now.
+- **biblatex's `shorthand`** becomes the abbreviation (`short`) of a reference that has none.
+
+### Keys
+
+- **The source key** is a CSL `id` or `citation-key`, a BibTeX entry key, or a RIS `ID`. An `id`
+  that is a URL is not a key: Zotero's CSL-JSON writes the item's URI there for an item with no
+  citation key, and a key is made instead.
+- **A source key is kept as given** when it fits. A library key becomes ASCII letters of either
+  case, digits, `_`, and `:`, `.` or `-` between them, at most 80 characters, which is inside
+  Pandoc's key grammar, BibTeX's and a URL segment's, unique ignoring case. So `Frank_1970` and
+  `radnerOriginIdeas2012` stay as they are, and a manuscript, the person's own `.bib` and
+  MultiBlog's downloads agree.
+- **A source key that doesn't fit**, such as dblp's `DBLP:conf/nips/VaswaniSPHGTS17` with its
+  `/` or a key with an accented letter, gets a key made from the record, as a record with no
+  source key does. The source key is kept as an alias in `reference_key_history`, which
+  `referencesByKeys` already reads, in Unicode's composed form (NFC), so one accented letter
+  is one spelling.
+- **A source key another reference holds**, as its key or as an alias, ignoring case, gets a
+  made key too, and no alias: the key stays the other reference's, and the preview says so.
+- **A key someone asks for is taken as given or refused**: `create_ref`'s `key` and the rename
+  box. Neither is altered to fit, where `normalizeKey` makes `Frank_1970` into `frank-1970`
+  today, since the key asked for is the one a manuscript will hold.
+- **A lookup ignores case**, in a URL, in Markdown and in `cites`, and a URL in another case
+  redirects to the key's own. `/references/[key]` decodes its param, since Next hands it over
+  percent-encoded and a `:` arrives as `%3A`. A rename that changes only a key's case rewrites
+  the key and leaves no old key behind.
+- **Case is ignored through a stored column, `key_folded`**, on `reference` and on
+  `reference_key_history`: the key with its ASCII capitals lowercased, held to that by a CHECK,
+  uniquely indexed, and written beside `key` by `reference-write.ts`, the only writer. Every
+  lookup by key reads it, with the asked key folded alike, so `findUnique` and `in` work as
+  they do now.
+  - **Only A to Z are folded**, by one rule in the CHECK (`translate`) and in the code. A
+    library key holds no other letter. An alias may, and its other letters match in their own
+    case.
+  - Rejected: `lower()` in the CHECK beside `toLowerCase()` in the code. The two disagree on
+    some letters an alias may hold (`İ`, a final `Σ`), and `lower()` follows the database's
+    locale, so the CHECK would refuse an alias the code had folded.
+  - Rejected: a unique index on `lower(key)` alone. Prisma can't read an index on an expression
+    through `findUnique` or `in`.
+  - Rejected: Prisma's `mode: "insensitive"`. It is `ILIKE`, in which the `_` a key may now hold
+    matches any character, so `Frank_1970` would also find `FrankX1970`.
+- **A key made from a record** is as now: `radner2012`, then `radner2012b`.
+- **What changes:**
+  - `REFERENCE_KEY_RE` and `normalizeKey`, and everything that tests a key's shape with them:
+    `/references/[key]`, `citedPageTarget`, `search`'s `cites` pattern in the MCP schema, and
+    the bulk export's `cites` check;
+  - `parseCites` (`search/params.ts`), which lowercases what it is given, and keeps it as given
+    now;
+  - the lookups, onto `key_folded`: `referenceByKey`, `referencesByKeys`, `resolveReferenceKey`
+    and `keyTaken`. `referencesByKeys` still answers by the key as it was asked, since each
+    caller looks up its own spelling;
+  - `createReference` and `updateReference`, which take an asked key as given or refuse it,
+    and `updateReference`'s freeing of a key the reference once had, by its folded form;
+  - the rename box's "A key is letters, digits and hyphens";
+  - the search vector, which takes the key with every character but a letter or a digit as a
+    space. Postgres reads `smith.jones-2012` as a host name and a number, and a search sends
+    the words `smith`, `jones` and `2012`, so the key would be missed by `/references`' box,
+    by the citation menu, and by `create_ref` reading back the work it made. The migration that
+    takes the tags out of titles carries this;
+  - the Markdown rule that refuses a key for its shape (Markdown, "A bare `@word` is a
+    citation"), which then looks up every key Pandoc reads.
+- **Rejected: slug-shaped keys, with the source key only as an alias.** `[@Frank_1970]` would
+  resolve, but the library and its downloads would name the work `frank-1970`, so a manuscript
+  written back out of MultiBlog would no longer match the person's own `.bib`.
+
+### The import box
+
+- **A file picker** beside the paste box, taking several files at once. Both are read in the
+  browser into one list.
+- **A preview before anything is written**, as `import.ts`'s header says there already is. It
+  shows each record's title, people, year and type, and the key it will get, with why that
+  differs from its source key. It also shows what was dropped, cut or mapped (a field no CSL
+  variable holds, a field cut at its bound, a type read as another, an identifier that failed
+  its check), and whether the library already holds it, with the title it has there.
+  - **The server answers what only it knows**: which records the library holds, asked by
+    identifier, and which keys are free. A key in the preview is the one the import would give
+    now, and the report says the one it gave.
+- **Parsed in the browser, checked on the server.** Import sends the parsed records in
+  batches, one server action each, with a running count. Each record is sent as `parseCslItem`
+  built it in the browser, with its source key and its `shorthand`, so one is never larger than
+  a stored record may be. A batch is at most a hundred records and at most 500,000 bytes as
+  UTF-8, half of Next's 1 MB body limit, which counts bytes: a record may be 20,000 characters
+  and a character three bytes, so a hundred of the largest would not fit. The server runs each
+  record through `parseCslItem` and the identifier checks, as it does `create_ref`'s, so
+  nothing the browser parsed is trusted. A library of thousands of records needs no larger body
+  limit, and shows its progress.
+- **An import survives a reload.** When Import is pressed, the browser keeps the records still
+  to send, with the preview's choices, in IndexedDB under the import's id and the user's, and
+  drops each batch once the server has answered it, so nothing it keeps is in the database yet.
+  On load the panel offers an unfinished import ("2,300 of 5,000 records left") to resume or
+  discard. Resuming starts at the oldest batch with no answer, the one in flight when the page
+  went away.
+- **A record is imported once.** Each carries the import's id and its place in the import, and
+  the server writes a row for it, `reference_import_record` (the user, the import's id, the
+  place, the outcome and the key).
+  - A record sent again answers what its row says: after a reload, from a second tab, or in a
+    batch the server died part-way through. A record with no DOI or ISBN would otherwise be
+    added twice.
+  - **The row is the first write of the transaction** that creates or replaces the reference.
+    The three are unique together, so of two sends at once the second waits on the first's
+    row, fails, and reads it. Written later in the transaction, the second would fail first on
+    the reference's key or identifier, and report the record as a duplicate of its own first
+    send.
+  - **Every outcome has a row.** A record refused, or reported as a duplicate, gets its row
+    written alone, there being no reference to write it with. So a resumed import's report is
+    read from the rows, and the browser keeps no copy of it.
+  - **But for a failure another try might not meet**, such as a key taken while the record was
+    being saved. That writes no row, and the record is tried again when it is sent again.
+  - Rejected: a row per batch, claimed as `src/lib/api/idempotency.ts` claims a write. That
+    helper runs a failed or abandoned claim again, which is right for one write and wrong for a
+    hundred of which sixty are already in.
+  - Rows are kept a week, and an unfinished import is offered for that week and then dropped,
+    since past it a resent record could no longer be told from a new one. A user's older rows
+    are deleted when they next start an import, so nothing sweeps them.
+- **An identifier that fails its check drops the identifier, not the record**, and the preview
+  says so, so it can be corrected in the box first. Kept without it, the record has nothing to
+  catch a later copy of the work by. Before the check, an ISBN is found by its shape inside the
+  field, so `9780631175049 (pbk.)`, and two ISBN-10s with one space between them, read as ISBNs.
+  `create_ref` still refuses a bad identifier, since an agent can correct it.
+
+### Replacing a record
+
+An imported record can't be corrected today: `/references` edits a key, an abbreviation and a
+PDF, `create_ref` only creates, and an import matching a held DOI or ISBN, deleted or not, is
+reported as a duplicate.
+
+- **A duplicate in the preview offers "Replace its record"** with the one being imported, a
+  duplicate at a time or all of them at once. Its key, abbreviation, PDF and citations stay,
+  and the citations are relabelled.
+- **A record that matches two references replaces neither**, its DOI one's and its ISBN
+  another's. The preview names both.
+- **A deleted duplicate is restored with it**, in one write, `replaceReference` in
+  `reference-write.ts`: `updateReference` refuses a deleted reference, and a restore followed
+  by an update could stop between the two.
+- **"Replace record" on a row of `/references`**: paste one record in any format the import
+  reads, parsed in the browser as the box parses, see which fields change, and save. A field
+  the pasted record lacks is removed. This is the repair for a record with no DOI or ISBN,
+  which no import can match. The reference's CSL-JSON download is the record to start from, so
+  the row's box is built with the downloads (Order).
+- **`update_ref`**, an MCP tool beside `create_ref`: a reference's key and a CSL-JSON record,
+  through `replaceReference`, so an agent can correct a record it added. `create_ref` refuses
+  the corrected record as a duplicate of the one it corrects. A deleted reference is refused,
+  never restored: a person deleted it.
+
+### Downloads
+
+- **Four formats**, written by one function (`src/lib/references/export.ts`) from a list of
+  records, so every place below agrees:
+  - **CSL-JSON** (`.json`, `application/vnd.citationstyles.csl+json`): the stored record, with
+    `id` and `citation-key` set to the key. Nothing the library holds is left out.
+  - **BibTeX** (`.bib`, `application/x-bibtex`): citation-js's `bibtex` writer, between two
+    passes of ours, the file every TeX tool reads, biber included.
+    - `useIdAsLabel`, so an entry's key is the library's, and `checkLabel` off, since it
+      otherwise takes the `:`, `.` and `-` out of a key.
+    - TeX for every character the writer has TeX for (`asciiOnly`, its default), since every
+      BibTeX reads that: `{\" u}` for "ü". "H₂O" is written "H2O".
+    - **A character it has no TeX for stays in the file as UTF-8.** The writer writes such a
+      character as nothing: a Cyrillic author comes out as `{,}`, a Japanese title as `{}`, and
+      a Latin word loses its `ə`. So a pass before the writer puts a marker of ASCII letters in
+      place of each, and a pass after it puts the character back. Which characters those are is
+      read from the writer's own tables (`lib/input/constants.js`). `bibtexu` and biber read
+      the file whole. Old `bibtex` carries the bytes through and cuts an initial by the byte,
+      so a style that abbreviates given names breaks such a name.
+    - **Both of a name's particles are written as BibTeX's `von` part**, `de La Gaulle,
+      Charles`. The writer alone leaves a dropping particle out, so a pass before it joins the
+      two. BibTeX has one kind of particle, so the file read back gives both as non-dropping.
+    - It writes what classic BibTeX has a field for: no abstract, translator, language or page
+      count, and `@misc` for software, a legal case, a web page or a thesis with no genre,
+      without its container.
+    - **After it**, the pass adds an arXiv id as `eprint` with `archivePrefix = {arXiv}`,
+      arXiv's own form, which the writer leaves out, and mends two entries a classic style
+      would print wrongly:
+      - **A month** becomes BibTeX's macro, `month = jun`, and a day its own field,
+        `day = {15}`. The writer puts both in a braced `month`, `{jun 15}`, and a month alone as
+        `{6}`. A braced value is a string, so a style prints it as written. A style ignores
+        `day`, and citation-js reads the two fields back as the whole date. Rejected:
+        `month = jun # "~15"`, which citation-js reads back as no month.
+      - **A chapter** becomes `@incollection`. The writer makes it `@inbook` with a `booktitle`,
+        and the standard styles' `@inbook` takes `title` for the book's and reads no
+        `booktitle`. citation-js reads either as a chapter. The biblatex file keeps `@inbook`,
+        which has a `booktitle` there.
+  - **biblatex** (`.biblatex.bib`, `application/x-bibtex`): citation-js's `biblatex` writer,
+    with the same key settings, between two passes as BibTeX's is, the one for particles the
+    same. It keeps what BibTeX can't: the abstract, translators, a whole date, `@software`, a
+    web page's site and a case's reporter. For biber, and for Pandoc, which reads a `.bib` file
+    as biblatex.
+    - **Every character outside ASCII stays as UTF-8**, by the same markers, put in place of
+      all of them: what biber and Pandoc read, and what a biblatex file holds.
+    - Rejected: `asciiOnly` off. The writer then escapes nothing, so a title's `&`, `%`, `#` or
+      `_` goes into the file bare and stops LaTeX.
+    - **After it**, a pass adds an arXiv id as `eprint` with `eprinttype = {arxiv}`, unless the
+      writer has put a PubMed id in `eprint`, the one id it writes there.
+    - Rejected: biblatex alone. Classic `bibtex` reads no `date` or `journaltitle`, so its
+      entries would have no year and no journal.
+    - Rejected: BibTeX alone, which loses the fields above for everyone.
+    - The two file names differ, so both can be saved to one folder, and a file named
+      `<name>.bib` is always the one classic BibTeX reads.
+  - **RIS** (`.ris`, `application/x-research-info-systems`): citation-js's writer, between two
+    passes of ours.
+    - **Before it**, a non-dropping particle is joined to the family name, a dropping one is
+      put after the given name, "Humboldt, Alexander von", and the markup is taken out of a
+      title. Its writer drops both particles and writes the markup as tags.
+    - **After it**, two mendings, in this order:
+      - **A value is made one line again.** The writer breaks every value after each 70
+        characters, inside a word as readily as between two, and Zotero joins the pieces with a
+        space. A line that follows a line holding exactly 70 characters of a value is more of
+        that value, and no other line is: a stored value holds no line break.
+      - **A page range** it wrote whole, `SP  - 635-641`, becomes an `SP` line and an `EP`
+        line, RIS's own form and what Zotero writes, so no reader is asked to take a range in
+        `SP`.
+    - Rejected: the writer's older layout (`spec: "old"`), which has an `EP` and fills both
+      wrongly: pages 635–641 come out as `SP  - 6` and `EP  - 3`.
+    - It writes no reporter and no page for a legal case, and no arXiv id, which RIS has no tag
+      for: the record's URL carries it.
+    - Zotero reads back every field it writes, among them a book's editor from `A3`, its series
+      number from `M1` and its page count from `SP`. Those three tags look like mistakes for a
+      book and are not.
+- **The writers run on the server**, for the route and the bulk export, so citation-js's core
+  and its BibTeX and RIS plugins are server dependencies. No reader is called there.
+
+**One route**, `GET /api/references/export?format=csl-json|bibtex|biblatex|ris`, with one
+selection. It sits under `/api` because `/references/export` would hide a reference keyed
+`export`. The File column below gives each selection's name as BibTeX; the ending follows the
+format.
+
+| Selection | Works | Gate | File |
+|---|---|---|---|
+| `key=<key>` | that one | none: a record is public | `<key>.bib` |
+| `doc=<id>` | the works the doc cites | `canUserReadDoc`; 404 otherwise | `<doc slug>.bib` |
+| `post=<id>` | the works the post cites | `readablePostWhere`; 404 otherwise | `<post slug>.bib` |
+| `/references`' querystring | what its search matches, every page | `canViewReferences` | `references.bib` |
+| `ids=<id>,…` | the rows selected in `/references` | `canViewReferences` | `references.bib` |
+
+- **A doc's and a post's works come from the `citation` table**, which holds the works their
+  References list. A doc's rows are kept from its `prose_json` cache, so they lag a live edit by
+  seconds. A post's are kept from the citations in its published text. A deleted reference is
+  included, as the References list it struck through. The records are the library's current
+  ones, so a corrected record downloads corrected before a post is republished.
+- **Every selection is in the library's order**, by author and then year. A `.bib` file's order
+  means nothing to the tools that read it.
+- **A `:` in a key is `_` in the file's name**, since Windows allows no `:` in one.
+- **Every file is sent as an attachment**, `Content-Disposition: attachment` with the File
+  column's name. Zotero's Connector then imports a BibTeX, biblatex or RIS download into Zotero
+  in place of saving it, in Firefox and in Vivaldi alike. Served inline, Vivaldi's Connector did
+  not always. Neither imports CSL-JSON. (Checked by hand: Later, "Zotero's Connector".)
+
+**Where the links are.** Every one is a plain link with `rel="nofollow"`, so a crawler that
+reads a public page doesn't fetch four files for each work on it.
+
+- **`/references/[key]`:** a row, "Download: BibTeX · BibLaTeX · RIS · CSL-JSON", beside the DOI
+  and ISBN. The links are plain URLs, so the page stays static.
+- **A doc's References:** a download icon beside the heading, in `BibliographyList`, wherever the
+  list is shown: the reading view, side-by-side and the editor. It opens a menu of the four
+  formats, a `<details>`, so it works in a static first paint. The `<details>` sits in a row
+  with the `<h2>`, not inside it, where only text-level elements may go.
+- **A post's References:** the same icon beside the heading. The References are the post's text,
+  appended at publish, so the icon is added where the text is drawn and never written into it:
+  by the static render, and by a widget decoration in the read-only editor that replaces it
+  (`AnnotatableArticle`). Neither changes the text, so search, quotes, comments and the feed
+  never see it. The heading is found by its place, the post's last level-2 heading reading
+  "References" in a post that cites a work, since `docJsonForPostSide` always appends it last.
+- **The landing page's preamble** gets no icon. Its References are a doc's, drawn as a post's,
+  and the doc may be one its readers can't open.
+- **`/references`:** a Download control in the table's toolbar for the rows its search matches,
+  on every page, and a bulk action for the rows selected, offered to every member, where the
+  table's other bulk actions are an author's. The route reads the querystring with
+  `parseReferencesFilters` and the page's own `where`, moved out of `page.tsx` into a module both
+  share, so when the table's search grows, its download follows with no change of its own. Today
+  that search is the box's words, each a prefix, and the deleted toggle.
+- **The bulk export** ([MCP.md](MCP.md) §5): the tar carries `references.json` and
+  `references.biblatex.bib`, every work the exported docs cite, so
+  `pandoc --citeproc --bibliography=references.json <doc>.md` resolves the `[@key]`s its
+  Markdown holds. The manifest lists both. The second is biblatex, the fuller of the two, and
+  Pandoc reads it as well.
+
+**MCP:** `find_refs` keeps answering text, and the bulk export is an agent's way to the records.
+
+### Order
+
+1. **What a record keeps, and keys**, together and before anyone imports. A record imported
+   before the first keeps what today's `parseCslItem` loses until it is replaced, and one
+   imported before the second gets a slug-shaped key, with no alias for its source key, until
+   someone renames it, since replacing a record keeps its key.
+2. **The readers**, with the box parsing in the browser and its preview, since a reader runs
+   nowhere else.
+3. **Resuming, a record imported once, replacing a duplicate from the preview, and
+   `update_ref`.** [MCP.md](MCP.md) and [PERMISSIONS.md](PERMISSIONS.md) get the tool.
+4. **The downloads**: `export.ts` and the route, then the links, "Replace record" on a row,
+   which starts from a download, and the bulk export. [PERMISSIONS.md](PERMISSIONS.md) gets
+   the route's five gates.
+
+### Checks
+
+- **Unit tests:**
+  - a fixture per source above, with the CSL it must yield, each reader's mended cases
+    included: `and others`, an arXiv `eprint` in both its forms, `shorthand`, an ADS journal
+    macro, two `SN` lines, and a `CITATION.cff` with a `references` list;
+  - a round trip from CSL through BibTeX, through biblatex and through RIS and back, equal on
+    the fields each format holds, with a suffix, a title with italics, a title holding `&` and
+    `%`, a Cyrillic author, a Japanese title, a page range, an arXiv id, which RIS doesn't
+    hold, and a key holding `:`, `.` and `-`;
+  - a non-dropping and a dropping particle through each format: both come back from BibTeX and
+    biblatex as non-dropping, and from RIS the one in the family name and the other after the
+    given name;
+  - a RIS value of 70, 71 and 140 characters, and one whose 71st character begins what reads
+    as a tag, each written as one line;
+  - a page range in RIS as an `SP` line and an `EP` line;
+  - in BibTeX, a date with a day as `month = jun` and `day`, and a chapter as `@incollection`;
+  - a URL or a DOI handed to each reader by name, which reads nothing;
+  - a lookup by key in another case, `Frank_1970` not finding `FrankX1970`, and an alias with
+    an accented capital, stored and found in its own case;
+  - an asked key that doesn't fit, refused and not altered, and a rename in case alone, which
+    leaves no old key;
+  - a key holding `.`, `:` and `_`, found through the search vector by each of its words;
+  - a title with markup as a label, as an entry's runs and as a made key; a title holding
+    `&lt;i&gt;`, "p < 0.05" and a tag that isn't kept; and italics inside an italic title;
+  - two papers of one proceedings, each with its ISBN and no `booktitle`, neither a duplicate
+    of the other;
+  - batches cut by bytes, with records in a script of three bytes to the character.
+- **e2e:**
+  - an import with a duplicate replaced, and a deleted duplicate replaced and restored;
+  - an import reloaded part-way and resumed, and a batch sent again after only some of its
+    records were written, each with nothing added twice;
+  - one record sent twice at once, created once and answered alike both times;
+  - `update_ref` correcting a record, and refusing a deleted reference;
+  - each download link's file, sent as an attachment under its name.
+- **By hand**, once a download exists:
+  - a chapter and an article dated to the day, as BibTeX, into Zotero, whose reading of `day`
+    and of `@incollection` is unchecked. Its Connector check (Later) read the writer's output
+    without the pass;
+  - the same two through `bibtex` with a standard style, for what the style prints;
+  - a title and an abstract over 70 characters, as RIS, into Zotero. The Connector check's
+    longest value was 69;
+  - a Cyrillic author and a Japanese title, as BibTeX through `bibtexu` and as biblatex
+    through biber and through Pandoc.
+
 ## Later
 
 - **CSL styles through citeproc-js** (CPAL-1.0 OR AGPL-1.0, about 1 MB). A doc's Citations
@@ -502,6 +992,34 @@ post's labels, and a republish refreshes both.
     through it and its quote re-derived. That was 58 of 140 annotation quotes in that copy.
   - An editor annotation whose mark covered only the label loses it.
   - Opted into per doc, and done last, once the rest is built.
+- **Zotero's Connector, through unAPI**, so its button saves a work from the page it is on. A
+  `<link rel="unapi-server">` on `/references/[key]`, a doc's reading view and a post's page, an
+  `<abbr class="unapi-id">` for each work, and `/api/unapi` answering a work in RIS from the
+  downloads' function (`src/lib/references/export.ts`). The Connector then saves the work, or
+  offers a doc's or a post's works as a list.
+  - **What it adds is the button.** Zotero already gets the works without it: the Connector
+    imports every download but CSL-JSON (Downloads, "sent as an attachment"). unAPI lets a
+    reader save from the Connector's own button without finding a download link, and pick some
+    of a doc's works in place of all of them.
+  - **Where each `abbr` goes:** beside the download links on `/references/[key]`; inside each
+    entry of a doc's References; and for a post, whose entries are its text, a widget
+    decoration per entry, placed as the download icon is.
+  - **What `/api/unapi` answers**, from a check by hand against a stub serving three works: in
+    Vivaldi (Chrome 152) saving one work and a list of three, in Firefox 156 opening the
+    pages, 2026-11-09.
+    - The Connector asks for the format list with no `id`, then for `?id=<key>&format=<name>`.
+      It never asks for one work's list, the `300` the spec gives, so the bare request is the
+      one that must answer.
+    - Offered `ris` and `bibtex`, it takes `ris`, and Zotero read every field of a book, a
+      chapter and an article from it. So RIS is the one format. A second, if one is wanted, is
+      biblatex under the name `bibtex`, which it also took whole. Classic BibTeX lost the
+      abstract, the translator, the language and the page count.
+    - A key with `:`, `.` or `-` arrives intact.
+    - The saved item's Library Catalog is the site's host, and a work with a URL gets an
+      Accessed date, as an item saved from any site does.
+  - Rejected: COinS, which carries only OpenURL's handful of fields; and Highwire `citation_*`
+    meta tags on a reference's page, which would describe that page as the work itself, to
+    Google Scholar as well as to Zotero.
 - **DOI lookup** on import. A DOI pasted alone fetches its record as CSL-JSON from doi.org, by
   content negotiation, and the record goes through `parseCslItem` like any other. The fetch
   goes to doi.org alone, never to a URL the user gives.
