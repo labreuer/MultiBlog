@@ -284,6 +284,7 @@ export const setTestReferenceFile = (...args: Parameters<DbHandlers["setTestRefe
   call("setTestReferenceFile", ...args);
 export const fillTestFileMetadata = (...args: Parameters<DbHandlers["fillTestFileMetadata"]>): Promise<string[] | null> =>
   call("fillTestFileMetadata", ...args);
+export const addTestReferenceAlias = (...args: Parameters<DbHandlers["addTestReferenceAlias"]>): Promise<void> => call("addTestReferenceAlias", ...args);
 export const getCitationSources = (...args: Parameters<DbHandlers["getCitationSources"]>): Promise<string[]> =>
   call("getCitationSources", ...args);
 export const getReferenceId = (...args: Parameters<DbHandlers["getReferenceId"]>) => call("getReferenceId", ...args);

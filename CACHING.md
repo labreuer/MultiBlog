@@ -499,5 +499,5 @@ instance, it answers `private, no-cache, no-store, max-age=0, must-revalidate` w
 
 What its design keeps is the option: it reads no session and no `searchParams`, with what
 depends on the viewer in a client island and a cited page in the fragment. docs/CITATIONS.md's
-"Planned: one link to every work a citation names" says what a list of works would need before
-the route is given a cache.
+"Pages" says what a list of works, `/references/<key>,<key>,…`, would need before the route is
+given a cache.

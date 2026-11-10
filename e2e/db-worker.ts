@@ -1276,6 +1276,18 @@ export async function ageTestImportReceipts(prefix: string, days: number): Promi
 }
 
 /**
+ * Makes `alias` answer for the test reference with key `key`, as a key it
+ * once had or a source key kept at import does: a row of its key history,
+ * which may hold what a library key may not, such as a comma. Removed with
+ * the reference, by `deleteTestReferences`.
+ */
+export async function addTestReferenceAlias(key: string, alias: string): Promise<void> {
+  if (!/^e2e[a-z0-9-]{4,}$/.test(key) || !alias.startsWith("e2e")) throw new Error(`addTestReferenceAlias: "${key}" or "${alias}" isn't an e2e key.`);
+  const reference = await prisma.reference.findUniqueOrThrow({ where: { key }, select: { id: true } });
+  await prisma.referenceKeyHistory.create({ data: { referenceId: reference.id, key: alias, keyFolded: alias.replace(/[A-Z]/g, (letter) => letter.toLowerCase()) } });
+}
+
+/**
  * Reads a test PDF's page labels and outline and stores them, as a first
  * read of the file does (pdf-metadata.ts). A test PDF is made with neither
  * stored, where a real one has them once read: `[]` for a PDF with no labels.
@@ -2905,6 +2917,7 @@ const handlers = {
   deleteTestImportReceipts,
   ageTestImportReceipts,
   setTestReferenceFile,
+  addTestReferenceAlias,
   fillTestFileMetadata,
   getTestReference,
   getDocChipIids,

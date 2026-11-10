@@ -93,6 +93,26 @@ test("a citation links to its first work's page route, by the first page cited, 
   assert.equal(href(), "/references/barfield1957");
 });
 
+// docs/CITATIONS.md, "The link" — several works link to the page listing them, each work's page by its place.
+test("a citation of several works links to the list, each work once, at the first page of the first item naming it that has one", () => {
+  const href = (...items: { refId: string; locator?: string }[]) => citationKind.render([{ items }], { form: "short" }, CONTEXT)[0].href;
+  // One work, cited once or twice, links to that work alone.
+  assert.equal(href({ refId: "bu" }, { refId: "bu" }), "/references/barfield1957");
+  assert.equal(href({ refId: "bu", locator: "49" }, { refId: "bu", locator: "51" }), "/references/barfield1957/p/49");
+  assert.equal(href({ refId: "bu" }, { refId: "bu", locator: "51" }), "/references/barfield1957/p/51");
+  // Several: no pages, no fragment.
+  assert.equal(href({ refId: "bu" }, { refId: "radner" }, { refId: "anon" }), "/references/barfield1957,radner2012,beowulf");
+  // A page on the first, and on the last alone; the first page of a range.
+  assert.equal(href({ refId: "bu", locator: "12–14" }, { refId: "radner" }, { refId: "anon" }), "/references/barfield1957,radner2012,beowulf#p=12");
+  assert.equal(href({ refId: "bu" }, { refId: "radner" }, { refId: "anon", locator: "3" }), "/references/barfield1957,radner2012,beowulf#p=,,3");
+  assert.equal(href({ refId: "bu", locator: "xii" }, { refId: "radner" }, { refId: "anon", locator: "3" }), "/references/barfield1957,radner2012,beowulf#p=xii,,3");
+  // A work named twice keeps its first place, and takes the page of its second item when its first has none.
+  assert.equal(href({ refId: "bu" }, { refId: "radner" }, { refId: "bu", locator: "51" }), "/references/barfield1957,radner2012#p=51");
+  // A key holding `:` is encoded, and the comma between keys is not.
+  const colon: CitationContext = { ...CONTEXT, c: work("c", { key: "a:b" }) };
+  assert.equal(citationKind.render([{ items: [{ refId: "c" }, { refId: "bu" }] }], { form: "short" }, colon)[0].href, "/references/a%3Ab,barfield1957");
+});
+
 test("the route finds the page cited in the PDF by the file's page labels", () => {
   const labelled = { slug: "saving", pageLabels: ["i", "ii", "1", "2", "49"] };
   assert.equal(pdfPageHref(labelled, "49"), "/pdf/saving#page=5");

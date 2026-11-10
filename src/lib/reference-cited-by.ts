@@ -8,7 +8,7 @@ import { firstPage, isPageLocator, normalizeLocator, pdfPageHref } from "@/lib/e
 import { readableFilesWhere } from "@/lib/file-authz";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { referenceByKey } from "@/lib/reference-data";
-import { isKeyShaped, referencePath } from "@/lib/references/keys";
+import { parseReferenceSegment, referencePath } from "@/lib/references/keys";
 
 // docs/CITATIONS.md, "Pages" — what a reference's public page can't show
 // everyone: the docs and notes citing the work, and the work's PDF, for one
@@ -44,15 +44,18 @@ function pageLabelsOf(stored: unknown): string[] | null {
  * this viewer (docs/CITATIONS.md, "The link"): the PDF at that page when the
  * reference has one they may read and its page labels name the page, and
  * the reference's page otherwise, the page in its fragment for its island.
- * null when no reference has or had the key.
+ * null when no reference has or had the key, and for a list, which is no
+ * one work. `segment` is read as the page reads it, so `~<alias>` is the
+ * alias (docs/CITATIONS.md, "The page").
  *
  * Nothing about the PDF reaches a viewer who may not read it: their answer
  * is the one a reference with no PDF gives.
  */
-export async function citedPageTarget(actor: Actor | null, key: string, page: string): Promise<string | null> {
+export async function citedPageTarget(actor: Actor | null, segment: string, page: string): Promise<string | null> {
   // Shape first, as the reference's page checks it: a key that can't be one costs no query.
-  if (!isKeyShaped(key)) return null;
-  const reference = await referenceByKey(key);
+  const parsed = parseReferenceSegment(segment);
+  if (!parsed || parsed.kind === "list") return null;
+  const reference = await referenceByKey(parsed.key);
   if (!reference) return null;
   const home = referencePath(reference.key);
   if (!isPageLocator(page)) return home;

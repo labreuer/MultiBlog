@@ -539,8 +539,8 @@ noisy per scroll, not noisy per second.
 
 ## 2026-11-10 — A reference list's page asks once per work: consider batching
 
-Not built yet, and not measured: a consideration for the list page that docs/CITATIONS.md's
-"Planned: one link to every work a citation names" describes. That page, `/references/<key>,<key>,…`,
+Not measured: a consideration for the list page that docs/CITATIONS.md's "Pages" describes.
+That page, `/references/<key>,<key>,…`,
 renders a `CitedBy` island under each work, and each island asks the server for its own
 answer through the `referenceCitedBy` server action once the reader is signed in.
 

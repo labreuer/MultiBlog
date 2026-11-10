@@ -4971,6 +4971,7 @@ without loss, and downloading works as BibTeX, biblatex, RIS or CSL-JSON.
 
 ## 31. One link to every work a citation names
 
-Planned 2026-11-10: a citation naming several works links to `/references/<key>,<key>,…`, one
-page listing them all, with the keys nothing answers to marked at the top rather than a 404.
-**Plan: [docs/CITATIONS.md](docs/CITATIONS.md), "Planned: one link to every work a citation names".**
+Planned and built 2026-11-10: a citation naming several works links to
+`/references/<key>,<key>,…`, one page listing them all, with the keys nothing answers to marked
+at the top rather than a 404. **As built: [docs/CITATIONS.md](docs/CITATIONS.md), Labels "The
+link", Keys (the list's address and the `~` form) and Pages.**
