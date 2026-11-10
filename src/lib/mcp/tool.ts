@@ -35,6 +35,7 @@ export const TOOL_NAMES = [
   "tag",
   "untag",
   "create_ref",
+  "update_ref",
   "manage",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];

@@ -2,14 +2,15 @@ import { z } from "zod";
 import { onceWithin } from "@/lib/api/idempotency";
 import { findReferences, referenceByKey } from "@/lib/reference-data";
 import { readableFiles } from "@/lib/reference-files";
-import { createReference, referencePath } from "@/lib/reference-write";
+import { notFound } from "@/lib/api/errors";
+import { createReference, referencePath, replaceReference, resolveReferenceKey } from "@/lib/reference-write";
 import { entryText } from "@/lib/references/entry";
 import { readableFile } from "../resolve";
 import { defineTool, listedName } from "../tool";
 
 // docs/CITATIONS.md, "MCP" — the reference library from a machine client:
-// look a work up, and add one, with its PDF. Editing a reference stays in the
-// UI. A work's PDF is under the files' read rule, so `find_refs` names one
+// look a work up, add one with its PDF, and correct the record of one.
+// Renaming a key and setting an abbreviation or a PDF stay in the UI. A work's PDF is under the files' read rule, so `find_refs` names one
 // only to an agent whose account may read it.
 
 const MAX_RESULTS = 20;
@@ -94,6 +95,33 @@ export const createReferenceTool = defineTool({
       const created = await createReference(ctx.actor, { csl: rest.csl, key: rest.key, short: rest.short, fileId });
       const reference = await referenceByKey(created.key);
       return { key: created.key, url: referencePath(created.key), entry: reference ? entryText(reference.item) : "" };
+    }) as Promise<never>;
+  },
+});
+
+export const updateReferenceTool = defineTool({
+  name: "update_ref",
+  scope: "WRITE",
+  description: `Correct a work in the reference library by replacing its CSL-JSON record whole: a field the new record lacks is removed. Its key, abbreviation, PDF and citations stay, and the citations are relabelled. Read the record first with ${listedName("find_refs")}. Refused as duplicate when another work holds the new record's DOI or ISBN, as invalid for one that fails its check, and as conflict for a deleted work, which a person deleted.`,
+  input: z.strictObject({
+    key: z.string().min(1).max(200).describe("The work's key, as find_refs gives it; a key it used to have finds it too."),
+    csl: z
+      .looseObject({ type: z.string().optional(), title: z.string() })
+      .describe("The whole CSL-JSON record, as create_ref takes one."),
+    idempotencyKey,
+  }),
+  output: z.object({ key: z.string(), url: z.string(), entry: z.string() }),
+  readOnly: false,
+  destructive: false,
+  searchHint: "correct edit fix reference citation bibliography record library",
+  async run(args, ctx) {
+    const { idempotencyKey: key, ...rest } = args;
+    return onceWithin(ctx.token.id, "update_ref", rest, key, async () => {
+      const found = await resolveReferenceKey(rest.key);
+      if (!found) throw notFound("That reference");
+      const replaced = await replaceReference(ctx.actor, found.id, rest.csl, { restore: false });
+      const reference = await referenceByKey(replaced.key);
+      return { key: replaced.key, url: referencePath(replaced.key), entry: reference ? entryText(reference.item) : "" };
     }) as Promise<never>;
   },
 });

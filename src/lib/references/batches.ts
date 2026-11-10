@@ -12,6 +12,13 @@ export const BATCH_RECORDS = 100;
  */
 export const BATCH_BYTES = 500_000;
 
+/**
+ * How long the server keeps an import's rows, and the browser offers an
+ * unfinished import: past it, a resent record could no longer be told from a
+ * new one.
+ */
+export const IMPORT_KEPT_MS = 7 * 24 * 60 * 60 * 1000;
+
 const encoder = new TextEncoder();
 
 /** `records` in order, cut so no batch passes either bound. A record too large to go in any batch is a batch of its own, for the server to refuse. */

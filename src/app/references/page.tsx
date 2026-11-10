@@ -155,7 +155,7 @@ export default async function ReferencesPage({
   return (
     <main style={{ maxWidth: 1100, margin: "4rem auto", fontFamily: "sans-serif" }}>
       <h1>References</h1>
-      {canWrite && <ReferenceImport />}
+      {canWrite && <ReferenceImport userId={session.user.id} />}
       <ReferencesTable rows={rows} totalCount={totalCount} filters={filters} prefs={prefs} canWrite={canWrite} />
     </main>
   );

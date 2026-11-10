@@ -126,3 +126,12 @@
   color: var(--text-secondary);
   margin-left: 1.25rem;
 }
+
+.importResume {
+  margin-bottom: 0.5rem;
+}
+
+.previewReplace {
+  display: block;
+  color: var(--foreground);
+}

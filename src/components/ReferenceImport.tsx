@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { importReferenceBatchAction, previewReferenceImportAction } from "@/app/actions/references";
+import { importReferenceBatchAction, importReportAction, previewReferenceImportAction } from "@/app/actions/references";
+import { discardPendingImport, dropAnsweredBatch, keepPendingImport, unfinishedImport, type PendingImport, type PendingRecord } from "@/lib/reference-import-store";
 import type { ImportOutcome, KeyNote, PreviewAnswer } from "@/lib/reference-write";
-import { cutBatches } from "@/lib/references/batches";
+import { cutBatches, IMPORT_KEPT_MS } from "@/lib/references/batches";
 import { citedNames, keyBaseOf, titleOf, yearOf } from "@/lib/references/csl";
 import { identifiersOf } from "@/lib/references/identifiers";
 import { parseReferences, type ImportedReference, type ReadNote } from "@/lib/references/import";
@@ -19,8 +20,10 @@ import styles from "./ReferencesTable.module.css";
 // read in the browser into one list. A preview shows each record before
 // anything is written: what it is, the key it will get and why that isn't
 // its source's, what reading it dropped, cut or mapped, and whether the
-// library already holds it. Import then sends the records in batches, one
-// server action each, with a running count.
+// library already holds it, with the choice of replacing that record. Import
+// then sends the records in batches, one server action each, with a running
+// count. The batches still to send are kept in IndexedDB, so a reload offers
+// the import to resume; the report is read from the rows the server keeps.
 
 /** How many records one preview question asks about. */
 const PREVIEW_CHUNK = 500;
@@ -56,8 +59,10 @@ function keyNoteText(note: KeyNote): string {
   }
 }
 
-export default function ReferenceImport() {
+export default function ReferenceImport({ userId }: { userId: string }) {
   const router = useRouter();
+  const [pending, setPending] = useState<PendingImport | null>(null);
+  const [replacing, setReplacing] = useState<Set<number>>(new Set());
   const [text, setText] = useState("");
   const [files, setFiles] = useState<{ name: string; text: string }[]>([]);
   const [phase, setPhase] = useState<Phase>("edit");
@@ -66,6 +71,14 @@ export default function ReferenceImport() {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [outcomes, setOutcomes] = useState<ImportOutcome[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void unfinishedImport(userId, IMPORT_KEPT_MS).then((found) => live && setPending(found));
+    return () => {
+      live = false;
+    };
+  }, [userId]);
 
   async function pickFiles(list: FileList | null) {
     setFiles(await Promise.all([...(list ?? [])].map(async (file) => ({ name: file.name, text: await file.text() }))));
@@ -99,28 +112,50 @@ export default function ReferenceImport() {
   }
 
   async function importAll() {
-    setFailure(null);
-    setPhase("importing");
-    const records = rows.map((row, place) => ({ place, sourceKey: row.reference.sourceKey, short: row.reference.short, csl: row.reference.data }));
+    const importId = crypto.randomUUID();
+    const records: PendingRecord[] = rows.map((row, place) => ({
+      place,
+      sourceKey: row.reference.sourceKey,
+      short: row.reference.short,
+      csl: row.reference.data,
+      replace: replacing.has(place) && row.answer.held.length === 1 ? row.answer.held[0].id : null,
+    }));
     const batches = cutBatches(records);
-    const got: ImportOutcome[] = [];
-    setProgress({ done: 0, total: records.length });
+    await keepPendingImport({ userId, importId, startedAt: Date.now(), total: records.length, batches });
+    await send(importId, batches, records.length);
+  }
+
+  /** Sends `batches` in order, dropping each from what is kept once answered, then reads the report from the server's rows. */
+  async function send(importId: string, batches: PendingRecord[][], total: number) {
+    setFailure(null);
+    setPending(null);
+    setPhase("importing");
+    let done = total - batches.reduce((sum, batch) => sum + batch.length, 0);
+    setProgress({ done, total });
     try {
       for (const batch of batches) {
-        got.push(...(await importReferenceBatchAction(batch)));
-        setProgress({ done: got.length, total: records.length });
+        await importReferenceBatchAction(importId, batch);
+        await dropAnsweredBatch(userId, importId);
+        done += batch.length;
+        setProgress({ done, total });
       }
+      setOutcomes(await importReportAction(importId));
       setPhase("done");
     } catch (e) {
-      setFailure(e instanceof Error ? e.message : "The import failed part-way.");
-      setPhase("preview");
+      setFailure(`${e instanceof Error ? e.message : "The import failed part-way."} What was sent is in; reload to resume the rest.`);
+      setPhase(rows.length > 0 ? "preview" : "edit");
     } finally {
-      setOutcomes(got);
       router.refresh();
     }
   }
 
+  async function discard() {
+    if (pending) await discardPendingImport(userId, pending.importId);
+    setPending(null);
+  }
+
   function startOver() {
+    setReplacing(new Set());
     setRows([]);
     setErrors([]);
     setOutcomes([]);
@@ -133,96 +168,142 @@ export default function ReferenceImport() {
 
   const busy = phase === "reading" || phase === "importing";
   const toAdd = rows.filter((row) => row.answer.held.length === 0).length;
+  const replaceable = rows.flatMap((row, place) => (row.answer.held.length === 1 ? [place] : []));
+  const toReplace = replaceable.filter((place) => replacing.has(place)).length;
+  const left = pending ? pending.batches.reduce((sum, batch) => sum + batch.length, 0) : 0;
+  const toggle = (place: number) =>
+    setReplacing((before) => {
+      const next = new Set(before);
+      if (!next.delete(place)) next.add(place);
+      return next;
+    });
 
   return (
-    <details className={styles.importPanel}>
-      <summary>Add references</summary>
-      {(phase === "edit" || phase === "reading") && (
-        <>
-          <label>
-            Paste BibTeX, biblatex, RIS, CSL-JSON, PubMed’s .nbib or a CITATION.cff, one record or many.
-            <textarea
-              className={styles.importBox}
-              aria-label="References to import"
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              spellCheck={false}
-              disabled={busy}
-            />
-          </label>
-          <label className={styles.importFiles}>
-            Or pick files: <input type="file" multiple aria-label="Files to import" onChange={(event) => void pickFiles(event.target.files)} disabled={busy} />
-          </label>
-          <button type="button" className={account.button} onClick={() => void read()} disabled={busy || (text.trim() === "" && files.length === 0)}>
-            {phase === "reading" ? "Reading…" : "Preview"}
-          </button>
-        </>
-      )}
-      {failure && <p className={styles.refused}>{failure}</p>}
-      {errors.length > 0 && (
-        <ul className={styles.importReport} aria-label="What couldn’t be read">
-          {errors.map((message, index) => (
-            <li key={index} className={styles.refused}>
-              {message}
-            </li>
-          ))}
-        </ul>
-      )}
-      {(phase === "preview" || phase === "importing") && (
-        <>
-          <p>
-            {rows.length === 0
-              ? "Nothing to import."
-              : `${rows.length} record${rows.length === 1 ? "" : "s"}: ${toAdd} to add, ${rows.length - toAdd} already in the library.`}
-          </p>
-          <ol className={styles.importPreview} aria-label="Import preview">
-            {rows.map((row, index) => (
-              <PreviewRow key={index} row={row} />
-            ))}
-          </ol>
-          <button type="button" className={account.button} onClick={() => void importAll()} disabled={busy || toAdd === 0}>
-            {phase === "importing" ? `Importing… ${progress.done} of ${progress.total}` : `Import ${toAdd}`}
+    <>
+      {pending && phase === "edit" && (
+        <p className={styles.importResume} role="status">
+          An import you started is unfinished: {left.toLocaleString("en")} of {pending.total.toLocaleString("en")} records left.{" "}
+          <button type="button" className={account.button} onClick={() => void send(pending.importId, pending.batches, pending.total)}>
+            Resume
           </button>{" "}
-          <button type="button" className={account.button} onClick={startOver} disabled={busy}>
-            Back
+          <button type="button" className={account.button} onClick={() => void discard()}>
+            Discard
           </button>
-        </>
+        </p>
       )}
-      {phase === "done" && (
-        <>
-          <ul className={styles.importReport} aria-label="Import results">
-            {outcomes.map((outcome) => (
-              <li key={outcome.place} className={outcome.status === "refused" ? styles.refused : undefined}>
-                {outcome.status === "created" && (
-                  <>
-                    Added <Link href={referencePath(outcome.key)}>{outcome.key}</Link>: {outcome.title}
-                    {outcome.keyNote && ` (${keyNoteText(outcome.keyNote)})`}
-                  </>
-                )}
-                {outcome.status === "duplicate" && (
-                  <>
-                    Already in the library as <Link href={referencePath(outcome.key)}>{outcome.key}</Link>
-                    {outcome.deleted ? " (deleted; restore it from the table)" : ""}: {outcome.title}
-                  </>
-                )}
-                {outcome.status === "refused" && (
-                  <>
-                    Not added{outcome.title ? `, “${outcome.title}”` : ""}: {outcome.error}
-                  </>
-                )}
+      <details className={styles.importPanel}>
+        <summary>Add references</summary>
+        {(phase === "edit" || phase === "reading") && (
+          <>
+            <label>
+              Paste BibTeX, biblatex, RIS, CSL-JSON, PubMed’s .nbib or a CITATION.cff, one record or many.
+              <textarea
+                className={styles.importBox}
+                aria-label="References to import"
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                spellCheck={false}
+                disabled={busy}
+              />
+            </label>
+            <label className={styles.importFiles}>
+              Or pick files: <input type="file" multiple aria-label="Files to import" onChange={(event) => void pickFiles(event.target.files)} disabled={busy} />
+            </label>
+            <button type="button" className={account.button} onClick={() => void read()} disabled={busy || (text.trim() === "" && files.length === 0)}>
+              {phase === "reading" ? "Reading…" : "Preview"}
+            </button>
+          </>
+        )}
+        {failure && <p className={styles.refused}>{failure}</p>}
+        {errors.length > 0 && (
+          <ul className={styles.importReport} aria-label="What couldn’t be read">
+            {errors.map((message, index) => (
+              <li key={index} className={styles.refused}>
+                {message}
               </li>
             ))}
           </ul>
-          <button type="button" className={account.button} onClick={startOver}>
-            Import more
-          </button>
-        </>
-      )}
-    </details>
+        )}
+        {(phase === "preview" || phase === "importing") && (
+          <>
+            <p>
+              {rows.length === 0
+                ? "Nothing to import."
+                : `${rows.length} record${rows.length === 1 ? "" : "s"}: ${toAdd} to add, ${rows.length - toAdd} already in the library.`}
+            </p>
+            {replaceable.length > 0 && (
+              <label className={styles.importFiles}>
+                <input
+                  type="checkbox"
+                  checked={toReplace === replaceable.length}
+                  onChange={(event) => setReplacing(event.target.checked ? new Set(replaceable) : new Set())}
+                  disabled={busy}
+                />{" "}
+                Replace the record of every work already in the library with the one being imported
+              </label>
+            )}
+            <ol className={styles.importPreview} aria-label="Import preview">
+              {rows.map((row, index) => (
+                <PreviewRow key={index} row={row} replacing={replacing.has(index)} onReplace={() => toggle(index)} disabled={busy} />
+              ))}
+            </ol>
+            <button type="button" className={account.button} onClick={() => void importAll()} disabled={busy || toAdd + toReplace === 0}>
+              {phase === "importing"
+                ? `Importing… ${progress.done} of ${progress.total}`
+                : [toAdd > 0 ? `Import ${toAdd}` : "", toReplace > 0 ? `${toAdd > 0 ? "and r" : "R"}eplace ${toReplace}` : ""].filter(Boolean).join(" ") || "Import"}
+            </button>{" "}
+            <button type="button" className={account.button} onClick={startOver} disabled={busy}>
+              Back
+            </button>
+          </>
+        )}
+        {phase === "importing" && rows.length === 0 && (
+          <p role="status">
+            Importing… {progress.done.toLocaleString("en")} of {progress.total.toLocaleString("en")}
+          </p>
+        )}
+        {phase === "done" && (
+          <>
+            <ul className={styles.importReport} aria-label="Import results">
+              {outcomes.map((outcome) => (
+                <li key={outcome.place} className={outcome.status === "refused" ? styles.refused : undefined}>
+                  {outcome.status === "created" && (
+                    <>
+                      Added <Link href={referencePath(outcome.key)}>{outcome.key}</Link>: {outcome.title}
+                      {outcome.keyNote && ` (${keyNoteText(outcome.keyNote)})`}
+                    </>
+                  )}
+                  {outcome.status === "replaced" && (
+                    <>
+                      Replaced the record of <Link href={referencePath(outcome.key)}>{outcome.key}</Link>
+                      {outcome.restored ? ", and restored it" : ""}: {outcome.title}
+                    </>
+                  )}
+                  {outcome.status === "duplicate" && (
+                    <>
+                      Already in the library as <Link href={referencePath(outcome.key)}>{outcome.key}</Link>
+                      {outcome.deleted ? " (deleted; restore it from the table)" : ""}: {outcome.title}
+                    </>
+                  )}
+                  {outcome.status === "refused" && (
+                    <>
+                      Not added{outcome.title ? `, “${outcome.title}”` : ""}: {outcome.error}
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <button type="button" className={account.button} onClick={startOver}>
+              Import more
+            </button>
+          </>
+        )}
+      </details>
+    </>
   );
 }
 
-function PreviewRow({ row }: { row: Row }) {
+function PreviewRow({ row, replacing, onReplace, disabled }: { row: Row; replacing: boolean; onReplace: () => void; disabled: boolean }) {
   const { item, notes } = row.reference;
   const { answer } = row;
   const people = citedNames(item);
@@ -249,6 +330,12 @@ function PreviewRow({ row }: { row: Row }) {
               {held.deleted ? " (deleted)" : ""}, “{held.title}”
             </span>
           ))}
+          {answer.held.length === 1 && (
+            <label className={styles.previewReplace}>
+              <input type="checkbox" checked={replacing} onChange={onReplace} disabled={disabled} /> Replace its record with this one
+              {answer.held[0].deleted ? ", and restore it" : ""}; its key, abbreviation, PDF and citations stay
+            </label>
+          )}
         </div>
       )}
       {notes.length > 0 && (

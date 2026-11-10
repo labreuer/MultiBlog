@@ -143,46 +143,47 @@ model User {
   avatar                 UserAvatar?
   accounts               Account[]
   sessions               Session[]
-  postAuthors            PostAuthor[]           @relation("PostAuthorUser")
-  postAuthorGrants       PostAuthor[]           @relation("PostAuthorCreatedBy")
+  postAuthors            PostAuthor[]            @relation("PostAuthorUser")
+  postAuthorGrants       PostAuthor[]            @relation("PostAuthorCreatedBy")
   commenter              Commenter?
   passwordResetTokens    PasswordResetToken[]
-  commentStatusChanges   Comment[]              @relation("CommentStatusChangedBy")
-  commentDeletions       Comment[]              @relation("CommentDeletedBy")
-  commentRevisions       CommentRevision[]      @relation("CommentRevisionAuthor")
-  publicationEvents      PostPublicationEvent[] @relation("PublicationEventActor")
-  deletedBy              User?                  @relation("UserDeletedBy", fields: [deletedByUserId], references: [id])
-  deletedUsers           User[]                 @relation("UserDeletedBy")
-  postDeletions          Post[]                 @relation("PostDeletedBy")
+  commentStatusChanges   Comment[]               @relation("CommentStatusChangedBy")
+  commentDeletions       Comment[]               @relation("CommentDeletedBy")
+  commentRevisions       CommentRevision[]       @relation("CommentRevisionAuthor")
+  publicationEvents      PostPublicationEvent[]  @relation("PublicationEventActor")
+  deletedBy              User?                   @relation("UserDeletedBy", fields: [deletedByUserId], references: [id])
+  deletedUsers           User[]                  @relation("UserDeletedBy")
+  postDeletions          Post[]                  @relation("PostDeletedBy")
   slugHistory            UserSlugHistory[]
-  ydocSnapshots          YdocSnapshot[]         @relation("YdocSnapshotUser")
+  ydocSnapshots          YdocSnapshot[]          @relation("YdocSnapshotUser")
   docAuthors             DocAuthor[]
-  docsCreated            Doc[]                  @relation("DocCreatedBy")
-  docUpdates             Doc[]                  @relation("DocUpdatedBy")
-  docDeletions           Doc[]                  @relation("DocDeletedBy")
+  docsCreated            Doc[]                   @relation("DocCreatedBy")
+  docUpdates             Doc[]                   @relation("DocUpdatedBy")
+  docDeletions           Doc[]                   @relation("DocDeletedBy")
   fileOwners             FileOwner[]
-  filesCreated           StoredFile[]           @relation("FileCreatedBy")
-  fileUpdates            StoredFile[]           @relation("FileUpdatedBy")
-  fileDeletions          StoredFile[]           @relation("FileDeletedBy")
-  annotations            Annotation[]           @relation("AnnotationAuthor")
-  annotationDeletions    Annotation[]           @relation("AnnotationDeletedBy")
+  filesCreated           StoredFile[]            @relation("FileCreatedBy")
+  fileUpdates            StoredFile[]            @relation("FileUpdatedBy")
+  fileDeletions          StoredFile[]            @relation("FileDeletedBy")
+  annotations            Annotation[]            @relation("AnnotationAuthor")
+  annotationDeletions    Annotation[]            @relation("AnnotationDeletedBy")
   docLinks               DocLink[]
   docLinkGroups          DocLinkGroup[]
-  invites                UserInvite[]           @relation("UserInviteRecipient")
-  invitesSent            UserInvite[]           @relation("UserInviteSender")
-  tagsCreated            Tag[]                  @relation("TagCreatedBy")
-  referencesCreated      Reference[]            @relation("ReferenceCreatedBy")
-  tagDeletions           Tag[]                  @relation("TagDeletedBy")
-  tagAssignments         TagAssignment[]        @relation("TagAssignedBy")
-  tagAssignmentDeletions TagAssignment[]        @relation("TagAssignmentDeletedBy")
-  anchoredLinksCreated   AnchoredLink[]         @relation("AnchoredLinkCreatedBy")
-  anchoredLinkDeletions  AnchoredLink[]         @relation("AnchoredLinkDeletedBy")
-  apiTokens              ApiToken[]             @relation("ApiTokenUser")
-  apiTokensIssued        ApiToken[]             @relation("ApiTokenCreatedBy")
-  worksFor               User?                  @relation("UserWorksFor", fields: [worksForUserId], references: [id], onDelete: SetNull)
-  bots                   User[]                 @relation("UserWorksFor")
-  oauthCodes             OauthCode[]            @relation("OauthCodeUser")
-  oauthCodesIssued       OauthCode[]            @relation("OauthCodeIssuer")
+  invites                UserInvite[]            @relation("UserInviteRecipient")
+  invitesSent            UserInvite[]            @relation("UserInviteSender")
+  tagsCreated            Tag[]                   @relation("TagCreatedBy")
+  referencesCreated      Reference[]             @relation("ReferenceCreatedBy")
+  referenceImports       ReferenceImportRecord[]
+  tagDeletions           Tag[]                   @relation("TagDeletedBy")
+  tagAssignments         TagAssignment[]         @relation("TagAssignedBy")
+  tagAssignmentDeletions TagAssignment[]         @relation("TagAssignmentDeletedBy")
+  anchoredLinksCreated   AnchoredLink[]          @relation("AnchoredLinkCreatedBy")
+  anchoredLinkDeletions  AnchoredLink[]          @relation("AnchoredLinkDeletedBy")
+  apiTokens              ApiToken[]              @relation("ApiTokenUser")
+  apiTokensIssued        ApiToken[]              @relation("ApiTokenCreatedBy")
+  worksFor               User?                   @relation("UserWorksFor", fields: [worksForUserId], references: [id], onDelete: SetNull)
+  bots                   User[]                  @relation("UserWorksFor")
+  oauthCodes             OauthCode[]             @relation("OauthCodeUser")
+  oauthCodesIssued       OauthCode[]             @relation("OauthCodeIssuer")
   mentions               Mention[]
 
   @@index([worksForUserId])
@@ -2237,6 +2238,33 @@ model ReferenceIdentifier {
   @@unique([scheme, value])
   @@index([referenceId])
   @@map("reference_identifier")
+}
+
+// One record of an import, written once (docs/CITATIONS.md, "A record is
+// imported once"): a record sent again, after a reload, from a second tab or
+// in a batch the server died part-way through, answers what its row says
+// rather than being added twice. The row is the first write of the
+// transaction that creates or replaces the reference, so of two sends at once
+// the second waits on the first's row, fails, and reads it. Kept a week, and
+// a user's older rows are deleted when they next import.
+model ReferenceImportRecord {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  importId  String   @map("import_id")
+  place     Int
+  /// created, replaced, duplicate or refused.
+  outcome   String
+  /// The reference's key, for an outcome that names one.
+  key       String?
+  /// The rest of the outcome as the report shows it: the title, why a key differs, why a record was refused.
+  detail    Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, importId, place])
+  @@index([userId, createdAt])
+  @@map("reference_import_record")
 }
 
 // A key a reference used to have, still answering for it: posts link to

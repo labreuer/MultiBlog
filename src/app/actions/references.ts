@@ -14,7 +14,9 @@ import { referenceCitedBy as citedByFor, type ReferenceCitedBy } from "@/lib/ref
 import { findReadablePdfs, referencesOfFile, type FileReference, type PdfCandidate } from "@/lib/reference-files";
 import {
   importBatchOf,
+  importIdOf,
   importReferenceBatch,
+  importReport,
   previewReferenceImport,
   referencePath,
   type PreviewAnswer,
@@ -46,13 +48,25 @@ function said(err: unknown): never {
 /**
  * One batch of an import the browser parsed (docs/CITATIONS.md, "The import
  * box"): at most a hundred records and 500,000 bytes, each built again here.
- * Each record is created, reported as already held, or refused with why.
+ * Each record is created, replaces the record of a duplicate the preview
+ * offered, is reported as already held, or is refused with why; one sent
+ * before answers what it answered then.
  */
-export async function importReferenceBatchAction(records: unknown): Promise<ImportOutcome[]> {
+export async function importReferenceBatchAction(importId: unknown, records: unknown): Promise<ImportOutcome[]> {
   const actor = await requireActor();
-  const outcomes = await importReferenceBatch(actor, importBatchOf(records)).catch(said);
+  const outcomes = await Promise.resolve()
+    .then(() => importReferenceBatch(actor, importIdOf(importId), importBatchOf(records)))
+    .catch(said);
   revalidatePath("/references");
   return outcomes;
+}
+
+/** An import's report, from the rows its records left: every outcome so far, in the import's order. */
+export async function importReportAction(importId: unknown): Promise<ImportOutcome[]> {
+  const actor = await requireActor();
+  return Promise.resolve()
+    .then(() => importReport(actor, importIdOf(importId)))
+    .catch(said);
 }
 
 /** How many records one preview question may ask about. */

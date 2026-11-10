@@ -662,9 +662,10 @@ rules take more away:
 
 - **The reads** are `search`, `read`, `find_users`, `find_tags`, `find_refs` and
   `download`; **the writes** `upload`, `create_doc`, `edit_doc`, `add_note`, `edit_note`,
-  `create_link`, `extend_link`, `tag`, `untag` and `create_ref`. A token acts with its
-  account's role, so `create_ref` adds a work only for an AUTHOR or above, as in the UI
-  (`canWriteReferences`, `src/lib/reference-write.ts`).
+  `create_link`, `extend_link`, `tag`, `untag`, `create_ref` and `update_ref`. A token acts
+  with its account's role, so `create_ref` adds a work and `update_ref` corrects one only for
+  an AUTHOR or above, as in the UI (`canWriteReferences`, `src/lib/reference-write.ts`).
+  `update_ref` refuses a deleted work rather than restoring it: a person deleted it.
 - **The tools that force a prompt** (`edit_link`, `rename_file`, `manage`) are listed only to a
   token issued for Claude Code, the one client documented to honor the flag, and `manage` to
   no bot's token, whatever its scopes. No connection is ever `claude-code`: a claim to be

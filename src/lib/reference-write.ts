@@ -8,7 +8,7 @@ import { PDF_CONTENT_TYPE } from "@/lib/reference-files";
 import { canWriteReferences } from "@/lib/role-checks";
 import { keyBaseOf, parseCslItem, readCsl, titleOf, type CslData } from "@/lib/references/csl";
 import { identifiersOf, withoutFailedIdentifiers, type Identifier, type IdentifierScheme } from "@/lib/references/identifiers";
-import { BATCH_BYTES, BATCH_RECORDS } from "@/lib/references/batches";
+import { BATCH_BYTES, BATCH_RECORDS, IMPORT_KEPT_MS } from "@/lib/references/batches";
 import { foldKey, isKeyShaped, isLibraryKey, lookupKey, referencePath } from "@/lib/references/keys";
 
 // docs/CITATIONS.md, "Who writes them" — every write to the reference
@@ -153,50 +153,129 @@ export async function createReference(actor: Actor, input: ReferenceInput): Prom
   requireWriter(actor);
   const { item, identifiers } = checked(input.csl);
   const asked = askedKey(input.key);
-  const source = !asked && input.sourceKey?.trim() ? input.sourceKey.trim().normalize("NFC") : null;
   if (input.fileId) await requireFile(actor, input.fileId);
-
   try {
-    return await base.$transaction(async (tx) => {
-      await refuseDuplicate(tx, identifiers);
-      if (asked && (await keyTaken(tx, asked))) {
-        throw new ApiError("conflict", `The key ${asked} is taken, or was once another reference's.`, { key: asked });
-      }
-      const made = () => freeKey(tx, keyBaseOf(readCsl(item)));
-      let key: string;
-      let alias: string | null = null;
-      let keyNote: KeyNote | undefined;
-      if (asked) key = asked;
-      else if (source && (await keyTaken(tx, source))) {
-        key = await made();
-        keyNote = { reason: "taken", sourceKey: source };
-      } else if (source && !isLibraryKey(source)) {
-        key = await made();
-        if (isKeyShaped(source)) alias = source;
-        keyNote = { reason: alias ? "alias" : "unfit", sourceKey: source };
-      } else key = source ?? (await made());
-      const created = await tx.reference.create({
-        data: {
-          key,
-          keyFolded: foldKey(key),
-          csl: item as Prisma.InputJsonValue,
-          short: shortOf(input.short),
-          fileId: input.fileId ?? null,
-          createdById: actor.userId,
-          updatedById: actor.userId,
-          identifiers: { create: identifiers.map((id) => ({ scheme: id.scheme, value: id.value })) },
-          ...(alias ? { keyHistory: { create: { key: alias, keyFolded: foldKey(alias) } } } : {}),
-        },
-        select: { id: true, key: true },
-      });
-      return keyNote ? { ...created, keyNote } : created;
-    });
+    return await base.$transaction((tx) => insertReference(tx, actor, item, identifiers, { ...input, key: asked }));
   } catch (err) {
     if (!isIdentifierRace(err)) throw err;
     // Lost a race with another writer of the same work, or of the same key: say which.
     await base.$transaction((tx) => refuseDuplicate(tx, identifiers));
     throw new ApiError("conflict", "That key was taken as this was saved; try again.");
   }
+}
+
+/** The insert itself, inside the caller's transaction: an import's runs after its record's row. */
+async function insertReference(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  item: CslData,
+  identifiers: Identifier[],
+  input: Omit<ReferenceInput, "csl">,
+): Promise<{ id: string; key: string; keyNote?: KeyNote }> {
+  const asked = input.key ?? null;
+  const source = !asked && input.sourceKey?.trim() ? input.sourceKey.trim().normalize("NFC") : null;
+  await refuseDuplicate(tx, identifiers);
+  if (asked && (await keyTaken(tx, asked))) {
+    throw new ApiError("conflict", `The key ${asked} is taken, or was once another reference's.`, { key: asked });
+  }
+  const made = () => freeKey(tx, keyBaseOf(readCsl(item)));
+  let key: string;
+  let alias: string | null = null;
+  let keyNote: KeyNote | undefined;
+  if (asked) key = asked;
+  else if (source && (await keyTaken(tx, source))) {
+    key = await made();
+    keyNote = { reason: "taken", sourceKey: source };
+  } else if (source && !isLibraryKey(source)) {
+    key = await made();
+    if (isKeyShaped(source)) alias = source;
+    keyNote = { reason: alias ? "alias" : "unfit", sourceKey: source };
+  } else key = source ?? (await made());
+  const created = await tx.reference.create({
+    data: {
+      key,
+      keyFolded: foldKey(key),
+      csl: item as Prisma.InputJsonValue,
+      short: shortOf(input.short),
+      fileId: input.fileId ?? null,
+      createdById: actor.userId,
+      updatedById: actor.userId,
+      identifiers: { create: identifiers.map((id) => ({ scheme: id.scheme, value: id.value })) },
+      ...(alias ? { keyHistory: { create: { key: alias, keyFolded: foldKey(alias) } } } : {}),
+    },
+    select: { id: true, key: true },
+  });
+  return keyNote ? { ...created, keyNote } : created;
+}
+
+/**
+ * Replaces a reference's record with another (docs/CITATIONS.md, "Replacing
+ * a record"): its key, abbreviation, PDF and citations stay, and the
+ * citations are relabelled. A field the new record lacks is removed. The
+ * abbreviation is set from `short` only when the reference has none.
+ *
+ * A deleted reference is restored with it when `restore` says so, in this
+ * one write, since a restore followed by an update could stop between the
+ * two; otherwise it is refused, as `update_ref` refuses one: a person
+ * deleted it.
+ */
+export async function replaceReference(
+  actor: Actor,
+  id: string,
+  csl: unknown,
+  options: { restore: boolean; short?: string | null },
+): Promise<{ id: string; key: string; restored: boolean }> {
+  requireWriter(actor);
+  const { item, identifiers } = checked(csl);
+  try {
+    return await replaceRecord(actor, id, item, identifiers, options);
+  } catch (err) {
+    if (!isIdentifierRace(err)) throw err;
+    await base.$transaction((tx) => refuseDuplicate(tx, identifiers, id));
+    throw new ApiError("conflict", "Another write reached that work as this was saved; try again.");
+  }
+}
+
+/**
+ * The replacement, in one transaction, and the relabelling once it commits.
+ * `around` runs inside the same transaction, first and last: an import's
+ * claim on its record's row, and the row's outcome.
+ */
+async function replaceRecord(
+  actor: Actor,
+  id: string,
+  item: CslData,
+  identifiers: Identifier[],
+  options: { restore: boolean; short?: string | null },
+  around?: { first(tx: Prisma.TransactionClient): Promise<void>; last(tx: Prisma.TransactionClient, replaced: { key: string; restored: boolean }): Promise<void> },
+): Promise<{ id: string; key: string; restored: boolean }> {
+  const replaced = await base.$transaction(async (tx) => {
+    await around?.first(tx);
+    const current = await tx.reference.findUnique({ where: { id }, select: { id: true, key: true, short: true, deletedAt: true } });
+    if (!current) throw notFound("That reference");
+    if (current.deletedAt && !options.restore) throw new ApiError("conflict", "That reference is deleted; a person deleted it, and only a person restores it.", { key: current.key });
+    await refuseDuplicate(tx, identifiers, id);
+    await tx.referenceIdentifier.deleteMany({ where: { referenceId: id } });
+    if (identifiers.length > 0) {
+      await tx.referenceIdentifier.createMany({ data: identifiers.map((identifier) => ({ referenceId: id, scheme: identifier.scheme, value: identifier.value })) });
+    }
+    const restored = current.deletedAt !== null;
+    await tx.reference.update({
+      where: { id },
+      data: {
+        csl: item as Prisma.InputJsonValue,
+        ...(current.short === null && shortOf(options.short) ? { short: shortOf(options.short) } : {}),
+        ...(restored ? { deletedAt: null, deletedByUserId: null } : {}),
+        updatedById: actor.userId,
+      },
+    });
+    const done = { id, key: current.key, restored };
+    await around?.last(tx, done);
+    return done;
+  });
+  // Once committed, the docs and notes citing the work are relabelled (docs/CITATIONS.md, "Refresh").
+  scheduleCitationRefresh([id]);
+  return replaced;
 }
 
 /**
@@ -300,12 +379,23 @@ export type ImportRecordInput = {
   short: string | null;
   /** The CSL-JSON record. */
   csl: unknown;
+  /** The reference whose record this replaces: a duplicate the preview offered to replace. */
+  replace: string | null;
 };
 
 export type ImportOutcome =
   | { place: number; status: "created"; key: string; title: string; keyNote?: KeyNote }
+  | { place: number; status: "replaced"; key: string; title: string; restored: boolean }
   | { place: number; status: "duplicate"; key: string; title: string; deleted: boolean }
   | { place: number; status: "refused"; title: string; error: string };
+
+/** An import's id, as the browser makes one. */
+const IMPORT_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
+
+export function importIdOf(raw: unknown): string {
+  if (typeof raw !== "string" || !IMPORT_ID_RE.test(raw)) throw invalid("That isn't an import's id.");
+  return raw;
+}
 
 /** A batch's records, or the refusal of a batch that isn't one: what a server action is sent is whatever its caller likes. */
 export function importBatchOf(raw: unknown): ImportRecordInput[] {
@@ -315,48 +405,168 @@ export function importBatchOf(raw: unknown): ImportRecordInput[] {
   return raw.map((record): ImportRecordInput => {
     const entry = record && typeof record === "object" ? (record as Record<string, unknown>) : {};
     const text = (value: unknown, max: number) => (typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null);
-    return {
-      place: Number.isSafeInteger(entry.place) ? (entry.place as number) : -1,
-      sourceKey: text(entry.sourceKey, 400),
-      short: text(entry.short, 400),
-      csl: entry.csl,
-    };
+    if (!Number.isSafeInteger(entry.place) || (entry.place as number) < 0) throw invalid("Each record of an import has its place in it.");
+    return { place: entry.place as number, sourceKey: text(entry.sourceKey, 400), short: text(entry.short, 400), csl: entry.csl, replace: text(entry.replace, 64) };
   });
 }
 
+type ImportRow = { place: number; outcome: string; key: string | null; detail: unknown };
+
+/** A row as the outcome it records. */
+function outcomeOf(row: ImportRow): ImportOutcome {
+  const detail = (row.detail && typeof row.detail === "object" ? row.detail : {}) as Record<string, unknown>;
+  const title = typeof detail.title === "string" ? detail.title : "";
+  switch (row.outcome) {
+    case "created":
+      return { place: row.place, status: "created", key: row.key ?? "", title, ...(detail.keyNote ? { keyNote: detail.keyNote as KeyNote } : {}) };
+    case "replaced":
+      return { place: row.place, status: "replaced", key: row.key ?? "", title, restored: detail.restored === true };
+    case "duplicate":
+      return { place: row.place, status: "duplicate", key: row.key ?? "", title, deleted: detail.deleted === true };
+    default:
+      return { place: row.place, status: "refused", title, error: typeof detail.error === "string" ? detail.error : "Not imported." };
+  }
+}
+
+/** An outcome as its row's columns. */
+function rowOf(outcome: ImportOutcome): { outcome: string; key: string | null; detail: Prisma.InputJsonValue } {
+  const { place: _place, status, ...rest } = outcome;
+  void _place;
+  const { key, ...detail } = rest as { key?: string } & Record<string, unknown>;
+  return { outcome: status, key: key ?? null, detail: detail as Prisma.InputJsonValue };
+}
+
+const isUniqueViolation = (err: unknown) => (err as { code?: unknown })?.code === "P2002";
+
 /**
  * Imports one batch of records the browser parsed (docs/CITATIONS.md, "The
- * import box"). Each stands alone: it is built again from its CSL-JSON, an
- * identifier that fails its check dropped, as the preview said; one already
- * in the library is reported with the key it has there; one that can't be
- * kept is reported with why; and the rest are created, each with its
- * source's key where that fits and is free.
+ * import box", "A record is imported once"). Each stands alone: it is built
+ * again from its CSL-JSON, an identifier that fails its check dropped, as
+ * the preview said; one already in the library is reported with the key it
+ * has there, or replaces that reference's record where the preview offered
+ * it; one that can't be kept is reported with why; and the rest are created,
+ * each with its source's key where that fits and is free.
+ *
+ * A record sent before answers what its row says, so nothing is added twice.
  */
-export async function importReferenceBatch(actor: Actor, records: readonly ImportRecordInput[]): Promise<ImportOutcome[]> {
+export async function importReferenceBatch(actor: Actor, importId: string, records: readonly ImportRecordInput[]): Promise<ImportOutcome[]> {
   requireWriter(actor);
+  // A user's rows past their week, deleted as they next import, so nothing sweeps them.
+  await prisma.referenceImportRecord.deleteMany({ where: { userId: actor.userId, createdAt: { lt: new Date(Date.now() - IMPORT_KEPT_MS) } } });
   const outcomes: ImportOutcome[] = [];
-  for (const record of records) {
-    const parsed = parseCslItem(record.csl);
-    if (!parsed.ok) {
-      outcomes.push({ place: record.place, status: "refused", title: "", error: parsed.error });
-      continue;
-    }
-    const { data } = withoutFailedIdentifiers(parsed.item);
-    const title = titleOf(readCsl(data));
-    try {
-      const created = await createReference(actor, { csl: data, sourceKey: record.sourceKey, short: record.short });
-      outcomes.push({ place: record.place, status: "created", key: created.key, title, ...(created.keyNote ? { keyNote: created.keyNote } : {}) });
-    } catch (err) {
-      if (err instanceof ApiError && err.code === "duplicate") {
-        outcomes.push({ place: record.place, status: "duplicate", key: String(err.details.key), title, deleted: err.details.deleted === true });
-      } else if (err instanceof ApiError) {
-        outcomes.push({ place: record.place, status: "refused", title, error: err.message });
-      } else {
-        throw err;
-      }
-    }
-  }
+  for (const record of records) outcomes.push(await importOne(actor, importId, record));
   return outcomes;
+}
+
+/** The row for this record, if it has one. */
+async function rowFor(actor: Actor, importId: string, place: number): Promise<ImportOutcome | null> {
+  const row = await prisma.referenceImportRecord.findUnique({
+    where: { userId_importId_place: { userId: actor.userId, importId, place } },
+    select: { place: true, outcome: true, key: true, detail: true },
+  });
+  return row ? outcomeOf(row) : null;
+}
+
+/** An outcome with no reference to write it with, its row written alone; of two sends at once, the second reads the first's. */
+async function recordAlone(actor: Actor, importId: string, outcome: ImportOutcome): Promise<ImportOutcome> {
+  try {
+    await prisma.referenceImportRecord.create({ data: { userId: actor.userId, importId, place: outcome.place, ...rowOf(outcome) } });
+    return outcome;
+  } catch (err) {
+    if (!isUniqueViolation(err)) throw err;
+    return (await rowFor(actor, importId, outcome.place)) ?? outcome;
+  }
+}
+
+async function importOne(actor: Actor, importId: string, record: ImportRecordInput): Promise<ImportOutcome> {
+  const answered = await rowFor(actor, importId, record.place);
+  if (answered) return answered;
+
+  const parsed = parseCslItem(record.csl);
+  if (!parsed.ok) return recordAlone(actor, importId, { place: record.place, status: "refused", title: "", error: parsed.error });
+  const { data } = withoutFailedIdentifiers(parsed.item);
+  const { identifiers } = identifiersOf(data);
+  const title = titleOf(readCsl(data));
+  const place = record.place;
+
+  // The row first: of two sends of this record at once, the second waits here on the
+  // first's, fails, and reads it, rather than failing later on the reference's key or
+  // identifier and reporting the record as a duplicate of its own first send.
+  const where = { userId_importId_place: { userId: actor.userId, importId, place } };
+  const claim = async (tx: Prisma.TransactionClient) => {
+    await tx.referenceImportRecord.create({ data: { userId: actor.userId, importId, place, outcome: "pending", detail: {} } });
+  };
+  const settle = (tx: Prisma.TransactionClient, done: ImportOutcome) => tx.referenceImportRecord.update({ where, data: rowOf(done) });
+  try {
+    if (record.replace) {
+      const target = record.replace;
+      let outcome: ImportOutcome | null = null;
+      await replaceRecord(actor, target, data, identifiers, { restore: true, short: record.short }, {
+        first: async (tx) => {
+          await claim(tx);
+          await refuseReplacingMore(tx, identifiers, target);
+        },
+        last: async (tx, replaced) => {
+          outcome = { place, status: "replaced", key: replaced.key, title, restored: replaced.restored };
+          await settle(tx, outcome);
+        },
+      });
+      return outcome!;
+    }
+    return await base.$transaction(async (tx): Promise<ImportOutcome> => {
+      await claim(tx);
+      const created = await insertReference(tx, actor, data, identifiers, { sourceKey: record.sourceKey, short: record.short });
+      const done: ImportOutcome = { place, status: "created", key: created.key, title, ...(created.keyNote ? { keyNote: created.keyNote } : {}) };
+      await settle(tx, done);
+      return done;
+    });
+  } catch (err) {
+    if (err instanceof ApiError && err.code === "duplicate") {
+      return recordAlone(actor, importId, { place, status: "duplicate", key: String(err.details.key), title, deleted: err.details.deleted === true });
+    }
+    if (err instanceof ApiError && (err.code === "invalid" || err.code === "not_found")) {
+      return recordAlone(actor, importId, { place, status: "refused", title, error: err.message });
+    }
+    if (err instanceof ApiError) {
+      // A failure another try might not meet, such as a key taken while this was saved: no
+      // row, so the record is tried again when it is sent again.
+      return { place, status: "refused", title, error: err.message };
+    }
+    if (isUniqueViolation(err)) {
+      // This record's row, written by another send of it; or a key or an identifier taken as
+      // this was saved, which another try may not meet.
+      const row = await rowFor(actor, importId, place);
+      if (row) return row;
+      return { place, status: "refused", title, error: "Another write reached that key or work as this was saved; import it again." };
+    }
+    throw err;
+  }
+}
+
+/**
+ * Refuses to replace `target` with a record that also matches another
+ * reference, its DOI one's and its ISBN another's: it replaces neither, and
+ * the preview named both. And refuses a target the record doesn't match,
+ * which no preview offered.
+ */
+async function refuseReplacingMore(tx: Prisma.TransactionClient, identifiers: Identifier[], target: string): Promise<void> {
+  const held = identifiers.length
+    ? await tx.referenceIdentifier.findMany({ where: { OR: identifiers.map((id) => ({ scheme: id.scheme, value: id.value })) }, select: { referenceId: true, reference: { select: { key: true } } } })
+    : [];
+  const holders = new Map(held.map((row) => [row.referenceId, row.reference.key]));
+  if (!holders.has(target)) throw invalid("That record isn't one the library holds, so it replaces nothing.");
+  if (holders.size > 1) throw invalid(`That record matches ${[...holders.values()].join(" and ")}, by its DOI and its ISBN, so it replaces neither.`);
+}
+
+/** An import's report, read from its rows (docs/CITATIONS.md, "Every outcome has a row"): the browser keeps no copy of it. */
+export async function importReport(actor: Actor, importId: string): Promise<ImportOutcome[]> {
+  requireWriter(actor);
+  const rows = await prisma.referenceImportRecord.findMany({
+    where: { userId: actor.userId, importId },
+    orderBy: { place: "asc" },
+    select: { place: true, outcome: true, key: true, detail: true },
+  });
+  return rows.filter((row) => row.outcome !== "pending").map(outcomeOf);
 }
 
 /** What the preview asks of one record: the key its source gave it, the key one would be made from, and what identifies it. */
