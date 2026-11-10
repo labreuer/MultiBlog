@@ -1,7 +1,8 @@
 # PDF fragment links — a link to a passage, with no row
 
 **Status: built** (2026-10-06), except "Copy passage link" (§8) and the MCP server's use of
-the check, which comes with the MCP server. Fragment links share the PDF locator rule and the
+the check, which comes with the MCP server. §13 is a plan, not an account: naming a page by its
+printed label (`p=`), and marking the words a quotation leaves out (`...`). Fragment links share the PDF locator rule and the
 server-side quads of [MCP.md](MCP.md), the MCP server's plan.
 
 A **fragment link** is a URL that names a passage of a PDF by its words:
@@ -433,6 +434,204 @@ the MCP server.
   inside the passage.
 - **The CLI also reads an elided quote** ("…" or "...") as `start,end` (§8).
 - **The two banners share one overlay**, stacked (§6).
+
+## 13. Planned: printed pages (`p=`) and elided passages (`...`)
+
+**Not built.** This section is a plan and the rest of this file is an account. When it lands,
+§2, §4, §5, §6, §8 and §9 take it in and this section goes. It has two halves: a page named by
+its printed label, and, under "Elided passages", a `text` value that marks the words a
+quotation leaves out. The second changes the `text` grammar for both page forms.
+
+A reader of a book names the page printed on it, and `page=` names the sheet. So an author
+quoting from a corrected copy converts one to the other by hand (§8, "the sheet number"). And
+a new copy of the file that adds or removes a sheet would move every `page=` link after it. `p=`
+names the printed page, and the file's page labels find the sheet:
+
+```
+/pdf/<slug>#p=<label>&text=<passage>[&p=<label>&text=<passage>…]
+```
+
+- **`page=` keeps its meaning**, the sheet, as RFC 8118 and `pdf-open-params.ts` read it.
+  Every link written so far uses it, and one link may use both forms.
+- **`p` is a label as `pagesLabelled` reads one** (`src/lib/pdf-page-labels.ts`): trimmed, case
+  ignored, against the file's usable labels (`usablePageLabels`). `/references/<key>#p=49`
+  already uses `p` for a printed page (CITATIONS.md, Pages).
+- **Pairing**: each `text` belongs to the nearest `page` or `p` before it. A `p` with no `text`
+  after it is a page link, opened as a bare `#page=` is.
+- **Encoding**: a label is percent-encoded where it holds anything but letters, digits, `.` and
+  `-`. A label in a PDF is free text, but nearly every one is digits or a Roman numeral and
+  needs no encoding.
+
+### Which sheet
+
+1. **A file with usable labels**: the sheets labelled `p`, in order. There can be several,
+   since front matter and body can each have a "1" (`pageLabelFor`).
+2. **A file without them**: `p=N`, with N in digits, is sheet N, which is how a citation's page
+   is already read on such a file (`pdfPageHref`). Any other label names no sheet.
+   `usablePageLabels` also rejects a file labelled 1…N, where the two forms agree anyway.
+3. **The passage is its first occurrence on the first of those sheets that holds it**, which is
+   §4's "first occurrence wins" extended across sheets. A page link opens at the first of them.
+4. **A label no sheet carries** is reported as a page out of range is (§8).
+
+### A miss looks beyond its page
+
+The viewer matches a passage only on the page its link names (§6). Under this plan, a miss on
+the named sheets, in either form, asks the server where the passage is instead:
+
+- **The answer is a sheet** when the passage occurs exactly once in the file, by the rule the
+  check already uses for "the page the passage is on", and nothing otherwise. The viewer draws
+  the passage there, and its banner row names both pages: the one the link gave, and the one
+  the passage was found on.
+- **The request is gated by `canUserReadFile`**, as the bytes are, and an unreadable file
+  answers as not found (§8, "It reads as the operator"). It searches the stored page text, so
+  the viewer extracts no pages beyond the ones it reads today.
+
+This is what carries a `p=` link through labels that were corrected.
+
+### Writing them
+
+- **Writers emit `p=` when the file has usable labels, and `page=` otherwise.** A `p=` written
+  against a file without labels is a sheet number by rule 2 above, and would turn into a
+  printed page the day the file gains labels. The check warns on one, giving its `page=` form.
+- **`page=` also where the label repeats** and an earlier sheet with that label holds the
+  passage, since rule 3 would draw it there.
+- **The writer's form is unchanged** (§8). Uniqueness is still judged on the sheet that holds
+  the passage.
+- **The CLI** takes a label as well as a sheet (`--label <label>` in place of `<page>`) and
+  prints whichever form the file takes. Its hint search (neighbours, then the whole file)
+  works in sheets as it does now.
+- **A corrected copy that cites printed pages needs no conversion**, where the PDF's labels
+  agree with them.
+- **MCP** checks a body's `p=` links through the shared check, as it checks `page=` ones, and
+  its tool descriptions tell the model to write the printed page.
+- **`pdfPageHref`**, a citation's link to a page, finds its sheet with `indexOf` over the stored
+  labels, a second rule beside `pagesLabelled`. It moves onto `pagesLabelled` and
+  `usablePageLabels`, so that a citation and a `p=` link of the same page land on the same
+  sheet.
+- **Search's page links** (`src/lib/search/pdfs.ts`) **and the cited-page route's redirect**
+  (`pdfPageHref`) **emit `p=` too**, by the same two rules. They are the page links nobody
+  chooses the form of, and are copied into bodies from the address bar.
+
+### The parse, the viewer and the check
+
+- **`parseFragmentPassages`** gives each passage a sheet or a label (`FragmentPassage`), and
+  `pageFromHash` returns either.
+- **`PdfViewer`** opens at a `p=` page once pdfjs has read the labels, which it already does on
+  load (`usablePageLabels` in `PdfViewer.tsx`).
+- **The banner names a page as the link did**: "Not found on p. 49" for a label, "page 53" for
+  a sheet.
+- **The check** reads `file.page_labels`. A file whose labels haven't been read yet (NULL, since
+  they are filled on first read, MCP.md §8) has them read from its bytes and not stored, since
+  the check writes nothing. Its new findings:
+  - an ERROR for a label no sheet carries;
+  - a warning for a `p=` on a file without usable labels, with its `page=` form;
+  - ok, as now, for a passage found on a later sheet of a repeated label.
+
+### What it leaves alone
+
+- **Annotation permalinks, `?sel=` and the sign-in hand-on** (§7). A `p=` rides through sign-in
+  and the slug-history redirect exactly as `page=` does.
+- **Existing `page=` links.** Nothing converts them. Most of them are hand-written citations,
+  which CITATIONS.md's "Converting the hand-written citations" turns into citation chips.
+- **A tab from before the deploy** ignores `p=`, so it opens such a link at the first page and
+  draws nothing.
+
+### Elided passages: `...`
+
+A quotation that leaves words out marks the gap with an ellipsis. A `text` value today names a
+passage whole or by its ends, and `start,end` is a length device over words quoted in full:
+the outline covers everything between them. `...` marks words the quoter left out, so the two
+can be told apart.
+
+```
+#p=8&text=a+direction+in...a+beatific+consummation
+#p=12&text=the+human+soul...is+detected,primarily+without
+```
+
+- **One `text` value is still one passage**, its segments joined by `...`. Two `text`s on one
+  page keep their meaning: two passages, each matched at its first occurrence. No link in the
+  measured copy puts two on one page.
+- **The separator is exactly three dots.** `…` (U+2026) reads as the same separator, and writers
+  write `...`. A single `.` stays punctuation, which readers ignore. 140 existing `text` values
+  hold one, and none holds `...` or `…`, so no existing link changes meaning.
+- **Precedence.** The value splits on `...` first. A `prefix-,` belongs to the first segment and
+  a `,-suffix` to the last. Each segment may still be shortened to its ends with `,`, by the
+  writer's form's rule (§8): a long segment misses on one OCR error, and `start,end` steps
+  around it (§4). A short one goes whole.
+- **Matching.** Each segment is matched by skeleton (§4), in order on the page, each starting
+  after the previous one ends. The passage's span runs from the start of the first segment to
+  the end of the last. A gap may match no words at all, which is what lets a `[sic]` stand
+  between two segments (below).
+- **An ellipsis at either end is dropped.** It says only that the quotation starts or stops
+  mid-sentence, and would leave an empty segment.
+- **Across a page break**, a segment that straddles the break splits at a word boundary, and an
+  elision that straddles it ends page n's passage and starts page n+1's. Each `text` is then
+  paired with its page, as §5 pairs them.
+- **Hand-written `...` is allowed in any fragment link**, a citation's `/pdf/` referent included
+  (CITATIONS.md, "Planned: a passage in a citation"): one grammar, one parser, one check.
+  Elision enters through a citation's `quote:*`, the one-quote CLI, or a writer typing `...`.
+
+**From a quotation to segments.** Where the words come from a written quotation rather than a
+URL, one shared function turns them into segments against the stored text of the pages:
+`passagePieces(quotation, pageTexts)`, a working name. The cited-page route, the integrity
+check and MCP's write check all call it, so the three agree. It settles what only the page text
+can:
+
+- **Brackets:**
+  - `[…]` or `[...]` is an elision, as `...` is.
+  - **A bracket standing alone**, such as `[sic]`, `[emphasis added]`, or `[the soul]` in place of
+    "it", is a gap. `[sic]` then covers no words. A substitution's own words in the PDF fall
+    inside the gap, since they weren't quoted verbatim.
+  - **A bracket attached to a word**, such as `[T]he` or `form[s]`, is tried with its letters kept
+    and then dropped, and whichever matches the page is used. A skeleton is contiguous letters,
+    so neither fixed rule works: "[T]he" matches only with them kept, and "form[s]" against a
+    source's "form" only with them dropped.
+  - **A bracket that is the source's own text** reads as an insertion and becomes a gap. That
+    shows its words as elided, which is harmless.
+- **Page breaks**, from where the stored text breaks.
+- **Long segments**, shortened to their ends.
+
+The viewer only ever receives plain segments.
+
+**Everything else that reads a `text` value:**
+
+- **`parseFragmentPassages`** gives each passage its segments.
+- **The one-quote CLI** reads a quote elided with "…" or "..." as elision, where today it reads
+  it as `start,end` (§8).
+- **The check** reports a segment that matches nowhere after the one before it as a miss, with
+  where it stops matching, as it reports a whole passage.
+- **A tab from before the deploy** ignores every `.`, so it reads an elided link as one unbroken
+  passage, misses, and says "Not found".
+
+**Held: how the viewer shows elided words.** The viewer receives the segments and the span. How
+the outline and the banner show the gaps apart from the quoted words is not settled.
+
+**Measured** over a stale copy of docs written by Claude. An author's own docs will likely hold
+more `[sic]`, `[T]he` and `[…]`.
+
+| | |
+|---|---|
+| Quotations directly before a link | 1,483 |
+| … holding an ellipsis | 58 (3.9%): one holds two, and one ends with one |
+| … with a gap inside | 57. In 32 of them, today's `start,end` link covers the elided words |
+| … holding a bracket | 2, both letters added to a word (`form[s]`, `fabricate[s]`) |
+| Block quotes holding a link's words | 18, two of them with an ellipsis |
+
+### Tests
+
+- **Unit**, beside `pdf-fragment.test.ts`:
+  - pairing with `p`, and with both forms in one link;
+  - a sheet from a label: repeated labels, a file without labels, a label no sheet carries;
+  - the writer choosing `page=` over `p=`;
+  - the segment grammar: `...` before `,`, a prefix and suffix on the outer segments, `…` read
+    as `...`, a single `.` ignored, an ellipsis at either end dropped;
+  - in-order matching: a gap of no words, a segment that only matches before the previous one,
+    a segment or an elision straddling a page break;
+  - brackets: `[…]`, `[sic]`, a substitution, `[T]he` and `form[s]`.
+- **e2e**, in `e2e/pdf-fragment-links.spec.ts`, on a fixture with page labels
+  (`scripts/make-test-pdf.ts`'s `pageLabels` option): a `p=` passage on a body page whose label
+  differs from its sheet, a label shared by two sheets, a page link, and a miss found on
+  another page.
 
 ## Appendix A. How the numbers were measured
 
