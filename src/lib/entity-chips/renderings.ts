@@ -1,5 +1,6 @@
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
+import { pointsAtQuotation, quotationsInJSON, quotationsInNode } from "./quotations";
 import { chipKind } from "./registry";
 import {
   ENTITY_CHIP,
@@ -8,6 +9,7 @@ import {
   type ChipOccurrence,
   type ChipRendering,
   type ChipStyles,
+  type Quotation,
 } from "./types";
 
 // docs/ENTITY_CHIPS.md, rule 2 — a rendering is a pure function of the chip,
@@ -30,20 +32,25 @@ export function chipAttrsOf(attrs: Record<string, unknown> | null | undefined): 
   };
 }
 
-/** Every chip in `node`, in doc order, with its position in `node`. */
+/**
+ * Every chip in `node`, in doc order, with its position in `node`. A citation
+ * pointing at the quotation beside it carries that quotation, found in `node`
+ * by the one finder (quotations.ts), so every surface rendering the chips of
+ * a body links it alike.
+ */
 export function chipsIn(node: PMNode): ChipOccurrence[] {
   const chips: ChipOccurrence[] = [];
   node.descendants((child, pos) => {
     if (child.type.name === ENTITY_CHIP) chips.push({ ...chipAttrsOf(child.attrs), pos });
     return !child.isLeaf;
   });
-  return chips;
+  return chips.some((chip) => pointsAtQuotation(chip.kind, chip.data)) ? withQuotations(chips, quotationsInNode(node)) : chips;
 }
 
 /**
  * The same over ProseMirror JSON, for the paths that hold a cache column and
  * no schema. `pos` is the chip's index among the doc's chips, since JSON has
- * no positions to give.
+ * no positions to give, and neither has a quotation.
  */
 export function chipsInJSON(doc: JSONContent): ChipOccurrence[] {
   const chips: ChipOccurrence[] = [];
@@ -52,7 +59,11 @@ export function chipsInJSON(doc: JSONContent): ChipOccurrence[] {
     node.content?.forEach(walk);
   };
   walk(doc);
-  return chips;
+  return chips.some((chip) => pointsAtQuotation(chip.kind, chip.data)) ? withQuotations(chips, quotationsInJSON(doc)) : chips;
+}
+
+function withQuotations(chips: ChipOccurrence[], quotations: readonly (Quotation | null | undefined)[]): ChipOccurrence[] {
+  return chips.map((chip, index) => (quotations[index] === undefined ? chip : { ...chip, quotation: quotations[index] }));
 }
 
 /**
@@ -89,6 +100,10 @@ export function chipRenderings(
       valid.map((entry) => entry.data),
       kind.parseStyle(styles[name]),
       kind.parseContext(context[name]),
+      valid.map((entry) => {
+        const quotation = chips[entry.index].quotation;
+        return quotation === undefined ? {} : { quotation: quotation?.text ?? null };
+      }),
     );
     const waiting = new Set(pending?.[name] ?? []);
     valid.forEach((entry, i) => {

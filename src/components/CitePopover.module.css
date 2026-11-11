@@ -183,3 +183,8 @@
   border: none;
   border-radius: 3px;
 }
+
+/* The Link field under "A link", across the fieldset's row. */
+.link {
+  flex: 1 1 100%;
+}

@@ -5,7 +5,7 @@ import { prismaIncludingDeleted } from "@/lib/prisma";
 import { markdownToBlocks } from "@/lib/markdown-import";
 import type { ChipQuoteForm, QuoteSpec } from "@/lib/quote-resolve";
 import { referencesByKeys } from "@/lib/reference-data";
-import { CITATION, citationKind } from "./kinds/citation";
+import { CITATION, citationKind, markdownDestination, referentKind, type CitationItem } from "./kinds/citation";
 import { MENTION, MENTION_HREF_PREFIX } from "./kinds/mention";
 import { mentionableAmong } from "./kinds/mention-rule";
 import { newChipIid } from "./node";
@@ -158,10 +158,13 @@ async function resolveCitations(content: JSONContent, held: JSONContent | null):
     else missing.push(key);
   }
   if (missing.length > 0) {
+    // A key read from a link's text was a link before a link around one citation was that citation: say how it stays one.
+    const links = linkedPlaceholders(content).filter((citation) => citation.items.some((item) => missing.includes(item.key)));
+    const asLinks = links.length > 0 ? ` To keep ${links.length > 1 ? "these links" : "this link"} a link, escape the @: ${links.map(escapedLink).join(", ")}.` : "";
     throw new ApiError(
       "unknown_chip",
-      `No reference has the key ${keyList(missing)}. find_refs lists the library's keys. An @ before a word is a citation: for a mention write [@Name](/authors/<slug>), and for a literal @, \\@.`,
-      { keys: missing },
+      `No reference has the key ${keyList(missing)}. find_refs lists the library's keys. An @ before a word is a citation, and so is a link whose whole text is one: for a mention write [@Name](/authors/<slug>), and for a literal @, \\@.${asLinks}`,
+      { keys: missing, ...(links.length > 0 ? { links: links.map(escapedLink) } : {}) },
     );
   }
   if (deleted.length > 0) {
@@ -177,13 +180,49 @@ async function resolveCitations(content: JSONContent, held: JSONContent | null):
     const data = citationKind.validate({
       items: citation.items.map(({ key, ...fields }) => ({ ...fields, refId: idOf.get(key)! })),
       ...(citation.narrative ? { form: "narrative" } : {}),
+      ...(citation.referent !== null ? { referent: citation.referent } : {}),
     });
     // Validation keeps only so many works, and a citation it shortened would lose some unseen.
     if (!data || data.items.length !== citation.items.length) {
-      throw new ApiError("invalid", `The citation ${String((node.attrs?.data as { label?: unknown }).label ?? "")} names more works than one citation can hold.`);
+      throw new ApiError("invalid", `The citation ${citation.label} names more works than one citation can hold.`);
     }
+    // Nor does it keep a referent the citation can't take, which would be lost unseen too.
+    if (citation.referent !== null && data.referent === undefined) throw referentRefused(citation, data.items);
     return { ...node, attrs: { kind: CITATION, iid: newChipIid(), data } };
   });
+}
+
+/** Every citation placeholder in `content` that a link's text gave, as `placeholderCitation` reads it. */
+function linkedPlaceholders(content: JSONContent): NonNullable<ReturnType<typeof placeholderCitation>>[] {
+  const found: NonNullable<ReturnType<typeof placeholderCitation>>[] = [];
+  walk(content, (node) => {
+    const citation = placeholderCitation(node);
+    if (citation?.referent !== null && citation !== null) found.push(citation);
+    return node;
+  });
+  return found;
+}
+
+/** The link a linked citation was, with the `@` of its text escaped so that it reads back as that link. */
+function escapedLink(citation: { label: string; referent: string | null }): string {
+  return `[${citation.label.replace(/^(\[?)@/, "$1\\@")}](${markdownDestination(citation.referent ?? "")})`;
+}
+
+/** Why a citation can't take the referent its link gave it (docs/CITATIONS.md, "What a referent may be"). */
+function referentRefused(citation: { label: string; referent: string | null }, items: readonly CitationItem[]): ApiError {
+  const written = `[${citation.label}](${citation.referent})`;
+  const kind = referentKind(citation.referent ?? "");
+  if (kind === null) {
+    return new ApiError(
+      "invalid",
+      `${written}: a citation's link points at quote:prev or quote:next, the quotation before or after it; a /pdf/ fragment link into the work's PDF; a /link/<id>; another path on this site; or an https URL.`,
+    );
+  }
+  const why = new Set(items.map((item) => item.refId)).size > 1 ? "it cites several works" : "it names no page";
+  return new ApiError(
+    "invalid",
+    `${written}: ${kind === "quote" ? "a quotation" : "a /pdf/ passage"} is looked for on the cited page, and ${why}. Cite one work at a page, or point it at a /link/<id>.`,
+  );
 }
 
 /** `content`'s placeholders as the chips they name (`chipsForFinding`), each handle and key looked up, deleted targets included. */

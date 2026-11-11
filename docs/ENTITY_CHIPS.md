@@ -288,11 +288,12 @@ selection across it quotes it, and highlights cover it. One such node serves eve
    id.
 2. **A rendering is a pure function** of the chip, the effective style, the chip context and the
    doc's order. It is the same function in the browser and on the servers, and it never depends
-   on the viewer. A planned citation whose referent is `quote:prev` or `quote:next` stretches
-   this: its link is computed from the quotation beside the chip as well (CITATIONS.md,
-   "Planned: a passage in a citation"). The kind's `render` still reads no doc. Each caller of
-   `chipRenderings` finds the quotation in the body it holds, with one shared finder, and
-   attaches it to the chip's occurrence. An edit to the quotation changes the citation's link.
+   on the viewer. A citation whose referent is `quote:prev` or `quote:next` stretches this: its
+   link is computed from the quotation beside the chip as well (CITATIONS.md, "A passage in a
+   citation"). The kind's `render` still reads no doc. `chipsIn` and `chipsInJSON` find the
+   quotation in the body they collect from, with one shared finder (`quotations.ts`), and
+   attach it to the chip's occurrence, which `chipRenderings` hands to `render`. An edit to the
+   quotation changes the citation's link.
 3. **A chip's anchor text is U+FFFC, forever.** It is the node's `leafText`, so every DOC_RANGE
    path in `src/lib/anchors/`, which calls `textBetween(…, " ")` with no leaf argument, gets it
    with no flattener changed. `quotedTextAt` passes a leaf argument of its own, so it changes
@@ -305,8 +306,8 @@ selection across it quotes it, and highlights cover it. One such node serves eve
    is that a tab on an older bundle validates `data` with only the fields it knows. So it drops
    a new field wherever it writes a chip's `data` from its own validation: an edit in a
    popover, or a cut and paste through `parseHTML`. Nothing refuses that tab. A plan adding a
-   field says why the loss is acceptable or how it is avoided (CITATIONS.md, "Planned: a
-   passage in a citation").
+   field says why the loss is acceptable or how it is avoided, as a citation's `referent` does
+   (CITATIONS.md, "A passage in a citation").
 
 ## The kind contract
 

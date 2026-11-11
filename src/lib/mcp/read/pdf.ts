@@ -4,7 +4,7 @@ import { storedPageText } from "@/lib/pdf-page-text";
 import { pdfMetadata } from "@/lib/pdf-metadata";
 import { labelRanges, pagesLabelled, sheetsLabelled, sheetsNamed, usablePageLabels } from "@/lib/pdf-page-labels";
 import { pageFromHash, type PageName } from "@/lib/pdf-open-params";
-import { parseFragmentPassages, resolveAll, resolvePassage, skeletonOf, type PassageText } from "@/lib/pdf-fragment";
+import { onePassage, parseFragmentPassages, passageWords, resolveAll, resolvePassage, skeletonOf, type PassageText } from "@/lib/pdf-fragment";
 import { checkPassage, type FilePages } from "@/lib/pdf-fragment-findings";
 import { overlapWindows } from "@/lib/comment-quote-match";
 import { markdownToText } from "@/lib/markdown-import";
@@ -277,12 +277,7 @@ async function aroundQuote(file: ResolvedFile, labels: string[] | null, args: Re
           ? pagesLabelled(labels, args.label)
           : allPages(pageCount);
   const texts = await pageTexts(file.id, indexes);
-  const passage = (quote: string, prefix?: string, suffix?: string): PassageText => ({
-    prefix: prefix ?? null,
-    start: quote,
-    end: null,
-    suffix: suffix ?? null,
-  });
+  const passage = (quote: string, prefix?: string, suffix?: string): PassageText => onePassage(quote, { prefix, suffix });
   const find = (p: PassageText) =>
     indexes.flatMap((index) => {
       const text = texts.get(index) ?? "";
@@ -374,7 +369,7 @@ async function fragmentPassages(
       };
       const finding = checkPassage(pages, passage);
       throw new ApiError("no_match", `A passage of that fragment link isn't on ${pageText(passage.page)}.`, {
-        passage: { start: passage.start, ...(passage.end ? { end: passage.end } : {}) },
+        passage: passageWords(passage),
         ...(finding.kind === "no-match"
           ? {
               matchedUpTo: finding.matchedUpTo,

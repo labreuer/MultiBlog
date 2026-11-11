@@ -1,8 +1,8 @@
 # PDF fragment links — a link to a passage, with no row
 
 **Status: built** (2026-10-06), except "Copy passage link" (§8). §13 is a plan, not an account:
-marking the words a quotation leaves out (`...`). Fragment links share the PDF locator rule and
-the server-side quads of [MCP.md](MCP.md), the MCP server's plan.
+how the viewer shows the words a quotation leaves out (`...`). Fragment links share the PDF
+locator rule and the server-side quads of [MCP.md](MCP.md), the MCP server's plan.
 
 A **fragment link** is a URL that names a passage of a PDF by its words:
 
@@ -56,7 +56,8 @@ body. Comments need one change for it (§8).
 /pdf/<slug>#page=<n>&text=<passage>[&page=<n>&text=<passage>…]
 /pdf/<slug>#p=<label>&text=<passage>[&p=<label>&text=<passage>…]
 
-passage = [<prefix>-,]<start>[,<end>][,-<suffix>]
+passage = [<prefix>-,]<segment>*("..." <segment>)[,-<suffix>]
+segment = <start>[,<end>]
 prefix, start, end, suffix = word *("+" word)
 ```
 
@@ -76,6 +77,25 @@ prefix, start, end, suffix = word *("+" word)
     between them is matched;
   - `prefix-,` and `,-suffix` are words that must come immediately before or after. They exist
     only to tell repeats apart.
+- **`...` joins a passage's segments**, the runs a quotation keeps around the words it leaves
+  out. `start,end` is a length device over words quoted in full, and outlines everything between
+  them; `...` marks words the quoter left out, so the two can be told apart.
+  - **One `text` value is still one passage.** Two `text`s on one page are two passages, each
+    matched at its first occurrence.
+  - **The separator is three dots.** `…` (U+2026) reads as the same separator, as the character
+    or as `%E2%80%A6`, which is what `location.hash` holds for one. It is the one marker read in
+    its encoded form: `,` and `-` are syntax only unencoded. A single `.` stays punctuation,
+    which readers ignore, and so do two. Of the 5,832 `text` values measured on explore, 140 hold
+    a single `.` and none holds `...` or `…`, so no link written before `...` changes meaning
+    (Appendix A).
+  - **Precedence.** The value splits on `...` first. A `prefix-,` belongs to the first segment
+    and a `,-suffix` to the last; on any other segment either makes the value unreadable. Each
+    segment may still be shortened to its ends with `,`, by the writer's form's rule (§8): a long
+    segment misses on one OCR error, and `start,end` steps around it (§4). A short one goes
+    whole.
+  - **An ellipsis at either end is dropped**, and so is a second one straight after the first.
+    One at an end says only that the quotation starts or stops mid-sentence, and would leave an
+    empty segment.
 - **Pairing.** Parameters are read left to right, as RFC 8118 reads a PDF's own. Each `text`
   belongs to the nearest `page` or `p` before it, so a `text` with no page before it is ignored,
   and a page whose value doesn't read forgets the one before it. A `page` or a `p` with no
@@ -106,6 +126,8 @@ stores today:
 #page=30&text=identity+but+of+the-,law+of+participation              the second, by its prefix
 #page=40&text=It+may+also,within+but+it&page=41&text=is+detected+primarily+without
                                                                      one quote across a page break
+#p=8&text=a+direction+in...a+beatific+consummation                   words left out between two
+#p=12&text=the+human+soul...is+detected,primarily+without            a shortened second segment
 ```
 
 **Why the fragment, not the query string.**
@@ -156,6 +178,44 @@ using, and fills an empty one with its sheet's number for the page box. On a fil
 labels, `p=5` never names a sheet whose own label is empty, in a link or in a citation: only
 `page=` names such a sheet. So a `p` is matched against the labels as read, and never against
 what `usablePageLabels` returns.
+
+### A quotation's segments
+
+Where a passage's words come from a written quotation rather than from a URL, one pair of
+functions turns them into segments (`src/lib/pdf-passage-pieces.ts`). A citation's passage
+uses both (CITATIONS.md, "A passage in a citation"), and the one-quote CLI the second (§8).
+
+- **`quotationText(quotation, { shorten })`** writes the quotation as a `text` value, with no
+  page in sight: what a citation's link carries.
+  - An ellipsis, written `...`, `…` or `. . .`, bare or bracketed (`[…]`, `[...]`), is a gap.
+  - **A bracket standing alone** is a gap too: `[sic]`, `[emphasis added]`, or `[the soul]` in
+    place of "it". `[sic]` then covers no words. A substitution's own words in the PDF fall
+    inside the gap, since they weren't quoted verbatim. The gap takes what is attached to the
+    bracket up to the next space, so the `'s` of `[the soul]'s` is no word of its own. A bracket
+    holding a space is no word's letters, and stands alone. A bracket that is the source's own
+    text reads as an insertion and becomes a gap, which shows its words as elided and is
+    harmless.
+  - **A bracket attached to a word** keeps its brackets, `%5BT%5Dhe`, `form%5Bs%5D`: whether its
+    letters are the source's is a question only the page text answers.
+  - With `shorten`, a segment longer than eight words goes as its first three and last three,
+    the writer's form's length rule without its step for uniqueness, which needs the page.
+- **`passagePieces(text, pages, startSheets, throughSheet)`** settles such a value against the
+  stored text of the pages, and answers each page's share in the writer's form (§8), holding
+  no bracket.
+  - **Each attached bracket** is tried with its letters kept, then dropped, and whichever matches
+    the page is used. A skeleton is contiguous letters, so neither fixed rule works: "[T]he"
+    matches only with them kept, and "form[s]" against a source's "form" only with them dropped.
+  - **The passage starts on the first of `startSheets` that holds it**, as a whole on one page
+    first, prefix and suffix included.
+  - **Then across pages**, segment by segment, never past eight pages and never past
+    `throughSheet(start)`. A segment that isn't on the page the one before it ended on is looked
+    for whole on the pages after, since the elision before it may straddle the break. Then, if
+    it is whole (not `start,end`, whose middle no page text gives), it is split at a word
+    boundary, its first part at its last match on the page, nearest the break, as
+    `splitAcrossPages` splits a quote (§5). Each page's share is then its own passage, paired
+    with its page.
+
+The viewer only ever receives plain segments.
 
 ## 3. How big
 
@@ -214,6 +274,12 @@ resolve to exactly the range their stored anchors cover.
   them; §9 is what notices.
 - **No worker is needed.** PDF.md §4 keeps its fuzzy step off the main thread because it is
   slow. A skeleton match is one `indexOf` over a page, and nothing here is fuzzy.
+- **Segments match in order.** Each is matched as a passage is, at its first match after the
+  previous segment ends, which is never worse for the segments after it than a later match
+  would be. The passage's range runs from the start of the first segment to the end of the last,
+  the words left out inside it. A gap may match no words at all, which is what lets a `[sic]`
+  stand between two segments. Only the last segment answers to the suffix, so it alone is looked
+  for past its first match, as Text Fragments looks for an `end` past its first.
 
 All of this is `src/lib/pdf-fragment.ts`. **MCP.md's PDF locator uses the same rule** (MCP.md
 §7, §8), and the sample shows why. Exact matching after folding quotation marks, dashes and
@@ -242,6 +308,10 @@ without"), so an author quoting from it knows where to split. The CLI, holding o
 quote, finds the split itself (`splitAcrossPages`, §8): it tries each word boundary between page
 n and page n+1, and keeps the split where both halves match on their pages.
 
+A written quotation is split the same way by `passagePieces` (§2, "A quotation's segments"),
+which also lets an elision straddle the break: the segment after it then starts the next page's
+passage.
+
 This is the case the selection capture gets wrong. A selection across a page break keeps the
 quads on its first page only, and its quote is lost, because the selected text isn't on that
 page (`captureTextTarget`, `capturePdfTextAnchor`).
@@ -265,7 +335,9 @@ name the same sheets.
 2. **Find each passage on the sheets its page names**, in order (`sheetsNamed`): one for
    `page=`, every sheet carrying the label for `p=`. Each page is read once per document, from
    `pdf.getPage(n).getTextContent()` through `normalisePageText`: the same text the stored page
-   text came from. The passage is matched by skeleton (§4).
+   text came from. The passage is matched by skeleton, each segment after the one before (§4).
+   **The outline covers the whole range**, the words left out between segments included; how
+   the viewer shows them apart is not settled (§13).
 3. **A miss looks beyond its page.** When none of those sheets holds a passage, in either form,
    the viewer asks the server where it is instead: `locateFragmentMisses`
    (`src/app/actions/pdf-fragment.ts`), once for every miss of the fragment.
@@ -324,6 +396,9 @@ name the same sheets.
 
 An annotation's permalink fragment has no `=` and is unaffected.
 
+**A tab whose bundle predates `...`** ignores every `.`, so it reads an elided link as one
+unbroken passage, misses, and says "Not found".
+
 **A tab whose bundle predates `p=`** ignores it: it opens such a link at the first page and draws
 nothing. In a link that mixes the two forms it pairs a `p=`'s `text` with the `page=` before it,
 and reports that passage not found there.
@@ -348,8 +423,9 @@ change.
 ## 8. Writing them
 
 **The pure half** is under `npm run test:unit`, because its rejection surface is the point:
-parsing and formatting the fragment, the skeleton and the match, the writer's form and the
-cross-page split (`src/lib/pdf-fragment.ts`); a page and its label (`src/lib/pdf-open-params.ts`,
+parsing and formatting the fragment, its segments, the skeleton and the match, the writer's form
+and the cross-page split (`src/lib/pdf-fragment.ts`); a written quotation's segments, its
+brackets and its page breaks (`src/lib/pdf-passage-pieces.ts`); a page and its label (`src/lib/pdf-open-params.ts`,
 `src/lib/pdf-page-labels.ts`); and the check's reading of an href and its findings
 (`src/lib/pdf-fragment-findings.ts`).
 
@@ -357,7 +433,9 @@ cross-page split (`src/lib/pdf-fragment.ts`); a page and its label (`src/lib/pdf
 goes as its first three and last three words, each extended a word at a time until the
 passage's first occurrence on the page is the one meant. A prefix is added only when extending
 can't tell two occurrences apart, as with a short quote the page repeats. All 65 sample quotes
-take that form without a prefix (§3).
+take that form without a prefix (§3). A passage with words left out goes segment by segment
+(`segmentedWriterForm`): each whole up to eight words and otherwise by its ends, every long one
+extended alike.
 
 **Which page form a writer takes** (`pageNameForSheet`, `src/lib/pdf-page-labels.ts`):
 
@@ -412,7 +490,8 @@ sheet"). It reports, per link:
 
 - ok, also for a passage found on a later sheet of a repeated label;
 - **no match**, with where the skeleton stops matching and what the PDF has there, and the page
-  the passage is on when it occurs exactly once elsewhere in the file;
+  the passage is on when it occurs exactly once elsewhere in the file. A segment that matches
+  nowhere after the one before it is a miss, with where it stops after that one;
 - **a warning when the passage repeats on its page**, since the link points at the first
   occurrence and only the author knows which one was meant;
 - a page out of range, which is also a `p=N` past the end of a file without usable labels;
@@ -456,8 +535,11 @@ It runs in:
    - The page is a hint: it tries the page given, then its neighbours, then the one page in the
      file that holds the quote once. A label is tried on every sheet carrying it first, then on
      the first one's neighbours; the search works in sheets.
-   - A quote elided with "…" or "..." is read as `start,end`.
-   - A quote that runs across a page break comes back as two passages (`splitAcrossPages`).
+   - The quote is read as a written quotation (§2, "A quotation's segments"): an ellipsis or a
+     bracket standing alone is a gap, and an attached bracket is tried with its letters and
+     without. A quote elided with "…" or "..." comes back with its segments joined by `...`.
+   - A quote that runs across a page break comes back as two passages (`passagePieces`), split
+     inside a segment or at an elision.
 3. **The MCP server.** Every body a call writes is checked before anything is written:
    `create_doc`'s, `edit_doc`'s replacements and appends, and `add_note`'s and `edit_note`'s. A
    miss, a page past the end or a label no sheet carries refuses the call with `no_match`, as
@@ -488,6 +570,8 @@ the same letters in the same order. The guard is `scripts/integrity/check-pdf-fr
 
 - **What it checks.** It runs §8's check over every fragment link and page link in docs'
   `proseJson`, posts' `proseJson`, comment bodies and annotation bodies, none of them deleted.
+  It checks every citation's passage too, by the link it renders or the link a post froze
+  (CITATIONS.md, "Its checks").
 - **What fails it.** It exits non-zero on an ERROR: a miss, an unknown file, a page out of range,
   a label no sheet carries, or a `text` parameter that doesn't parse. A repeated passage, a past
   slug and a `p=` on a file without usable labels are warnings.
@@ -528,7 +612,8 @@ When to run it:
 
 | | |
 |---|---|
-| `src/lib/pdf-fragment.ts` | the grammar, the skeleton match, the writer's form, the cross-page split; unit-tested, with pairing by `page` and `p` |
+| `src/lib/pdf-fragment.ts` | the grammar and its segments, the skeleton match, the writer's form, the cross-page split; unit-tested, with pairing by `page` and `p` |
+| `src/lib/pdf-passage-pieces.ts` (`quotationText`, `passagePieces`) | a written quotation as segments, and those settled against the pages: brackets and page breaks; unit-tested |
 | `src/lib/pdf-open-params.ts` | a page as a fragment names it, `page=` or `p=` (`PageName`), read and written; unit-tested |
 | `src/lib/pdf-page-labels.ts` (`sheetsLabelled`, `sheetsNamed`, `pageNameForSheet`, `pageNameForLabel`) | which sheet a label names, and which form a writer takes; unit-tested: repeated labels, a file without labels, a label no sheet carries, a sheet whose own label is empty |
 | `src/lib/pdf-quads.ts` | the quads of a range of normalised text, from text items; unit-tested |
@@ -555,7 +640,7 @@ When to run it:
 - **A repeat is counted apart, never inside itself** (§4). Counted the planned way, "To be able
   … that is imagination" would have warned of a repeat because its second "to be able" falls
   inside the passage.
-- **The CLI also reads an elided quote** ("…" or "...") as `start,end` (§8).
+- **The CLI also reads an elided quote** ("…" or "..."), now as segments (§8).
 - **The two banners share one overlay**, stacked (§6).
 
 From the printed-page plan (`p=`):
@@ -584,110 +669,27 @@ From the printed-page plan (`p=`):
 - **MCP's write check now refuses a page link to a PDF that doesn't exist** or isn't the
   actor's to read, as it refuses such a fragment link, since page links are checked.
 
-## 13. Planned: elided passages (`...`)
+From the elided-passage plan (`...`):
 
-**Not built.** This section is a plan and the rest of this file is an account. When it lands,
-§2, §4, §6, §8 and §9 take it in and this section goes. It changes the `text` grammar for both
-page forms, `page=` and `p=` (§2).
+- **The CLI reads a quote through `passagePieces`**, not just its `...`: it settles brackets as a
+  citation's passage does, and splits at an elision as well as inside a segment.
+- **Two ellipses in a row are one gap**, and a prefix or a suffix on an inner segment makes the
+  value unreadable. The plan said only "exactly three dots"; four read as `...` and a `.`.
+- **`. . .` and `[. . .]` are gaps** in a written quotation, beside `…`, `...`, `[…]` and
+  `[...]`.
+- **A bracket standing alone takes what is attached to it** up to the next space, so `[the
+  soul]'s` leaves no `s` to miss, and **a bracket holding a space stands alone**. The plan had
+  neither case.
+- **More than four attached brackets in one passage** are tried all kept and all dropped only,
+  rather than every combination.
+- **A segment that straddles a break is looked for whole on the next page first**, then split,
+  and an elision may straddle a whole page. The plan named the two cases without an order.
 
-A quotation that leaves words out marks the gap with an ellipsis. A `text` value today names a
-passage whole or by its ends, and `start,end` is a length device over words quoted in full:
-the outline covers everything between them. `...` marks words the quoter left out, so the two
-can be told apart.
+## 13. Planned: how the viewer shows elided words
 
-```
-#p=8&text=a+direction+in...a+beatific+consummation
-#p=12&text=the+human+soul...is+detected,primarily+without
-```
-
-- **One `text` value is still one passage**, its segments joined by `...`. Two `text`s on one
-  page keep their meaning: two passages, each matched at its first occurrence. None of the
-  links measured puts two on one page (Measured, below).
-- **The separator is exactly three dots.** `…` (U+2026) reads as the same separator, and writers
-  write `...`. A single `.` stays punctuation, which readers ignore. Of the `text` values
-  measured, 140 hold one, and none holds `...` or `…`, so no existing link changes meaning.
-- **`…` is read as the character or as `%E2%80%A6`**, which is what `location.hash` holds for
-  one. It is the one marker read in its encoded form: `,` and `-` are syntax only unencoded
-  (§2).
-- **Precedence.** The value splits on `...` first. A `prefix-,` belongs to the first segment and
-  a `,-suffix` to the last. Each segment may still be shortened to its ends with `,`, by the
-  writer's form's rule (§8): a long segment misses on one OCR error, and `start,end` steps
-  around it (§4). A short one goes whole.
-- **Matching.** Each segment is matched by skeleton (§4), in order on the page, each starting
-  after the previous one ends. The passage's span runs from the start of the first segment to
-  the end of the last. A gap may match no words at all, which is what lets a `[sic]` stand
-  between two segments (below).
-- **An ellipsis at either end is dropped.** It says only that the quotation starts or stops
-  mid-sentence, and would leave an empty segment.
-- **Across a page break**, a segment that straddles the break splits at a word boundary, and an
-  elision that straddles it ends page n's passage and starts page n+1's. Each `text` is then
-  paired with its page, as §5 pairs them.
-- **Hand-written `...` is allowed in any fragment link**, a citation's `/pdf/` referent included
-  (CITATIONS.md, "Planned: a passage in a citation"): one grammar, one parser, one check.
-  Elision enters through a citation's `quote:*`, the one-quote CLI, or a writer typing `...`.
-
-**From a quotation to segments.** Where the words come from a written quotation rather than a
-URL, one shared function turns them into segments against the stored text of the pages:
-`passagePieces(quotation, pageTexts)`, a working name. The cited-page route, the integrity
-check and MCP's write check all call it, so the three agree. It settles what only the page text
-can:
-
-- **Brackets:**
-  - `[…]` or `[...]` is an elision, as `...` is.
-  - **A bracket standing alone**, such as `[sic]`, `[emphasis added]`, or `[the soul]` in place of
-    "it", is a gap. `[sic]` then covers no words. A substitution's own words in the PDF fall
-    inside the gap, since they weren't quoted verbatim.
-  - **A bracket attached to a word**, such as `[T]he` or `form[s]`, is tried with its letters kept
-    and then dropped, and whichever matches the page is used. A skeleton is contiguous letters,
-    so neither fixed rule works: "[T]he" matches only with them kept, and "form[s]" against a
-    source's "form" only with them dropped.
-  - **A bracket that is the source's own text** reads as an insertion and becomes a gap. That
-    shows its words as elided, which is harmless.
-- **Page breaks**, from where the stored text breaks.
-- **Long segments**, shortened to their ends.
-
-The viewer only ever receives plain segments.
-
-**Everything else that reads a `text` value:**
-
-- **`parseFragmentPassages`** gives each passage its segments.
-- **The one-quote CLI** reads a quote elided with "…" or "..." as elision, where today it reads
-  it as `start,end` (§8).
-- **The check** reports a segment that matches nowhere after the one before it as a miss, with
-  where it stops matching, as it reports a whole passage.
-- **A tab from before the deploy** ignores every `.`, so it reads an elided link as one unbroken
-  passage, misses, and says "Not found".
-
-**Held: how the viewer shows elided words.** The viewer receives the segments and the span. How
-the outline and the banner show the gaps apart from the quoted words is not settled.
-
-**Measured** on explore's docs, 2026-11-10: every live doc holding a fragment link, 33 docs
-with 5,662 links, all written by Claude. An author's own docs will likely hold more `[sic]`,
-`[T]he` and `[…]`. The classifier is a heuristic, which matches runs of quoted words by
-skeleton. It is not the finder `quote:prev` will have.
-
-| | |
-|---|---|
-| Quotations directly before a link | 4,947 |
-| … holding an ellipsis | 102 (2.1%). 4 hold two |
-| … holding a bracket | 11: 4 attached to a word (`form[s]`, `correct[ed]`, `[a]ll`), 1 `[sic]`, and 6 standing alone (`[of the soul]`, `[the rich]`, `[already]`) |
-| Block quotes holding a link's words | 68: 8 with an ellipsis, one of those with two, and 1 with `[sic]` |
-| Links with two `text`s on one page | 0 |
-| `text` values holding a single `.` | 140 of 5,832. None holds `...` or `…` |
-
-Not measured again: in a copy of 2026-10-19, 10 docs with 1,793 links, 57 of the 58 quotations
-holding an ellipsis had the gap inside, and in 32 of those today's `start,end` link covers the
-elided words.
-
-### Tests
-
-- **Unit**, beside `pdf-fragment.test.ts`:
-  - the segment grammar: `...` before `,`, a prefix and suffix on the outer segments, `…` read
-    as `...` as the character and as `%E2%80%A6`, a single `.` ignored, an ellipsis at either
-    end dropped;
-  - in-order matching: a gap of no words, a segment that only matches before the previous one,
-    a segment or an elision straddling a page break;
-  - brackets: `[…]`, `[sic]`, a substitution, `[T]he` and `form[s]`.
+**Not built, and held.** The viewer receives a passage's segments and outlines its whole range,
+the words left out between segments included (§6). How the outline and the banner show the gaps
+apart from the quoted words is not settled.
 
 ## Appendix A. How the numbers were measured
 
@@ -715,6 +717,24 @@ elided words.
     one meant;
   - the viewer drew all 65 on their glyphs. One of them steps around the PDF's own OCR error,
     "were bom when" for "were born when", because a `start,end` passage's middle isn't matched.
+
+**For `...`**, measured on explore's docs on 2026-11-10: every live doc holding a fragment
+link, 33 docs with 5,662 links, all written by Claude. An author's own docs will likely hold
+more `[sic]`, `[T]he` and `[…]`. The classifier is a heuristic, which matches runs of quoted
+words by skeleton, and not the finder a citation's `quote:prev` has.
+
+| | |
+|---|---|
+| Quotations directly before a link | 4,947 |
+| … holding an ellipsis | 102 (2.1%). 4 hold two |
+| … holding a bracket | 11: 4 attached to a word (`form[s]`, `correct[ed]`, `[a]ll`), 1 `[sic]`, and 6 standing alone (`[of the soul]`, `[the rich]`, `[already]`) |
+| Block quotes holding a link's words | 68: 8 with an ellipsis, one of those with two, and 1 with `[sic]` |
+| Links with two `text`s on one page | 0 |
+| `text` values holding a single `.` | 140 of 5,832. None holds `...` or `…` |
+
+In a copy of 2026-10-19, 10 docs with 1,793 links, 57 of the 58 quotations holding an ellipsis
+had the gap inside, and in 32 of those the `start,end` link covered the elided words. Not
+measured again.
 
 ## Appendix B. Prior art
 

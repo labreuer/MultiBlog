@@ -1416,7 +1416,10 @@ gives it, and the sheet for a page with none. Each one is checked before anythin
 by the check the integrity script and the one-quote CLI already share: `FragmentChecker`
 (`src/lib/pdf-fragment-check.ts`), with `linkHrefsIn` to find the links in a body
 (`src/lib/pdf-fragment-findings.ts`). A page link, `#page=<n>` or `#p=<label>` with no `text`,
-is checked for its page.
+is checked for its page. So is a citation's passage, the link around a citation
+(`[[@bu, p. 49]](quote:prev)`): a quotation the cited page doesn't hold, and a `/pdf/` referent
+naming another work's PDF, are refused as `no_match` too ([CITATIONS.md](CITATIONS.md), "A
+passage in a citation", "Its checks").
 
 - **It reads as the operator**, so the MCP server asks `canUserReadFile` first, as the module's
   header requires.

@@ -5,6 +5,7 @@ import {
   countPassageOccurrences,
   formatFragmentPassages,
   fragmentWords,
+  onePassage,
   parseFragmentPassages,
   resolvePassage,
   splitAcrossPages,
@@ -28,13 +29,7 @@ const PAGE = [
   "The individual breathe totem feels he is the totem.",
 ].join(" ");
 
-const whole = (start: string, extra: Partial<PassageText> = {}): PassageText => ({
-  prefix: null,
-  start,
-  end: null,
-  suffix: null,
-  ...extra,
-});
+const whole = (start: string, extra: { prefix?: string; end?: string; suffix?: string } = {}): PassageText => onePassage(start, extra);
 
 const text = (page: string, passage: PassageText) => {
   const range = resolvePassage(page, passage);
@@ -45,8 +40,8 @@ const text = (page: string, passage: PassageText) => {
 
 test("each text belongs to the page before it, read left to right", () => {
   assert.deepEqual(parseFragmentPassages("#page=12&text=could+not+yet&page=13&text=a,b"), [
-    { page: { sheet: 12 }, prefix: null, start: "could not yet", end: null, suffix: null },
-    { page: { sheet: 13 }, prefix: null, start: "a", end: "b", suffix: null },
+    { page: { sheet: 12 }, prefix: null, segments: [{ start: "could not yet", end: null }], suffix: null },
+    { page: { sheet: 13 }, prefix: null, segments: [{ start: "a", end: "b" }], suffix: null },
   ]);
   // Two texts on one page, and no leading #.
   assert.equal(parseFragmentPassages("page=4&text=one&text=two").length, 2);
@@ -54,26 +49,26 @@ test("each text belongs to the page before it, read left to right", () => {
 
 test("a text belongs to the nearest page or p before it, and one link may use both forms", () => {
   assert.deepEqual(parseFragmentPassages("#p=49&text=could+not+yet&page=53&text=a,b&p=xii&text=c"), [
-    { page: { label: "49" }, prefix: null, start: "could not yet", end: null, suffix: null },
-    { page: { sheet: 53 }, prefix: null, start: "a", end: "b", suffix: null },
-    { page: { label: "xii" }, prefix: null, start: "c", end: null, suffix: null },
+    { page: { label: "49" }, prefix: null, segments: [{ start: "could not yet", end: null }], suffix: null },
+    { page: { sheet: 53 }, prefix: null, segments: [{ start: "a", end: "b" }], suffix: null },
+    { page: { label: "xii" }, prefix: null, segments: [{ start: "c", end: null }], suffix: null },
   ]);
   // A label is decoded: %20 and + are spaces, and it is trimmed.
   assert.deepEqual(parseFragmentPassages("#p=A%201&text=a&p=+B+2+&text=b").map((p) => p.page), [{ label: "A 1" }, { label: "B 2" }]);
   // An unreadable p forgets the page before it, as an unreadable page does.
   for (const bad of ["", "%20", "%E2%80"]) {
-    assert.deepEqual(parseFragmentPassages(`#p=3&text=a&p=${bad}&text=b`).map((p) => p.start), ["a"], bad);
+    assert.deepEqual(parseFragmentPassages(`#p=3&text=a&p=${bad}&text=b`).map((p) => p.segments[0].start), ["a"], bad);
   }
   // A p with no text after it names no passage: it is a page link (pageFromHash).
-  assert.deepEqual(parseFragmentPassages("#page=2&text=a&p=7"), [{ page: { sheet: 2 }, prefix: null, start: "a", end: null, suffix: null }]);
+  assert.deepEqual(parseFragmentPassages("#page=2&text=a&p=7"), [{ page: { sheet: 2 }, prefix: null, segments: [{ start: "a", end: null }], suffix: null }]);
 });
 
 test("a text with no valid page before it is ignored, and a bad page forgets the last good one", () => {
   assert.deepEqual(parseFragmentPassages("#text=orphan&page=2&text=kept"), [
-    { page: { sheet: 2 }, prefix: null, start: "kept", end: null, suffix: null },
+    { page: { sheet: 2 }, prefix: null, segments: [{ start: "kept", end: null }], suffix: null },
   ]);
   for (const bad of ["0", "-1", "2x", "1.5", ""]) {
-    assert.deepEqual(parseFragmentPassages(`#page=3&text=a&page=${bad}&text=b`).map((p) => p.start), ["a"], bad);
+    assert.deepEqual(parseFragmentPassages(`#page=3&text=a&page=${bad}&text=b`).map((p) => p.segments[0].start), ["a"], bad);
   }
 });
 
@@ -81,20 +76,19 @@ test("prefix and suffix markers are read before decoding, so encoded ones are te
   assert.deepEqual(parseFragmentPassages("#page=1&text=before+this-,the+start,the+end,-after+that")[0], {
     page: { sheet: 1 },
     prefix: "before this",
-    start: "the start",
-    end: "the end",
+    segments: [{ start: "the start", end: "the end" }],
     suffix: "after that",
   });
   // %2C is a comma inside the text, not a separator.
-  assert.deepEqual(parseFragmentPassages("#page=1&text=God%2C+but+nothing")[0].end, null);
+  assert.deepEqual(parseFragmentPassages("#page=1&text=God%2C+but+nothing")[0].segments[0].end, null);
   // A hyphen inside a word, with no comma beside it, is text too.
-  assert.equal(parseFragmentPassages("#page=1&text=self-consciousness")[0].start, "self-consciousness");
+  assert.equal(parseFragmentPassages("#page=1&text=self-consciousness")[0].segments[0].start, "self-consciousness");
 });
 
 test("spaces arrive as + or %20 alike", () => {
   const plus = parseFragmentPassages("#page=1&text=the+law")[0];
   const encoded = parseFragmentPassages("#page=1&text=the%20law")[0];
-  assert.equal(plus.start, encoded.start);
+  assert.deepEqual(plus.segments, encoded.segments);
 });
 
 test("a passage that doesn't parse, or has a part with no letters, is dropped", () => {
@@ -105,7 +99,7 @@ test("a passage that doesn't parse, or has a part with no letters, is dropped", 
 
 test("other parameters and an annotation permalink are ignored", () => {
   assert.deepEqual(parseFragmentPassages("#zoom=200&page=2&text=kept&search=x"), [
-    { page: { sheet: 2 }, prefix: null, start: "kept", end: null, suffix: null },
+    { page: { sheet: 2 }, prefix: null, segments: [{ start: "kept", end: null }], suffix: null },
   ]);
   assert.deepEqual(parseFragmentPassages("#ada-lovelace-2026-10-04-12-00-00"), []);
   assert.deepEqual(parseFragmentPassages(""), []);
@@ -120,27 +114,108 @@ test("a writer emits letters and digits joined by +, folding accents and keeping
   assert.deepEqual(fragmentWords("could not yet ‘call his soul his own’."), ["could", "not", "yet", "call", "his", "soul", "his", "own"]);
   assert.deepEqual(fragmentWords("Lévy-Bruhl’s ﬁnding"), ["Levy", "Bruhl", "s", "finding"]);
   assert.equal(
-    formatFragmentPassages([{ page: { sheet: 30 }, prefix: "identity, but of the", start: "law of participation", end: null, suffix: null }]),
+    formatFragmentPassages([{ page: { sheet: 30 }, ...whole("law of participation", { prefix: "identity, but of the" }) }]),
     "page=30&text=identity+but+of+the-,law+of+participation",
   );
   assert.equal(
     formatFragmentPassages([
-      { page: { sheet: 40 }, prefix: null, start: "It may also", end: "within, but it", suffix: null },
-      { page: { sheet: 41 }, prefix: null, start: "is detected", end: null, suffix: "primarily" },
+      { page: { sheet: 40 }, prefix: null, segments: [{ start: "It may also", end: "within, but it" }], suffix: null },
+      { page: { sheet: 41 }, prefix: null, segments: [{ start: "is detected", end: null }], suffix: "primarily" },
     ]),
     "page=40&text=It+may+also,within+but+it&page=41&text=is+detected,-primarily",
   );
   // A printed page is written p=, and reads back as itself.
   const labelled = formatFragmentPassages([
-    { page: { label: "49" }, prefix: null, start: "could not yet", end: null, suffix: null },
-    { page: { label: "A 1" }, prefix: null, start: "a", end: null, suffix: null },
+    { page: { label: "49" }, prefix: null, segments: [{ start: "could not yet", end: null }], suffix: null },
+    { page: { label: "A 1" }, prefix: null, segments: [{ start: "a", end: null }], suffix: null },
   ]);
   assert.equal(labelled, "p=49&text=could+not+yet&p=A%201&text=a");
   assert.deepEqual(parseFragmentPassages(labelled).map((p) => p.page), [{ label: "49" }, { label: "A 1" }]);
   // A letter with no ASCII base is percent-encoded, and survives the round trip.
-  const greek = formatFragmentPassages([{ page: { sheet: 1 }, prefix: null, start: "εἴδωλον", end: null, suffix: null }]);
+  const greek = formatFragmentPassages([{ page: { sheet: 1 }, prefix: null, segments: [{ start: "εἴδωλον", end: null }], suffix: null }]);
   assert.match(greek, /^page=1&text=%/);
-  assert.equal(fragmentWords(parseFragmentPassages(greek)[0].start).join(" "), fragmentWords("εἴδωλον").join(" "));
+  assert.equal(fragmentWords(parseFragmentPassages(greek)[0].segments[0].start).join(" "), fragmentWords("εἴδωλον").join(" "));
+});
+
+// ---- words left out (`...`) ----------------------------------------------
+
+const seg = (start: string, end: string | null = null) => ({ start, end });
+
+test("... splits a text into segments before , shortens one", () => {
+  assert.deepEqual(parseFragmentPassages("#p=8&text=a+direction+in...a+beatific,consummation")[0].segments, [
+    seg("a direction in"),
+    seg("a beatific", "consummation"),
+  ]);
+  assert.deepEqual(parseFragmentPassages("#p=12&text=the+human+soul...is+detected,primarily+without")[0].segments, [
+    seg("the human soul"),
+    seg("is detected", "primarily without"),
+  ]);
+});
+
+test("a prefix belongs to the first segment and a suffix to the last", () => {
+  const [passage] = parseFragmentPassages("#page=1&text=before+this-,one,two...three...four,-after+that");
+  assert.equal(passage.prefix, "before this");
+  assert.equal(passage.suffix, "after that");
+  assert.deepEqual(passage.segments, [seg("one", "two"), seg("three"), seg("four")]);
+  // Anywhere else a prefix or a suffix is no passage.
+  assert.deepEqual(parseFragmentPassages("#page=1&text=one...two-,three"), []);
+  assert.deepEqual(parseFragmentPassages("#page=1&text=one,-two...three"), []);
+});
+
+test("… reads as ... as the character and as location.hash holds it", () => {
+  const dots = parseFragmentPassages("#page=1&text=one+two...three")[0].segments;
+  for (const marker of ["…", "%E2%80%A6", "%e2%80%a6"]) {
+    assert.deepEqual(parseFragmentPassages(`#page=1&text=one+two${marker}three`)[0].segments, dots, marker);
+  }
+});
+
+test("one or two dots are punctuation, which a match ignores", () => {
+  assert.deepEqual(parseFragmentPassages("#page=1&text=the+end.+Next")[0].segments, [seg("the end. Next")]);
+  assert.deepEqual(parseFragmentPassages("#page=1&text=the+end..+Next")[0].segments, [seg("the end.. Next")]);
+  // An encoded dot is text, never a separator.
+  assert.equal(parseFragmentPassages("#page=1&text=one%2E%2E%2Etwo")[0].segments.length, 1);
+});
+
+test("an ellipsis at either end, or two in a row, is dropped", () => {
+  assert.deepEqual(parseFragmentPassages("#page=1&text=...one+two...")[0].segments, [seg("one two")]);
+  assert.deepEqual(parseFragmentPassages("#page=1&text=one......two")[0].segments, [seg("one"), seg("two")]);
+  const prefixed = parseFragmentPassages("#page=1&text=before-,...one")[0];
+  assert.deepEqual([prefixed.prefix, prefixed.segments], ["before", [seg("one")]]);
+  // Nothing but ellipses is no passage, and a segment with an empty end is malformed.
+  assert.deepEqual(parseFragmentPassages("#page=1&text=...%E2%80%A6"), []);
+  assert.deepEqual(parseFragmentPassages("#page=1&text=one...two,"), []);
+});
+
+test("a writer joins segments with ..., and they read back as themselves", () => {
+  const passage = { page: { label: "8" }, prefix: null, segments: [seg("a direction in"), seg("a beatific", "consummation")], suffix: null };
+  const written = formatFragmentPassages([passage]);
+  assert.equal(written, "p=8&text=a+direction+in...a+beatific,consummation");
+  assert.deepEqual(parseFragmentPassages(written), [passage]);
+});
+
+const ELIDED = "We have seen that the law of participation governs the earlier mind, and that the law of identity governs ours.";
+
+test("segments match in order, each after the one before it", () => {
+  const passage = (...segments: { start: string; end: string | null }[]): PassageText => ({ prefix: null, segments, suffix: null });
+  // The span runs from the first segment's start to the last one's end, the words left out inside it.
+  assert.equal(text(ELIDED, passage(seg("We have seen"), seg("the earlier mind"))), "We have seen that the law of participation governs the earlier mind");
+  // A gap may hold no words at all, as a [sic] between two segments does.
+  assert.equal(text(ELIDED, passage(seg("the law of"), seg("participation governs"))), "the law of participation governs");
+  // A segment the page holds only before the one it follows is a miss.
+  assert.equal(resolvePassage(ELIDED, passage(seg("the earlier mind"), seg("We have seen"))), null);
+  // A later segment takes its first match after the one before it: "the law of" twice.
+  assert.equal(text(ELIDED, passage(seg("the earlier mind"), seg("the law of"))), "the earlier mind, and that the law of");
+  // A shortened segment among them.
+  assert.equal(text(ELIDED, passage(seg("We have", "participation"), seg("identity governs ours"))), ELIDED.slice(0, -1));
+});
+
+test("a suffix follows the last segment, and the passage is counted apart", () => {
+  const governs = (suffix: string | null): PassageText => ({ prefix: null, segments: [seg("the law of"), seg("governs")], suffix });
+  // As Text Fragments reads `start,end,-suffix`: the first start whose rest matches, the suffix picking the later "governs".
+  assert.equal(text(ELIDED, governs("ours")), "the law of participation governs the earlier mind, and that the law of identity governs");
+  assert.equal(text(ELIDED, governs(null)), "the law of participation governs");
+  assert.equal(countPassageOccurrences(ELIDED, governs(null)), 2);
+  assert.equal(countPassageOccurrences(ELIDED, governs("ours")), 1);
 });
 
 // ---- the match -----------------------------------------------------------

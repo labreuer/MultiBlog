@@ -257,8 +257,9 @@ import is the only write: `[could not yet 'call his soul his own'](/pdf/<slug>#p
   rather than the PDF's own text: the match ignores what extraction does to words ("bea tific",
   "o f").
 - **A quote longer than eight words goes as its first three and last three**,
-  `text=a+direction+in,a+beatific+consummation`, and so does a quote elided with "…": its two
-  ends.
+  `text=a+direction+in,a+beatific+consummation`. A quote elided with "…" goes as its segments
+  joined by `...`, each shortened the same way: `text=a+direction+in...a+beatific+consummation`
+  (PDF_FRAGMENT_LINKS.md §2).
 - **A quote across a page break is two page and `text` pairs**, split where the page breaks.
 - **The import stores hrefs as written and checks none of them.** Afterwards, where the import
   ran, `npx tsx scripts/integrity/check-pdf-fragment-links.ts --doc <slug>` confirms the doc's

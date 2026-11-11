@@ -31,9 +31,9 @@ export const PASSAGE_END_WORDS = 3;
 const MAX_PREFIX_WORDS = 6;
 
 /**
- * One passage of a fragment, decoded. The four text parts are free text:
- * only their letters and digits take part in a match, so a `+`, a `%20` or a
- * stray comma inside a quote makes no difference to what they find.
+ * One passage of a fragment, decoded. Its text parts are free text: only
+ * their letters and digits take part in a match, so a `+`, a `%20` or a stray
+ * comma inside a quote makes no difference to what they find.
  */
 export type FragmentPassage = PassageText & {
   /**
@@ -44,13 +44,33 @@ export type FragmentPassage = PassageText & {
   page: PageName;
 };
 
-/** The text half of a passage: what the matcher needs, without the page. */
+/**
+ * One run of quoted words: whole, or by its first and last words
+ * (`start,end`), when nothing between them is matched.
+ */
+export type PassageSegment = { start: string; end: string | null };
+
+/**
+ * The text half of a passage: what the matcher needs, without the page.
+ *
+ * `segments` are the runs a quoter kept, in order, at least one, joined by
+ * `...` in a URL (§2). Words between two segments were left out, and there
+ * may be none at all. `prefix` comes right before the first segment and
+ * `suffix` right after the last.
+ */
 export type PassageText = {
   prefix: string | null;
-  start: string;
-  end: string | null;
+  segments: readonly PassageSegment[];
   suffix: string | null;
 };
+
+/** A passage of one segment: a quote with nothing left out, or its two ends. */
+export function onePassage(
+  start: string,
+  opts: { end?: string | null; prefix?: string | null; suffix?: string | null } = {},
+): PassageText {
+  return { prefix: opts.prefix ?? null, segments: [{ start, end: opts.end ?? null }], suffix: opts.suffix ?? null };
+}
 
 /** A range in a page's normalised text, as `position` measures one: UTF-16 offsets, end exclusive. */
 export type TextRange = { start: number; end: number };
@@ -84,26 +104,49 @@ export function parseFragmentPassages(hash: string): FragmentPassage[] {
   return passages;
 }
 
+// The separator between a passage's segments (§2): exactly three dots, or
+// `…` as the character or as `location.hash` holds one. It is read before
+// decoding, as `,` and `-` are, but `…` is the one marker read encoded too.
+const ELLIPSIS = /\.\.\.|…|%E2%80%A6/gi;
+
 /**
  * Text Fragments' grammar, `[prefix-,]start[,end][,-suffix]`, over the raw
- * (still percent-encoded) value. The markers are read before decoding, as
- * Text Fragments reads them, so an encoded `%2C` or `%2D` is text, never
- * syntax.
+ * (still percent-encoded) value, with `...` between segments (§2). The value
+ * splits on `...` first; a prefix belongs to the first segment and a suffix
+ * to the last, and each segment may be shortened to its ends with `,`. The
+ * `,` and `-` markers are read before decoding, as Text Fragments reads
+ * them, so an encoded `%2C` or `%2D` is text, never syntax. A segment with no
+ * letters or digits, as an ellipsis at either end leaves, is dropped.
  */
-function parsePassageText(raw: string): PassageText | null {
-  const tokens = raw.split(",");
+export function parsePassageText(raw: string): PassageText | null {
+  const pieces = raw.split(ELLIPSIS).map((piece) => piece.split(","));
   let prefix: string | null = null;
   let suffix: string | null = null;
-  if (tokens.length > 1 && tokens[0].endsWith("-")) prefix = tokens.shift()!.slice(0, -1);
-  if (tokens.length > 1 && tokens[tokens.length - 1].startsWith("-")) suffix = tokens.pop()!.slice(1);
-  if (tokens.length < 1 || tokens.length > 2) return null;
+  const first = pieces[0];
+  if (first.length > 1 && first[0].endsWith("-")) prefix = first.shift()!.slice(0, -1);
+  const last = pieces[pieces.length - 1];
+  if (last.length > 1 && last[last.length - 1].startsWith("-")) suffix = last.pop()!.slice(1);
 
-  const parts = [prefix, tokens[0], tokens[1] ?? null, suffix].map((part) => (part === null ? null : decodePart(part)));
-  // undefined is a part that didn't decode; "" is one with no letters or digits.
-  if (parts.some((part) => part === undefined || part === "")) return null;
-  const [decodedPrefix, start, end, decodedSuffix] = parts as (string | null)[];
-  if (start === null) return null;
-  return { prefix: decodedPrefix, start, end, suffix: decodedSuffix };
+  const segments: PassageSegment[] = [];
+  for (const [index, tokens] of pieces.entries()) {
+    if (tokens.length > 2) return null;
+    // A prefix or a suffix anywhere but the passage's own ends is no passage.
+    if (tokens.length === 2 && ((index > 0 && tokens[0].endsWith("-")) || (index < pieces.length - 1 && tokens[1].startsWith("-")))) return null;
+    const start = decodePart(tokens[0]);
+    const end = tokens.length === 2 ? decodePart(tokens[1]) : null;
+    if (start === undefined || end === undefined) return null;
+    if (end === null) {
+      // Nothing to match: an ellipsis at an end, or two in a row.
+      if (start !== "") segments.push({ start, end: null });
+    } else {
+      if (start === "" || end === "") return null;
+      segments.push({ start, end });
+    }
+  }
+  if (segments.length === 0) return null;
+  const [decodedPrefix, decodedSuffix] = [prefix, suffix].map((part) => (part === null ? null : decodePart(part)));
+  if (decodedPrefix === undefined || decodedPrefix === "" || decodedSuffix === undefined || decodedSuffix === "") return null;
+  return { prefix: decodedPrefix, segments, suffix: decodedSuffix };
 }
 
 /** `+` is a word break, as a writer emits it. Undefined for a malformed escape; "" for a part with nothing to match. */
@@ -123,17 +166,31 @@ function decodePart(part: string): string | undefined {
  * percent-encoding except for letters with no ASCII base letter.
  */
 export function formatFragmentPassages(passages: readonly FragmentPassage[]): string {
-  return passages
-    .map((passage) => {
-      const parts = [
-        passage.prefix !== null ? `${encodeWords(passage.prefix)}-` : null,
-        encodeWords(passage.start),
-        passage.end !== null ? encodeWords(passage.end) : null,
-        passage.suffix !== null ? `-${encodeWords(passage.suffix)}` : null,
-      ].filter((part): part is string => part !== null);
-      return `${formatPageName(passage.page)}&text=${parts.join(",")}`;
-    })
-    .join("&");
+  return passages.map((passage) => `${formatPageName(passage.page)}&text=${formatPassageText(passage)}`).join("&");
+}
+
+/** One passage's `text` value: its segments joined by `...`, a prefix before the first and a suffix after the last. */
+export function formatPassageText(passage: PassageText): string {
+  const segments = passage.segments
+    .map((segment) => (segment.end !== null ? `${encodeWords(segment.start)},${encodeWords(segment.end)}` : encodeWords(segment.start)))
+    .join("...");
+  return [
+    passage.prefix !== null ? `${encodeWords(passage.prefix)}-` : null,
+    segments,
+    passage.suffix !== null ? `-${encodeWords(passage.suffix)}` : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(",");
+}
+
+/**
+ * A passage's words as an answer names them: `start` and `end` for a passage
+ * of one segment, as before there were others, and `segments` for one with
+ * words left out.
+ */
+export function passageWords(passage: PassageText): { start: string; end?: string } | { segments: { start: string; end?: string }[] } {
+  const shown = passage.segments.map((segment) => ({ start: segment.start, ...(segment.end !== null ? { end: segment.end } : {}) }));
+  return shown.length === 1 ? shown[0] : { segments: shown };
 }
 
 function encodeWords(text: string): string {
@@ -209,29 +266,30 @@ function wordCharAt(source: string, offset: number, side: "before" | "after"): b
 }
 
 /**
- * Every place `needle`'s skeleton occurs in the page, as skeleton indices,
- * where the occurrence begins and ends on a word boundary of the page text and
- * on whole characters of it (a match may not begin halfway through a
- * ligature's expansion).
+ * Every place `needle`'s skeleton occurs in the page from skeleton index
+ * `from`, in order, as skeleton indices, where the occurrence begins and ends
+ * on a word boundary of the page text and on whole characters of it (a match
+ * may not begin halfway through a ligature's expansion).
  */
-function occurrences(page: string, sk: Skeleton, needle: string, from = 0): number[] {
-  const found: number[] = [];
-  if (needle === "") return found;
+function* occurrences(page: string, sk: Skeleton, needle: string, from = 0): Generator<number> {
+  if (needle === "") return;
   for (let at = sk.text.indexOf(needle, from); at >= 0; at = sk.text.indexOf(needle, at + 1)) {
     const last = at + needle.length - 1;
     if (at > 0 && sk.starts[at - 1] === sk.starts[at]) continue;
     if (last + 1 < sk.text.length && sk.ends[last + 1] === sk.ends[last]) continue;
     if (wordCharAt(page, sk.starts[at], "before")) continue;
     if (wordCharAt(page, sk.ends[last], "after")) continue;
-    found.push(at);
+    yield at;
   }
-  return found;
 }
 
 /**
  * Where a passage is on a page, as Text Fragments finds one: the first
- * occurrence of `start` that `prefix` immediately precedes, then (for a
- * range) the first `end` after it that `suffix` immediately follows. Null
+ * occurrence of its first segment's `start` that `prefix` immediately
+ * precedes, then (for a range) the first `end` after it, then each later
+ * segment the same way after the one before it, the last one followed by
+ * `suffix`. The range runs from the first segment's start to the last
+ * one's end, so the words left out between segments are inside it. Null
  * when there is none.
  *
  * `prefix` and `suffix` are compared in skeleton space too, so whatever
@@ -247,6 +305,8 @@ export function countPassageOccurrences(page: string, passage: PassageText, sk: 
   return resolveAll(page, passage, sk, false).length;
 }
 
+type SegmentKeys = { start: string; end: string | null };
+
 /**
  * Every place on the page a passage resolves to, in page order, counted apart
  * (never one inside another) — or only the first, with `firstOnly`. What the
@@ -254,37 +314,92 @@ export function countPassageOccurrences(page: string, passage: PassageText, sk: 
  * (docs/MCP.md §8), where `resolvePassage` above answers with the first.
  */
 export function resolveAll(page: string, passage: PassageText, sk: Skeleton = skeletonOf(page), firstOnly = false): TextRange[] {
-  const startKey = skeletonOf(passage.start).text;
-  const endKey = passage.end !== null ? skeletonOf(passage.end).text : null;
+  const keys: SegmentKeys[] = passage.segments.map((segment) => ({
+    start: skeletonOf(segment.start).text,
+    end: segment.end !== null ? skeletonOf(segment.end).text : null,
+  }));
   const prefixKey = passage.prefix !== null ? skeletonOf(passage.prefix).text : null;
   const suffixKey = passage.suffix !== null ? skeletonOf(passage.suffix).text : null;
   const results: TextRange[] = [];
+  if (keys.length === 0) return results;
 
-  for (const at of occurrences(page, sk, startKey)) {
+  for (const at of occurrences(page, sk, keys[0].start)) {
     // Occurrences are counted apart, never inside one another: a `start` that
     // recurs within the passage it begins ("to be able … then to be able also
     // … imagination") is the same passage, not a second one.
     const previous = results[results.length - 1];
     if (previous && sk.starts[at] < previous.end) continue;
     if (prefixKey !== null && !precededBy(page, sk, at, prefixKey)) continue;
-    let last: number | null = null;
-    if (endKey === null) {
-      const candidate = at + startKey.length - 1;
-      if (suffixKey === null || followedBy(page, sk, candidate, suffixKey)) last = candidate;
-    } else {
-      for (const endAt of occurrences(page, sk, endKey, at + startKey.length)) {
-        const candidate = endAt + endKey.length - 1;
-        if (suffixKey === null || followedBy(page, sk, candidate, suffixKey)) {
-          last = candidate;
-          break;
-        }
-      }
-    }
+    const last = passageEnd(page, sk, keys, at, suffixKey);
     if (last === null) continue;
     results.push({ start: sk.starts[at], end: sk.ends[last] });
     if (firstOnly) break;
   }
   return results;
+}
+
+/**
+ * The skeleton index of the last character of the passage whose first
+ * segment starts at `at`, or null. Each later segment is its first match
+ * after the one before it ends (§2), which is never worse for the segments
+ * after it than a later match would be. A gap may hold no words at all.
+ * Only the last segment answers to `suffix`.
+ */
+function passageEnd(page: string, sk: Skeleton, keys: readonly SegmentKeys[], at: number, suffixKey: string | null): number | null {
+  let last = segmentEnd(page, sk, keys[0], at, keys.length === 1 ? suffixKey : null);
+  for (let i = 1; i < keys.length && last !== null; i++) {
+    const segmentSuffix = i === keys.length - 1 ? suffixKey : null;
+    let found: number | null = null;
+    for (const next of occurrences(page, sk, keys[i].start, last + 1)) {
+      found = segmentEnd(page, sk, keys[i], next, segmentSuffix);
+      // Only a suffix can make a later start do better than the first.
+      if (found !== null || segmentSuffix === null) break;
+    }
+    last = found;
+  }
+  return last;
+}
+
+/** Where one segment starting at `at` ends: its start's last character, or its `end`'s first match after it; null when there is none, or `suffix` doesn't follow. */
+function segmentEnd(page: string, sk: Skeleton, key: SegmentKeys, at: number, suffixKey: string | null): number | null {
+  if (key.end === null) {
+    const candidate = at + key.start.length - 1;
+    return suffixKey === null || followedBy(page, sk, candidate, suffixKey) ? candidate : null;
+  }
+  for (const endAt of occurrences(page, sk, key.end, at + key.start.length)) {
+    const candidate = endAt + key.end.length - 1;
+    if (suffixKey === null || followedBy(page, sk, candidate, suffixKey)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Every place one segment matches on the page at or after text offset `from`,
+ * in page order and counted apart, or only the first, with `firstOnly`: what
+ * places a quotation's segments one after another across pages
+ * (src/lib/pdf-passage-pieces.ts).
+ */
+export function segmentRanges(page: string, segment: PassageSegment, from = 0, sk: Skeleton = skeletonOf(page), firstOnly = false): TextRange[] {
+  const key: SegmentKeys = { start: skeletonOf(segment.start).text, end: segment.end !== null ? skeletonOf(segment.end).text : null };
+  // The first skeleton character at or after `from`.
+  let low = 0;
+  let high = sk.starts.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (sk.starts[mid] < from) low = mid + 1;
+    else high = mid;
+  }
+  const ranges: TextRange[] = [];
+  for (const at of occurrences(page, sk, key.start, low)) {
+    const previous = ranges[ranges.length - 1];
+    if (previous && sk.starts[at] < previous.end) continue;
+    const last = segmentEnd(page, sk, key, at, null);
+    // No end after this start is none after a later one either.
+    if (last === null) break;
+    ranges.push({ start: sk.starts[at], end: sk.ends[last] });
+    if (firstOnly) break;
+  }
+  return ranges;
 }
 
 /** Whether `key`'s skeleton ends right before skeleton index `at`, and begins on a word boundary. */
@@ -315,30 +430,43 @@ function followedBy(page: string, sk: Skeleton, last: number, key: string): bool
  * no form reaches this range.
  */
 export function writerForm(page: string, range: TextRange, words?: readonly string[]): PassageText | null {
-  const sk = skeletonOf(page);
-  const passageWords = words ?? fragmentWords(page.slice(range.start, range.end));
-  if (passageWords.length === 0) return null;
+  return segmentedWriterForm(page, range, [words ?? fragmentWords(page.slice(range.start, range.end))]);
+}
 
-  const forms: { start: readonly string[]; end: readonly string[] | null }[] = [];
-  if (passageWords.length <= WHOLE_PASSAGE_MAX_WORDS) {
-    forms.push({ start: passageWords, end: null });
-  } else {
-    for (let k = PASSAGE_END_WORDS; 2 * k < passageWords.length; k++) {
-      forms.push({ start: passageWords.slice(0, k), end: passageWords.slice(-k) });
+/**
+ * The writer's form of a passage with words left out (§2): each segment's
+ * words, in order, the first segment's first word starting `range` and the
+ * last segment's last word ending it. Each segment goes as `writerForm` takes
+ * a passage, whole up to eight words and otherwise by its ends, every long
+ * segment extended alike, and a prefix only where no length tells the
+ * occurrences apart. Verified against the page, as `writerForm` is.
+ */
+export function segmentedWriterForm(page: string, range: TextRange, segments: readonly (readonly string[])[]): PassageText | null {
+  if (segments.length === 0 || segments.some((words) => words.length === 0)) return null;
+  const sk = skeletonOf(page);
+
+  // One candidate per length of the shortened ends, every segment longer than
+  // twice that shortened to it, then every segment whole.
+  const forms: PassageSegment[][] = [];
+  const longest = Math.max(...segments.map((words) => words.length));
+  if (longest > WHOLE_PASSAGE_MAX_WORDS) {
+    for (let k = PASSAGE_END_WORDS; 2 * k < longest; k++) {
+      forms.push(
+        segments.map((words) =>
+          words.length > WHOLE_PASSAGE_MAX_WORDS && 2 * k < words.length
+            ? { start: words.slice(0, k).join(" "), end: words.slice(-k).join(" ") }
+            : { start: words.join(" "), end: null },
+        ),
+      );
     }
-    forms.push({ start: passageWords, end: null });
   }
+  forms.push(segments.map((words) => ({ start: words.join(" "), end: null })));
 
   const before = fragmentWords(page.slice(Math.max(0, range.start - 400), range.start));
   for (let prefixWords = 0; prefixWords <= Math.min(MAX_PREFIX_WORDS, before.length); prefixWords++) {
     const prefix = prefixWords > 0 ? before.slice(-prefixWords).join(" ") : null;
     for (const form of forms) {
-      const candidate: PassageText = {
-        prefix,
-        start: form.start.join(" "),
-        end: form.end ? form.end.join(" ") : null,
-        suffix: null,
-      };
+      const candidate: PassageText = { prefix, segments: form, suffix: null };
       const found = resolvePassage(page, candidate, sk);
       if (found && found.start === range.start && found.end === range.end) return candidate;
     }
@@ -365,9 +493,9 @@ export function splitAcrossPages(
   for (let split = 1; split < words.length; split++) {
     const firstWords = words.slice(0, split);
     const nextWords = words.slice(split);
-    const firsts = resolveAll(firstPage, { prefix: null, start: firstWords.join(" "), end: null, suffix: null }, firstSk, false);
+    const firsts = resolveAll(firstPage, onePassage(firstWords.join(" ")), firstSk, false);
     if (firsts.length === 0) continue;
-    const next = resolvePassage(nextPage, { prefix: null, start: nextWords.join(" "), end: null, suffix: null }, nextSk);
+    const next = resolvePassage(nextPage, onePassage(nextWords.join(" ")), nextSk);
     if (!next) continue;
     return { first: firsts[firsts.length - 1], firstWords, next, nextWords };
   }

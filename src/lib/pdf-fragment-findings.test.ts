@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkPage, checkPassage, parseFragmentLinkHref, passageElsewhere, type FilePages } from "./pdf-fragment-findings";
-import { skeletonOf, type FragmentPassage } from "./pdf-fragment";
+import { onePassage, skeletonOf, type FragmentPassage } from "./pdf-fragment";
 import type { PageName } from "./pdf-open-params";
 
 // docs/PDF_FRAGMENT_LINKS.md §8 — which hrefs the check reads, and what a
@@ -14,7 +14,7 @@ const ORIGIN = "https://blog.example";
 test("an href with text is a fragment link, and one with a page or a p and no text a page link", () => {
   assert.deepEqual(parseFragmentLinkHref("/pdf/book#p=49&text=a,b", null), {
     slug: "book",
-    passages: [{ page: { label: "49" }, prefix: null, start: "a", end: "b", suffix: null }],
+    passages: [{ page: { label: "49" }, prefix: null, segments: [{ start: "a", end: "b" }], suffix: null }],
     page: null,
     unread: 0,
   });
@@ -51,7 +51,7 @@ function file(ownLabels: readonly string[] | null): FilePages {
 const LABELLED = file(["i", "1", "1", "2", ""]);
 const UNLABELLED = file([]);
 
-const passage = (page: PageName, start: string, end: string | null = null): FragmentPassage => ({ page, prefix: null, start, end, suffix: null });
+const passage = (page: PageName, start: string, end: string | null = null): FragmentPassage => ({ page, ...onePassage(start, { end }) });
 
 test("a passage is found on the first of its label's sheets that holds it", () => {
   const first = checkPassage(LABELLED, passage({ label: "1" }, "law of participation"));
@@ -99,10 +99,26 @@ test("a page link comes to its first sheet, past the end, or a label no sheet ca
 });
 
 test("the viewer's question: the one sheet outside those named that holds the passage", () => {
-  const text = { prefix: null, start: "the totem passage", end: null, suffix: null };
+  const text = { prefix: null, segments: [{ start: "the totem passage", end: null }], suffix: null };
   assert.equal(passageElsewhere(LABELLED, text, [1, 2]), 4);
   // On a sheet the link names, it isn't elsewhere.
   assert.equal(passageElsewhere(LABELLED, text, [3]), null);
   // Twice in the file is no answer.
-  assert.equal(passageElsewhere(LABELLED, { ...text, start: "the" }, []), null);
+  assert.equal(passageElsewhere(LABELLED, { ...text, segments: [{ start: "the", end: null }] }, []), null);
+});
+
+test("a segment that matches nowhere after the one before it is a miss, with where it stops", () => {
+  const elided = (...segments: string[]): FragmentPassage => ({ page: { sheet: 4 }, prefix: null, segments: segments.map((start) => ({ start, end: null })), suffix: null });
+  assert.equal(checkPassage(LABELLED, elided("Only this page", "the totem passage")).kind, "ok");
+  // The second segment is on the page, but before the first: it stops matching after the first.
+  const before = checkPassage(LABELLED, elided("the totem passage", "Only this"));
+  assert.equal(before.kind, "no-match");
+  if (before.kind !== "no-match") return;
+  assert.equal(before.matchedUpTo, null);
+  // A word the page spells differently, in a later segment: matched up to where it differs.
+  const misspelt = checkPassage(LABELLED, elided("Only this page", "the totum passage"));
+  assert.equal(misspelt.kind, "no-match");
+  if (misspelt.kind !== "no-match") return;
+  assert.equal(misspelt.matchedUpTo, "the tot");
+  assert.equal(misspelt.pageHasThere, "em passage.");
 });

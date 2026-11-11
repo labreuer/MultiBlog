@@ -1,5 +1,6 @@
 import { inlineRuns, mergeRuns, runsHaveMarks, runsText, type InlineRun } from "../../inline-markdown";
 import { formatPageName } from "../../pdf-open-params";
+import { quotationText } from "../../pdf-passage-pieces";
 import { pageNameForLabel } from "../../pdf-page-labels";
 import type { ReferenceEntry } from "../../references/entry";
 import { MAX_LIST_KEYS, referenceListPath, referencePath } from "../../references/keys";
@@ -32,9 +33,53 @@ export type CitationItem = {
 /**
  * A citation's fields. `form: "narrative"` is the author in the sentence and
  * the rest in the parentheses, "Radner (2012, p. 49)"; absent, the whole
- * citation is parenthetical.
+ * citation is parenthetical. `referent` is what a link around the citation
+ * points at (docs/CITATIONS.md, "A passage in a citation"): `quote:prev` or
+ * `quote:next`, the quotation beside it; a `/pdf/` fragment link into the
+ * work's PDF; or a link anywhere else, `/link/<id>`, a path, an https URL.
  */
-export type CitationData = { items: CitationItem[]; form?: "narrative" };
+export type CitationData = { items: CitationItem[]; form?: "narrative"; referent?: string };
+
+/** The two referents that point at a quotation in the prose beside the citation. */
+export const QUOTE_REFERENTS = ["quote:prev", "quote:next"] as const;
+export type QuoteReferent = (typeof QUOTE_REFERENTS)[number];
+
+/**
+ * What a referent is: the quotation beside the citation, a passage of the
+ * work's PDF, or a link elsewhere that the citation links to as it is. Null
+ * for anything a citation can't point at: another scheme, a protocol-relative
+ * or backslashed path, or one longer than `MAX_REFERENT_LENGTH`.
+ */
+export function referentKind(referent: string): "quote" | "pdf" | "elsewhere" | null {
+  if ((QUOTE_REFERENTS as readonly string[]).includes(referent)) return "quote";
+  if (referent.length > MAX_REFERENT_LENGTH || /[\s\\]/.test(referent)) return null;
+  if (referent.startsWith("/")) {
+    if (referent.startsWith("//")) return null;
+    try {
+      // Settled under a probe origin, so a path can't climb out of the site: `/pdf/..//host` stays on it.
+      if (new URL(referent, REFERENT_PROBE).origin !== REFERENT_PROBE) return null;
+    } catch {
+      return null;
+    }
+    return /^\/pdf\/[^/?#]+\/?(?:#|$)/.test(referent) ? "pdf" : "elsewhere";
+  }
+  try {
+    return new URL(referent).protocol === "https:" ? "elsewhere" : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a citation of these items may take a referent of this kind
+ * (docs/CITATIONS.md, "What a referent may be"): a quotation or a passage of
+ * the work's PDF only for one work, cited at a page, since the cited page is
+ * where the passage is looked for; a link elsewhere for any citation.
+ */
+export function referentAllowed(kind: "quote" | "pdf" | "elsewhere", items: readonly CitationItem[]): boolean {
+  if (kind === "elsewhere") return true;
+  return new Set(items.map((item) => item.refId)).size === 1 && items.some((item) => item.locator);
+}
 
 /** A doc's choice for its citations. */
 export type CitationStyle = { form: CitationForm };
@@ -68,6 +113,10 @@ export type CiteCandidate = {
 export const UNKNOWN_WORK = "unknown work";
 
 const MAX_ID_LENGTH = 64;
+// A `/pdf/` referent holds a passage's words; eight passages of a long quote fit well inside.
+const MAX_REFERENT_LENGTH = 2_000;
+// Resolves a referent path for the check above; never fetched.
+const REFERENT_PROBE = "https://referent.invalid";
 // No more works than a list's page takes, so a citation's link is always one.
 const MAX_ITEMS = MAX_LIST_KEYS;
 const MAX_TEXT = 200;
@@ -171,6 +220,43 @@ function validateItem(raw: unknown): CitationItem | null {
     ...(suffix ? { suffix } : {}),
     ...(raw.suppressAuthor === true ? { suppressAuthor: true } : {}),
   };
+}
+
+/**
+ * Where a citation with a referent links (docs/CITATIONS.md, "The link"), or
+ * null to link as one without:
+ *
+ * - **A link elsewhere** is the link.
+ * - **A quotation beside it** goes through the cited-page route, its words as
+ *   the query's `text`: `/references/<key>/p/49?text=…`. A locator naming more
+ *   than one page is the path whole (`/p/49–50`), which tells the route how
+ *   far the quotation may run, and its runs go whole, since only the page text
+ *   says where a break falls in one; otherwise each run longer than eight
+ *   words goes by its ends. With no quotation found it links to the page.
+ * - **A `/pdf/` passage** goes through the same route, its fragment's own page
+ *   and `text` pairs as the query, so the PDF's slug stays out of the link and
+ *   each reader is asked at the click.
+ */
+function referentHref(referent: string | undefined, cited: readonly { key: string; locator?: string }[], quotation: string | null | undefined): string | null {
+  const kind = referent ? referentKind(referent) : null;
+  if (!referent || !kind) return null;
+  if (kind === "elsewhere") return referent;
+  const [{ key, locator }] = cited;
+  if (cited.length !== 1 || !locator) return null;
+  if (kind === "quote") {
+    const several = /[–,]/.test(locator);
+    const text = quotation ? quotationText(quotation, { shorten: !several }) : null;
+    if (!text) return null;
+    return `${referencePath(key)}/p/${encodeURIComponent(several ? locator : firstPage(locator))}?text=${text}`;
+  }
+  const pairs = fragmentPairs(referent.slice(referent.indexOf("#") + 1));
+  return pairs ? `${citedPagePath(key, locator)}?${pairs}` : null;
+}
+
+/** A fragment's `page`, `p` and `text` parameters, in order and as written: what a `/pdf/` referent hands the cited-page route. Null for none. */
+export function fragmentPairs(fragment: string): string | null {
+  const kept = fragment.split("&").filter((param) => /^(?:page|p|text)=/.test(param));
+  return kept.length > 0 ? kept.join("&") : null;
 }
 
 /** Where a citation of the work with this key, at this locator, links: `/references/<key>/p/<first page>`, or the reference's page. */
@@ -311,12 +397,17 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
     const items = data.items.slice(0, MAX_ITEMS).map(validateItem);
     if (items.length === 0 || items.some((item) => item === null)) return null;
     const valid = items as CitationItem[];
+    // A referent this citation can't take isn't stored, so what is stored
+    // always reads back: the parse refuses one first (parsed-chips.ts), and
+    // an edit removing the citation's page drops a quotation's.
+    const kind = typeof data.referent === "string" ? referentKind(data.referent) : null;
+    const referent = kind && referentAllowed(kind, valid) ? { referent: data.referent as string } : {};
     // A narrative citation holds one work, with no prefix and its author
     // shown: Pandoc has no form for the others, so they aren't stored.
     if (data.form === "narrative" && valid.length === 1 && !valid[0].prefix && !valid[0].suppressAuthor) {
-      return { items: valid, form: "narrative" };
+      return { items: valid, form: "narrative", ...referent };
     }
-    return { items: valid };
+    return { items: valid, ...referent };
   },
 
   // The works. Order is not part of it: "[@a; @b]" reordered cites the same two.
@@ -340,11 +431,11 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
     return isRecord(raw) ? (raw as CitationContext) : {};
   },
 
-  render(chips, style, context) {
+  render(chips, style, context, beside = []) {
     const { form } = style;
     const { numbers, shortLabel } = citationLabelling(chips, context);
 
-    return chips.map((data): ChipRendering => {
+    return chips.map((data, chipIndex): ChipRendering => {
       const works = data.items.map((item) => context[item.refId]);
       if (works.some((work) => !work)) return { label: UNKNOWN_WORK, href: null, postHref: null, status: "unknown" };
       const known = works as CitedWork[];
@@ -407,7 +498,7 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
         if (!seen) cited.push({ id: work.id, key: work.key, ...(item.locator ? { locator: item.locator } : {}) });
         else if (!seen.locator && item.locator) seen.locator = item.locator;
       });
-      const href = cited.length === 1 ? citedPagePath(cited[0].key, cited[0].locator) : citedWorksPath(cited);
+      const href = referentHref(data.referent, cited, beside[chipIndex]?.quotation) ?? (cited.length === 1 ? citedPagePath(cited[0].key, cited[0].locator) : citedWorksPath(cited));
       return { label, ...formatted, href, postHref: href, status: "live" };
     });
   },
@@ -431,6 +522,13 @@ export const citationKind: ChipKind<CitationData, CitationStyle, CitationContext
         .map((item) => `${item.prefix ? `${escapeCitationField(item.prefix)} ` : ""}${item.suppressAuthor ? "-" : ""}${keyOf(item)}${after(item) ? `, ${after(item)}` : ""}`)
         .join("; ")}]`;
     }
-    return rendering.status === "live" ? out : `~~${out}~~`;
+    // A referent is the link around the citation: `[[@bu, p. 49]](quote:prev)`, `[@bu](/link/abc123)`.
+    const linked = data.referent ? `[${out}](${markdownDestination(data.referent)})` : out;
+    return rendering.status === "live" ? linked : `~~${linked}~~`;
   },
 };
+
+/** A link's destination as Markdown: bare, or between `<` and `>` where a space, a parenthesis or a bracket would end it. */
+export function markdownDestination(href: string): string {
+  return /[\s()<>\\]/.test(href) ? `<${href.replace(/[<>\\]/g, "\\$&")}>` : href;
+}

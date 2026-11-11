@@ -77,12 +77,76 @@ test("parse: a citation is a placeholder holding its keys, and a mention is stil
   assert.deepEqual(shape(inline("Ask [@Ada Lovelace](/authors/ada).")), ["Ask ", 'mention:"ada"', "."]);
 });
 
-test("parse: nothing in code, link text, an address or an escape is a citation", () => {
+test("parse: nothing in code, link text but a whole citation, an address or an escape is a citation", () => {
   assert.deepEqual(shape(inline("`@radner2012`")), ["@radner2012|code"]);
-  assert.deepEqual(shape(inline("[@handle](https://x.com/handle)")), ["@handle|link"]);
+  assert.deepEqual(shape(inline("[\\@handle](https://x.com/handle)")), ["@handle|link"]);
   assert.deepEqual(shape(inline("[see @x and more](https://example.com)")), ["see @x and more|link"]);
+  assert.deepEqual(shape(inline("[@x.](https://example.com) [@x said](https://example.com)")), ["@x.|link", " ", "@x said|link"]);
   assert.deepEqual(shape(inline("mail luke@example.com")), ["mail ", "luke@example.com|link"]);
   assert.deepEqual(shape(inline("\\@radner2012 and \\[\\@x\\]")), ["@radner2012 and [@x]"]);
+});
+
+test("parse: a link whose whole text is one citation is that citation, its destination the referent", () => {
+  const referentOf = (markdown: string) =>
+    inline(markdown).map((node) => (node.type === "entityChip" ? (node.attrs?.data as { referent?: string }).referent ?? "-" : `${node.text}`));
+  // The three shapes, as Pandoc reads them.
+  assert.deepEqual(shape(inline('"could not yet" [[@bu, p. 49]](quote:prev)')), ['"could not yet" ', `citation:${JSON.stringify([{ key: "bu", suffix: "p. 49" }])}`]);
+  assert.deepEqual(referentOf('"could not yet" [[@bu, p. 49]](quote:prev)'), ['"could not yet" ', "quote:prev"]);
+  assert.deepEqual(referentOf("[@bu [p. 49]](quote:next) writes"), ["quote:next", " writes"]);
+  assert.deepEqual(referentOf("as [@wimsatt1986](/link/def456) argues"), ["as ", "/link/def456", " argues"]);
+  assert.equal((inline("[@bu [p. 49]](quote:next)")[0].attrs?.data as { form?: string }).form, "narrative");
+  assert.deepEqual(referentOf("[[@a, p. 12; @b, p. 3]](/link/abc123)"), ["/link/abc123"]);
+  assert.deepEqual(referentOf("[[@bu, p. 6]](</link/a(b)>)"), ["/link/a(b)"]);
+  // A bare `[@handle](url)` is a citation too, so a library without the key refuses it (parsed-chips.ts).
+  assert.deepEqual(referentOf("[@handle](https://x.com/handle)"), ["https://x.com/handle"]);
+  // A mention is claimed first.
+  assert.deepEqual(shape(inline("[@Ada Lovelace](/authors/ada)")), ['mention:"ada"']);
+  // A comment reads no bare @key, so there only the bracketed shape is a citation.
+  const comment = markdownToCommentContent("[@bu](https://x.com/bu) [[@bu, p. 3]](quote:prev)").content?.[0].content ?? [];
+  assert.deepEqual(comment.map((node) => node.type === "entityChip" ? `chip:${(node.attrs?.data as { referent?: string }).referent}` : `${node.text}|${node.marks?.map((m) => m.type).join(",") ?? ""}`), ["@bu|link", " |", "chip:quote:prev"]);
+});
+
+test("write: a referent is the link around the citation, and a link reading as one citation is escaped", () => {
+  const { markdown, back } = roundTrip(
+    text('"x" '),
+    cite("a", { items: [{ refId: "r1", locator: "49" }], referent: "quote:prev" }),
+    text(" and "),
+    cite("b", { items: [{ refId: "r1" }], form: "narrative", referent: "/link/a(b)" }),
+    text(" and "),
+    text("@radner2012", [{ type: "link", attrs: { href: "https://x.com" } }]),
+    text(" wow!"),
+    cite("c", { items: [{ refId: "r1", locator: "5" }], referent: "quote:prev" }),
+  );
+  assert.equal(markdown, '"x" [[@radner2012, p. 49]](quote:prev) and [@radner2012](</link/a(b)>) and [\\@radner2012](https://x.com) wow\\![[@radner2012, p. 5]](quote:prev)');
+  assert.deepEqual(back, [
+    '"x" ',
+    `citation:${JSON.stringify([{ key: "radner2012", suffix: "p. 49" }])}`,
+    " and ",
+    `citation:${JSON.stringify([{ key: "radner2012" }])}`,
+    " and ",
+    "@radner2012|link",
+    " wow!",
+    `citation:${JSON.stringify([{ key: "radner2012", suffix: "p. 5" }])}`,
+  ]);
+});
+
+test("validate: a referent is kept only where the citation can take it", () => {
+  const referent = (data: Record<string, unknown>) => citationKind.validate(data)?.referent ?? null;
+  const one = { items: [{ refId: "r1", locator: "49" }] };
+  for (const kept of ["quote:prev", "quote:next", "/pdf/book#p=49&text=a...b", "/link/abc123", "/doc/x", "https://example.com/x"]) {
+    assert.equal(referent({ ...one, referent: kept }), kept, kept);
+  }
+  for (const refused of ["quote:else", "http://example.com", "javascript:alert(1)", "//evil.example/x", "/a\\b", "/a b", "mailto:x@y.z", `/link/${"x".repeat(2000)}`]) {
+    assert.equal(referent({ ...one, referent: refused }), null, refused);
+  }
+  // A quotation, or a passage of the PDF, needs one work at a page; a link elsewhere doesn't.
+  for (const items of [[{ refId: "r1" }], [{ refId: "r1", locator: "3" }, { refId: "r2", locator: "4" }]]) {
+    assert.equal(referent({ items, referent: "quote:prev" }), null);
+    assert.equal(referent({ items, referent: "/pdf/book#p=3&text=a" }), null);
+    assert.equal(referent({ items, referent: "/link/abc123" }), "/link/abc123");
+  }
+  // One work twice, one of them at a page, is one work at a page.
+  assert.equal(referent({ items: [{ refId: "r1" }, { refId: "r1", locator: "51" }], referent: "quote:next" }), "quote:next");
 });
 
 test("parse: a note's body reads citations too, and a comment's reads only the bracketed forms", () => {
