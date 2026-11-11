@@ -40,7 +40,7 @@ import { prisma } from "../src/lib/prisma";
 import { FragmentChecker } from "../src/lib/pdf-fragment-check";
 import { checkPassage, type FilePages } from "../src/lib/pdf-fragment-findings";
 import { formatFragmentPassages, parsePassageText, resolvePassage, type FragmentPassage, type PassageText } from "../src/lib/pdf-fragment";
-import { passagePieces, quotationText, type PlacedPassage } from "../src/lib/pdf-passage-pieces";
+import { passagePieces, quotationText, withoutBrackets, type PlacedPassage } from "../src/lib/pdf-passage-pieces";
 import type { PageName } from "../src/lib/pdf-open-params";
 import { pageNameForSheet, sheetsLabelled, usablePageLabels } from "../src/lib/pdf-page-labels";
 
@@ -48,16 +48,6 @@ import { pageNameForSheet, sheetsLabelled, usablePageLabels } from "../src/lib/p
 function passageFor(quote: string): PassageText | null {
   const text = quotationText(quote, { shorten: false });
   return text === null ? null : parsePassageText(text);
-}
-
-/** The quote with its brackets' letters kept, for the miss's report. */
-function withoutBrackets(passage: PassageText): PassageText {
-  const plain = (part: string) => part.replace(/[[\]]/g, "");
-  return {
-    prefix: passage.prefix,
-    segments: passage.segments.map((segment) => ({ start: plain(segment.start), end: segment.end === null ? null : plain(segment.end) })),
-    suffix: passage.suffix,
-  };
 }
 
 /** Where the passage is on one page: the sheets given, the first one's neighbours, or the one page in the file that holds it once. */

@@ -131,6 +131,18 @@ export function quotationText(quotation: string, opts: { shorten: boolean }): st
 
 // ---- the pieces, against the pages -----------------------------------------
 
+/** A passage with each bracket's letters kept and the brackets gone: how a miss is reported, and what a viewer is sent when nothing places it. */
+export function withoutBrackets(passage: PassageText): PassageText {
+  const plain = (part: string) => part.replace(/[[\]]/g, "");
+  return {
+    prefix: passage.prefix === null ? null : plain(passage.prefix),
+    segments: passage.segments.map((segment) => ({ start: plain(segment.start), end: segment.end === null ? null : plain(segment.end) })),
+    suffix: passage.suffix === null ? null : plain(passage.suffix),
+  };
+}
+
+
+
 /** A page's stored text, as the check holds it. */
 export type PieceSheet = { text: string; skeleton: Skeleton };
 

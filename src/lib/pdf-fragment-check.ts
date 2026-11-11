@@ -85,14 +85,37 @@ export class FragmentChecker {
    * text, and extracts nothing.
    */
   async sheetHolding(fileId: string, passage: PassageText, named: readonly number[]): Promise<number | null> {
+    const file = await this.fileById(fileId);
+    if (!file) return null;
+    return passageElsewhere({ pages: await this.wholeFile(file) }, passage, named);
+  }
+
+  /**
+   * The pages at `indexes` (0-based) of the file with this id, with its own
+   * labels: what a citation's passage is placed against (src/lib/cited-passage.ts).
+   * Null for a file that is deleted or isn't a PDF. Kept for the run, as the
+   * pages links name are.
+   */
+  async pagesAt(fileId: string, indexes: readonly number[]): Promise<FilePages | null> {
+    const file = await this.fileById(fileId);
+    if (!file) return null;
+    let cited = this.cited.get(file.fileId);
+    if (!cited) {
+      cited = new Map();
+      this.cited.set(file.fileId, cited);
+    }
+    const toRead = indexes.filter((index) => index >= 0 && index < file.pageCount && !cited.has(index));
+    for (const [index, page] of await this.readPages(file, toRead)) cited.set(index, page);
+    return { ...file, ownLabels: await this.labelsOf(file), pages: cited };
+  }
+
+  private fileById(fileId: string): Promise<FileRef | null> {
     let pending = this.files.get(`id:${fileId}`);
     if (!pending) {
       pending = prisma.storedFile.findUnique({ where: { id: fileId }, select: FILE_SELECT }).then((file) => (file ? this.refFor(file) : null));
       this.files.set(`id:${fileId}`, pending);
     }
-    const file = await pending;
-    if (!file) return null;
-    return passageElsewhere({ pages: await this.wholeFile(file) }, passage, named);
+    return pending;
   }
 
   private fileFor(slug: string): Promise<FileRef | null> {

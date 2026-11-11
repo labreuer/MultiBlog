@@ -10,6 +10,11 @@ import { pdfMetadata } from "@/lib/pdf-metadata";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { referenceByKey } from "@/lib/reference-data";
 import { parseReferenceSegment, referencePath } from "@/lib/references/keys";
+import { placeCitedQuotation, placedFragment } from "@/lib/cited-passage";
+import { parseCitedQuery } from "@/lib/cited-passage-query";
+import { formatPassageText } from "@/lib/pdf-fragment";
+import { FragmentChecker } from "@/lib/pdf-fragment-check";
+import { withoutBrackets } from "@/lib/pdf-passage-pieces";
 
 // docs/CITATIONS.md, "Pages" — what a reference's public page can't show
 // everyone: the docs and notes citing the work, and the work's PDF, for one
@@ -49,10 +54,19 @@ function pageLabelsOf(stored: unknown): string[] | null {
  * one work. `segment` is read as the page reads it, so `~<alias>` is the
  * alias (docs/CITATIONS.md, "The page").
  *
+ * `query` is the link's raw query (src/lib/cited-passage-query.ts). A
+ * `/pdf/` referent's page and `text` pairs become the PDF's fragment as they
+ * are. A quotation is placed on the cited page, and on the pages after it
+ * that a locator of several pages names, from the stored page text
+ * (`placeCitedQuotation`): its brackets settled, split where a page breaks,
+ * each piece in the writer's form with its own page. A quotation the page
+ * doesn't hold goes as it is, its brackets' letters kept, so the viewer says
+ * it isn't there and looks for it elsewhere (docs/PDF_FRAGMENT_LINKS.md §6).
+ *
  * Nothing about the PDF reaches a viewer who may not read it: their answer
- * is the one a reference with no PDF gives.
+ * is the one a reference with no PDF gives, whatever the query.
  */
-export async function citedPageTarget(actor: Actor | null, segment: string, page: string): Promise<string | null> {
+export async function citedPageTarget(actor: Actor | null, segment: string, page: string, query = ""): Promise<string | null> {
   // Shape first, as the reference's page checks it: a key that can't be one costs no query.
   const parsed = parseReferenceSegment(segment);
   if (!parsed || parsed.kind === "list") return null;
@@ -74,7 +88,15 @@ export async function citedPageTarget(actor: Actor | null, segment: string, page
   // citation lands on the page the labels name and not on the sheet of that
   // number.
   const pageLabels = pageLabelsOf(file.pageLabels) ?? (await pdfMetadata(file.id))?.pageLabels ?? null;
-  return pdfPageHref({ slug: file.slug, pageLabels, pageCount: file.pageCount }, first) || fallback;
+  const pageHref = pdfPageHref({ slug: file.slug, pageLabels, pageCount: file.pageCount }, first);
+  if (!pageHref || file.pageCount === null) return fallback;
+
+  const asked = parseCitedQuery(query);
+  if (asked.kind === "pairs") return `/pdf/${file.slug}#${asked.fragment}`;
+  if (asked.kind !== "quotation") return pageHref;
+  const { placed, pages } = await placeCitedQuotation(new FragmentChecker(), { id: file.id, pageCount: file.pageCount, ownLabels: pageLabels }, page, asked.text);
+  if (placed && pages) return `/pdf/${file.slug}#${placedFragment(placed, pages)}`;
+  return `${pageHref}&text=${formatPassageText(withoutBrackets(asked.text))}`;
 }
 
 export async function referenceCitedBy(actor: Actor, referenceId: string): Promise<ReferenceCitedBy> {

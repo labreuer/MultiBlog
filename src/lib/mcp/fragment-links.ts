@@ -1,4 +1,11 @@
+import type { JSONContent } from "@tiptap/core";
+import { checkCitedHref } from "@/lib/cited-passage";
+import { parseCitedHref } from "@/lib/cited-passage-query";
+import { chipInputsForBody } from "@/lib/entity-chips/context";
+import { CITATION, referentKind } from "@/lib/entity-chips/kinds/citation";
+import { chipMarkdowns, chipRenderings, chipsInJSON } from "@/lib/entity-chips/renderings";
 import { canUserReadFile } from "@/lib/file-authz";
+import { prismaIncludingDeleted } from "@/lib/prisma";
 import { resolveFileParam } from "@/lib/file-slug";
 import { passageWords } from "@/lib/pdf-fragment";
 import { FragmentChecker } from "@/lib/pdf-fragment-check";
@@ -36,9 +43,15 @@ function unlabelled(href: string, page: PageName, sheet: number, usableLabels: b
     : [];
 }
 
-/** Checks each fragment link and page link in `bodies`; refuses a miss, and answers warnings for a passage its page repeats and for a `p=` on a PDF without labels. */
+/**
+ * Checks each fragment link and page link in `bodies`, and each citation's
+ * passage (docs/CITATIONS.md, "Its checks"); refuses a miss, and answers
+ * warnings for a passage its page repeats and for a `p=` on a PDF without
+ * labels. A `/pdf/` referent is checked as the fragment link it is.
+ */
 export async function checkFragmentLinks(actor: Actor, bodies: unknown[]): Promise<string[]> {
-  const hrefs = [...new Set(bodies.flatMap((body) => linkHrefsIn(body)))];
+  const citations = await citationsIn(bodies);
+  const hrefs = [...new Set([...bodies.flatMap((body) => linkHrefsIn(body)), ...citations.flatMap((citation) => (citation.kind === "pdf" ? [citation.referent] : []))])];
   const checker = new FragmentChecker();
   const warnings: string[] = [];
   for (const href of hrefs) {
@@ -94,6 +107,89 @@ export async function checkFragmentLinks(actor: Actor, bodies: unknown[]): Promi
         warnings.push(`${href}: its passage occurs ${passage.occurrences} times on page ${passage.sheet}; the link points at the first.`);
       }
       warnings.push(...unlabelled(href, page, passage.sheet, finding.usableLabels));
+    }
+  }
+  warnings.push(...(await checkCitations(actor, checker, citations)));
+  return warnings;
+}
+
+/** A citation in a body that points at a passage: what it said, the link it renders, its quotation's absence, and its work. */
+type CitationToCheck = { kind: "quote" | "pdf"; referent: string; markdown: string; href: string | null; quotationFound: boolean; refId: string };
+
+/** Every citation in `bodies` whose referent is a quotation or a `/pdf/` passage, with the link its rendering gives it. */
+async function citationsIn(bodies: unknown[]): Promise<CitationToCheck[]> {
+  const found: CitationToCheck[] = [];
+  for (const body of bodies) {
+    if (!body || typeof body !== "object") continue;
+    const json = body as JSONContent;
+    const chips = chipsInJSON(json);
+    if (!chips.some((chip) => chip.kind === CITATION && typeof chip.data.referent === "string")) continue;
+    const inputs = await chipInputsForBody(json);
+    const renderings = chipRenderings(chips, inputs.styles, inputs.context);
+    const markdown = chipMarkdowns(chips, inputs.styles, inputs.context);
+    chips.forEach((chip, index) => {
+      const referent = chip.data.referent;
+      const kind = chip.kind === CITATION && typeof referent === "string" ? referentKind(referent) : null;
+      if (!kind || kind === "elsewhere" || typeof referent !== "string") return;
+      found.push({
+        kind,
+        referent,
+        markdown: markdown.get(chip.iid) ?? referent,
+        href: renderings[index].href,
+        quotationFound: chip.quotation !== null,
+        refId: String((chip.data.items as { refId?: unknown }[] | undefined)?.[0]?.refId ?? ""),
+      });
+    });
+  }
+  return found;
+}
+
+/**
+ * Each citation's passage against its work's PDF, as the cited-page route
+ * would place it: a quotation the cited page doesn't hold, and a `/pdf/`
+ * referent naming another work's PDF, are refused as `no_match`. A PDF the
+ * actor can't read is not asked about, and one the work hasn't got only
+ * warns, since its passage is never shown.
+ */
+async function checkCitations(actor: Actor, checker: FragmentChecker, citations: readonly CitationToCheck[]): Promise<string[]> {
+  const warnings: string[] = [];
+  for (const citation of citations) {
+    if (citation.kind === "quote" && !citation.quotationFound) {
+      warnings.push(`${citation.markdown}: no quotation is ${citation.referent === "quote:prev" ? "right before" : "after"} it, so it links to its page.`);
+      continue;
+    }
+    if (citation.kind === "pdf") {
+      const reference = await prismaIncludingDeleted.reference.findUnique({ where: { id: citation.refId }, select: { fileId: true } });
+      const link = parseFragmentLinkHref(citation.referent, appOrigin());
+      const named = link ? await resolveFileParam(link.slug, { id: true }) : null;
+      if (!reference?.fileId) {
+        warnings.push(`${citation.markdown}: its work has no PDF, so its passage is never shown.`);
+        continue;
+      }
+      if (named && named.file.id !== reference.fileId) {
+        throw new ApiError("no_match", `${citation.markdown} names a PDF other than its work's own, which is where its passage is looked for.`, { link: citation.referent });
+      }
+      // Its passages were checked as the fragment link it is, above.
+      continue;
+    }
+    const cited = citation.href ? parseCitedHref(citation.href, null) : null;
+    if (!cited) continue;
+    const finding = await checkCitedHref(checker, cited, { canRead: (file) => canUserReadFile(actor.userId, actor.role, file) });
+    if (finding.kind === "no-pdf") warnings.push(`${citation.markdown}: its work has no PDF, so its quotation is never shown.`);
+    else if (finding.kind === "unreadable-query") throw invalid(`${citation.markdown}: its quotation makes no passage.`);
+    else if (finding.kind === "no-such-page") {
+      throw new ApiError("no_match", `${citation.markdown} cites page ${finding.page}, ${NO_SUCH_LABEL}.`, { link: citation.href });
+    } else if (finding.kind === "missed") {
+      throw new ApiError("no_match", `${citation.markdown}: its quotation isn't on p. ${cited.page}, the page it cites (sheet ${finding.sheet} of the PDF).`, {
+        link: citation.href,
+        matchedUpTo: finding.matchedUpTo,
+        pageHasThere: finding.pageHasThere,
+        ...(finding.foundOnPage !== null ? { foundOnPage: finding.foundOnPage } : {}),
+      });
+    } else if (finding.kind === "placed") {
+      for (const piece of finding.passages) {
+        if (piece.occurrences > 1) warnings.push(`${citation.markdown}: its quotation occurs ${piece.occurrences} times on page ${piece.sheet}; the link points at the first.`);
+      }
     }
   }
   return warnings;
