@@ -1146,6 +1146,36 @@ hold chips, a PENDING comment notifies nobody (MENTIONS.md, Later).
 
 ---
 
+## Pandoc prints a title's inner quotation marks as written, from a `.bib` download (docs/CITATIONS.md, "Downloads")
+
+citation-js's writer braces a title's capitalised words, which is BibTeX's protection against a
+style that lowercases them, and it takes a quotation mark beside a word into the braces:
+`title = {A {“Black} {Box”} of {Stakeholder} {Thinking}}`. Pandoc (3.7.0.2) then prints the
+marks as written. Under its default style the title comes out as “A “Black Box” of Stakeholder
+Thinking.”, double marks inside double. From `references.json` the same record prints “A
+‘Black Box’ of Stakeholder Thinking.” In a bulk export of three docs citing 81 works, checked
+on 2026-11-10, that was the only line the two files printed differently.
+
+Left as it is for now. The fix would be one more step in `writeBib`'s pass after the writer
+(`src/lib/references/export.ts`): a quotation mark at either edge of a braced word moves
+outside the braces, `“{Black} {Box}”`. Pandoc makes those marks single. It also does for the
+same title with no braces at all, with `\enquote{…}` and with TeX's own quotation marks. Not
+checked: what biber and classic `bibtex` print for the moved marks.
+
+The same braces protect less in Pandoc than in BibTeX:
+
+- Pandoc keeps a brace as case protection only around a word holding an apostrophe,
+  `{Bhaskar’s}`, and drops it around a plain word, `{Bunge}`. So under a style that puts titles
+  in sentence case it lowercases a proper noun from either file: the CSL-JSON marks none, and
+  most of the biblatex file's marks aren't read.
+- A brace around an initial changes the word after it. `{Donald} {T}. {Campbell}` prints as
+  "donald t. Campbell", where the same title with no braces prints as "donald t. campbell".
+
+Protecting a proper noun for Pandoc would take a mark on the stored title, which CSL-JSON writes
+as `<span class="nocase">`. Whether the library keeps one through an import is not checked.
+
+---
+
 ## Upstream follow-ups from the e2e flakiness work
 
 **Status:** the local half is done. This item used to be "`npm run e2e` fails ~1 run in 2 on a

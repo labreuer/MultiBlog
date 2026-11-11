@@ -953,12 +953,14 @@ reference's record with another, each through `replaceReference` (`reference-wri
     - TeX for every character the writer has TeX for (`asciiOnly`, its default), since every
       BibTeX reads that: `{\" u}` for "ü". "H₂O" is written "H2O".
     - **A character it has no TeX for stays in the file as UTF-8.** The writer writes such a
-      character as nothing: a Cyrillic author comes out as `{,}`, a Japanese title as `{}`, and
-      a Latin word loses its `ə`. So a pass before the writer puts a marker of ASCII letters in
-      place of each, and a pass after it puts the character back. Which characters those are is
-      read from the writer's own tables (`lib/input/constants.js`). `bibtexu` and biber read
-      the file whole. Old `bibtex` carries the bytes through and cuts an initial by the byte,
-      so a style that abbreviates given names breaks such a name.
+      character as nothing: a Cyrillic author comes out as `{, }`, a Japanese title as `{}`, and
+      a Latin word loses its `ə`. A given name's `ё` or `й` leaves its accent with no letter
+      under it, `{\" }`, which stops LaTeX. So a pass before the writer puts a marker of ASCII
+      letters in place of each, and a pass after it puts the character back. Which characters
+      those are is read from the writer's own tables (`lib/input/constants.js`). `bibtexu` and
+      biber read the file whole. Old `bibtex` carries the bytes through and cuts a letter by
+      the byte wherever a style takes a name's first letters. So `abbrv` breaks such a name's
+      initials, and `alpha` the label it makes from the family names.
     - **Both of a name's particles are written as BibTeX's `von` part**, `de La Gaulle,
       Charles`. The writer alone leaves a dropping particle out, so a pass before it joins the
       two. BibTeX has one kind of particle, so the file read back gives both as non-dropping.
@@ -985,6 +987,11 @@ reference's record with another, each through `replaceReference` (`reference-wri
     - **Every character outside ASCII stays as UTF-8**, by the same markers, put in place of
       all of them: what biber and Pandoc read, and what a biblatex file holds. But for a page
       range, left to the writer, which writes its en dash `--`, every reader's range.
+    - **A quotation mark inside a title is braced with its word.** The writer braces a title's
+      capitalised words, in this file and in BibTeX's, and takes a mark beside one into the
+      braces: `{A {“Black} {Box”} of {Stakeholder} {Thinking}}`. Pandoc then prints the marks
+      as written, double inside a quoted title, where from the CSL-JSON file it makes them
+      single (TODO.md, "Pandoc prints a title's inner quotation marks as written").
     - Rejected: `asciiOnly` off. The writer then escapes nothing, so a title's `&`, `%`, `#` or
       `_` goes into the file bare and stops LaTeX.
     - **After it**, a pass adds an arXiv id as `eprint` with `eprinttype = {arxiv}`, unless the
@@ -1073,8 +1080,9 @@ reads a public page doesn't fetch four files for each work on it.
 - **The bulk export** ([MCP.md](MCP.md) §5): the tar carries `references.json` and
   `references.biblatex.bib`, every work the exported docs cite, so
   `pandoc --citeproc --bibliography=references.json <doc>.md` resolves the `[@key]`s its
-  Markdown holds. The manifest lists both. The second is biblatex, the fuller of the two, and
-  Pandoc reads it as well.
+  Markdown holds. The manifest lists both. The second is biblatex, the fuller of the two `.bib`
+  forms, and Pandoc reads it as well. A title's inner quotation marks print right only from
+  the first (biblatex, above).
 
 **MCP:** `find_refs` keeps answering text, and the bulk export is an agent's way to the records.
 
@@ -1107,15 +1115,23 @@ reads a public page doesn't fetch four files for each work on it.
     written. Its receipts answer it record by record, as they answer the batch above.
   - Not covered: `Frank_1970` not finding `FrankX1970`, an alias with an accented capital, and
     a rename in case alone, which need the database and so no unit test.
+- **Checked by hand**, 2026-11-10, with TeX Live 2026 (`bibtex` 0.99e, `bibtexu` 4.03, biber
+  2.22) and Pandoc 3.7.0.2:
+  - a Cyrillic author and a Japanese title: the BibTeX file through `bibtex`, `bibtexu` and
+    biber, the biblatex file through biber, and all three files through Pandoc. Each prints
+    them whole, but for old `bibtex` under `abbrv` and `alpha` (BibTeX, above);
+  - `export.test.ts`'s chapter and article, dated to the day, through `bibtex` under `plain`,
+    `unsrt`, `alpha` and `abbrv`. The month prints by name with the day left out, and the
+    chapter with its editor and its book's title. With the writer's own `@inbook` and braced
+    `month`, the same styles print "jun 15 1990" and leave the editor and the book's title out;
+  - the bulk export's Markdown with each of its two files, for three docs citing 81 works,
+    through `pandoc --citeproc`: every key resolved, with no warning.
 - **Not yet checked by hand:**
   - a chapter and an article dated to the day, as BibTeX, into Zotero, whose reading of `day`
     and of `@incollection` is unchecked. Its Connector check (Later) read the writer's output
     without the pass;
-  - the same two through `bibtex` with a standard style, for what the style prints;
   - a title and an abstract over 70 characters, as RIS, into Zotero. The Connector check's
-    longest value was 69;
-  - a Cyrillic author and a Japanese title, as BibTeX through `bibtexu` and as biblatex
-    through biber and through Pandoc.
+    longest value was 69.
 
 ## Later
 
