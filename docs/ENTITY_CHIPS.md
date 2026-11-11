@@ -289,9 +289,10 @@ selection across it quotes it, and highlights cover it. One such node serves eve
 2. **A rendering is a pure function** of the chip, the effective style, the chip context and the
    doc's order. It is the same function in the browser and on the servers, and it never depends
    on the viewer. A planned citation whose referent is `quote:prev` or `quote:next` stretches
-   this: its link is computed from the text beside the chip as well (CITATIONS.md, "Planned: a
-   passage in a citation"). That text is in the same body as the chip, so whatever renders the
-   chip has it, but an edit to the quotation changes the citation's link.
+   this: its link is computed from the quotation beside the chip as well (CITATIONS.md,
+   "Planned: a passage in a citation"). The kind's `render` still reads no doc. Each caller of
+   `chipRenderings` finds the quotation in the body it holds, with one shared finder, and
+   attaches it to the chip's occurrence. An edit to the quotation changes the citation's link.
 3. **A chip's anchor text is U+FFFC, forever.** It is the node's `leafText`, so every DOC_RANGE
    path in `src/lib/anchors/`, which calls `textBetween(…, " ")` with no leaf argument, gets it
    with no flattener changed. `quotedTextAt` passes a leaf argument of its own, so it changes
