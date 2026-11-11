@@ -4981,6 +4981,9 @@ link", Keys (the list's address and the `~` form) and Pages.**
 Planned 2026-11-10: `p=<label>` in a PDF link beside `page=`'s sheet, so a link names the page a
 reader sees printed on it and survives a replacement that adds or removes sheets; and `...`
 between the segments of a `text` value, so a link marks the words a quotation leaves out.
-Built 2026-11-10: `p=`, with search's page links and the cited-page redirect writing it. **As
-built: [docs/PDF_FRAGMENT_LINKS.md](docs/PDF_FRAGMENT_LINKS.md) §2 ("Which sheet"), §6, §8,
-§9, and §12 for the departures.** Elided passages are still a plan: **§13 there.**
+Built 2026-11-10: `p=`, with search's page links and the cited-page redirect writing it. Built
+2026-11-10, with a citation's passage: `...`, all but how the viewer shows the gaps. **As
+built: [docs/PDF_FRAGMENT_LINKS.md](docs/PDF_FRAGMENT_LINKS.md) §2 ("Which sheet", "A
+quotation's segments"), §4, §6, §8, §9, and §12 for the departures; the viewer's gaps are
+still a plan, §13 there. A citation's passage: [docs/CITATIONS.md](docs/CITATIONS.md), "A
+passage in a citation".**

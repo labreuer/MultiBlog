@@ -151,6 +151,13 @@
   border-radius: 2px;
 }
 
+/* The quotation an open citation points at (CitePopover.tsx), while its popover is open: a decoration only. */
+.prose :global(.cite-quotation) {
+  background: var(--accent-wash);
+  border-radius: 2px;
+  box-shadow: 0 1px 0 var(--accent-outline);
+}
+
 .prose :global(.quote-indicator) {
   display: inline-flex;
   align-items: center;

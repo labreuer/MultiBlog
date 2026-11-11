@@ -3,7 +3,8 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { useEditorState, type Editor } from "@tiptap/react";
-import { NodeSelection, type EditorState } from "@tiptap/pm/state";
+import { NodeSelection, Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { IconX } from "@tabler/icons-react";
 import { searchCitable } from "@/app/actions/references";
@@ -12,13 +13,16 @@ import {
   CITATION,
   citationKind,
   normalizeLocator,
+  referentAllowed,
+  referentKind,
   type CitationData,
   type CitationItem,
   type CiteCandidate,
   type CitedWork,
 } from "@/lib/entity-chips/kinds/citation";
 import { chipRenderingIn, entityChipKey } from "@/lib/entity-chips/node";
-import { ENTITY_CHIP } from "@/lib/entity-chips/types";
+import { chipsIn } from "@/lib/entity-chips/renderings";
+import { ENTITY_CHIP, type Quotation } from "@/lib/entity-chips/types";
 import { popoverBoundsElement } from "@/lib/popover-placement";
 import { splitLocator, type CiteSource } from "./CiteMenu";
 import styles from "./CitePopover.module.css";
@@ -39,6 +43,11 @@ import styles from "./CitePopover.module.css";
 // Open while the editor has focus and its selection is the chip, and after
 // that while focus is in the popover: `pinned` is the chip a press inside it
 // kept open as the editor's blur lands.
+//
+// "Points at" is the citation's referent (docs/CITATIONS.md, "A passage in a
+// citation"): nothing, the quotation before or after it, or a link. While the
+// popover is open on a citation pointing at a quotation, the quotation the
+// finder found is highlighted in the editor, by a decoration only.
 //
 // A doc's or note's popover searches the library and seeds the page's chip
 // surface. A comment's editor names no surface and hands over a `source` of
@@ -76,7 +85,43 @@ type Open = {
   data: CitationData;
   label: string;
   works: (CitedWork | undefined)[];
+  /** The quotation a `quote:*` referent points at, as the finder found it; undefined for any other referent. */
+  quotation?: Quotation | null;
 };
+
+// The highlight over the quotation the open citation points at: a range set
+// by the popover, mapped through edits until the popover sets the next one.
+const quotationKey = new PluginKey<{ from: number; to: number } | null>("citeQuotation");
+
+function quotationPlugin(): Plugin {
+  return new Plugin<{ from: number; to: number } | null>({
+    key: quotationKey,
+    state: {
+      init: () => null,
+      apply(tr, range) {
+        const meta = tr.getMeta(quotationKey) as { from: number; to: number } | null | undefined;
+        if (meta !== undefined) return meta;
+        if (!range || !tr.docChanged) return range;
+        const from = tr.mapping.map(range.from, 1);
+        const to = tr.mapping.map(range.to, -1);
+        return to > from ? { from, to } : null;
+      },
+    },
+    props: {
+      decorations(state) {
+        const range = quotationKey.getState(state);
+        if (!range || range.to > state.doc.content.size) return null;
+        return DecorationSet.create(state.doc, [Decoration.inline(range.from, range.to, { class: "cite-quotation" })]);
+      },
+    },
+  });
+}
+
+/** A quotation as the popover names it: its words, cut short. */
+function quoted(text: string): string {
+  const words = text.replace(/\s+/g, " ").trim();
+  return words.length > 80 ? `${words.slice(0, 77)}…` : words;
+}
 
 /** A text field that writes when it is left or Enter is pressed, and Escape puts back. */
 function FieldInput({ label, value, onCommit, inputRef }: { label: string; value: string; onCommit: (value: string) => void; inputRef?: Ref<HTMLInputElement> }) {
@@ -205,9 +250,36 @@ export default function CitePopover({
       const found = iid ? findCitation(e.state, iid) : null;
       if (!iid || !found) return null;
       const works = (entityChipKey.getState(e.state)?.inputs.context[CITATION] ?? {}) as Record<string, CitedWork>;
-      return { iid, pos: found.pos, data: found.data, label: chipRenderingIn(e.state, iid)?.label ?? "", works: found.data.items.map((item) => works[item.refId]) };
+      // The finder's answer for this chip, only while it points at a quotation: it reads the whole doc.
+      const quotation = found.data.referent && referentKind(found.data.referent) === "quote" ? (chipsIn(e.state.doc).find((chip) => chip.iid === iid)?.quotation ?? null) : undefined;
+      return {
+        iid,
+        pos: found.pos,
+        data: found.data,
+        label: chipRenderingIn(e.state, iid)?.label ?? "",
+        works: found.data.items.map((item) => works[item.refId]),
+        quotation,
+      };
     },
   });
+
+  // The quotation highlight, registered once per editor and set from what is open.
+  useEffect(() => {
+    if (disabled) return;
+    editor.registerPlugin(quotationPlugin());
+    return () => {
+      if (!editor.isDestroyed) editor.unregisterPlugin(quotationKey);
+    };
+  }, [editor, disabled]);
+  const highlightFrom = open?.quotation?.from ?? null;
+  const highlightTo = open?.quotation?.to ?? null;
+  useEffect(() => {
+    if (disabled || editor.isDestroyed || !quotationKey.get(editor.state)) return;
+    const range = highlightFrom !== null && highlightTo !== null && highlightTo > highlightFrom ? { from: highlightFrom, to: highlightTo } : null;
+    const current = quotationKey.getState(editor.state);
+    if (current?.from === range?.from && current?.to === range?.to) return;
+    editor.view.dispatch(editor.state.tr.setMeta(quotationKey, range).setMeta("addToHistory", false));
+  }, [editor, disabled, highlightFrom, highlightTo]);
 
   // Enter on a selected citation moves into the popover, rather than replacing the chip with a line break.
   useEffect(() => {
@@ -239,11 +311,17 @@ export default function CitePopover({
 
   const openIid = open?.iid ?? null;
   const openPos = open?.pos ?? null;
+  // Why the last write left the citation pointing at nothing, when it did.
+  const [referentNote, setReferentNote] = useState<string | null>(null);
+  // Whether "A link" is chosen with nothing typed in it yet.
+  const [linkChosen, setLinkChosen] = useState(false);
   // Said only until the popover closes or moves to another citation.
   const [movedFor, setMovedFor] = useState<string | null>(null);
   if (movedFor !== openIid) {
     setMovedFor(openIid);
     setMoved(null);
+    setReferentNote(null);
+    setLinkChosen(false);
   }
   useLayoutEffect(() => {
     if (openIid === null || openPos === null) return;
@@ -272,10 +350,25 @@ export default function CitePopover({
   /** Writes the citation's fields, as its kind stores them; a value the kind refuses changes nothing. */
   const write = (next: CitationData) => {
     setMoved(null);
+    setReferentNote(null);
     const data = citationKind.validate(next);
     const at = findCitation(editor.state, open.iid);
     if (!data || !at) return;
+    // Validation keeps no referent the citation can't take (docs/CITATIONS.md, "What a referent may be"): say so.
+    if (next.referent !== undefined && data.referent === undefined) {
+      setReferentNote(
+        referentKind(next.referent) === null
+          ? "A citation's link is a /pdf/ passage, a /link/, a path on this site or an https URL."
+          : "A quotation or a PDF passage is looked for on the cited page, so it needs one work at a page. It points at nothing now.",
+      );
+    }
     editor.view.dispatch(editor.state.tr.setNodeAttribute(at.pos, "data", data));
+  };
+  /** The citation's fields with its referent set, or gone. */
+  const pointAt = (referent: string | null) => {
+    const { referent: _was, ...rest } = open.data;
+    void _was;
+    write(referent ? { ...rest, referent } : rest);
   };
   const writeItem = (index: number, change: Partial<CitationItem>) => {
     const items = open.data.items.map((item, i) => {
@@ -300,6 +393,8 @@ export default function CitePopover({
   };
 
   const narrative = open.data.form === "narrative";
+  const quoteAllowed = referentAllowed("quote", open.data.items);
+  const linkReferent = !!open.data.referent && referentKind(open.data.referent) !== "quote";
   // Pandoc's narrative form holds one work, with its author shown and nothing before it (docs/CITATIONS.md, "The chip").
   const narrativeAllowed = narrativeForm && open.data.items.length === 1 && !open.data.items[0].prefix && !open.data.items[0].suppressAuthor;
 
@@ -334,7 +429,17 @@ export default function CitePopover({
       <fieldset className={styles.form}>
         <legend className={styles.fieldLabel}>Shown</legend>
         <label>
-          <input type="radio" name={`form-${open.iid}`} checked={!narrative} onChange={() => write({ items: open.data.items })} /> In parentheses
+          <input
+            type="radio"
+            name={`form-${open.iid}`}
+            checked={!narrative}
+            onChange={() => {
+              const { form: _form, ...rest } = open.data;
+              void _form;
+              write(rest);
+            }}
+          />{" "}
+          In parentheses
         </label>
         <label
           title={
@@ -346,11 +451,59 @@ export default function CitePopover({
             name={`form-${open.iid}`}
             checked={narrative}
             disabled={!narrativeAllowed}
-            onChange={() => write({ items: open.data.items, form: "narrative" })}
+            onChange={() => write({ ...open.data, form: "narrative" })}
           />{" "}
           In the sentence
         </label>
         {!narrativeForm && <p className={styles.note}>In a comment, a citation is always in parentheses.</p>}
+      </fieldset>
+      <fieldset className={styles.form}>
+        <legend className={styles.fieldLabel}>Points at</legend>
+        <label>
+          <input
+            type="radio"
+            name={`referent-${open.iid}`}
+            checked={!open.data.referent && !linkChosen}
+            onChange={() => {
+              setLinkChosen(false);
+              pointAt(null);
+            }}
+          />{" "}
+          Nothing
+        </label>
+        {(["quote:prev", "quote:next"] as const).map((referent) => (
+          <label key={referent} title={quoteAllowed ? undefined : "A quotation is looked for on the cited page: cite one work at a page."}>
+            <input
+              type="radio"
+              name={`referent-${open.iid}`}
+              checked={open.data.referent === referent}
+              disabled={!quoteAllowed}
+              onChange={() => {
+                setLinkChosen(false);
+                pointAt(referent);
+              }}
+            />{" "}
+            {referent === "quote:prev" ? "The quotation before" : "The quotation after"}
+          </label>
+        ))}
+        <label>
+          <input type="radio" name={`referent-${open.iid}`} checked={linkReferent || linkChosen} onChange={() => setLinkChosen(true)} /> A link
+        </label>
+        {(linkReferent || linkChosen) && (
+          <div className={styles.link}>
+            <FieldInput label="Link" value={linkReferent ? (open.data.referent ?? "") : ""} onCommit={(value) => pointAt(value.trim() || null)} />
+          </div>
+        )}
+        {open.quotation !== undefined && (
+          <p className={styles.note} role="status">
+            {open.quotation ? `“${quoted(open.quotation.text)}”` : "There is no quotation there, so it links to its page."}
+          </p>
+        )}
+        {referentNote && (
+          <p className={styles.moved} role="status">
+            {referentNote}
+          </p>
+        )}
       </fieldset>
       {open.data.items.map((item, index) => {
         const work = open.works[index];
@@ -370,7 +523,7 @@ export default function CitePopover({
                   title="Remove this work"
                   onClick={() => {
                     keepFocus();
-                    write({ items: open.data.items.filter((_, i) => i !== index) });
+                    write({ ...open.data, items: open.data.items.filter((_, i) => i !== index) });
                   }}
                 >
                   <IconX size={14} />
@@ -414,7 +567,7 @@ export default function CitePopover({
           onPick={(candidate, locator) => {
             keepFocus();
             seed(candidate.work);
-            write({ items: [...open.data.items, { refId: candidate.work.id, ...(locator ? { locator } : {}) }] });
+            write({ ...open.data, items: [...open.data.items, { refId: candidate.work.id, ...(locator ? { locator } : {}) }] });
           }}
         />
       )}
