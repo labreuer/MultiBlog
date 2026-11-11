@@ -77,7 +77,7 @@ export function usePdfFragment(handle: PdfViewerHandle | null, fileId: string): 
       if (misses.length > 0) {
         const answers = await locateFragmentMisses(
           fileId,
-          misses.map(({ passage: { prefix, start, end, suffix }, named }) => ({ passage: { prefix, start, end, suffix }, named })),
+          misses.map(({ passage: { prefix, segments, suffix }, named }) => ({ passage: { prefix, segments, suffix }, named })),
         ).catch((error: unknown) => {
           console.warn("[pdf] couldn't ask where a linked passage is instead:", error);
           return [];

@@ -21,8 +21,11 @@
 //     where the break falls, which the page's folio and running head would
 //     otherwise hide (§5).
 //
-// A quote elided with "…" or "..." is read as its first words and its last,
-// the `start,end` form, and nothing between them is matched.
+// A quote elided with "…" or "..." is read with its words left out (§2): its
+// segments, in order, each the first match after the one before it. A
+// bracket standing alone is a gap too, and one attached to a word is tried
+// with its letters and without, as a citation's passage is
+// (src/lib/pdf-passage-pieces.ts).
 //
 // Read-only, and it reads as the operator, like the integrity check.
 //
@@ -36,69 +39,42 @@ import "dotenv/config";
 import { prisma } from "../src/lib/prisma";
 import { FragmentChecker } from "../src/lib/pdf-fragment-check";
 import { checkPassage, type FilePages } from "../src/lib/pdf-fragment-findings";
-import {
-  countPassageOccurrences,
-  formatFragmentPassages,
-  fragmentWords,
-  resolvePassage,
-  splitAcrossPages,
-  writerForm,
-  type FragmentPassage,
-  type PassageText,
-  type TextRange,
-} from "../src/lib/pdf-fragment";
+import { formatFragmentPassages, parsePassageText, resolvePassage, type FragmentPassage, type PassageText } from "../src/lib/pdf-fragment";
+import { passagePieces, quotationText, type PlacedPassage } from "../src/lib/pdf-passage-pieces";
 import type { PageName } from "../src/lib/pdf-open-params";
 import { pageNameForSheet, sheetsLabelled, usablePageLabels } from "../src/lib/pdf-page-labels";
 
-type Located = { pageIndex: number; range: TextRange };
-
-/** The quote as a passage to look for: whole, or its two ends when it is elided. */
-function passageFor(quote: string): PassageText {
-  const [start, ...rest] = quote.split(/\s*(?:…|\.\.\.)\s*/);
-  const end = rest.length > 0 ? rest[rest.length - 1] : null;
-  return { prefix: null, start, end: end && end.trim() ? end : null, suffix: null };
+/** The quote as a `text` value: its words left out marked as gaps, its brackets still to settle (src/lib/pdf-passage-pieces.ts). */
+function passageFor(quote: string): PassageText | null {
+  const text = quotationText(quote, { shorten: false });
+  return text === null ? null : parsePassageText(text);
 }
 
-/** Where the passage is: the sheets given, the first one's neighbours, or the one page in the file that holds it once. */
-function locate(file: FilePages, sheets: readonly number[], passage: PassageText): Located | null {
+/** The quote with its brackets' letters kept, for the miss's report. */
+function withoutBrackets(passage: PassageText): PassageText {
+  const plain = (part: string) => part.replace(/[[\]]/g, "");
+  return {
+    prefix: passage.prefix,
+    segments: passage.segments.map((segment) => ({ start: plain(segment.start), end: segment.end === null ? null : plain(segment.end) })),
+    suffix: passage.suffix,
+  };
+}
+
+/** Where the passage is on one page: the sheets given, the first one's neighbours, or the one page in the file that holds it once. */
+function locate(file: FilePages, sheets: readonly number[], passage: PassageText): PlacedPassage | null {
   const candidates = sheets.length > 0 ? [...new Set([...sheets, sheets[0] - 1, sheets[0] + 1])] : [];
   for (const candidate of candidates) {
-    const page = file.pages.get(candidate);
-    const range = page ? resolvePassage(page.text, passage, page.skeleton) : null;
-    if (range) return { pageIndex: candidate, range };
+    const found = passagePieces(passage, file.pages, [candidate]);
+    if (found) return found[0];
   }
-  let found: Located | null = null;
-  for (const [candidate, page] of file.pages) {
-    const count = countPassageOccurrences(page.text, passage, page.skeleton);
-    if (count === 0) continue;
-    if (count > 1 || found) return null;
-    found = { pageIndex: candidate, range: resolvePassage(page.text, passage, page.skeleton)! };
+  let found: PlacedPassage | null = null;
+  for (const candidate of file.pages.keys()) {
+    const pieces = passagePieces(passage, file.pages, [candidate]);
+    if (!pieces) continue;
+    if (pieces[0].occurrences > 1 || found) return null;
+    found = pieces[0];
   }
   return found;
-}
-
-/**
- * The writer's form of a located passage, in the author's own words where
- * they reach the same range (a corrected copy's "imagination" rather than the
- * page's "imagin ation"), and the page's otherwise.
- */
-function formFor(text: string, located: Located, passage: PassageText): PassageText | null {
-  if (passage.end === null) {
-    return writerForm(text, located.range, fragmentWords(passage.start)) ?? writerForm(text, located.range);
-  }
-  const startWords = fragmentWords(passage.start);
-  const endWords = fragmentWords(passage.end);
-  for (let k = 3; k <= Math.max(startWords.length, endWords.length); k++) {
-    const candidate: PassageText = {
-      prefix: null,
-      start: startWords.slice(0, k).join(" "),
-      end: endWords.slice(-k).join(" "),
-      suffix: null,
-    };
-    const range = resolvePassage(text, candidate);
-    if (range && range.start === located.range.start && range.end === located.range.end) return candidate;
-  }
-  return writerForm(text, located.range);
 }
 
 /** A located passage as the link names it: its page in whichever form the file takes (§8). */
@@ -116,15 +92,13 @@ function sheetText(file: FilePages, pageIndex: number): string {
   return own ? `page ${pageIndex + 1} (labelled ${own})` : `page ${pageIndex + 1}`;
 }
 
-type Printed = { passage: FragmentPassage; pageIndex: number; text: string; occurrences: number };
-
-function print(file: FilePages, passages: Printed[], asked: readonly number[], askedText: string): void {
-  console.log(`/pdf/${file.slug}#${formatFragmentPassages(passages.map((p) => p.passage))}`);
-  for (const { pageIndex, text, occurrences } of passages) {
-    console.log(`  ${sheetText(file, pageIndex)}: "${text}"`);
+function print(file: FilePages, passages: readonly PlacedPassage[], asked: readonly number[], askedText: string): void {
+  console.log(`/pdf/${file.slug}#${formatFragmentPassages(passages.map((p) => named(file, p.sheet, p.passage)))}`);
+  for (const { sheet, range, occurrences } of passages) {
+    console.log(`  ${sheetText(file, sheet)}: "${file.pages.get(sheet)!.text.slice(range.start, range.end)}"`);
     if (occurrences > 1) console.log(`  warn: this form occurs ${occurrences} times on its page; the link points at the first`);
   }
-  if (!asked.includes(passages[0].pageIndex)) console.log(`  note: found on ${sheetText(file, passages[0].pageIndex)}, not ${askedText}`);
+  if (!asked.includes(passages[0].sheet)) console.log(`  note: found on ${sheetText(file, passages[0].sheet)}, not ${askedText}`);
 }
 
 const USAGE = 'Usage: npx tsx scripts/pdf-fragment-link.ts <file-slug> <page> "<quote>"\n       npx tsx scripts/pdf-fragment-link.ts <file-slug> --label <label> "<quote>"';
@@ -156,53 +130,25 @@ async function main(): Promise<number> {
   if ("label" in askedName && asked.length === 0) console.error(`  note: no page of "${file.slug}" is labelled ${askedName.label}; looking in the whole file`);
 
   const passage = passageFor(quote);
+  if (!passage) {
+    console.error("The quote has no words to look for.");
+    return 2;
+  }
   const located = locate(file, asked, passage);
   if (located) {
-    const page = file.pages.get(located.pageIndex)!;
-    const form = formFor(page.text, located, passage);
-    if (form) {
-      const range = resolvePassage(page.text, form, page.skeleton)!;
-      print(
-        file,
-        [
-          {
-            passage: named(file, located.pageIndex, form),
-            pageIndex: located.pageIndex,
-            text: page.text.slice(range.start, range.end),
-            occurrences: countPassageOccurrences(page.text, form, page.skeleton),
-          },
-        ],
-        asked,
-        askedText,
-      );
-      return 0;
-    }
+    print(file, [located], asked, askedText);
+    return 0;
   }
 
   // Across a page break: the page given and the next, then the one before and it.
-  if (passage.end === null && asked.length > 0) {
-    for (const first of [asked[0], asked[0] - 1]) {
-      const a = file.pages.get(first);
-      const b = file.pages.get(first + 1);
-      const split = a && b ? splitAcrossPages(a.text, b.text, quote) : null;
-      if (!a || !b || !split) continue;
-      const firstForm = writerForm(a.text, split.first, split.firstWords) ?? writerForm(a.text, split.first);
-      const nextForm = writerForm(b.text, split.next, split.nextWords) ?? writerForm(b.text, split.next);
-      if (!firstForm || !nextForm) continue;
-      print(
-        file,
-        [
-          { passage: named(file, first, firstForm), pageIndex: first, text: a.text.slice(split.first.start, split.first.end), occurrences: 1 },
-          { passage: named(file, first + 1, nextForm), pageIndex: first + 1, text: b.text.slice(split.next.start, split.next.end), occurrences: 1 },
-        ],
-        asked,
-        askedText,
-      );
-      return 0;
-    }
+  for (const first of asked.length > 0 ? [asked[0], asked[0] - 1] : []) {
+    const pieces = passagePieces(passage, file.pages, [first], (start) => start + 1);
+    if (!pieces) continue;
+    print(file, pieces, asked, askedText);
+    return 0;
   }
 
-  const finding = checkPassage(file, { page: askedName, ...passage });
+  const finding = checkPassage(file, { page: askedName, ...withoutBrackets(passage) });
   if (finding.kind === "page-out-of-range") {
     console.error(`${askedText[0].toUpperCase()}${askedText.slice(1)} is past the end: "${file.slug}" has ${finding.pageCount} pages.`);
   } else if (finding.kind === "no-such-label") {

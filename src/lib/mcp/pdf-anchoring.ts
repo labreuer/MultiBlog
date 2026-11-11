@@ -4,7 +4,7 @@ import { extractPageItems } from "@/lib/pdf-extract";
 import { storedPageText } from "@/lib/pdf-page-text";
 import { normalisePageText } from "@/lib/pdf-text";
 import { quadsForRange } from "@/lib/pdf-quads";
-import { resolveAll, skeletonOf, type PassageText } from "@/lib/pdf-fragment";
+import { onePassage, resolveAll, skeletonOf, type PassageText } from "@/lib/pdf-fragment";
 import { buildQuote } from "@/lib/pdf-quote";
 import { capturePdfTextAnchor } from "@/lib/anchors/capture";
 import { overlapWindows } from "@/lib/comment-quote-match";
@@ -59,12 +59,12 @@ export async function anchorPdfQuote(
   if (indexes.length === 0) throw new ApiError("not_found", `No page of this PDF is labelled "${quote.label}".`);
   const texts = await pageTexts(file.id, indexes);
 
-  const passageOf = (q: QuoteInput, read: (s: string) => string): PassageText => ({
-    prefix: q.prefix ? read(q.prefix) : null,
-    start: read(q.quote ?? q.start ?? ""),
-    end: q.quote ? null : q.end ? read(q.end) : null,
-    suffix: q.suffix ? read(q.suffix) : null,
-  });
+  const passageOf = (q: QuoteInput, read: (s: string) => string): PassageText =>
+    onePassage(read(q.quote ?? q.start ?? ""), {
+      prefix: q.prefix ? read(q.prefix) : null,
+      end: q.quote ? null : q.end ? read(q.end) : null,
+      suffix: q.suffix ? read(q.suffix) : null,
+    });
   const find = (p: PassageText) =>
     indexes.flatMap((index) => {
       const text = texts.get(index) ?? "";

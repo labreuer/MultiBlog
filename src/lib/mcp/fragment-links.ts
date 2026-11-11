@@ -1,5 +1,6 @@
 import { canUserReadFile } from "@/lib/file-authz";
 import { resolveFileParam } from "@/lib/file-slug";
+import { passageWords } from "@/lib/pdf-fragment";
 import { FragmentChecker } from "@/lib/pdf-fragment-check";
 import { linkHrefsIn, parseFragmentLinkHref } from "@/lib/pdf-fragment-findings";
 import type { Actor } from "@/lib/actor";
@@ -66,11 +67,7 @@ export async function checkFragmentLinks(actor: Actor, bodies: unknown[]): Promi
     }
     for (const passage of finding.passages) {
       const page = passage.passage.page;
-      const named = {
-        ...("sheet" in page ? { page: page.sheet } : { label: page.label }),
-        start: passage.passage.start,
-        ...(passage.passage.end ? { end: passage.passage.end } : {}),
-      };
+      const named = { ...("sheet" in page ? { page: page.sheet } : { label: page.label }), ...passageWords(passage.passage) };
       if (passage.kind === "page-out-of-range") {
         throw new ApiError("no_match", `The fragment link ${href} names ${pageText(page)}, past the PDF's ${passage.pageCount}.`, {
           link: href,

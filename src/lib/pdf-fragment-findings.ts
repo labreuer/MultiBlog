@@ -206,22 +206,35 @@ const CONTEXT = 40;
 
 /**
  * Where a missed passage stops matching: the longest leading stretch of the
- * part that failed (`start`, or `end` when the start is there), and what the
- * page has right after it. That is the answer an author needs: the word the
- * PDF spells differently, a footnote number in the way, a page break.
+ * part that failed, and what the page has right after it. The parts are
+ * walked in order, each looked for after the one before it, as the matcher
+ * walks a passage's segments (§2): a segment's `start`, then its `end`, then
+ * the next segment. That is the answer an author needs: the word the PDF
+ * spells differently, a footnote number in the way, a page break, or a
+ * segment the page holds only before the one it follows.
  */
 function whereItStops(
   text: string,
   sk: Skeleton,
   passage: PassageText,
 ): { matchedUpTo: string | null; pageHasThere: string | null } {
-  const startKey = skeletonOf(passage.start).text;
-  let key = startKey;
+  const parts = passage.segments.flatMap((segment) => [segment.start, ...(segment.end !== null ? [segment.end] : [])]);
+  let key: string | null = null;
   let from = 0;
-  const startAt = sk.text.indexOf(startKey);
-  if (startAt >= 0 && passage.end !== null) {
-    key = skeletonOf(passage.end).text;
-    from = startAt + startKey.length;
+  for (const part of parts) {
+    const partKey = skeletonOf(part).text;
+    const at = sk.text.indexOf(partKey, from);
+    if (at < 0) {
+      key = partKey;
+      break;
+    }
+    from = at + partKey.length;
+  }
+  // Every part is there in order: the miss is a word boundary, a prefix or a
+  // suffix, and the answer is the first part, found whole.
+  if (key === null) {
+    key = skeletonOf(passage.segments[0].start).text;
+    from = 0;
   }
   // The longest prefix of `key` the page holds, found by halving.
   let low = 0;

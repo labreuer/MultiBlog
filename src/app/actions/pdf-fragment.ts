@@ -2,7 +2,7 @@
 
 import { auth } from "@/lib/auth";
 import { canUserReadFile } from "@/lib/file-authz";
-import { MAX_FRAGMENT_PASSAGES, type PassageText } from "@/lib/pdf-fragment";
+import { MAX_FRAGMENT_PASSAGES, type PassageSegment, type PassageText } from "@/lib/pdf-fragment";
 import { FragmentChecker } from "@/lib/pdf-fragment-check";
 import { prisma } from "@/lib/prisma";
 
@@ -23,6 +23,8 @@ export type FragmentMiss = { passage: PassageText; named: number[] };
 const MAX_PART_LENGTH = 2_000;
 /** More sheets than any file has; a label is rarely on more than two. */
 const MAX_NAMED = 10_000;
+// A passage's segments, which a fragment's length bounds already; this bounds what a caller can send.
+const MAX_SEGMENTS = 64;
 
 function isPart(value: unknown, nullable: boolean): boolean {
   return (nullable && value === null) || (typeof value === "string" && value.length <= MAX_PART_LENGTH);
@@ -33,13 +35,17 @@ function missOf(value: unknown): FragmentMiss | null {
   if (!value || typeof value !== "object") return null;
   const { passage, named } = value as { passage?: unknown; named?: unknown };
   if (!passage || typeof passage !== "object") return null;
-  const { prefix, start, end, suffix } = passage as Record<string, unknown>;
-  if (!isPart(prefix, true) || !isPart(start, false) || !isPart(end, true) || !isPart(suffix, true)) return null;
+  const { prefix, segments, suffix } = passage as Record<string, unknown>;
+  if (!isPart(prefix, true) || !isPart(suffix, true)) return null;
+  if (!Array.isArray(segments) || segments.length === 0 || segments.length > MAX_SEGMENTS) return null;
+  const read: PassageSegment[] = [];
+  for (const segment of segments) {
+    const { start, end } = (segment ?? {}) as Record<string, unknown>;
+    if (!isPart(start, false) || !isPart(end, true)) return null;
+    read.push({ start: start as string, end: end as string | null });
+  }
   if (!Array.isArray(named) || named.length > MAX_NAMED || !named.every((n) => Number.isInteger(n) && n >= 0)) return null;
-  return {
-    passage: { prefix: prefix as string | null, start: start as string, end: end as string | null, suffix: suffix as string | null },
-    named: named as number[],
-  };
+  return { passage: { prefix: prefix as string | null, segments: read, suffix: suffix as string | null }, named: named as number[] };
 }
 
 /**
