@@ -454,8 +454,12 @@ names the printed page, and the file's page labels find the sheet:
 - **`page=` keeps its meaning**, the sheet, as RFC 8118 and `pdf-open-params.ts` read it.
   Every link written so far uses it, and one link may use both forms.
 - **`p` is a label as `pagesLabelled` reads one** (`src/lib/pdf-page-labels.ts`): trimmed, case
-  ignored, against the file's usable labels (`usablePageLabels`). `/references/<key>#p=49`
-  already uses `p` for a printed page (CITATIONS.md, Pages).
+  ignored, against the labels the file itself gives. `/references/<key>#p=49` already uses `p`
+  for a printed page (CITATIONS.md, Pages).
+- **A filled-in number is not a label.** `usablePageLabels` says whether a file has labels
+  worth using, and fills an empty one with its sheet's number for the page box. `p=5` never
+  names a sheet whose own label is empty, in a link or in a citation. Only `page=` names such
+  a sheet.
 - **Pairing**: each `text` belongs to the nearest `page` or `p` before it. A `p` with no `text`
   after it is a page link, opened as a bare `#page=` is.
 - **Encoding**: a label is percent-encoded where it holds anything but letters, digits, `.` and
@@ -464,8 +468,8 @@ names the printed page, and the file's page labels find the sheet:
 
 ### Which sheet
 
-1. **A file with usable labels**: the sheets labelled `p`, in order. There can be several,
-   since front matter and body can each have a "1" (`pageLabelFor`).
+1. **A file with usable labels**: the sheets whose own label is `p`, in order. There can be
+   several, since front matter and body can each have a "1" (`pageLabelFor`).
 2. **A file without them**: `p=N`, with N in digits, is sheet N, which is how a citation's page
    is already read on such a file (`pdfPageHref`). Any other label names no sheet.
    `usablePageLabels` also rejects a file labelled 1…N, where the two forms agree anyway.
@@ -495,6 +499,7 @@ This is what carries a `p=` link through labels that were corrected.
   printed page the day the file gains labels. The check warns on one, giving its `page=` form.
 - **`page=` also where the label repeats** and an earlier sheet with that label holds the
   passage, since rule 3 would draw it there.
+- **`page=` also for a sheet whose own label is empty**, which no `p` names.
 - **The writer's form is unchanged** (§8). Uniqueness is still judged on the sheet that holds
   the passage.
 - **The CLI** takes a label as well as a sheet (`--label <label>` in place of `<page>`) and
@@ -505,36 +510,51 @@ This is what carries a `p=` link through labels that were corrected.
 - **MCP** checks a body's `p=` links through the shared check, as it checks `page=` ones, and
   its tool descriptions tell the model to write the printed page.
 - **`pdfPageHref`**, a citation's link to a page, finds its sheet with `indexOf` over the stored
-  labels, a second rule beside `pagesLabelled`. It moves onto `pagesLabelled` and
-  `usablePageLabels`, so that a citation and a `p=` link of the same page land on the same
-  sheet.
+  labels, a second rule beside `pagesLabelled`. It moves onto the rule above, so that a
+  citation and a `p=` link of the same page land on the same sheet. Two things change for a
+  citation. A label matches trimmed and in any case, where `indexOf` matches it exactly. And
+  a file whose labels are all empty takes the page as a sheet number, where today it finds no
+  page.
 - **Search's page links** (`src/lib/search/pdfs.ts`) **and the cited-page route's redirect**
-  (`pdfPageHref`) **emit `p=` too**, by the same two rules. They are the page links nobody
-  chooses the form of, and are copied into bodies from the address bar.
+  (`pdfPageHref`) **emit `p=` too.** They are the page links nobody chooses the form of, and
+  are copied into bodies from the address bar.
+  - A page link has no passage for rule 3 to find, so it opens at the first sheet carrying its
+    label.
+  - The redirect starts from a label, so on a file with usable labels it writes `p=`.
+  - A search hit starts from a sheet. It writes `p=` when that sheet is the first carrying its
+    label, and `page=` otherwise, as for a sheet whose own label is empty.
 
 ### The parse, the viewer and the check
 
 - **`parseFragmentPassages`** gives each passage a sheet or a label (`FragmentPassage`), and
   `pageFromHash` returns either.
 - **`PdfViewer`** opens at a `p=` page once pdfjs has read the labels, which it already does on
-  load (`usablePageLabels` in `PdfViewer.tsx`).
-- **The banner names a page as the link did**: "Not found on p. 49" for a label, "page 53" for
-  a sheet.
+  load (`usablePageLabels` in `PdfViewer.tsx`). It keeps the labels as read beside the
+  filled-in ones it shows, since `p` is matched against the first.
+- **The banner names every page by its label**, as it does today and as the rest of the viewer
+  does (`pageLabelFor`). So a `page=53` miss still reads "Not found on page 49" where sheet 53
+  is labelled 49. A `p=` whose label no sheet carries is named as the link wrote it.
 - **The check** reads `file.page_labels`. A file whose labels haven't been read yet (NULL, since
   they are filled on first read, MCP.md §8) has them read from its bytes and not stored, since
   the check writes nothing. Its new findings:
   - an ERROR for a label no sheet carries;
   - a warning for a `p=` on a file without usable labels, with its `page=` form;
   - ok, as now, for a passage found on a later sheet of a repeated label.
+- **The check reads page links too**: an href to `/pdf/<slug>` with a `page` or a `p` and no
+  `text`, which `parseFragmentLinkHref` answers null for today. A label no sheet carries and
+  a page past the end are findings for one as for a passage, in the integrity script and in
+  MCP's write check.
 
 ### What it leaves alone
 
 - **Annotation permalinks, `?sel=` and the sign-in hand-on** (§7). A `p=` rides through sign-in
   and the slug-history redirect exactly as `page=` does.
-- **Existing `page=` links.** Nothing converts them. Most of them are hand-written citations,
-  which CITATIONS.md's "Converting the hand-written citations" turns into citation chips.
+- **Existing `page=` links.** Nothing here converts them. Most of them are hand-written
+  citations, which CITATIONS.md's "Converting the hand-written citations" turns into citation
+  chips. A URL that conversion keeps as a referent gets `p=` where its file has usable labels.
 - **A tab from before the deploy** ignores `p=`, so it opens such a link at the first page and
-  draws nothing.
+  draws nothing. In a link that mixes the two forms, it pairs a `p=`'s `text` with the `page=`
+  before it, and reports that passage not found there.
 
 ### Elided passages: `...`
 
@@ -549,11 +569,14 @@ can be told apart.
 ```
 
 - **One `text` value is still one passage**, its segments joined by `...`. Two `text`s on one
-  page keep their meaning: two passages, each matched at its first occurrence. No link in the
-  measured copy puts two on one page.
+  page keep their meaning: two passages, each matched at its first occurrence. None of the
+  links measured puts two on one page (Measured, below).
 - **The separator is exactly three dots.** `…` (U+2026) reads as the same separator, and writers
-  write `...`. A single `.` stays punctuation, which readers ignore. 140 existing `text` values
-  hold one, and none holds `...` or `…`, so no existing link changes meaning.
+  write `...`. A single `.` stays punctuation, which readers ignore. Of the `text` values
+  measured, 140 hold one, and none holds `...` or `…`, so no existing link changes meaning.
+- **`…` is read as the character or as `%E2%80%A6`**, which is what `location.hash` holds for
+  one. It is the one marker read in its encoded form: `,` and `-` are syntax only unencoded
+  (§2).
 - **Precedence.** The value splits on `...` first. A `prefix-,` belongs to the first segment and
   a `,-suffix` to the last. Each segment may still be shortened to its ends with `,`, by the
   writer's form's rule (§8): a long segment misses on one OCR error, and `start,end` steps
@@ -606,25 +629,35 @@ The viewer only ever receives plain segments.
 **Held: how the viewer shows elided words.** The viewer receives the segments and the span. How
 the outline and the banner show the gaps apart from the quoted words is not settled.
 
-**Measured** over a stale copy of docs written by Claude. An author's own docs will likely hold
-more `[sic]`, `[T]he` and `[…]`.
+**Measured** on explore's docs, 2026-11-10: every live doc holding a fragment link, 33 docs
+with 5,662 links, all written by Claude. An author's own docs will likely hold more `[sic]`,
+`[T]he` and `[…]`. The classifier is a heuristic, which matches runs of quoted words by
+skeleton. It is not the finder `quote:prev` will have.
 
 | | |
 |---|---|
-| Quotations directly before a link | 1,483 |
-| … holding an ellipsis | 58 (3.9%): one holds two, and one ends with one |
-| … with a gap inside | 57. In 32 of them, today's `start,end` link covers the elided words |
-| … holding a bracket | 2, both letters added to a word (`form[s]`, `fabricate[s]`) |
-| Block quotes holding a link's words | 18, two of them with an ellipsis |
+| Quotations directly before a link | 4,947 |
+| … holding an ellipsis | 102 (2.1%). 4 hold two |
+| … holding a bracket | 11: 4 attached to a word (`form[s]`, `correct[ed]`, `[a]ll`), 1 `[sic]`, and 6 standing alone (`[of the soul]`, `[the rich]`, `[already]`) |
+| Block quotes holding a link's words | 68: 8 with an ellipsis, one of those with two, and 1 with `[sic]` |
+| Links with two `text`s on one page | 0 |
+| `text` values holding a single `.` | 140 of 5,832. None holds `...` or `…` |
+
+Not measured again: in a copy of 2026-10-19, 10 docs with 1,793 links, 57 of the 58 quotations
+holding an ellipsis had the gap inside, and in 32 of those today's `start,end` link covers the
+elided words.
 
 ### Tests
 
 - **Unit**, beside `pdf-fragment.test.ts`:
   - pairing with `p`, and with both forms in one link;
-  - a sheet from a label: repeated labels, a file without labels, a label no sheet carries;
-  - the writer choosing `page=` over `p=`;
+  - a sheet from a label: repeated labels, a file without labels, a label no sheet carries, a
+    sheet whose own label is empty;
+  - the writer choosing `page=` over `p=`, for a passage and for a page link;
+  - a page link read as one, with its findings;
   - the segment grammar: `...` before `,`, a prefix and suffix on the outer segments, `…` read
-    as `...`, a single `.` ignored, an ellipsis at either end dropped;
+    as `...` as the character and as `%E2%80%A6`, a single `.` ignored, an ellipsis at either
+    end dropped;
   - in-order matching: a gap of no words, a segment that only matches before the previous one,
     a segment or an elision straddling a page break;
   - brackets: `[…]`, `[sic]`, a substitution, `[T]he` and `form[s]`.
