@@ -188,9 +188,11 @@ distinct works.
 - **One work, with a page**, to `/references/<key>/p/<first page>` (`citedPagePath`), which
   renders nothing (`src/app/references/[key]/p/[page]/page.tsx`, `citedPageTarget` in
   `src/lib/reference-cited-by.ts`). A reader who may open the work's PDF, under the files' read
-  rule, is sent to `/pdf/<slug>#page=<sheet>`, the sheet found by the file's `pageLabels`
-  ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)), or taken as the page itself for a file with
-  none. Anyone else, and a page the labels don't name, goes to `/references/<key>#p=49`, where
+  rule, is sent to `/pdf/<slug>#p=<label>` on a file with usable labels, and to
+  `#page=<sheet>`, the page taken as the sheet itself, on one without (`pdfPageHref`). The sheet
+  is found by the rule a `p=` link's is ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md) §2,
+  "Which sheet"), against the file's own `pageLabels`, read and stored first where they haven't
+  been yet. Anyone else, and a page no sheet carries, goes to `/references/<key>#p=49`, where
   the page's client island offers the PDF to whoever may read it. A fragment, rather than a query
   string, since a page that reads `searchParams` can never be cached (Pages).
 - **One work without one**, to `/references/<key>`. This includes
@@ -1210,7 +1212,7 @@ as [@wimsatt1986](/link/def456) argues
   picks wrong more often.
 - **Ellipses and brackets standing alone split the passage into segments**, so nothing elided is
   stored, and the viewer can show what was left out. A bracket attached to a word, such as
-  `[T]he`, is settled against the page instead (PDF_FRAGMENT_LINKS.md §13, "Elided passages").
+  `[T]he`, is settled against the page instead (PDF_FRAGMENT_LINKS.md §13).
 - **When nothing is found**, the link falls back to the page, and the check reports it.
 - **The quotation reaches `render` as an input, and `render` reads no doc.** The link depends on
   text beside the chip, which stretches ENTITY_CHIPS.md rule 2, and that rule says so.
@@ -1228,7 +1230,7 @@ as [@wimsatt1986](/link/def456) argues
 fragment.
 
 - **For `quote:*`, the query is the quotation as one `text`**, in the fragment grammar with its
-  elided segments (PDF_FRAGMENT_LINKS.md §13, "Elided passages"):
+  elided segments (PDF_FRAGMENT_LINKS.md §13):
   `?text=could+not+yet+call...his+own`.
   - **A bracket standing alone and `[…]` are written `...`**, since telling them from the
     quoted words needs no page text.
@@ -1254,7 +1256,8 @@ fragment.
   the session, so reading `searchParams` costs it no cache. The reference's page, which is
   cached, never gets the query.
 - **A reader who may open the PDF** is sent to `/pdf/<slug>#p=<label>&text=…`, or to
-  `#page=<sheet>&text=…` on a file without usable labels (PDF_FRAGMENT_LINKS.md §13).
+  `#page=<sheet>&text=…` on a file without usable labels (PDF_FRAGMENT_LINKS.md §8, "Which page
+  form a writer takes").
   - A quotation that runs onto the next page is split there from the stored page text, and goes
     as two passages, each `text` paired with its page. A segment straddling the break splits at
     a word boundary, and an elision straddling it ends one page's passage and starts the next.
@@ -1313,9 +1316,9 @@ citation. What Pandoc (3.7.0.2) makes of the form:
 - **A link becomes `quote:prev`** where the quotation just before it holds all the link's words,
   and otherwise its own URL becomes the referent.
 - **A URL kept as a referent has its `page=` rewritten to `p=`** where the file has usable
-  labels, by the writers' rule (PDF_FRAGMENT_LINKS.md §13, "Writing them"). So a converted
-  citation carries a sheet number only into a file without labels, or onto a sheet `p=` can't
-  name.
+  labels, by the writers' rule (PDF_FRAGMENT_LINKS.md §8, "Which page form a writer takes"). So
+  a converted citation carries a sheet number only into a file without labels, or onto a sheet
+  `p=` can't name.
 - **Measured over the 5,662 links in explore's docs**, 2026-11-10, about 81% become
   `quote:prev` and about 19% keep their own URL:
   - 88% have a quotation directly before: 87% right before the link, and 1% earlier in its

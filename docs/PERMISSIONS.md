@@ -578,12 +578,15 @@ no link, a deleted link, or someone else's unminted draft is a 404, the existenc
 redirects; like `?sel=`, it grants nothing.
 
 **A PDF fragment link's fragment grants nothing either**
-([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)). `/pdf/<slug>#page=<n>&text=<words>` meets
-the PDF route's own gate exactly as a bare `/pdf/<slug>` does, and can only name passages
-inside the file that gate allowed. What it does not have is a landing page: its href carries
-the file's slug and the passage's words to everyone who can read the text holding it, where an
-anchored link's id carries neither. The check behind its tooling reads as the operator, so a
-front door that reads as a user must gate on `canUserReadFile` first.
+([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)). `/pdf/<slug>#page=<n>&text=<words>`, or
+`#p=<label>&…`, meets the PDF route's own gate exactly as a bare `/pdf/<slug>` does, and can
+only name passages inside the file that gate allowed. What it does not have is a landing page:
+its href carries the file's slug and the passage's words to everyone who can read the text
+holding it, where an anchored link's id carries neither. The check behind its tooling reads as
+the operator, so a front door that reads as a user must gate on `canUserReadFile` first. The
+viewer's one such door, asking where a passage its page doesn't hold is instead
+(`locateFragmentMisses`), answers a file the viewer can't read as one that holds none of the
+passages.
 
 ## API tokens (docs/MCP.md §3, §21)
 
