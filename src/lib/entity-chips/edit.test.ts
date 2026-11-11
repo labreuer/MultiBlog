@@ -72,14 +72,15 @@ test("parse: a mention's syntax is a placeholder holding its handle, only when c
 
 test("parse: the label is never read, and only the syntax counts", () => {
   const parsed = (markdown: string) => markdownToBlocks(markdown, { chips: true })[0].content ?? [];
-  const isChipAt = (markdown: string) => parsed(markdown).some((node) => node.type === "entityChip");
+  const isChipAt = (markdown: string) => parsed(markdown).some((node) => node.type === "entityChip" && node.attrs?.kind === MENTION);
   // Whatever the label says, in whatever style.
   assert.ok(isChipAt("[@AL](/authors/ada)"));
   assert.ok(isChipAt("[@anything at all](/authors/ada)"));
   assert.ok(isChipAt("~~[@Gone Person](/authors/gone)~~"));
   // An escaped @, as a hand-written link is written out: a link.
   assert.ok(!isChipAt("[\\@Andrew](/authors/andrew)"));
-  // No @, another destination, or formatting before the @: links.
+  // No @, another destination, or formatting before the @: no mention. (`[@home](/elsewhere)`, whose
+  // whole text is one citation, is that citation: citation-markdown.test.ts.)
   assert.ok(!isChipAt("[his page](/authors/ada)"));
   assert.ok(!isChipAt("[@home](/elsewhere)"));
   assert.ok(!isChipAt("[**@Ada**](/authors/ada)"));

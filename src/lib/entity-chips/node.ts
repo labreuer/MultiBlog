@@ -30,7 +30,18 @@ import {
 
 export type { ChipInputs };
 
-type ChipPluginState = { inputs: ChipInputs; decorations: DecorationSet; byIid: Map<string, ChipRendering> };
+type ChipPluginState = {
+  inputs: ChipInputs;
+  decorations: DecorationSet;
+  byIid: Map<string, ChipRendering>;
+  /**
+   * Where an edit could change the quotation a citation points at
+   * (quotations.ts): for each such chip, its top-level block and the one
+   * either side, in the current doc's positions. Typing anywhere else maps
+   * the decorations rather than rebuilding them.
+   */
+  reaches: [number, number][];
+};
 
 export const entityChipKey = new PluginKey<ChipPluginState>("entityChip");
 
@@ -62,8 +73,9 @@ export function chipLabelsOf(state: EditorState): ChipLabels {
 // The runs travel as their JSON for the same reason: a string compares by value.
 type ChipDecorationSpec = { chipLabel: string; chipRuns: string | null; chipHref: string | null; chipStatus: ChipRendering["status"] };
 
-function compute(doc: PMNode, inputs: ChipInputs): Pick<ChipPluginState, "decorations" | "byIid"> {
+function compute(doc: PMNode, inputs: ChipInputs): Pick<ChipPluginState, "decorations" | "byIid" | "reaches"> {
   const chips = chipsIn(doc);
+  const reaches = chips.filter((chip) => chip.quotation !== undefined).map((chip) => reachOf(doc, chip.pos));
   const renderings = chipRenderings(chips, inputs.styles, inputs.context, inputs.pending);
   const byIid = new Map<string, ChipRendering>();
   const decorations = chips.map((chip, index) => {
@@ -77,7 +89,21 @@ function compute(doc: PMNode, inputs: ChipInputs): Pick<ChipPluginState, "decora
     };
     return Decoration.node(chip.pos, chip.pos + 1, {}, spec);
   });
-  return { decorations: DecorationSet.create(doc, decorations), byIid };
+  return { decorations: DecorationSet.create(doc, decorations), byIid, reaches };
+}
+
+/** The top-level block holding position `pos`, and the one either side: everything the finder can read for a chip there. */
+function reachOf(doc: PMNode, pos: number): [number, number] {
+  const $pos = doc.resolve(pos);
+  const index = $pos.index(0);
+  return [$pos.posAtIndex(Math.max(0, index - 1), 0), $pos.posAtIndex(Math.min(doc.childCount, index + 2), 0)];
+}
+
+/** Whether a transaction changed anything inside a reach, in the positions of the doc it ends at. */
+function touchesQuotation(tr: Transaction, reaches: readonly [number, number][]): boolean {
+  if (reaches.length === 0) return false;
+  const mapped = reaches.map(([from, to]) => [tr.mapping.map(from, -1), tr.mapping.map(to, 1)] as const);
+  return insertedRanges([tr], true).some(([from, to]) => mapped.some(([start, end]) => from <= end && to >= start));
 }
 
 function renderingFrom(decorations: readonly Decoration[]): ChipRendering | null {
@@ -163,9 +189,10 @@ function insertsChip(tr: Transaction): boolean {
 
 /**
  * Whether a transaction puts a chip in, takes one out or sets one's
- * attributes: the only document changes that can alter a rendering, since a chip's label reads nothing of
- * the text around it. False for ordinary typing, at the cost of looking at
- * the few positions each step replaced.
+ * attributes: the only document changes that can alter a rendering but for
+ * the quotation a citation points at (`touchesQuotation`), since a chip's
+ * label reads nothing of the text around it. False for ordinary typing, at
+ * the cost of looking at the few positions each step replaced.
  */
 function touchesChip(tr: Transaction): boolean {
   if (insertsChip(tr)) return true;
@@ -185,8 +212,8 @@ function touchesChip(tr: Transaction): boolean {
   });
 }
 
-/** The ranges `transactions` inserted, in the positions of the document they end at. */
-function insertedRanges(transactions: readonly Transaction[]): [number, number][] {
+/** The ranges `transactions` inserted, in the positions of the document they end at; with `deletions`, a deletion too, as the empty range where it was. */
+function insertedRanges(transactions: readonly Transaction[], deletions = false): [number, number][] {
   const ranges: [number, number][] = [];
   transactions.forEach((tr, t) => {
     tr.steps.forEach((step, s) => {
@@ -197,7 +224,7 @@ function insertedRanges(transactions: readonly Transaction[]): [number, number][
           from = later.mapping.map(from, 1);
           to = later.mapping.map(to, -1);
         }
-        if (to > from) ranges.push([from, to]);
+        if (to > from || (deletions && to === from)) ranges.push([from, Math.max(from, to)]);
       });
     });
   });
@@ -268,8 +295,13 @@ export function entityChipPlugin(initial: ChipInputs): Plugin<ChipPluginState> {
           // rather than rebuilt. A rebuilt set is a new object all the way
           // down, and ProseMirror then compares every block's decorations on
           // every keystroke; a mapped one shares what the edit didn't reach.
-          if (!touchesChip(tr)) {
-            return { ...previous, decorations: previous.decorations.map(tr.mapping, tr.doc) };
+          // So does typing beside them, but for a citation's quotation, whose words are its link.
+          if (!touchesChip(tr) && !touchesQuotation(tr, previous.reaches)) {
+            return {
+              ...previous,
+              decorations: previous.decorations.map(tr.mapping, tr.doc),
+              reaches: previous.reaches.map(([from, to]) => [tr.mapping.map(from, -1), tr.mapping.map(to, 1)]),
+            };
           }
         }
         return { inputs, ...compute(tr.doc, inputs) };

@@ -17,14 +17,21 @@ export function placeholderSlug(node: JSONContent): string | null {
   return typeof data?.slug === "string" && typeof data.userId !== "string" ? data.slug : null;
 }
 
-/** A citation placeholder's works, as the Markdown named them, or null for any other node. */
-export function placeholderCitation(node: JSONContent): { items: MarkdownCitationItem[]; narrative: boolean } | null {
+/** A citation placeholder's works, as the Markdown named them, and the link around it, or null for any other node. */
+export function placeholderCitation(
+  node: JSONContent,
+): { items: MarkdownCitationItem[]; narrative: boolean; referent: string | null; label: string } | null {
   if (!isChip(node) || node.attrs?.kind !== CITATION) return null;
   const data = node.attrs?.data as Record<string, unknown> | undefined;
   const items = data?.items;
   if (!Array.isArray(items) || items.length === 0) return null;
   if (!items.every((item) => typeof item?.key === "string" && item.refId === undefined)) return null;
-  return { items: items as MarkdownCitationItem[], narrative: data?.form === "narrative" };
+  return {
+    items: items as MarkdownCitationItem[],
+    narrative: data?.form === "narrative",
+    referent: typeof data?.referent === "string" ? data.referent : null,
+    label: typeof data?.label === "string" ? data.label : "",
+  };
 }
 
 export function walk(node: JSONContent, visit: (node: JSONContent) => JSONContent): JSONContent {
@@ -69,6 +76,7 @@ export function chipsForFinding(
     const data = citationKind.validate({
       items: citation.items.map(({ key, ...fields }) => ({ ...fields, refId: lookup.reference(key) ?? key })),
       ...(citation.narrative ? { form: "narrative" } : {}),
+      ...(citation.referent !== null ? { referent: citation.referent } : {}),
     });
     return data ? { ...node, attrs: { kind: CITATION, iid: "", data } } : node;
   });

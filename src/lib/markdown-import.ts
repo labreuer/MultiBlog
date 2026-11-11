@@ -210,6 +210,29 @@ function opensMentionShapedLink(node: JSONContent, parent: JSONContent | undefin
   return !previous?.marks?.some((mark) => mark.type === "link" && mark.attrs?.href === href);
 }
 
+/**
+ * Whether `node`, child `index` of `parent`, is the first text of a link
+ * whose whole text reads as one citation, `@handle`, which the parse would
+ * take for that citation with the link as its referent (docs/CITATIONS.md,
+ * "A passage in a citation"): its `@` is escaped, `[\@handle](…)`, which
+ * CommonMark reads as the same link text. A bracketed citation's text needs
+ * nothing, since the serializer escapes its brackets.
+ */
+function opensCitationShapedLink(node: JSONContent, parent: JSONContent, index: number): boolean {
+  if (node.type !== "text" || !node.text?.startsWith("@")) return false;
+  const href = node.marks?.find((mark) => mark.type === "link")?.attrs?.href;
+  if (typeof href !== "string") return false;
+  const siblings = parent.content ?? [];
+  const sameLink = (sibling: JSONContent | undefined) => sibling?.marks?.some((mark) => mark.type === "link" && mark.attrs?.href === href) ?? false;
+  if (sameLink(siblings[index - 1])) return false;
+  let text = "";
+  for (let i = index; i < siblings.length && sameLink(siblings[i]); i++) {
+    if (siblings[i].type !== "text") return false;
+    text += siblings[i].text ?? "";
+  }
+  return readCitation(text, undefined)?.raw === text;
+}
+
 /** A chip's Markdown, as `withChipMarkdown` put it on the node; "" for anything else. */
 function chipMd(node: JSONContent | undefined): string {
   return node && isChip(node) && typeof node.attrs?.md === "string" ? node.attrs.md : "";
@@ -250,11 +273,15 @@ function serializeWithEscapes(manager: MarkdownManager, json: JSONContent, opts:
       }
       if (child.type !== "text" || typeof child.text !== "string") return visit(child);
       if (child.marks?.some((mark) => mark.type === "code")) return child;
-      // Link text holds no citation, so only a mention's shape is escaped there.
+      // Link text holds no citation but a whole one, so only a mention's
+      // shape, and text that would read as one whole citation, is escaped there.
       const inLink = child.marks?.some((mark) => mark.type === "link") ?? false;
       const offsets = new Set(inLink || !bareAts ? [] : citationShapedAts(child.text));
       if (opensMentionShapedLink(child, node, index)) offsets.add(0);
+      if (bareAts && opensCitationShapedLink(child, node, index)) offsets.add(0);
       if (/^[:(]/.test(child.text) && chipMd(previous).endsWith("]")) offsets.add(0);
+      // `!` right before a linked citation would make it an image: `![[@bu]](quote:prev)`.
+      if (child.text.endsWith("!") && /^\[[^]*\)$/.test(chipMd(siblings[index + 1]))) offsets.add(child.text.length - 1);
       if (offsets.size === 0) return child;
       found = true;
       let text = "";
@@ -326,25 +353,37 @@ function citationParsing(bare: boolean) {
     },
     parseMarkdown: (token) => {
       const citation = token.citation as ReturnType<typeof readCitation>;
-      if (!citation) return [];
-      return {
-        type: ENTITY_CHIP,
-        attrs: {
-          kind: CITATION,
-          iid: "",
-          // `label` is the Markdown it was read from, for a title taken from a heading.
-          data: { items: citation.items, ...(citation.narrative ? { form: "narrative" } : {}), label: citation.raw },
-        },
-      };
+      return citation ? citationPlaceholder(citation) : [];
     },
   });
 }
 
 /**
+ * A citation placeholder: the works the Markdown named by key, and the link
+ * around it as its `referent` when it had one. `label` is the Markdown it was
+ * read from, for a title taken from a heading and for a refusal to quote.
+ */
+function citationPlaceholder(citation: NonNullable<ReturnType<typeof readCitation>>, referent?: string): JSONContent {
+  return {
+    type: ENTITY_CHIP,
+    attrs: {
+      kind: CITATION,
+      iid: "",
+      data: {
+        items: citation.items,
+        ...(citation.narrative ? { form: "narrative" } : {}),
+        label: citation.raw,
+        ...(referent !== undefined ? { referent } : {}),
+      },
+    },
+  };
+}
+
+/**
  * `tokens` with each citation put back as the text it was read from. Link
- * text holds no citation (docs/CITATIONS.md, "Markdown"): a chip can't carry
- * a link, so a citation there would cost the link, and
- * `[@handle](https://x.com/handle)` is a link, not an unknown key.
+ * text holds no citation but a whole one (docs/CITATIONS.md, "Markdown"): a
+ * chip can't carry a link, so a citation among other words there would cost
+ * the link.
  */
 function citationsAsText(tokens: readonly MarkdownToken[] | undefined): MarkdownToken[] {
   return (tokens ?? []).map((token) =>
@@ -358,9 +397,16 @@ function citationsAsText(tokens: readonly MarkdownToken[] | undefined): Markdown
 
 const CitationParsing = citationParsing(true);
 
+// A link whose whole text is one citation is that citation, its destination
+// the citation's `referent` (docs/CITATIONS.md, "A passage in a citation"):
+// `[[@bu, p. 49]](quote:prev)`, `[@bu [p. 49]](…)` and `[@bu](…)`, as
+// Pandoc reads all three. A mention, `[@Name](/authors/<slug>)`, is claimed
+// first. A comment's parse reads no bare `@key`, so there `[@key](…)` stays a
+// link and only the bracketed shape is a citation.
 const ChipParsingLink = Link.extend({
   parseMarkdown: (token, helpers) => {
     const href = typeof token.href === "string" ? token.href : "";
+    const whole = token.tokens?.length === 1 && token.tokens[0].type === CITATION_TOKEN ? token.tokens[0] : null;
     token = { ...token, tokens: citationsAsText(token.tokens) };
     const first = token.tokens?.[0];
     if (href.startsWith(MENTION_HREF_PREFIX) && first?.type === "text" && String(first.raw ?? "").startsWith("@")) {
@@ -372,6 +418,7 @@ const ChipParsingLink = Link.extend({
         return { type: ENTITY_CHIP, attrs: { kind: MENTION, iid: "", data: { slug, label } } };
       }
     }
+    if (whole?.citation) return citationPlaceholder(whole.citation as NonNullable<ReturnType<typeof readCitation>>, href);
     // No title: Markdown's `[text](url "title")` would store one as an
     // attribute, which a read can't show and the merge would then see as a
     // link that changed (docs/ENTITY_CHIPS.md, MCP item 5).

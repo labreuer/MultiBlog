@@ -53,11 +53,28 @@ export type ChipRendering = {
   status: ChipStatus;
 };
 
+/**
+ * The words a citation whose referent is `quote:prev` or `quote:next` points
+ * at, as the prose holds them (quotations.ts), and where they stand in the
+ * node the chip was collected from, when that node has positions.
+ */
+export type Quotation = { text: string; from: number | null; to: number | null };
+
 /** One chip as the doc-order pass meets it. */
 export type ChipOccurrence = ChipAttrs & {
   /** Its position in the node it was collected from. */
   pos: number;
+  /**
+   * The quotation beside it, for a chip that points at one: found in the body
+   * the chip was collected from, null when none is there. Absent for any other
+   * chip, and for one collected with no body around it (a stored anchor's
+   * record), whose rendering then links as if it pointed at none.
+   */
+  quotation?: Quotation | null;
 };
+
+/** What a chip's rendering reads from beside the chip, in the body it was collected from: never the body itself (docs/ENTITY_CHIPS.md, rule 2). */
+export type ChipBeside = { quotation?: string | null };
 
 /**
  * A doc's choice of form per chip kind, keyed by chip kind. Each kind parses
@@ -132,9 +149,11 @@ export type ChipKind<Data = unknown, Style = unknown, Context = unknown> = {
   /**
    * Every chip of this kind in the doc, in doc order, to its rendering, in
    * the same order. One call per doc, so a kind can number its chips or tell
-   * apart two entities that would share a label.
+   * apart two entities that would share a label. `beside` is what each chip's
+   * occurrence carries from the text beside it, in the same order: a
+   * citation's quotation, found by the one finder (quotations.ts).
    */
-  render(chips: readonly Data[], style: Style, context: Context): ChipRendering[];
+  render(chips: readonly Data[], style: Style, context: Context, beside?: readonly ChipBeside[]): ChipRendering[];
   /**
    * One chip as Markdown (the kind contract, item 7), given the rendering
    * `render` made for it. The syntax is this kind's own, and its parse keys on

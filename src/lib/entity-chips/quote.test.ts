@@ -162,7 +162,8 @@ test("markdown: a link written by hand in a mention's shape is escaped, and read
     para(text("@Andrew", link("/authors/andrew")), text(" and "), text("his page", link("/authors/andrew")), text(" and "), text("@home", link("/elsewhere"))),
   );
   const written = docContentToMarkdown(doc.toJSON());
-  assert.equal(written, "[\\@Andrew](/authors/andrew) and [his page](/authors/andrew) and [@home](/elsewhere)");
+  // `@home` alone would read back as a citation of the work keyed home, so its `@` is escaped too.
+  assert.equal(written, "[\\@Andrew](/authors/andrew) and [his page](/authors/andrew) and [\\@home](/elsewhere)");
   const [block] = markdownToBlocks(written);
   assert.deepEqual(
     block.content?.map((node) => [node.text, node.marks?.[0]?.attrs?.href ?? null]),
