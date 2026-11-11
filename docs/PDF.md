@@ -796,7 +796,9 @@ The stored copy drops them, for §10b's reason.
   run. The viewer uses its own copy as pdfjs returns it.
 
 Anchoring, presence and geometry all keep counting **sheets** (1-based indices). A label
-never enters a computation — only a rendering. PLAN.md §19c.
+never enters a computation — only a rendering, and the lookup that finds the sheets a printed
+page names, for a `p=` link or a citation's page ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)
+§2, "Which sheet"). PLAN.md §19c.
 
 ---
 

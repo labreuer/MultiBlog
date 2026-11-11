@@ -1,5 +1,8 @@
 // docs/PDF_FRAGMENT_LINKS.md — a link to a passage of a PDF that is only a
-// URL: `/pdf/<slug>#page=<n>&text=<passage>`, with no row anywhere.
+// URL: `/pdf/<slug>#page=<n>&text=<passage>`, or `#p=<label>&text=<passage>`
+// by the page printed on it, with no row anywhere.
+
+import { formatPageName, isPageParam, pageNameOf, type PageName } from "./pdf-open-params";
 //
 // Pure and isomorphic, like src/lib/pdf-text.ts beside it: the viewer reads
 // fragments with it, and the integrity check and the one-quote CLI write and
@@ -32,42 +35,47 @@ const MAX_PREFIX_WORDS = 6;
  * only their letters and digits take part in a match, so a `+`, a `%20` or a
  * stray comma inside a quote makes no difference to what they find.
  */
-export type FragmentPassage = {
-  /** 1-based sheet number, exactly as `#page=` means it (src/lib/pdf-open-params.ts). */
-  page: number;
+export type FragmentPassage = PassageText & {
+  /**
+   * The page it names: a 1-based sheet, exactly as `#page=` means it, or a
+   * printed label, as `#p=` gives one (src/lib/pdf-open-params.ts). Only
+   * `sheetsNamed` (src/lib/pdf-page-labels.ts) turns a label into sheets.
+   */
+  page: PageName;
+};
+
+/** The text half of a passage: what the matcher needs, without the page. */
+export type PassageText = {
   prefix: string | null;
   start: string;
   end: string | null;
   suffix: string | null;
 };
 
-/** The text half of a passage: what the matcher needs, without the page. */
-export type PassageText = Omit<FragmentPassage, "page">;
-
 /** A range in a page's normalised text, as `position` measures one: UTF-16 offsets, end exclusive. */
 export type TextRange = { start: number; end: number };
 
 /**
  * The passages a fragment names, in order. Parameters are read left to right,
- * as RFC 8118 reads a PDF's own: each `text` belongs to the nearest `page`
- * before it, a `text` with no valid `page` before it is ignored, and anything
- * else is ignored as `pageFromHash` ignores it. A passage whose grammar
- * doesn't parse, or one of whose parts has no letters or digits, is dropped
- * rather than guessed at.
+ * as RFC 8118 reads a PDF's own: each `text` belongs to the nearest `page` or
+ * `p` before it, a `text` with no valid page before it is ignored, and
+ * anything else is ignored as `pageFromHash` ignores it. A passage whose
+ * grammar doesn't parse, or one of whose parts has no letters or digits, is
+ * dropped rather than guessed at.
  */
 export function parseFragmentPassages(hash: string): FragmentPassage[] {
   const passages: FragmentPassage[] = [];
-  let page: number | null = null;
+  let page: PageName | null = null;
   for (const param of hash.replace(/^#/, "").split("&")) {
     if (passages.length >= MAX_FRAGMENT_PASSAGES) break;
     const equals = param.indexOf("=");
     if (equals < 0) continue;
     const name = param.slice(0, equals);
     const value = param.slice(equals + 1);
-    if (name === "page") {
+    if (isPageParam(name)) {
       // An unreadable page forgets the one before it, so the texts after it
       // can't attach themselves to a page they were never written for.
-      page = /^\d+$/.test(value) && Number(value) >= 1 ? Number(value) : null;
+      page = pageNameOf(name, value);
     } else if (name === "text" && page !== null) {
       const text = parsePassageText(value);
       if (text) passages.push({ page, ...text });
@@ -123,7 +131,7 @@ export function formatFragmentPassages(passages: readonly FragmentPassage[]): st
         passage.end !== null ? encodeWords(passage.end) : null,
         passage.suffix !== null ? `-${encodeWords(passage.suffix)}` : null,
       ].filter((part): part is string => part !== null);
-      return `page=${passage.page}&text=${parts.join(",")}`;
+      return `${formatPageName(passage.page)}&text=${parts.join(",")}`;
     })
     .join("&");
 }

@@ -2,9 +2,10 @@ import { prisma } from "@/lib/prisma";
 import { currentTextVersion } from "@/lib/pdf-extract";
 import { storedPageText } from "@/lib/pdf-page-text";
 import { pdfMetadata } from "@/lib/pdf-metadata";
-import { labelRanges, pagesLabelled, usablePageLabels } from "@/lib/pdf-page-labels";
+import { labelRanges, pagesLabelled, sheetsLabelled, sheetsNamed, usablePageLabels } from "@/lib/pdf-page-labels";
+import { pageFromHash, type PageName } from "@/lib/pdf-open-params";
 import { parseFragmentPassages, resolveAll, resolvePassage, skeletonOf, type PassageText } from "@/lib/pdf-fragment";
-import { checkPassage, type FilePages } from "@/lib/pdf-fragment-check";
+import { checkPassage, type FilePages } from "@/lib/pdf-fragment-findings";
 import { overlapWindows } from "@/lib/comment-quote-match";
 import { markdownToText } from "@/lib/markdown-import";
 import { tagsForTarget } from "@/lib/tag-data";
@@ -154,15 +155,15 @@ function pageRange(spec: string, pageCount: number): number[] {
   return Array.from({ length: Math.min(to, pageCount) - from + 1 }, (_, k) => from - 1 + k);
 }
 
-/** What the fragment names: a page (`#page=N`) and the passages a fragment link's `text` parameters name. */
-function viewerFragment(fragment: string): { page: number | null; hasText: boolean } {
-  let page: number | null = null;
-  let hasText = false;
-  for (const [key, value] of fragmentParams(fragment)) {
-    if (key === "page" && /^\d+$/.test(value)) page = Number(value);
-    if (key === "text") hasText = true;
-  }
-  return { page, hasText };
+/** What the fragment names: a page (`#page=N`, or `#p=<label>` by printed page) and whether it has a fragment link's `text` parameters. */
+function viewerFragment(fragment: string): { page: PageName | null; hasText: boolean } {
+  const hasText = fragmentParams(fragment).some(([key]) => key === "text");
+  return { page: pageFromHash(`#${fragment}`), hasText };
+}
+
+/** A page as an answer names it. */
+function pageText(page: PageName): string {
+  return "sheet" in page ? `page ${page.sheet}` : `the page labelled ${page.label}`;
 }
 
 export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArgs, fragment: string, extras: () => Promise<ToolResult>): Promise<ToolResult> {
@@ -172,11 +173,13 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
   }
   const metadata = await pdfMetadata(file.id);
   const labels = metadata ? usablePageLabels(metadata.pageLabels, file.pageCount) : null;
+  // The labels the file itself gives, which a `p=` is matched against, never `labels`' filled-in copy.
+  const ownLabels = metadata?.pageLabels ?? null;
   const pageCount = file.pageCount;
   const maxChars = readBoundFor(ctx.token.client);
   const { page: fragmentPage, hasText } = viewerFragment(fragment);
 
-  if (hasText) return fragmentPassages(file, labels, fragment);
+  if (hasText) return fragmentPassages(file, labels, ownLabels, fragment);
   if (args.around !== undefined) return { ...(await aroundQuote(file, labels, args)), ...(await extras()) };
 
   if (args.entry !== undefined) {
@@ -199,7 +202,13 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
     return pagesResult(file, labels, indexes, maxChars);
   }
   if (args.pages !== undefined) return pagesResult(file, labels, pageRange(args.pages, pageCount), maxChars);
-  const page = args.page ?? fragmentPage;
+  // A page link opens at the first sheet carrying its label, as the viewer does.
+  if (args.page === undefined && fragmentPage !== null && "label" in fragmentPage) {
+    const sheets = sheetsLabelled(ownLabels, pageCount, fragmentPage.label);
+    if (sheets.length === 0) throw new ApiError("not_found", `No page of this PDF is labelled "${fragmentPage.label}".`);
+    return pagesResult(file, labels, [sheets[0]], maxChars);
+  }
+  const page = args.page ?? (fragmentPage && "sheet" in fragmentPage ? fragmentPage.sheet : null);
   if (page !== null && page !== undefined) {
     if (page > pageCount) throw invalid(`This PDF has ${pageCount} pages.`);
     return pagesResult(file, labels, [page - 1], maxChars);
@@ -322,25 +331,37 @@ async function aroundQuote(file: ResolvedFile, labels: string[] | null, args: Re
 
 /**
  * A fragment link read as its passage (§8): each `text` resolved as the
- * viewer resolves it (`resolvePassage`), with about 300 characters either
- * side, its page and its label — rather than the page, since following a
- * summary's citations page by page would read mostly other text. A passage
- * that isn't there answers `no_match` with what the fragment-link check
- * reports: where its skeleton stops matching, what the page has there, and
- * the page it is on instead when it occurs exactly once elsewhere.
+ * viewer resolves it (`resolvePassage`, on the first of the sheets its page
+ * names that holds it), with about 300 characters either side, its page and
+ * its label — rather than the page, since following a summary's citations
+ * page by page would read mostly other text. A passage that isn't there
+ * answers `no_match` with what the fragment-link check reports: where its
+ * skeleton stops matching, what the page has there, and the page it is on
+ * instead when it occurs exactly once elsewhere.
  */
-async function fragmentPassages(file: ResolvedFile, labels: string[] | null, fragment: string): Promise<ToolResult> {
+async function fragmentPassages(
+  file: ResolvedFile,
+  labels: string[] | null,
+  ownLabels: string[] | null,
+  fragment: string,
+): Promise<ToolResult> {
   const passages = parseFragmentPassages(`#${fragment}`);
   if (passages.length === 0) throw invalid("That fragment's text= parameters don't parse as a fragment link.");
   const pageCount = file.pageCount!;
-  const wanted = [...new Set(passages.map((p) => p.page - 1).filter((index) => index >= 0 && index < pageCount))];
-  const texts = await pageTexts(file.id, wanted);
+  const sheetsOf = passages.map((passage) => sheetsNamed(passage.page, ownLabels, pageCount));
+  const texts = await pageTexts(file.id, [...new Set(sheetsOf.flat())]);
   const out: Record<string, unknown>[] = [];
-  for (const passage of passages) {
-    const index = passage.page - 1;
-    const text = texts.get(index);
-    const range = text !== undefined ? resolvePassage(text, passage) : null;
-    if (text === undefined || !range) {
+  for (const [n, passage] of passages.entries()) {
+    let found: { index: number; text: string; range: { start: number; end: number } } | null = null;
+    for (const index of sheetsOf[n]) {
+      const text = texts.get(index);
+      const range = text !== undefined ? resolvePassage(text, passage) : null;
+      if (text !== undefined && range) {
+        found = { index, text, range };
+        break;
+      }
+    }
+    if (!found) {
       // The check's own finding, over every page, for the answer.
       const all = await pageTexts(file.id, allPages(pageCount));
       const pages: FilePages = {
@@ -348,10 +369,11 @@ async function fragmentPassages(file: ResolvedFile, labels: string[] | null, fra
         slug: file.slug,
         pageCount,
         textVersion: await currentTextVersion(),
+        ownLabels,
         pages: new Map([...all].map(([i, t]) => [i, { text: t, skeleton: skeletonOf(t) }])),
       };
       const finding = checkPassage(pages, passage);
-      throw new ApiError("no_match", `A passage of that fragment link isn't on page ${passage.page}.`, {
+      throw new ApiError("no_match", `A passage of that fragment link isn't on ${pageText(passage.page)}.`, {
         passage: { start: passage.start, ...(passage.end ? { end: passage.end } : {}) },
         ...(finding.kind === "no-match"
           ? {
@@ -361,10 +383,12 @@ async function fragmentPassages(file: ResolvedFile, labels: string[] | null, fra
             }
           : finding.kind === "page-out-of-range"
             ? { pageCount }
-            : {}),
+            : finding.kind === "no-such-label"
+              ? { noSuchLabel: true, ...(finding.foundOnPage !== null ? { foundOnPage: finding.foundOnPage } : {}) }
+              : {}),
       });
     }
-    out.push({ page: passage.page, ...(labels ? { label: labels[index] } : {}), ...surroundings(text, range.start, range.end) });
+    out.push({ page: found.index + 1, ...(labels ? { label: labels[found.index] } : {}), ...surroundings(found.text, found.range.start, found.range.end) });
   }
   return { kind: "pdf-passages", url: `/pdf/${file.slug}`, passages: out };
 }

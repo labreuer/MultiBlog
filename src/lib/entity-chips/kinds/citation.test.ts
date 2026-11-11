@@ -114,22 +114,31 @@ test("a citation of several works links to the list, each work once, at the firs
 });
 
 test("the route finds the page cited in the PDF by the file's page labels", () => {
-  const labelled = { slug: "saving", pageLabels: ["i", "ii", "1", "2", "49"] };
-  assert.equal(pdfPageHref(labelled, "49"), "/pdf/saving#page=5");
-  assert.equal(pdfPageHref(labelled, "ii"), "/pdf/saving#page=2");
-  assert.equal(pdfPageHref(labelled, "49–51"), "/pdf/saving#page=5");
-  assert.equal(pdfPageHref(labelled, "49, 60"), "/pdf/saving#page=5");
+  const labelled = { slug: "saving", pageLabels: ["i", "ii", "1", "2", "49"], pageCount: 5 };
+  // A file with usable labels is linked by its printed page, as a p= link names it.
+  assert.equal(pdfPageHref(labelled, "49"), "/pdf/saving#p=49");
+  assert.equal(pdfPageHref(labelled, "ii"), "/pdf/saving#p=ii");
+  assert.equal(pdfPageHref(labelled, "49–51"), "/pdf/saving#p=49");
+  assert.equal(pdfPageHref(labelled, "49, 60"), "/pdf/saving#p=49");
+  // In any case, written as the file gives it.
+  assert.equal(pdfPageHref(labelled, "II"), "/pdf/saving#p=ii");
   // A page the file doesn't label, or no page: nothing to go to in the PDF.
   assert.equal(pdfPageHref(labelled, "300"), null);
   assert.equal(pdfPageHref(labelled, undefined), null);
-  // With no labels, a number is the sheet.
-  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null }, "49"), "/pdf/saving#page=49");
-  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null }, "xii"), null);
-  // As a file with no labels stores them once its metadata is read.
-  assert.equal(pdfPageHref({ slug: "saving", pageLabels: [] }, "49"), "/pdf/saving#page=49");
-  // But not past the file's last sheet.
+  // A filled-in number is not a label: a sheet whose own label is empty is no page "1".
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: ["", "", "1", "2"], pageCount: 4 }, "1"), "/pdf/saving#p=1");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: ["", "", "5", "6"], pageCount: 4 }, "1"), null);
+  // With no labels, a number is the sheet, written as one.
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 60 }, "49"), "/pdf/saving#page=49");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 60 }, "xii"), null);
+  // As a file with no labels stores them once its metadata is read; and labels all empty, or just 1…N, are none.
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: [], pageCount: 60 }, "49"), "/pdf/saving#page=49");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: ["", "", ""], pageCount: 3 }, "2"), "/pdf/saving#page=2");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: ["1", "2", "3"], pageCount: 3 }, "2"), "/pdf/saving#page=2");
+  // But not past the file's last sheet, nor for a file that isn't a PDF.
   assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 40 }, "49"), null);
   assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 49 }, "49"), "/pdf/saving#page=49");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: null }, "49"), null);
 });
 
 test("Page holds pages only, and an item is stored as Markdown reads it back", () => {

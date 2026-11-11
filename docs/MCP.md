@@ -1301,9 +1301,11 @@ the same way: lazily on first read, with raw SQL. A book is read by chapter.
 occurrence's page, label and about 300 characters either side. A read of the file itself
 carries its title, page count, labels, outline and tags.
 
-**A fragment link reads as its passage.** `read` of `/pdf/<slug>#page=<n>&text=…` resolves each
-`text` as the viewer does (`resolvePassage`) and returns the passage with about 300 characters
-either side, its page and its label, rather than the page. The books on the development
+**A fragment link reads as its passage.** `read` of `/pdf/<slug>#page=<n>&text=…`, or
+`#p=<label>&text=…` by printed page, resolves each `text` as the viewer does (`resolvePassage`,
+on the first of the sheets its page names that holds it) and returns the passage with about 300
+characters either side, its page and its label, rather than the page. A `#p=<label>` with no
+`text` reads the first page carrying the label, where the viewer opens it. The books on the development
 instance average 2,500 to 3,250 characters a page, so following a summary's citations page by
 page would read mostly other text. A passage that isn't there answers `no_match` with what the
 check below reports.
@@ -1408,14 +1410,19 @@ property [PDF.md](PDF.md) §4 rests on: an anchor measured once is correct forev
 
 **Fragment links in what the MCP server writes are checked.** A doc or annotation body may link
 a PDF passage by URL alone, as a fragment link ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)):
-`/pdf/<slug>#page=<n>&text=<words>`. Each one is checked before anything is written, by the
-check the integrity script and the one-quote CLI already share: `FragmentChecker`, with
-`linkHrefsIn` to find the links in a body (`src/lib/pdf-fragment-check.ts`).
+`/pdf/<slug>#p=<label>&text=<words>` by printed page, or `#page=<n>&text=<words>` by sheet.
+`create_doc`'s description tells the model to write the printed page, with the label a read
+gives it, and the sheet for a page with none. Each one is checked before anything is written,
+by the check the integrity script and the one-quote CLI already share: `FragmentChecker`
+(`src/lib/pdf-fragment-check.ts`), with `linkHrefsIn` to find the links in a body
+(`src/lib/pdf-fragment-findings.ts`). A page link, `#page=<n>` or `#p=<label>` with no `text`,
+is checked for its page.
 
 - **It reads as the operator**, so the MCP server asks `canUserReadFile` first, as the module's
   header requires.
-- **It never extracts.** It reads the stored text at the current version, or the newest the
-  file has, since a skeleton barely depends on the version. The anchor locator above extracts
+- **It never extracts page text.** It reads the stored text at the current version, or the
+  newest the file has, since a skeleton barely depends on the version. A `p=` on a file whose
+  labels haven't been read yet has them read from its bytes and not stored. The anchor locator above extracts
   on a miss instead, because quads need the text the current pdfjs yields.
 - **It reads only the pages the links name**, and a whole file only for a miss, so a body
   citing many books costs what it cites rather than what the books hold
@@ -1435,10 +1442,17 @@ The answers:
   `pageHasThere` and `foundOnPage`. That is §7's answer for an anchor. An agent
   can fix the quote in the same turn, where otherwise a broken link shows only when someone
   follows it.
+- **A page past the end, or a label no sheet carries, refuses it with `no_match` too**, for a
+  passage or a page link. A label no sheet carries gives the page the passage is on, as a miss
+  does. The answer says that a page with no label of its own is named by `page=`, since the
+  labels a read shows fill such a page's in with its sheet number, and a `p` is never matched
+  against those.
 - **A file the actor can't read is `not_found`**, the same as one that doesn't exist (§4), so the
   check can't be asked what a PRIVATE file contains.
 - **A passage that repeats on its page is a warning in the result**, not an error. A fragment
   link points at the first occurrence by definition, and only its writer knows which was meant.
+  So is a `p=` on a file without usable labels, with its `page=` form: it is a sheet number
+  there, and would turn into a printed page the day the file gained labels.
 - **Nothing is rewritten.** The href stored is the one sent.
 - **The importer checks none.** An integrity script checks every stored one
   (PDF_FRAGMENT_LINKS.md §9).
@@ -2153,8 +2167,8 @@ restore-to-a-point exists ([DOCS.md](DOCS.md), "Deferred").
 |---|---|
 | `/doc/<slug>`, also by id and with `/edit` | The doc whole, its outline, or a range of it (§6); `include` its annotations, or the links into it |
 | `/pdf/<slug>` | The file's title, page count, labels as ranges, outline and tags (§8); `include` as for a doc; an outline entry's pages |
-| `/pdf/<slug>#page=<n>` | That page's text; `pages` or `label` for others (§8) |
-| `/pdf/<slug>#page=<n>&text=…`, a fragment link | Its passage, with its context, page and label (§8) |
+| `/pdf/<slug>#page=<n>`, or `#p=<label>` | That page's text, the first carrying the label; `pages` or `label` for others (§8) |
+| `/pdf/<slug>#page=<n>&text=…` or `#p=<label>&text=…`, a fragment link | Its passage, with its context, page and label (§8) |
 | `/annotations` | The threads on every doc and PDF the actor can read, filtered as a container's are, grouped by container (§9) |
 | `/files/<slug>` | Any file, a .docx included: its title, filename, size and tags (§8); a PDF's text is read at `/pdf/<slug>` |
 | either, with an annotation card's fragment | That annotation's thread (§9) |

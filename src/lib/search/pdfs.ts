@@ -6,7 +6,8 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { readableFilesWhere } from "@/lib/file-authz";
 import { currentTextVersion } from "@/lib/pdf-extract";
-import { usablePageLabels } from "@/lib/pdf-page-labels";
+import { pageNameForSheet, usablePageLabels } from "@/lib/pdf-page-labels";
+import { formatPageName } from "@/lib/pdf-open-params";
 import { parseHeadline, type HeadlineFragment } from "./headline";
 import { bodyHeadlineSql, cleanedText, orderNewest, rankRows, snippetsFor, type TsQuery } from "./sql";
 import { remember, taggedWhere, type KindContext, type KindSearch } from "./context";
@@ -105,6 +106,19 @@ function labelOf(file: { pageCount: number | null; pageLabels: unknown }, pageIn
   return labels ? labels[pageIndex] : null;
 }
 
+/**
+ * A page hit's link: `#p=<label>` where the sheet is the first carrying its
+ * own label, and `#page=<n>` otherwise, as for a sheet whose own label is
+ * empty or a file without usable labels (docs/PDF_FRAGMENT_LINKS.md §8). It
+ * is a page link nobody chooses the form of, and is copied into bodies from
+ * the address bar, so it takes the form that survives a new copy of the file.
+ * From the stored labels only, as `labelOf` is.
+ */
+function pageHref(file: { slug: string; pageCount: number | null; pageLabels: unknown }, pageIndex: number): string {
+  const own = Array.isArray(file.pageLabels) ? (file.pageLabels as string[]) : null;
+  return `/pdf/${file.slug}#${formatPageName(pageNameForSheet(own, file.pageCount ?? 0, pageIndex))}`;
+}
+
 export const pdfsSearch: KindSearch<PdfHit> = {
   async match(ctx, query) {
     const updatedAt = await candidates(ctx);
@@ -153,7 +167,7 @@ export const pdfsSearch: KindSearch<PdfHit> = {
           pages: matched.slice(0, PDF_PAGES_SHOWN).map((page) => ({
             page: page.pageIndex + 1,
             label: labelOf(file, page.pageIndex),
-            href: `/pdf/${file.slug}#page=${page.pageIndex + 1}`,
+            href: pageHref(file, page.pageIndex),
             snippet: snippets.get(`${id}:${page.pageIndex}`) ?? [],
           })),
           morePages: Math.max(0, matched.length - PDF_PAGES_SHOWN),

@@ -122,5 +122,5 @@ export function fragmentParams(fragment: string): [string, string][] {
 
 /** Whether a PDF fragment is a viewer fragment (page, text, zoom…) rather than an annotation card's name. */
 export function isViewerFragment(fragment: string): boolean {
-  return fragmentParams(fragment).some(([key]) => ["page", "text", "zoom", "nameddest", "search"].includes(key));
+  return fragmentParams(fragment).some(([key]) => ["page", "p", "text", "zoom", "nameddest", "search"].includes(key));
 }

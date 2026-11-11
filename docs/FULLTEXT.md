@@ -457,13 +457,18 @@ for the same reason `LocalTime` exists: the server's time zone isn't the reader'
 |---|---|
 | Doc | `/doc/<slug>` |
 | Post | its public path, or `/post/<id>/edit` when unpublished |
-| PDF page | `/pdf/<slug>#page=<n>` |
+| PDF page | `/pdf/<slug>#p=<label>`, or `#page=<n>` (below) |
 | Annotation | its doc or PDF, plus the permalink fragment its card renders (`annotationAnchorName`) |
 | Comment | its post's path, plus the fragment its card renders (`commentAnchorName`) |
 
 - **`#page=` follows the PDF Open Parameters convention**
   ([pdf-open-params.ts](../src/lib/pdf-open-params.ts)). The viewer reads it once the document
-  is laid out, and again on `hashchange`.
+  is laid out, and again on `hashchange`, and reads `#p=`, the printed page, the same way.
+- **A page hit links by its printed page** where its sheet is the first carrying its own label,
+  and by its sheet otherwise, as for a sheet whose own label is empty or a file without usable
+  labels: a page link is copied into bodies from the address bar, and `p=` survives a new copy
+  of the file that adds or removes a sheet ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md) §8,
+  "Which page form a writer takes"). From the stored labels only, as the hit's label is.
 - **Each fragment is built by one shared function** that the card uses too, so a link can't
   miss its card.
 - **An annotation's writer is a name, never an email.** `displayNameOf`

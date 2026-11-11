@@ -4975,3 +4975,12 @@ Planned and built 2026-11-10: a citation naming several works links to
 `/references/<key>,<key>,…`, one page listing them all, with the keys nothing answers to marked
 at the top rather than a 404. **As built: [docs/CITATIONS.md](docs/CITATIONS.md), Labels "The
 link", Keys (the list's address and the `~` form) and Pages.**
+
+## 32. A PDF page named by its printed label, and elided passages
+
+Planned 2026-11-10: `p=<label>` in a PDF link beside `page=`'s sheet, so a link names the page a
+reader sees printed on it and survives a replacement that adds or removes sheets; and `...`
+between the segments of a `text` value, so a link marks the words a quotation leaves out.
+Built 2026-11-10: `p=`, with search's page links and the cited-page redirect writing it. **As
+built: [docs/PDF_FRAGMENT_LINKS.md](docs/PDF_FRAGMENT_LINKS.md) §2 ("Which sheet"), §6, §8,
+§9, and §12 for the departures.** Elided passages are still a plan: **§13 there.**

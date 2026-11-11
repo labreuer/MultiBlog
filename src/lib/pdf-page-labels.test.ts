@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { pageLabelFor, pageTotalLabel, usablePageLabels } from "./pdf-page-labels";
-import { labelRanges, labelStyle, pagesLabelled } from "./pdf-page-labels";
+import { labelRanges, labelStyle, pageNameForLabel, pageNameForSheet, pagesLabelled, sheetsLabelled, sheetsNamed } from "./pdf-page-labels";
 
 // PLAN.md §19c. The interesting half of this is what gets *rejected*: a labels
 // array is built from a number tree in someone else's file, and every arm below
@@ -129,4 +129,71 @@ test("pagesLabelled finds every page carrying a label, and a plain number withou
   assert.deepEqual(pagesLabelled(["I", "ii"], "i"), [0]);
   assert.deepEqual(pagesLabelled(null, "12"), [11]);
   assert.deepEqual(pagesLabelled(null, "xii"), []);
+});
+
+test("pagesLabelled trims and ignores case on both sides, and an empty label names nothing", () => {
+  assert.deepEqual(pagesLabelled([" xii ", "XII"], "xii"), [0, 1]);
+  assert.deepEqual(pagesLabelled(["", "1"], " "), []);
+  assert.deepEqual(pagesLabelled(null, " 12 "), [11]);
+});
+
+// docs/PDF_FRAGMENT_LINKS.md §2, "Which sheet": a p= label against the labels the file itself gives.
+
+test("on a labelled file, a label names every sheet whose own label it is, in order", () => {
+  // Front matter and body both have a "1".
+  const own = ["i", "ii", "1", "2", "1", "2"];
+  assert.deepEqual(sheetsLabelled(own, 6, "1"), [2, 4]);
+  assert.deepEqual(sheetsLabelled(own, 6, "II"), [1]);
+  assert.deepEqual(sheetsLabelled(own, 6, " 2 "), [3, 5]);
+  // A label no sheet carries.
+  assert.deepEqual(sheetsLabelled(own, 6, "49"), []);
+  assert.deepEqual(sheetsLabelled(own, 6, "iii"), []);
+});
+
+test("a filled-in number is not a label", () => {
+  // Sheets 1 and 2 carry no label of their own; usablePageLabels shows them as "1" and "2".
+  const own = ["", "", "1", "2"];
+  assert.deepEqual(sheetsLabelled(own, 4, "1"), [2]);
+  assert.deepEqual(sheetsLabelled(["", "", "5", "6"], 4, "1"), []);
+  assert.deepEqual(sheetsLabelled(["", "", "5", "6"], 4, "2"), []);
+});
+
+test("on a file without usable labels, a label in digits is that sheet, and any other names none", () => {
+  for (const own of [null, undefined, [], ["", "", ""], ["1", "2", "3"], ["i", "ii"]]) {
+    assert.deepEqual(sheetsLabelled(own, 3, "2"), [1], JSON.stringify(own));
+    assert.deepEqual(sheetsLabelled(own, 3, "xii"), [], JSON.stringify(own));
+    // Not past the last sheet, and never sheet 0.
+    assert.deepEqual(sheetsLabelled(own, 3, "4"), [], JSON.stringify(own));
+    assert.deepEqual(sheetsLabelled(own, 3, "0"), [], JSON.stringify(own));
+  }
+});
+
+test("a fragment's page names its sheets: a sheet past the end names none", () => {
+  assert.deepEqual(sheetsNamed({ sheet: 3 }, null, 3), [2]);
+  assert.deepEqual(sheetsNamed({ sheet: 4 }, null, 3), []);
+  assert.deepEqual(sheetsNamed({ label: "1" }, ["i", "1", "1"], 3), [1, 2]);
+});
+
+test("a writer names a sheet p= only where its own label finds it first", () => {
+  const own = ["", "i", "1", "2", "1"];
+  // A page link: p= for the first sheet carrying its label, page= for a later one.
+  assert.deepEqual(pageNameForSheet(own, 5, 2), { label: "1" });
+  assert.deepEqual(pageNameForSheet(own, 5, 4), { sheet: 5 });
+  assert.deepEqual(pageNameForSheet(own, 5, 1), { label: "i" });
+  // A sheet whose own label is empty is named page=.
+  assert.deepEqual(pageNameForSheet(own, 5, 0), { sheet: 1 });
+  // A passage on a later sheet of a repeated label: p= when no earlier one holds it.
+  assert.deepEqual(pageNameForSheet(own, 5, 4, () => false), { label: "1" });
+  assert.deepEqual(pageNameForSheet(own, 5, 4, (earlier) => earlier === 2), { sheet: 5 });
+  // A file without usable labels is always page=.
+  assert.deepEqual(pageNameForSheet(null, 5, 2), { sheet: 3 });
+  assert.deepEqual(pageNameForSheet(["1", "2", "3"], 3, 1), { sheet: 2 });
+});
+
+test("a writer names a printed page p= with the file's own label, or page= on a file without labels", () => {
+  assert.deepEqual(pageNameForLabel(["i", "XII", "1"], 3, "xii"), { label: "XII" });
+  assert.deepEqual(pageNameForLabel(["i", " 1 ", "1"], 3, "1"), { label: "1" });
+  assert.deepEqual(pageNameForLabel(["i", "ii", "1"], 3, "49"), null);
+  assert.deepEqual(pageNameForLabel(null, 60, "49"), { sheet: 49 });
+  assert.deepEqual(pageNameForLabel([], 40, "49"), null);
 });

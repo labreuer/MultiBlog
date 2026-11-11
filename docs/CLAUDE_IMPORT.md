@@ -249,15 +249,17 @@ its doc survive the edit, and would not survive the doc being deleted and import
 ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)), written straight into the Markdown, so the
 import is the only write: `[could not yet 'call his soul his own'](/pdf/<slug>#page=122&text=could+not+yet+call+his+soul+his+own)`.
 
-- **The page is the 1-based sheet number**, never the printed page. A booktext extraction's
-  header gives the mapping ("pdf page = printed page -1").
+- **The page is the printed page, `p=<label>`, where the PDF's own labels agree with the
+  copy's**, and otherwise `page=`, the 1-based sheet number. A booktext extraction's header
+  gives the mapping to sheets ("pdf page = printed page -1"). Which form a PDF takes, and the
+  places `p=` can't name a sheet: PDF_FRAGMENT_LINKS.md §8, "Which page form a writer takes".
 - **The words are the quote's letters and digits, joined by `+`**, from the corrected copy
   rather than the PDF's own text: the match ignores what extraction does to words ("bea tific",
   "o f").
 - **A quote longer than eight words goes as its first three and last three**,
   `text=a+direction+in,a+beatific+consummation`, and so does a quote elided with "…": its two
   ends.
-- **A quote across a page break is two `page`/`text` pairs**, split where the page breaks.
+- **A quote across a page break is two page and `text` pairs**, split where the page breaks.
 - **The import stores hrefs as written and checks none of them.** Afterwards, where the import
   ran, `npx tsx scripts/integrity/check-pdf-fragment-links.ts --doc <slug>` confirms the doc's
   links. Before writing, `npx tsx scripts/pdf-fragment-link.ts <file-slug> <page> "<quote>"`

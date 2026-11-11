@@ -10,7 +10,13 @@
 //   - **The page is a hint.** It looks on the page given, then on its two
 //     neighbours, then anywhere in the file, and uses the page the quote is on
 //     when that is unambiguous. A printed page number given by mistake for a
-//     sheet number is the usual cause.
+//     sheet number is the usual cause. Given as a printed page (`--label`), it
+//     looks on every sheet carrying that label first, then on the first one's
+//     neighbours.
+//   - **It prints whichever form the file takes** (§8): `p=` with the printed
+//     page where the file has usable labels, and `page=` where it has none,
+//     where the sheet's own label is empty, or where an earlier sheet with
+//     the same label holds the passage.
 //   - **A quote across a page break comes back as two passages**, split
 //     where the break falls, which the page's folio and running head would
 //     otherwise hide (§5).
@@ -22,11 +28,14 @@
 //
 // Usage:
 //   npx tsx scripts/pdf-fragment-link.ts <file-slug> <page> "<quote>"
-//   <page> is the 1-based sheet number, as #page= takes it.
+//   npx tsx scripts/pdf-fragment-link.ts <file-slug> --label <label> "<quote>"
+//   <page> is the 1-based sheet number, as #page= takes it; <label> is the
+//   page printed on it, as #p= takes it.
 
 import "dotenv/config";
 import { prisma } from "../src/lib/prisma";
-import { FragmentChecker, checkPassage, type FilePages } from "../src/lib/pdf-fragment-check";
+import { FragmentChecker } from "../src/lib/pdf-fragment-check";
+import { checkPassage, type FilePages } from "../src/lib/pdf-fragment-findings";
 import {
   countPassageOccurrences,
   formatFragmentPassages,
@@ -38,6 +47,8 @@ import {
   type PassageText,
   type TextRange,
 } from "../src/lib/pdf-fragment";
+import type { PageName } from "../src/lib/pdf-open-params";
+import { pageNameForSheet, sheetsLabelled, usablePageLabels } from "../src/lib/pdf-page-labels";
 
 type Located = { pageIndex: number; range: TextRange };
 
@@ -48,9 +59,10 @@ function passageFor(quote: string): PassageText {
   return { prefix: null, start, end: end && end.trim() ? end : null, suffix: null };
 }
 
-/** Where the passage is: the page given, its neighbours, or the one page in the file that holds it once. */
-function locate(file: FilePages, pageIndex: number, passage: PassageText): Located | null {
-  for (const candidate of [pageIndex, pageIndex - 1, pageIndex + 1]) {
+/** Where the passage is: the sheets given, the first one's neighbours, or the one page in the file that holds it once. */
+function locate(file: FilePages, sheets: readonly number[], passage: PassageText): Located | null {
+  const candidates = sheets.length > 0 ? [...new Set([...sheets, sheets[0] - 1, sheets[0] + 1])] : [];
+  for (const candidate of candidates) {
     const page = file.pages.get(candidate);
     const range = page ? resolvePassage(page.text, passage, page.skeleton) : null;
     if (range) return { pageIndex: candidate, range };
@@ -89,22 +101,43 @@ function formFor(text: string, located: Located, passage: PassageText): PassageT
   return writerForm(text, located.range);
 }
 
-function print(slug: string, passages: { passage: FragmentPassage; text: string; occurrences: number }[], askedPage: number): void {
-  console.log(`/pdf/${slug}#${formatFragmentPassages(passages.map((p) => p.passage))}`);
-  for (const { passage, text, occurrences } of passages) {
-    console.log(`  page ${passage.page}: "${text}"`);
-    if (occurrences > 1) console.log(`  warn: this form occurs ${occurrences} times on page ${passage.page}; the link points at the first`);
-  }
-  if (passages[0].passage.page !== askedPage) console.log(`  note: found on page ${passages[0].passage.page}, not ${askedPage}`);
+/** A located passage as the link names it: its page in whichever form the file takes (§8). */
+function named(file: FilePages, pageIndex: number, form: PassageText): FragmentPassage {
+  const page = pageNameForSheet(file.ownLabels, file.pageCount, pageIndex, (earlier) => {
+    const text = file.pages.get(earlier);
+    return text !== undefined && resolvePassage(text.text, form, text.skeleton) !== null;
+  });
+  return { page, ...form };
 }
 
+/** A sheet as the output names it: its number, and its own label where the file has usable ones. */
+function sheetText(file: FilePages, pageIndex: number): string {
+  const own = usablePageLabels(file.ownLabels, file.pageCount) ? file.ownLabels?.[pageIndex]?.trim() : "";
+  return own ? `page ${pageIndex + 1} (labelled ${own})` : `page ${pageIndex + 1}`;
+}
+
+type Printed = { passage: FragmentPassage; pageIndex: number; text: string; occurrences: number };
+
+function print(file: FilePages, passages: Printed[], asked: readonly number[], askedText: string): void {
+  console.log(`/pdf/${file.slug}#${formatFragmentPassages(passages.map((p) => p.passage))}`);
+  for (const { pageIndex, text, occurrences } of passages) {
+    console.log(`  ${sheetText(file, pageIndex)}: "${text}"`);
+    if (occurrences > 1) console.log(`  warn: this form occurs ${occurrences} times on its page; the link points at the first`);
+  }
+  if (!asked.includes(passages[0].pageIndex)) console.log(`  note: found on ${sheetText(file, passages[0].pageIndex)}, not ${askedText}`);
+}
+
+const USAGE = 'Usage: npx tsx scripts/pdf-fragment-link.ts <file-slug> <page> "<quote>"\n       npx tsx scripts/pdf-fragment-link.ts <file-slug> --label <label> "<quote>"';
+
 async function main(): Promise<number> {
-  const [slug, pageArg, quote] = process.argv.slice(2);
-  if (!slug || !pageArg || !quote || !/^\d+$/.test(pageArg) || Number(pageArg) < 1) {
-    console.error('Usage: npx tsx scripts/pdf-fragment-link.ts <file-slug> <page> "<quote>"');
+  const args = process.argv.slice(2);
+  const byLabel = args[1] === "--label";
+  const [slug, pageArg, quote] = byLabel ? [args[0], args[2], args[3]] : args;
+  if (!slug || !pageArg?.trim() || !quote || (!byLabel && (!/^\d+$/.test(pageArg) || Number(pageArg) < 1))) {
+    console.error(USAGE);
     return 2;
   }
-  const askedPage = Number(pageArg);
+  const askedName: PageName = byLabel ? { label: pageArg.trim() } : { sheet: Number(pageArg) };
 
   const checker = new FragmentChecker();
   const file = await checker.pagesFor(slug);
@@ -117,22 +150,38 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  // The sheets the page names: one for a sheet; every sheet carrying a label.
+  const asked = "sheet" in askedName ? [askedName.sheet - 1] : sheetsLabelled(file.ownLabels, file.pageCount, askedName.label);
+  const askedText = "sheet" in askedName ? `page ${askedName.sheet}` : `the page labelled ${askedName.label}`;
+  if ("label" in askedName && asked.length === 0) console.error(`  note: no page of "${file.slug}" is labelled ${askedName.label}; looking in the whole file`);
+
   const passage = passageFor(quote);
-  const located = locate(file, askedPage - 1, passage);
+  const located = locate(file, asked, passage);
   if (located) {
     const page = file.pages.get(located.pageIndex)!;
     const form = formFor(page.text, located, passage);
     if (form) {
-      const full: FragmentPassage = { page: located.pageIndex + 1, ...form };
       const range = resolvePassage(page.text, form, page.skeleton)!;
-      print(file.slug, [{ passage: full, text: page.text.slice(range.start, range.end), occurrences: countPassageOccurrences(page.text, form, page.skeleton) }], askedPage);
+      print(
+        file,
+        [
+          {
+            passage: named(file, located.pageIndex, form),
+            pageIndex: located.pageIndex,
+            text: page.text.slice(range.start, range.end),
+            occurrences: countPassageOccurrences(page.text, form, page.skeleton),
+          },
+        ],
+        asked,
+        askedText,
+      );
       return 0;
     }
   }
 
   // Across a page break: the page given and the next, then the one before and it.
-  if (passage.end === null) {
-    for (const first of [askedPage - 1, askedPage - 2]) {
+  if (passage.end === null && asked.length > 0) {
+    for (const first of [asked[0], asked[0] - 1]) {
       const a = file.pages.get(first);
       const b = file.pages.get(first + 1);
       const split = a && b ? splitAcrossPages(a.text, b.text, quote) : null;
@@ -141,24 +190,27 @@ async function main(): Promise<number> {
       const nextForm = writerForm(b.text, split.next, split.nextWords) ?? writerForm(b.text, split.next);
       if (!firstForm || !nextForm) continue;
       print(
-        file.slug,
+        file,
         [
-          { passage: { page: first + 1, ...firstForm }, text: a.text.slice(split.first.start, split.first.end), occurrences: 1 },
-          { passage: { page: first + 2, ...nextForm }, text: b.text.slice(split.next.start, split.next.end), occurrences: 1 },
+          { passage: named(file, first, firstForm), pageIndex: first, text: a.text.slice(split.first.start, split.first.end), occurrences: 1 },
+          { passage: named(file, first + 1, nextForm), pageIndex: first + 1, text: b.text.slice(split.next.start, split.next.end), occurrences: 1 },
         ],
-        askedPage,
+        asked,
+        askedText,
       );
       return 0;
     }
   }
 
-  const finding = checkPassage(file, { page: askedPage, ...passage });
+  const finding = checkPassage(file, { page: askedName, ...passage });
   if (finding.kind === "page-out-of-range") {
-    console.error(`Page ${askedPage} is past the end: "${file.slug}" has ${finding.pageCount} pages.`);
+    console.error(`${askedText[0].toUpperCase()}${askedText.slice(1)} is past the end: "${file.slug}" has ${finding.pageCount} pages.`);
+  } else if (finding.kind === "no-such-label") {
+    console.error(`No page is labelled ${pageArg.trim()}, and the quote isn't exactly once anywhere in the file.`);
   } else if (finding.kind === "no-match") {
-    console.error(`Not found on page ${askedPage}, its neighbours, or exactly once anywhere else in the file.`);
+    console.error(`Not found on ${askedText}, its neighbours, or exactly once anywhere else in the file.`);
     if (finding.matchedUpTo !== null) {
-      console.error(`  On page ${askedPage} it matches up to "…${finding.matchedUpTo}", where the page has "${finding.pageHasThere}…".`);
+      console.error(`  On ${sheetText(file, finding.sheets[0] - 1)} it matches up to "…${finding.matchedUpTo}", where the page has "${finding.pageHasThere}…".`);
     }
   }
   return 1;

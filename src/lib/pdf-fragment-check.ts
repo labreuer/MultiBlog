@@ -1,123 +1,51 @@
+import { readFile } from "node:fs/promises";
 import { prisma } from "./prisma";
 import { resolveFileParam } from "./file-slug";
-import { currentTextVersion } from "./pdf-extract";
+import { storagePathFor } from "./file-storage";
+import { currentTextVersion, extractPdfMetadata } from "./pdf-extract";
+import { sheetsNamed, usablePageLabels } from "./pdf-page-labels";
+import { skeletonOf, type PassageText } from "./pdf-fragment";
 import {
-  countPassageOccurrences,
-  parseFragmentPassages,
-  resolvePassage,
-  skeletonOf,
-  type FragmentPassage,
-  type Skeleton,
-} from "./pdf-fragment";
+  checkPage,
+  checkPassage,
+  passageElsewhere,
+  type FilePages,
+  type FragmentLinkFinding,
+  type FragmentLinkHref,
+  type PassageFinding,
+} from "./pdf-fragment-findings";
 
 // docs/PDF_FRAGMENT_LINKS.md §8 — the check every confirmation of a fragment
-// link shares: the integrity script, run over everything or one doc, and the
-// one-quote CLI. It resolves each passage against the file's stored page
-// text, the text the viewer's own extraction reproduces, and says what it
-// found.
+// link shares: the integrity script, run over everything or one doc, the
+// one-quote CLI and MCP's write check. It resolves each passage against the
+// file's stored page text, the text the viewer's own extraction reproduces,
+// and says what it found. A page link (a `page` or a `p` and no `text`) is
+// checked for its page alone. The viewer's miss asks it where the passage is
+// instead (`sheetHolding`, §6).
 //
-// **Server-only, and it reads as the operator.** Both callers are scripts
-// holding the database's credentials, where a read gate protects nothing. A
-// front door that reads as a user (the MCP server, MCP.md §8) must ask
-// `canUserReadFile` before calling in, and answer a file the user can't read
-// as not found, or the check becomes a way to ask what a PRIVATE file says.
+// **Server-only, and it reads as the operator.** The scripts hold the
+// database's credentials, where a read gate protects nothing. A front door
+// that reads as a user (the MCP server, MCP.md §8, and the viewer's server
+// action) must ask `canUserReadFile` before calling in, and answer a file the
+// user can't read as not found, or the check becomes a way to ask what a
+// PRIVATE file says.
 //
 // **Read-only.** `storedPageText` extracts a file lazily when its text is
 // missing at the current version; this doesn't, so a check never writes.
 // It reads the current version where the file has one, and otherwise the
 // newest it has, as search does (docs/FULLTEXT.md §4): a skeleton barely
-// depends on the version (src/lib/pdf-fragment.ts), so either answers.
+// depends on the version (src/lib/pdf-fragment.ts), so either answers. A
+// `p=` needs the file's page labels: `file.page_labels`, or, for a file whose
+// labels haven't been read yet (NULL, filled on first read: docs/MCP.md §8),
+// the labels read from its bytes and not stored.
+//
+// The pure half, the href's parse and the findings, is
+// src/lib/pdf-fragment-findings.ts.
 
-/** How a fragment link's href names its file and passages. Null when the href is not one. */
-export type FragmentLinkHref = {
-  slug: string;
-  passages: FragmentPassage[];
-  /** `text` parameters the grammar couldn't read, or that named no page, or came past the limit. */
-  unread: number;
-};
-
-// Resolves a relative href; never fetched.
-const PROBE_ORIGIN = "https://fragment-check.invalid";
-
-/**
- * A fragment link's slug and passages: an href to `/pdf/<slug>` whose
- * fragment has at least one `text` parameter, written relative or absolute
- * on `siteOrigin`. A link to a PDF with only `#page=`, or none, is a page
- * link, and null here.
- */
-export function parseFragmentLinkHref(href: string, siteOrigin: string | null): FragmentLinkHref | null {
-  let url: URL;
-  try {
-    if (href.startsWith("/") && !href.startsWith("//")) {
-      url = new URL(href, PROBE_ORIGIN);
-    } else {
-      if (!siteOrigin) return null;
-      url = new URL(href);
-      if (url.origin !== new URL(siteOrigin).origin) return null;
-    }
-  } catch {
-    return null;
-  }
-  const match = /^\/pdf\/([^/]+)\/?$/.exec(url.pathname);
-  if (!match) return null;
-  const textParams = url.hash
-    .replace(/^#/, "")
-    .split("&")
-    .filter((param) => param.startsWith("text=")).length;
-  if (textParams === 0) return null;
-  let slug: string;
-  try {
-    slug = decodeURIComponent(match[1]);
-  } catch {
-    return null;
-  }
-  const passages = parseFragmentPassages(url.hash);
-  return { slug, passages, unread: textParams - passages.length };
-}
-
-export type PassageFinding =
-  | {
-      kind: "ok";
-      passage: FragmentPassage;
-      /** The page's text at the match. */
-      text: string;
-      /** How many places on the page this form finds; above 1, the link points at the first. */
-      occurrences: number;
-    }
-  | {
-      kind: "no-match";
-      passage: FragmentPassage;
-      /** The longest stretch of the passage the page holds, and what the page has right after it. */
-      matchedUpTo: string | null;
-      pageHasThere: string | null;
-      /** The 1-based page the passage is on instead, when it occurs exactly once elsewhere in the file. */
-      foundOnPage: number | null;
-    }
-  | { kind: "page-out-of-range"; passage: FragmentPassage; pageCount: number };
-
-export type FragmentLinkFinding =
-  | { kind: "unknown-file"; slug: string }
-  | {
-      kind: "checked";
-      slug: string;
-      /** The file's slug now; different from `slug` when the link names a past one. */
-      currentSlug: string;
-      fileId: string;
-      passages: PassageFinding[];
-      unread: number;
-    };
-
-/** A file's stored page text, chosen once per run; see the module header for which version. */
-export type FilePages = {
-  fileId: string;
-  slug: string;
-  pageCount: number;
-  textVersion: string | null;
-  pages: Map<number, { text: string; skeleton: Skeleton }>;
-};
-
-type FileRef = Omit<FilePages, "pages">;
+type FileRef = Omit<FilePages, "pages" | "ownLabels"> & { sha256: string; storedLabels: unknown };
 type PageMap = FilePages["pages"];
+
+const FILE_SELECT = { id: true, slug: true, sha256: true, pageCount: true, pageLabels: true, deletedByUserId: true } as const;
 
 /**
  * Reads, for one run, each page a link names once, so a doc that quotes one
@@ -132,44 +60,89 @@ type PageMap = FilePages["pages"];
  */
 export class FragmentChecker {
   private files = new Map<string, Promise<FileRef | null>>();
+  private labels = new Map<string, Promise<string[]>>();
   private cited = new Map<string, PageMap>();
-  private whole: { fileId: string; pages: Promise<FilePages> } | null = null;
+  private whole: { fileId: string; pages: Promise<PageMap> } | null = null;
   private version: Promise<string> | null = null;
 
   /**
-   * Every page of the file a slug names now, past slugs followed; null for
-   * none, or a deleted one. Held until another file's every page is asked for.
+   * Every page of the file a slug names now, past slugs followed, with its
+   * labels; null for none, or a deleted one. Held until another file's every
+   * page is asked for.
    */
   async pagesFor(slug: string): Promise<FilePages | null> {
     const file = await this.fileFor(slug);
-    return file ? this.wholeFile(file) : null;
+    if (!file) return null;
+    const [pages, ownLabels] = await Promise.all([this.wholeFile(file), this.labelsOf(file)]);
+    return { ...file, ownLabels, pages };
+  }
+
+  /**
+   * The 1-based sheet holding `passage` when exactly one sheet outside
+   * `named` (0-based) holds it, once: the viewer's question when a passage
+   * isn't on the sheets its link names (§6). Null otherwise, and for a file
+   * that is deleted or has no stored text. Reads the whole file's stored
+   * text, and extracts nothing.
+   */
+  async sheetHolding(fileId: string, passage: PassageText, named: readonly number[]): Promise<number | null> {
+    let pending = this.files.get(`id:${fileId}`);
+    if (!pending) {
+      pending = prisma.storedFile.findUnique({ where: { id: fileId }, select: FILE_SELECT }).then((file) => (file ? this.refFor(file) : null));
+      this.files.set(`id:${fileId}`, pending);
+    }
+    const file = await pending;
+    if (!file) return null;
+    return passageElsewhere({ pages: await this.wholeFile(file) }, passage, named);
   }
 
   private fileFor(slug: string): Promise<FileRef | null> {
     let pending = this.files.get(slug);
     if (!pending) {
-      pending = this.resolve(slug);
+      pending = resolveFileParam(slug, FILE_SELECT).then((resolved) => (resolved ? this.refFor(resolved.file) : null));
       this.files.set(slug, pending);
     }
     return pending;
   }
 
-  private async resolve(slug: string): Promise<FileRef | null> {
-    const resolved = await resolveFileParam(slug, { id: true, slug: true, pageCount: true, deletedByUserId: true });
-    if (!resolved || resolved.file.deletedByUserId !== null || resolved.file.pageCount === null) return null;
-    const file = resolved.file;
-
+  private async refFor(file: {
+    id: string;
+    slug: string;
+    sha256: string;
+    pageCount: number | null;
+    pageLabels: unknown;
+    deletedByUserId: string | null;
+  }): Promise<FileRef | null> {
+    if (file.deletedByUserId !== null || file.pageCount === null) return null;
     this.version ??= currentTextVersion();
     const current = await this.version;
     const versions = await prisma.filePageText.groupBy({ by: ["textVersion"], where: { fileId: file.id } });
     const names = versions.map((row) => row.textVersion);
     const textVersion = names.includes(current) ? current : (names.sort().at(-1) ?? null);
-    return { fileId: file.id, slug: file.slug, pageCount: file.pageCount!, textVersion };
+    return { fileId: file.id, slug: file.slug, sha256: file.sha256, pageCount: file.pageCount, textVersion, storedLabels: file.pageLabels };
   }
 
-  private wholeFile(file: FileRef): Promise<FilePages> {
+  /** The file's own labels: as stored, or read from its bytes and not stored where they haven't been read yet. [] when they can't be read. */
+  private labelsOf(file: FileRef): Promise<string[]> {
+    let pending = this.labels.get(file.fileId);
+    if (!pending) {
+      const stored = file.storedLabels;
+      pending = Array.isArray(stored)
+        ? Promise.resolve(stored.map((label) => (typeof label === "string" ? label : "")))
+        : readFile(storagePathFor(file.sha256))
+            .then((bytes) => extractPdfMetadata(bytes))
+            .then((metadata) => metadata.pageLabels)
+            .catch((error: unknown) => {
+              console.error(`[pdf-fragment-check] couldn't read the page labels of file ${file.fileId}:`, error);
+              return [];
+            });
+      this.labels.set(file.fileId, pending);
+    }
+    return pending;
+  }
+
+  private wholeFile(file: FileRef): Promise<PageMap> {
     if (this.whole?.fileId !== file.fileId) {
-      this.whole = { fileId: file.fileId, pages: this.readPages(file, null).then((pages) => ({ ...file, pages })) };
+      this.whole = { fileId: file.fileId, pages: this.readPages(file, null) };
     }
     return this.whole.pages;
   }
@@ -190,122 +163,36 @@ export class FragmentChecker {
     const file = await this.fileFor(link.slug);
     if (!file) return { kind: "unknown-file", slug: link.slug };
 
+    const pagesNamed = [...link.passages.map((passage) => passage.page), ...(link.page ? [link.page] : [])];
+    const ownLabels = pagesNamed.some((page) => "label" in page) ? await this.labelsOf(file) : null;
+    const usableLabels = ownLabels ? usablePageLabels(ownLabels, file.pageCount) !== null : null;
+
+    if (link.page) {
+      return { kind: "checked", slug: link.slug, currentSlug: file.slug, fileId: file.fileId, passages: [], page: checkPage(file.pageCount, ownLabels, link.page), usableLabels, unread: 0 };
+    }
+
     let cited = this.cited.get(file.fileId);
     if (!cited) {
       cited = new Map();
       this.cited.set(file.fileId, cited);
     }
-    const toRead = [...new Set(link.passages.map((passage) => passage.page - 1))].filter(
-      (index) => index >= 0 && index < file.pageCount && !cited.has(index),
+    const toRead = [...new Set(link.passages.flatMap((passage) => sheetsNamed(passage.page, ownLabels, file.pageCount)))].filter(
+      (index) => !cited.has(index),
     );
     for (const [index, page] of await this.readPages(file, toRead)) cited.set(index, page);
 
     // Only the pages links name, so a miss is asked again of the whole file,
     // the one finding that reads past its own page.
-    const named: FilePages = { ...file, pages: cited };
+    const named: FilePages = { ...file, ownLabels, pages: cited };
     const passages: PassageFinding[] = [];
     for (const passage of link.passages) {
       const finding = checkPassage(named, passage);
-      passages.push(finding.kind === "no-match" ? checkPassage(await this.wholeFile(file), passage) : finding);
+      passages.push(
+        finding.kind === "no-match" || finding.kind === "no-such-label"
+          ? checkPassage({ ...named, pages: await this.wholeFile(file) }, passage)
+          : finding,
+      );
     }
-    return { kind: "checked", slug: link.slug, currentSlug: file.slug, fileId: file.fileId, passages, unread: link.unread };
+    return { kind: "checked", slug: link.slug, currentSlug: file.slug, fileId: file.fileId, passages, page: null, usableLabels, unread: link.unread };
   }
-}
-
-/** One passage against its file's pages. */
-export function checkPassage(file: FilePages, passage: FragmentPassage): PassageFinding {
-  const pageIndex = passage.page - 1;
-  if (pageIndex >= file.pageCount) return { kind: "page-out-of-range", passage, pageCount: file.pageCount };
-  const page = file.pages.get(pageIndex);
-  const range = page ? resolvePassage(page.text, passage, page.skeleton) : null;
-  if (page && range) {
-    return {
-      kind: "ok",
-      passage,
-      text: page.text.slice(range.start, range.end),
-      occurrences: countPassageOccurrences(page.text, passage, page.skeleton),
-    };
-  }
-  return {
-    kind: "no-match",
-    passage,
-    ...(page ? whereItStops(page.text, page.skeleton, passage) : { matchedUpTo: null, pageHasThere: null }),
-    foundOnPage: elsewhere(file, passage),
-  };
-}
-
-/** The 1-based page holding the passage when exactly one other page does, once. */
-function elsewhere(file: FilePages, passage: FragmentPassage): number | null {
-  let found: number | null = null;
-  for (const [pageIndex, page] of file.pages) {
-    if (pageIndex === passage.page - 1) continue;
-    const count = countPassageOccurrences(page.text, passage, page.skeleton);
-    if (count === 0) continue;
-    if (count > 1 || found !== null) return null;
-    found = pageIndex + 1;
-  }
-  return found;
-}
-
-// How much of the page to show either side of where a match stops.
-const CONTEXT = 40;
-
-/**
- * Where a missed passage stops matching: the longest leading stretch of the
- * part that failed (`start`, or `end` when the start is there), and what the
- * page has right after it. That is the answer an author needs: the word the
- * PDF spells differently, a footnote number in the way, a page break.
- */
-function whereItStops(
-  text: string,
-  sk: Skeleton,
-  passage: FragmentPassage,
-): { matchedUpTo: string | null; pageHasThere: string | null } {
-  const startKey = skeletonOf(passage.start).text;
-  let key = startKey;
-  let from = 0;
-  const startAt = sk.text.indexOf(startKey);
-  if (startAt >= 0 && passage.end !== null) {
-    key = skeletonOf(passage.end).text;
-    from = startAt + startKey.length;
-  }
-  // The longest prefix of `key` the page holds, found by halving.
-  let low = 0;
-  let high = key.length;
-  let at = -1;
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    const found = sk.text.indexOf(key.slice(0, mid), from);
-    if (found >= 0) {
-      low = mid;
-      at = found;
-    } else {
-      high = mid - 1;
-    }
-  }
-  if (low === 0 || at < 0) return { matchedUpTo: null, pageHasThere: null };
-  const matchStart = sk.starts[at];
-  const matchEnd = sk.ends[at + low - 1];
-  return {
-    matchedUpTo: text.slice(Math.max(matchStart, matchEnd - CONTEXT), matchEnd),
-    pageHasThere: text.slice(matchEnd, matchEnd + CONTEXT),
-  };
-}
-
-/** Every link mark's href in a ProseMirror JSON body, in document order. */
-export function linkHrefsIn(json: unknown): string[] {
-  const hrefs: string[] = [];
-  const walk = (node: unknown) => {
-    if (!node || typeof node !== "object") return;
-    const record = node as { marks?: unknown; content?: unknown };
-    if (Array.isArray(record.marks)) {
-      for (const mark of record.marks) {
-        const href = (mark as { type?: unknown; attrs?: { href?: unknown } })?.attrs?.href;
-        if ((mark as { type?: unknown }).type === "link" && typeof href === "string") hrefs.push(href);
-      }
-    }
-    if (Array.isArray(record.content)) record.content.forEach(walk);
-  };
-  walk(json);
-  return hrefs;
 }
