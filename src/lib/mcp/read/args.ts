@@ -33,7 +33,7 @@ export const listPaging = z.strictObject({
 
 export const readInput = z.strictObject({
   url: objectRef.describe(
-    "What to read: /doc/<slug> (or its id, or /edit); /pdf/<slug>, with #page=N for a page or a fragment link's #page=N&text=… for its passage; /files/<slug>; /annotations; /link/<id> or a URL with ?sel=<id>; a doc or PDF URL with an annotation card's #fragment for that thread; a post's path or /post/<id>/edit, with a comment card's #fragment for that comment; /tag/<slug>; /authors/<slug>. Past slugs work.",
+    "What to read: /doc/<slug> (or its id, or /edit); /pdf/<slug>, with #page=N (or #p=<label>) for a page or a fragment link's #page=N&text=… (or #p=<label>&text=…) for its passage; /files/<slug>; /annotations; /link/<id> or a URL with ?sel=<id>; a doc or PDF URL with an annotation card's #fragment for that thread; a post's path or /post/<id>/edit, with a comment card's #fragment for that comment; /tag/<slug>; /authors/<slug>. Past slugs work.",
   ),
   format: z.enum(["markdown", "text"]).optional().describe("Doc and post bodies: markdown (default), or text, which a quote can be copied from exactly."),
   whole: z.boolean().optional().describe("A doc whole, up to the bound the description gives; without it, one over 40,000 answers with its outline."),

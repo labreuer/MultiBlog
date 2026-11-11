@@ -1,5 +1,6 @@
 import { test, expect, signIn, gotoOk } from "./fixtures";
 import { ADMIN_EMAIL, TEST_PASSWORD, createTestFile, deleteTestFile, renameTestFileSlug, type TestFile } from "./db";
+import type { TestPageLabelRange } from "../scripts/make-test-pdf";
 
 // docs/PDF_FRAGMENT_LINKS.md — a link to a passage that is only a URL,
 // `/pdf/<slug>#page=<n>&text=<words>`. Nothing is written anywhere, so every
@@ -178,5 +179,84 @@ test.describe("pdf fragment links", () => {
       await expect(linkRects(page, 2)).toHaveCount(1, { timeout: 20_000 });
       await expect(banner(page)).toContainText("law of participation");
     });
+  });
+});
+
+// docs/PDF_FRAGMENT_LINKS.md §2, "Which sheet" — `p=<label>` names the page
+// printed on a sheet, found by the labels the file itself gives. The fixture's
+// labels are i, ii, 1, 2, 1, A-1: the body's "2" is sheet 4, and "1" is on
+// sheets 3 and 5, as when a second part restarts its numbering.
+const LABELLED_PAGES = [
+  ["Front matter, the first sheet."],
+  ["Front matter, the second sheet."],
+  ["The first part opens with a plain sentence."],
+  ["A sentence only the fourth sheet holds."],
+  ["The second part restarts its numbering here."],
+  ["An appendix sheet with a prefixed label."],
+];
+
+const LABELS: TestPageLabelRange[] = [
+  { from: 1, style: "r" },
+  { from: 3, style: "D", start: 1 },
+  { from: 5, style: "D", start: 1 },
+  { from: 6, style: "D", prefix: "A-", start: 1 },
+];
+
+test.describe("pdf fragment links by printed page", () => {
+  let file: TestFile;
+
+  test.beforeAll(async () => {
+    file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: LABELLED_PAGES, pageLabels: LABELS });
+  });
+
+  test.afterAll(async () => {
+    await deleteTestFile(file.id);
+  });
+
+  async function open(page: import("@playwright/test").Page, fragment: string) {
+    await signIn(page, ADMIN_EMAIL);
+    await gotoOk(page, `/pdf/${file.slug}#${fragment}`);
+    await waitForViewer(page);
+  }
+
+  test("a p= passage is on the sheet its label names, not the sheet of that number", async ({ page }) => {
+    await open(page, "p=2&text=only+the+fourth+sheet+holds");
+    await expect(banner(page).getByRole("listitem")).toHaveText("only the fourth sheet holds", { timeout: 20_000 });
+    await expect(linkRects(page, 4)).toHaveCount(1);
+    await expect(linkRects(page, 2)).toHaveCount(0);
+    await expect(page.getByLabel("Page number")).toHaveValue("2");
+  });
+
+  test("a label two sheets carry finds the passage on the second when the first doesn't hold it", async ({ page }) => {
+    await open(page, "p=1&text=restarts+its+numbering");
+    await expect(banner(page).getByRole("listitem")).toHaveText("restarts its numbering", { timeout: 20_000 });
+    await expect(linkRects(page, 5)).toHaveCount(1);
+    await expect(linkRects(page, 3)).toHaveCount(0);
+    // Not found elsewhere: the label names sheet 5 too.
+    await expect(banner(page).getByTestId("pdf-fragment-elsewhere")).toHaveCount(0);
+  });
+
+  test("a page link by label opens at the sheet carrying it", async ({ page }) => {
+    await open(page, "p=2");
+    await expect(page.getByLabel("Page number")).toHaveValue("2", { timeout: 20_000 });
+    await expect(banner(page)).toHaveCount(0);
+  });
+
+  test("a passage its page doesn't hold is drawn where the file holds it once, and the banner names both pages", async ({ page }) => {
+    await open(page, "p=1&text=only+the+fourth+sheet+holds");
+    const row = banner(page).getByRole("listitem");
+    await expect(row).toContainText("only the fourth sheet holds", { timeout: 20_000 });
+    await expect(row.getByTestId("pdf-fragment-elsewhere")).toHaveText("On page 2, not 1:");
+    await expect(linkRects(page, 4)).toHaveCount(1);
+    // A page= link is carried the same way, and its page is named by its label too.
+    await page.evaluate(() => {
+      window.location.hash = "page=3&text=only+the+fourth+sheet+holds";
+    });
+    await expect(row.getByTestId("pdf-fragment-elsewhere")).toHaveText("On page 2, not 1:", { timeout: 20_000 });
+  });
+
+  test("a label no sheet carries is named as the link wrote it", async ({ page }) => {
+    await open(page, "p=99&text=words+no+page+holds");
+    await expect(banner(page).getByTestId("pdf-fragment-miss")).toHaveText("Not found on page 99", { timeout: 20_000 });
   });
 });

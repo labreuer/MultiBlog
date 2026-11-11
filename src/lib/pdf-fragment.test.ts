@@ -45,16 +45,32 @@ const text = (page: string, passage: PassageText) => {
 
 test("each text belongs to the page before it, read left to right", () => {
   assert.deepEqual(parseFragmentPassages("#page=12&text=could+not+yet&page=13&text=a,b"), [
-    { page: 12, prefix: null, start: "could not yet", end: null, suffix: null },
-    { page: 13, prefix: null, start: "a", end: "b", suffix: null },
+    { page: { sheet: 12 }, prefix: null, start: "could not yet", end: null, suffix: null },
+    { page: { sheet: 13 }, prefix: null, start: "a", end: "b", suffix: null },
   ]);
   // Two texts on one page, and no leading #.
   assert.equal(parseFragmentPassages("page=4&text=one&text=two").length, 2);
 });
 
+test("a text belongs to the nearest page or p before it, and one link may use both forms", () => {
+  assert.deepEqual(parseFragmentPassages("#p=49&text=could+not+yet&page=53&text=a,b&p=xii&text=c"), [
+    { page: { label: "49" }, prefix: null, start: "could not yet", end: null, suffix: null },
+    { page: { sheet: 53 }, prefix: null, start: "a", end: "b", suffix: null },
+    { page: { label: "xii" }, prefix: null, start: "c", end: null, suffix: null },
+  ]);
+  // A label is decoded: %20 and + are spaces, and it is trimmed.
+  assert.deepEqual(parseFragmentPassages("#p=A%201&text=a&p=+B+2+&text=b").map((p) => p.page), [{ label: "A 1" }, { label: "B 2" }]);
+  // An unreadable p forgets the page before it, as an unreadable page does.
+  for (const bad of ["", "%20", "%E2%80"]) {
+    assert.deepEqual(parseFragmentPassages(`#p=3&text=a&p=${bad}&text=b`).map((p) => p.start), ["a"], bad);
+  }
+  // A p with no text after it names no passage: it is a page link (pageFromHash).
+  assert.deepEqual(parseFragmentPassages("#page=2&text=a&p=7"), [{ page: { sheet: 2 }, prefix: null, start: "a", end: null, suffix: null }]);
+});
+
 test("a text with no valid page before it is ignored, and a bad page forgets the last good one", () => {
   assert.deepEqual(parseFragmentPassages("#text=orphan&page=2&text=kept"), [
-    { page: 2, prefix: null, start: "kept", end: null, suffix: null },
+    { page: { sheet: 2 }, prefix: null, start: "kept", end: null, suffix: null },
   ]);
   for (const bad of ["0", "-1", "2x", "1.5", ""]) {
     assert.deepEqual(parseFragmentPassages(`#page=3&text=a&page=${bad}&text=b`).map((p) => p.start), ["a"], bad);
@@ -63,7 +79,7 @@ test("a text with no valid page before it is ignored, and a bad page forgets the
 
 test("prefix and suffix markers are read before decoding, so encoded ones are text", () => {
   assert.deepEqual(parseFragmentPassages("#page=1&text=before+this-,the+start,the+end,-after+that")[0], {
-    page: 1,
+    page: { sheet: 1 },
     prefix: "before this",
     start: "the start",
     end: "the end",
@@ -89,7 +105,7 @@ test("a passage that doesn't parse, or has a part with no letters, is dropped", 
 
 test("other parameters and an annotation permalink are ignored", () => {
   assert.deepEqual(parseFragmentPassages("#zoom=200&page=2&text=kept&search=x"), [
-    { page: 2, prefix: null, start: "kept", end: null, suffix: null },
+    { page: { sheet: 2 }, prefix: null, start: "kept", end: null, suffix: null },
   ]);
   assert.deepEqual(parseFragmentPassages("#ada-lovelace-2026-10-04-12-00-00"), []);
   assert.deepEqual(parseFragmentPassages(""), []);
@@ -104,18 +120,25 @@ test("a writer emits letters and digits joined by +, folding accents and keeping
   assert.deepEqual(fragmentWords("could not yet ‘call his soul his own’."), ["could", "not", "yet", "call", "his", "soul", "his", "own"]);
   assert.deepEqual(fragmentWords("Lévy-Bruhl’s ﬁnding"), ["Levy", "Bruhl", "s", "finding"]);
   assert.equal(
-    formatFragmentPassages([{ page: 30, prefix: "identity, but of the", start: "law of participation", end: null, suffix: null }]),
+    formatFragmentPassages([{ page: { sheet: 30 }, prefix: "identity, but of the", start: "law of participation", end: null, suffix: null }]),
     "page=30&text=identity+but+of+the-,law+of+participation",
   );
   assert.equal(
     formatFragmentPassages([
-      { page: 40, prefix: null, start: "It may also", end: "within, but it", suffix: null },
-      { page: 41, prefix: null, start: "is detected", end: null, suffix: "primarily" },
+      { page: { sheet: 40 }, prefix: null, start: "It may also", end: "within, but it", suffix: null },
+      { page: { sheet: 41 }, prefix: null, start: "is detected", end: null, suffix: "primarily" },
     ]),
     "page=40&text=It+may+also,within+but+it&page=41&text=is+detected,-primarily",
   );
+  // A printed page is written p=, and reads back as itself.
+  const labelled = formatFragmentPassages([
+    { page: { label: "49" }, prefix: null, start: "could not yet", end: null, suffix: null },
+    { page: { label: "A 1" }, prefix: null, start: "a", end: null, suffix: null },
+  ]);
+  assert.equal(labelled, "p=49&text=could+not+yet&p=A%201&text=a");
+  assert.deepEqual(parseFragmentPassages(labelled).map((p) => p.page), [{ label: "49" }, { label: "A 1" }]);
   // A letter with no ASCII base is percent-encoded, and survives the round trip.
-  const greek = formatFragmentPassages([{ page: 1, prefix: null, start: "εἴδωλον", end: null, suffix: null }]);
+  const greek = formatFragmentPassages([{ page: { sheet: 1 }, prefix: null, start: "εἴδωλον", end: null, suffix: null }]);
   assert.match(greek, /^page=1&text=%/);
   assert.equal(fragmentWords(parseFragmentPassages(greek)[0].start).join(" "), fragmentWords("εἴδωλον").join(" "));
 });

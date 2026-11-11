@@ -1,3 +1,5 @@
+import type { PageName } from "./pdf-open-params";
+
 // PLAN.md §19c — page labels: what a PDF calls its own pages.
 //
 // A page's *index* is where it sits in the file; its **label** is what is
@@ -6,9 +8,10 @@
 // because it is what the contents page, the index and the citation all say.
 //
 // Indices stay 1-based everywhere internally (pdfjs's own API is, our anchors
-// are, presence is). This is a **display** concern only: one function answers
-// "what do we call this page", and every surface that shows a page number calls
-// it.
+// are, presence is). A label is **displayed and looked up**, never counted
+// with: one function answers "what do we call this page", and every surface
+// that shows a page number calls it; one rule answers "which sheet is printed
+// page 49" for a link or a citation (`sheetsLabelled`, below).
 
 /**
  * The labels worth using, or null to mean "just number the pages".
@@ -204,9 +207,88 @@ export function labelRanges(labels: readonly string[]): LabelRange[] {
   return ranges;
 }
 
-/** Every 0-based page carrying `label` — labels are not unique, so front matter and body can both have a "1". */
+/**
+ * Every 0-based page carrying `label`, trimmed and in any case — labels are
+ * not unique, so front matter and body can both have a "1". Without labels, a
+ * plain number is its own page.
+ */
 export function pagesLabelled(labels: readonly string[] | null, label: string): number[] {
-  if (!labels) return /^\d+$/.test(label) ? [Number(label) - 1] : [];
   const wanted = label.trim().toLowerCase();
-  return labels.flatMap((l, index) => (l.toLowerCase() === wanted ? [index] : []));
+  if (!labels) return /^\d+$/.test(wanted) ? [Number(wanted) - 1] : [];
+  if (!wanted) return [];
+  return labels.flatMap((l, index) => (l.trim().toLowerCase() === wanted ? [index] : []));
+}
+
+// ---------------------------------------------------------------------------
+// docs/PDF_FRAGMENT_LINKS.md §2, "Which sheet" — a printed page as a link
+// names it (`p=<label>`), and as a citation's page does: the one rule both
+// find a sheet by, so a citation and a `p=` link of the same page land on the
+// same sheet.
+//
+// **`ownLabels` are the labels the file itself gives**, one per sheet, as
+// pdfjs's `getPageLabels()` reads them and `file.page_labels` stores them —
+// never `usablePageLabels`' copy, whose empty labels are filled with their
+// sheet's number for the page box. A filled-in number is not a label, so on a
+// labelled file `p=5` never names a sheet whose own label is empty; only
+// `page=` names such a sheet.
+
+/**
+ * The 0-based sheets the printed page `label` names, in order. On a file with
+ * usable labels, every sheet whose own label it is; on a file without them,
+ * sheet N for a label N in digits, as a citation's page is read on such a
+ * file, and nothing for any other label. Empty when no sheet carries it.
+ */
+export function sheetsLabelled(ownLabels: readonly string[] | null | undefined, pageCount: number, label: string): number[] {
+  if (ownLabels && usablePageLabels(ownLabels, pageCount)) return pagesLabelled(ownLabels, label);
+  const wanted = label.trim();
+  if (!/^\d+$/.test(wanted)) return [];
+  const sheet = Number(wanted);
+  return sheet >= 1 && sheet <= pageCount ? [sheet - 1] : [];
+}
+
+/**
+ * The 0-based sheets a fragment's page names, in order: a sheet past the end
+ * names none, as a label no sheet carries names none.
+ */
+export function sheetsNamed(page: PageName, ownLabels: readonly string[] | null | undefined, pageCount: number): number[] {
+  if ("sheet" in page) return page.sheet <= pageCount ? [page.sheet - 1] : [];
+  return sheetsLabelled(ownLabels, pageCount, page.label);
+}
+
+/**
+ * How a writer names the sheet at 0-based `sheetIndex` (PDF_FRAGMENT_LINKS.md
+ * §8): `p=` with its own label where the file has usable labels, and `page=`
+ * where it has none, where a `p=` would turn into a printed page the day the
+ * file gained labels. Also `page=` for a sheet whose own label is empty,
+ * which no `p` names, and where an earlier sheet carrying the same label
+ * `holds` what the link names, since a `p=` would find it there first.
+ *
+ * For a passage, `holds` says whether an earlier sheet holds the passage as
+ * written. A page link has no passage and opens at the first sheet carrying
+ * its label, so by default every earlier sheet holds it: a search hit writes
+ * `p=` only when its sheet is the first carrying its label.
+ */
+export function pageNameForSheet(
+  ownLabels: readonly string[] | null | undefined,
+  pageCount: number,
+  sheetIndex: number,
+  holds: (earlierSheet: number) => boolean = () => true,
+): PageName {
+  const own = ownLabels?.[sheetIndex]?.trim();
+  if (!own || !usablePageLabels(ownLabels, pageCount)) return { sheet: sheetIndex + 1 };
+  const earlier = pagesLabelled(ownLabels!, own).filter((index) => index < sheetIndex);
+  return earlier.some(holds) ? { sheet: sheetIndex + 1 } : { label: own };
+}
+
+/**
+ * How a writer names the printed page `label` in a link that has no passage,
+ * the cited-page redirect's: `p=` with the label as the file gives it, on a
+ * file with usable labels; `page=` with its sheet on one without, where
+ * `p=` would turn into a printed page the day the file gained labels. Null
+ * when no sheet carries it.
+ */
+export function pageNameForLabel(ownLabels: readonly string[] | null | undefined, pageCount: number, label: string): PageName | null {
+  const sheets = sheetsLabelled(ownLabels, pageCount, label);
+  if (sheets.length === 0) return null;
+  return ownLabels && usablePageLabels(ownLabels, pageCount) ? { label: ownLabels[sheets[0]].trim() } : { sheet: sheets[0] + 1 };
 }

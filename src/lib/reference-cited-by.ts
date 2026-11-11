@@ -6,6 +6,7 @@ import { readableDocsWhere } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { firstPage, isPageLocator, normalizeLocator, pdfPageHref } from "@/lib/entity-chips/kinds/citation";
 import { readableFilesWhere } from "@/lib/file-authz";
+import { pdfMetadata } from "@/lib/pdf-metadata";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { referenceByKey } from "@/lib/reference-data";
 import { parseReferenceSegment, referencePath } from "@/lib/references/keys";
@@ -28,8 +29,8 @@ export type ReferenceCitedBy = {
   notes: { writer: string; on: string; href: string }[];
   /** Whether either list was cut at `CITED_BY_LIMIT`. */
   more: boolean;
-  /** The work's PDF, where this viewer may read it, with each sheet's printed label for a link to a page. */
-  file: { title: string; slug: string; pageLabels: string[] | null } | null;
+  /** The work's PDF, where this viewer may read it, with each sheet's printed label and its page count for a link to a page. */
+  file: { title: string; slug: string; pageLabels: string[] | null; pageCount: number | null } | null;
 };
 
 const NOTHING: ReferenceCitedBy = { docs: [], notes: [], more: false, file: null };
@@ -63,8 +64,17 @@ export async function citedPageTarget(actor: Actor | null, segment: string, page
   const fallback = `${home}#p=${encodeURIComponent(first)}`;
   const filesWhere = actor ? readableFilesWhere(actor.userId, actor.role) : null;
   if (!reference.fileId || reference.deleted || !filesWhere) return fallback;
-  const file = await prisma.storedFile.findFirst({ where: { AND: [filesWhere, { id: reference.fileId }] }, select: { slug: true, pageLabels: true, pageCount: true } });
-  return (file && pdfPageHref({ slug: file.slug, pageLabels: pageLabelsOf(file.pageLabels), pageCount: file.pageCount }, first)) || fallback;
+  const file = await prisma.storedFile.findFirst({
+    where: { AND: [filesWhere, { id: reference.fileId }] },
+    select: { id: true, slug: true, pageLabels: true, pageCount: true },
+  });
+  if (!file) return fallback;
+  // A file whose labels haven't been read yet (NULL) has them read and stored
+  // now, as every reader of them does (src/lib/pdf-metadata.ts), so its first
+  // citation lands on the page the labels name and not on the sheet of that
+  // number.
+  const pageLabels = pageLabelsOf(file.pageLabels) ?? (await pdfMetadata(file.id))?.pageLabels ?? null;
+  return pdfPageHref({ slug: file.slug, pageLabels, pageCount: file.pageCount }, first) || fallback;
 }
 
 export async function referenceCitedBy(actor: Actor, referenceId: string): Promise<ReferenceCitedBy> {
@@ -99,7 +109,7 @@ export async function referenceCitedBy(actor: Actor, referenceId: string): Promi
         })
       : [],
     reference.fileId && filesWhere
-      ? prisma.storedFile.findFirst({ where: { AND: [filesWhere, { id: reference.fileId }] }, select: { slug: true, title: true, pageLabels: true } })
+      ? prisma.storedFile.findFirst({ where: { AND: [filesWhere, { id: reference.fileId }] }, select: { slug: true, title: true, pageLabels: true, pageCount: true } })
       : null,
   ]);
 
@@ -117,6 +127,6 @@ export async function referenceCitedBy(actor: Actor, referenceId: string): Promi
       return [{ writer, on: container.title, href: `${container.href}#${annotationAnchorName(writer, note.createdAt)}` }];
     }),
     more: docs.length > CITED_BY_LIMIT || notes.length > CITED_BY_LIMIT,
-    file: file ? { title: file.title, slug: file.slug, pageLabels: pageLabelsOf(file.pageLabels) } : null,
+    file: file ? { title: file.title, slug: file.slug, pageLabels: pageLabelsOf(file.pageLabels), pageCount: file.pageCount } : null,
   };
 }

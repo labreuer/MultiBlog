@@ -1,4 +1,6 @@
 import { inlineRuns, mergeRuns, runsHaveMarks, runsText, type InlineRun } from "../../inline-markdown";
+import { formatPageName } from "../../pdf-open-params";
+import { pageNameForLabel } from "../../pdf-page-labels";
 import type { ReferenceEntry } from "../../references/entry";
 import { MAX_LIST_KEYS, referenceListPath, referencePath } from "../../references/keys";
 import type { ChipKind, ChipRendering } from "../types";
@@ -241,20 +243,22 @@ function itemLabel(item: CitationItem, form: CitationForm, name: string): Label 
 }
 
 /**
- * `/pdf/<slug>#page=<sheet>` for a locator the file's page labels name, else
- * null: its first page, found among the printed labels, or taken as the
- * sheet itself for a file that has none, if the file has that many. A file
- * with none stores `[]` once its metadata is read, and null before.
+ * The PDF at a locator's first page, else null: `/pdf/<slug>#p=<label>`, with
+ * the label as the file's own labels give it, on a file with usable labels,
+ * and `#page=<sheet>`, the page taken as the sheet itself, on one without,
+ * if the file has that many. It is the rule a `p=` link's sheet is found by
+ * (`sheetsLabelled`, docs/PDF_FRAGMENT_LINKS.md §2), so a citation and a
+ * `p=` link of the same page land on the same sheet. `pageLabels` are the
+ * file's own, as stored: `[]` for a file with none once its metadata is
+ * read, and null before. A file with no page count isn't a PDF.
  */
 export function pdfPageHref(
-  file: { slug: string; pageLabels: string[] | null; pageCount?: number | null } | null,
+  file: { slug: string; pageLabels: string[] | null; pageCount: number | null } | null,
   locator: string | undefined,
 ): string | null {
-  if (!file || !locator) return null;
-  const first = firstPage(locator);
-  const labels = file.pageLabels?.length ? file.pageLabels : null;
-  const sheet = labels ? labels.indexOf(first) + 1 : /^\d+$/.test(first) ? Number(first) : 0;
-  return sheet > 0 && (typeof file.pageCount !== "number" || sheet <= file.pageCount) ? `/pdf/${file.slug}#page=${sheet}` : null;
+  if (!file || !locator || file.pageCount === null) return null;
+  const page = pageNameForLabel(file.pageLabels, file.pageCount, firstPage(locator));
+  return page ? `/pdf/${file.slug}#${formatPageName(page)}` : null;
 }
 
 /** What every label in a doc reads from the doc's citations as a whole: each work's number and its told-apart short label. */

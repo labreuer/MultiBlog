@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { PDFJS_VERSION, documentOptions, ensurePdfWorker, pdfjs, pdfjsViewer } from "@/lib/pdfjs-client";
 import { buildPageOffsets, type PageOffsets } from "@/lib/pdf-geometry";
-import { pageTotalLabel, usablePageLabels } from "@/lib/pdf-page-labels";
-import { pageFromHash } from "@/lib/pdf-open-params";
+import { pageTotalLabel, sheetsNamed, usablePageLabels } from "@/lib/pdf-page-labels";
+import { pageFromHash, type PageName } from "@/lib/pdf-open-params";
 import { usePdfZoomGestures } from "./use-pdf-zoom-gestures";
 import { usePdfRefit } from "./use-pdf-refit";
 import "pdfjs-dist/web/pdf_viewer.css";
@@ -46,7 +46,26 @@ export type PdfViewerHandle = {
    * reads it through `pageLabelFor`; nothing computed from a page ever does.
    */
   pageLabels: string[] | null;
+  /**
+   * The labels the document itself gives, one per sheet, or null where it
+   * gives none: what a `p=` is matched against (`sheetsNamed`), never
+   * `pageLabels`, whose empty labels are filled with their sheet's number
+   * (docs/PDF_FRAGMENT_LINKS.md §2). NULs are dropped, as the copy stored on
+   * `file` drops them, so the viewer and the check name the same sheets.
+   */
+  ownPageLabels: string[] | null;
 };
+
+/**
+ * The 1-based sheet a fragment's page opens at: a sheet, clamped to the
+ * document, or the first sheet carrying a label; null for a label no sheet
+ * carries, which leaves the viewer where it is.
+ */
+function openingSheet(page: PageName, ownLabels: readonly string[] | null, pageCount: number): number | null {
+  if ("sheet" in page) return Math.min(page.sheet, pageCount);
+  const sheets = sheetsNamed(page, ownLabels, pageCount);
+  return sheets.length > 0 ? sheets[0] + 1 : null;
+}
 
 /** One tab in the side panel, and the pane it selects. */
 export type PdfPane = {
@@ -246,11 +265,13 @@ export default function PdfViewer({
       // Settable only once the first page has been laid out; assigning earlier
       // is silently dropped and the viewer opens at some default.
       viewer.currentScaleValue = "page-width";
-      // `#page=<n>` (pdf-open-params.ts) — a search hit on a page opens the
-      // document there (docs/FULLTEXT.md §7). After the scale, since a page
-      // jump is a scroll position and the scale change would move it.
+      // `#page=<n>` or `#p=<label>` (pdf-open-params.ts) — a search hit on a
+      // page opens the document there (docs/FULLTEXT.md §7). After the scale,
+      // since a page jump is a scroll position and the scale change would
+      // move it, and after the labels have been read, since a `p=` needs them.
       const askedPage = pageFromHash(window.location.hash);
-      if (askedPage !== null) viewer.currentPageNumber = Math.min(askedPage, pending.pdf.numPages);
+      const askedSheet = askedPage && openingSheet(askedPage, pending.ownPageLabels, pending.pdf.numPages);
+      if (askedSheet) viewer.currentPageNumber = askedSheet;
       handleRef.current = pending;
       setPageLabels(pending.pageLabels);
       setStatus("ready");
@@ -268,7 +289,8 @@ export default function PdfViewer({
     const onHashChange = () => {
       const page = pageFromHash(window.location.hash);
       const handle = handleRef.current;
-      if (page !== null && handle) handle.viewer.currentPageNumber = Math.min(page, handle.pdf.numPages);
+      const sheet = page && handle && openingSheet(page, handle.ownPageLabels, handle.pdf.numPages);
+      if (handle && sheet) handle.viewer.currentPageNumber = sheet;
     };
     window.addEventListener("hashchange", onHashChange);
 
@@ -318,6 +340,7 @@ export default function PdfViewer({
           offsets: buildPageOffsets(heights),
           container,
           pageLabels,
+          ownPageLabels: Array.isArray(rawLabels) ? rawLabels.map((label) => String(label).replace(/\0/g, "")) : null,
         };
         completeReady();
       })

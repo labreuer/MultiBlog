@@ -295,7 +295,7 @@ export default function PdfAnnotationSurface({
   // names, found in this document on arrival and on every hashchange. Drawn
   // with a followed anchored link's outline, and mirrored into a ref for the
   // layer's callbacks like the link parts above.
-  const fragment = usePdfFragment(handle);
+  const fragment = usePdfFragment(handle, fileId);
   const fragmentRegionsRef = useRef(fragment.regions);
   useEffect(() => {
     fragmentRegionsRef.current = fragment.regions;
