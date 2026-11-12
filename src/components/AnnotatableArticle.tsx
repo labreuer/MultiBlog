@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import TableDownloadButtons from "./TableDownloadButtons";
-import { useEditor, EditorContent, type JSONContent } from "@tiptap/react";
+import { useEditor, EditorContent, type Editor, type JSONContent } from "@tiptap/react";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import { ReferencesDownload } from "@/lib/post-references-download";
 import bibliographyStyles from "./bibliography/Bibliography.module.css";
@@ -34,7 +34,13 @@ type Props = {
 };
 
 export default function AnnotatableArticle({ postId, doc, threads, staticContent, referencesDownload = null }: Props) {
-  const [ready, setReady] = useState(false);
+  // The editor that has announced it is mounted, not a flag: a change to
+  // `threads` (useEditor's dep below) destroys the editor and builds another,
+  // which has no view until EditorContent mounts it. A plain flag would stay
+  // `true` across that rebuild and hand the viewless editor to the margin
+  // rail, whose layout effect reads `editor.view.dom` and throws — uncaught,
+  // so the reader gets the error page.
+  const [createdEditor, setCreatedEditor] = useState<Editor | null>(null);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const quoteContext = useCommentQuote();
@@ -70,7 +76,7 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
     // `role: "textbox"` on an `editable: false` editor is the existing
     // convention here rather than a fresh judgement call.
     editorProps: { attributes: { "aria-label": "Post body", role: "textbox" } },
-    onCreate: () => setReady(true),
+    onCreate: ({ editor: mounted }) => setCreatedEditor(mounted),
     onSelectionUpdate: ({ editor: liveEditor }) => {
       const { from, to, empty } = liveEditor.state.selection;
       const container = containerRef.current;
@@ -99,6 +105,9 @@ export default function AnnotatableArticle({ postId, doc, threads, staticContent
     // navigation) would never show its own highlight/badge until an actual
     // page reload.
   }, [threads]);
+  // False again from the moment a rebuild starts until the new editor's
+  // `create`, so the static copy stands in for that frame as it does on load.
+  const ready = editor !== null && createdEditor === editor;
 
   // Lets CommentSection's cards sit level with the passages they quote
   // (PLAN.md §18). Gated on `ready` because until then this editor is

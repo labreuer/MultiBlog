@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { submitComment, type SubmitCommentState } from "@/app/actions/comments";
 import {
@@ -46,7 +45,6 @@ function draftKey(props: Props): string {
 
 export default function CommentForm(props: Props) {
   const { postId, parentCommentId, anchorFrom, anchorTo, quotedText, onPosted, onCancel } = props;
-  const router = useRouter();
   // **`status` is load-bearing here, not decoration.** The post page is
   // statically generated (§21), so no session can be in its HTML: every
   // reader gets the signed-out render first, and `useSession` corrects it
@@ -87,10 +85,9 @@ export default function CommentForm(props: Props) {
   // Once per action result, never once per render. `state` is a new object
   // only when the action returns, so it is the right identity to key on:
   // the general form stays mounted after approval (rendering null), the
-  // refresh below re-renders it, and an effect keyed on anything that
-  // changes identity per render — the draft hook's return object did, and a
-  // caller's inline `onPosted` does — re-fires and refreshes again, a full
-  // reload loop at the rate the page can render (seen 2026-09-17, ~7/s).
+  // revalidated page re-renders it, and an effect keyed on anything that
+  // changes identity per render — the draft hook's return object, a caller's
+  // inline `onPosted` — re-fires on every one of those renders.
   const handled = useRef<SubmitCommentState | null>(null);
   const { clear } = draft;
   useEffect(() => {
@@ -100,13 +97,17 @@ export default function CommentForm(props: Props) {
       clear();
     }
     if (state.status === "APPROVED") {
+      // No router.refresh() here, deliberately. The action called
+      // revalidatePath, so its own response already carries the page
+      // re-rendered with this comment, and the router applies it. A refresh
+      // would GET the page again, and an ISR entry older than the page's
+      // `revalidate` is served stale-while-revalidate even with its path tag
+      // expired (Next's incremental cache checks tags only on an entry not
+      // yet stale by age) — so the stale copy lands last and the comment
+      // disappears until a reload.
       onPosted?.();
-      // The action revalidated the (statically generated) post page; this is
-      // what fetches it, so the author sees their own comment without a
-      // manual reload. Same call CommentNode makes after an edit or delete.
-      router.refresh();
     }
-  }, [state, onPosted, clear, router]);
+  }, [state, onPosted, clear]);
 
   if (state.status === "APPROVED") {
     return null;

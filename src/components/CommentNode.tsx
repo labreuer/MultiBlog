@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 // Aliased because the local `isAdmin` below is the resolved boolean for this
 // viewer; role-checks.ts is safe in a client bundle by design (its own header
@@ -71,7 +70,6 @@ export function hasNonDeletedDescendant(comment: CommentNodeData): boolean {
 }
 
 export default function CommentNode({ comment, postId, depth = 0 }: Props) {
-  const router = useRouter();
   const { data: session } = useSession();
   const isOwnComment = useIsOwnComment(comment.id);
   const isAdmin = !!session?.user && isAdminRole(session.user.role);
@@ -95,9 +93,9 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
   // Set by this viewer's own successful save, and shown in place of the
   // server's copy until a refresh lands. Not an optimistic update — the save
   // has already succeeded — but the same reason `justDeleted` exists: the
-  // post page is statically generated (PLAN.md §21), so the revalidation and
-  // the refresh that follow are a round trip the author should not have to
-  // watch to see their own words.
+  // post page is statically generated (PLAN.md §21), so the re-rendered page
+  // that follows is a round trip the author should not have to watch to see
+  // their own words.
   const [saved, setSaved] = useState<{ body: JSONContent; bodyText: string } | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -178,7 +176,9 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
         // watch their words vanish from the page with no explanation.
         setEditError("Saved, but this comment has been flagged for moderation and is no longer public.");
       }
-      router.refresh();
+      // No router.refresh(): the action's response already carries the
+      // revalidated page, and a refresh can fetch a stale ISR copy over it
+      // (CommentForm's effect says why).
     });
   };
 
@@ -188,7 +188,6 @@ export default function CommentNode({ comment, postId, depth = 0 }: Props) {
       try {
         await deleteComment(comment.id);
         setJustDeleted(true);
-        router.refresh();
       } catch (e) {
         setDeleteError(e instanceof Error ? e.message : "Failed to delete comment.");
       }
