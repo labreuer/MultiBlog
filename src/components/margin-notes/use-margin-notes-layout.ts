@@ -192,9 +192,21 @@ export function useMarginNotesLayout({
       return;
     }
 
+    // The provider can still be holding an editor its owner has just
+    // destroyed: AnnotatableArticle rebuilds its editor when the post's quote
+    // threads change, and clears the registration only in an effect, so a
+    // list mounting in that same commit (a post's first comment) gets here
+    // first. A destroyed editor has no view, and `editor.view` throws rather
+    // than returning nothing. This effect runs again once the owner registers
+    // the rebuilt editor.
+    if (editor.isDestroyed) return;
+
     let frame = 0;
 
     const apply = () => {
+      // Same reason, a frame later: a rebuild can land between scheduling
+      // this pass and running it.
+      if (editor.isDestroyed) return;
       const containerTop = container.getBoundingClientRect().top;
       const tops = resolveTopsRef.current(editor);
       const band = boundsRef.current?.() ?? null;
