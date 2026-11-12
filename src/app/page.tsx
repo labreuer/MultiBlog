@@ -10,6 +10,7 @@ import { contentExtensions } from "@/lib/tiptap-schema";
 import PostListing, { postListingInclude } from "@/components/PostListing";
 import PostPager from "@/components/PostPager";
 import ContributorList from "@/components/ContributorList";
+import { loadBannerOverlay } from "@/components/BannerOverlay";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./page.module.css";
 
@@ -22,7 +23,7 @@ export const revalidate = 60;
 // removal of PostEditBadge is what made that true again.
 export default async function Home() {
   // Page 1 of the listing that `/page/N` continues (docs/BLOG.md).
-  const [posts, total, preamble] = await Promise.all([
+  const [posts, total, preamble, overlay] = await Promise.all([
     prisma.post.findMany({
       where: publishedPostWhere(),
       orderBy: postListOrderBy,
@@ -31,6 +32,8 @@ export default async function Home() {
     }),
     prisma.post.count({ where: publishedPostWhere() }),
     getFrontPagePreamble(),
+    // A text banner replaces the image and anything over it.
+    SITE_BANNER_TEXT ? null : loadBannerOverlay(),
   ]);
 
   return (
@@ -40,9 +43,18 @@ export default async function Home() {
           {SITE_BANNER_TEXT}
         </h1>
       ) : (
-        SITE_BANNER && (
-          <div className={styles.banner} style={{ aspectRatio: SITE_BANNER_ASPECT }}>
-            <Image src={SITE_BANNER} alt={SITE_BANNER_ALT} fill priority className={styles.bannerImage} />
+        (SITE_BANNER || overlay) && (
+          // The overlay is the image box's sibling, so it can sit over the
+          // image (positioned against this wrapper, which is the image's size
+          // while the overlay is out of flow) or below it, in flow, as its
+          // stylesheet decides; with no image it is the banner on its own.
+          <div className={styles.banner}>
+            {SITE_BANNER && (
+              <div className={styles.bannerImageBox} style={{ aspectRatio: SITE_BANNER_ASPECT }}>
+                <Image src={SITE_BANNER} alt={SITE_BANNER_ALT} fill priority className={styles.bannerImage} />
+              </div>
+            )}
+            {overlay}
           </div>
         )
       )}

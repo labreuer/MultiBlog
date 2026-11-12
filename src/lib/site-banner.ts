@@ -23,3 +23,11 @@ export const SITE_BANNER_ALT = process.env.SITE_BANNER_ALT?.trim() || "";
 // length; page.module.css caps it at 10vw, so a long title still fits a phone.
 export const SITE_BANNER_TEXT = process.env.SITE_BANNER_TEXT?.trim() || null;
 export const SITE_BANNER_TEXT_SIZE = process.env.SITE_BANNER_TEXT_SIZE?.trim() || "72px";
+
+// Words over the banner (docs/BLOG.md, "The banner overlay"): paths to a
+// fragment of markup and, optionally, the stylesheet that places it, both
+// read on each render and sent as written, so an edit shows at the page's
+// next revalidation with no restart. Relative paths resolve against the
+// project directory. Ignored when SITE_BANNER_TEXT is set, which replaces the banner.
+export const SITE_BANNER_OVERLAY = process.env.SITE_BANNER_OVERLAY?.trim() || null;
+export const SITE_BANNER_OVERLAY_CSS = process.env.SITE_BANNER_OVERLAY_CSS?.trim() || null;

@@ -1,0 +1,34 @@
+/* Words in the empty band at the top left of thicketry.org's banner image,
+   whose box this is, as a share of the image. The image is drawn at the
+   banner's width, so the type is sized in cqw and keeps its place in the band
+   at any width. */
+.banner-overlay {
+  position: absolute;
+  left: 5.52%;
+  top: 3.36%;
+  width: 51.4%;
+  height: 25.7%;
+  /* The pair is centred in the box as one block, as wide as the tagline,
+     with the title flush to the tagline's left edge. */
+  display: grid;
+  place-content: center;
+  justify-items: start;
+  /* The image is opaque white in both schemes, so no theme token. */
+  color: #171717;
+}
+
+.banner-overlay h1 {
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  font-size: 4.8cqw;
+  font-weight: normal;
+  line-height: 1.1;
+}
+
+/* The longest tagline is 28.85em in Arial, so 1.55cqw keeps it to 45cqw of
+   the band's 51.4. */
+.banner-overlay p {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 1.55cqw;
+  line-height: 1.25;
+  white-space: nowrap;
+}

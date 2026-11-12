@@ -55,6 +55,8 @@ SITE_BANNER_ASPECT="4724 / 1609"   # optional, 3 / 1 by default
 SITE_BANNER_ALT=""                 # optional; empty is right for a decorative banner
 SITE_BANNER_TEXT="…"               # optional; words instead of the image, and wins over it
 SITE_BANNER_TEXT_SIZE="72px"       # optional, 72px by default
+SITE_BANNER_OVERLAY="site-banner/overlay.html"     # optional; words over (or under) the image
+SITE_BANNER_OVERLAY_CSS="site-banner/overlay.css"  # optional; where they go and how they look
 ```
 
 - **Its own module, `src/lib/site-banner.ts`.** `site-config.ts` is imported by
@@ -86,6 +88,36 @@ SITE_BANNER_TEXT_SIZE="72px"       # optional, 72px by default
 - **Neither set, no banner.** A `SITE_BANNER` that names a missing file isn't detected and
   hidden. The optimizer's request for it fails, and with the default empty alt text readers
   see an empty band in the banner's shape. That is a deployment error, and it is left to show.
+
+### The banner overlay
+
+Words on the banner, such as a name and tagline set in an empty band of the image. Where they
+go depends on the image, so like it the overlay is deployment content: a markup file
+(`SITE_BANNER_OVERLAY`) and a stylesheet (`SITE_BANNER_OVERLAY_CSS`), gitignored under
+`/site-banner/` by convention and read on each render (`src/components/BannerOverlay.tsx`).
+
+- **Both files reach the browser as written**: the markup as the contents of
+  `div.banner-overlay`, the stylesheet as a `<style>` beside it. Nothing is parsed or checked,
+  because only someone with a shell on the box writes them, the same trust as `.env`; a
+  whitelist would guard the page against the one person who can already edit its source. So a
+  mistake in either file shows on the page, as a wrong `SITE_BANNER` path does, and anything
+  that lets someone else write them (an upload, a form) needs validation first. The stylesheet
+  reaches the lines by element (`.banner-overlay h1`), and may use color literals, since an
+  image doesn't follow the theme.
+- **`<!-- one-of -->` … `<!-- or -->` … `<!-- end -->` keeps one alternative**
+  (`resolveOneOfs`, `src/lib/banner-overlay.ts`), picked on each render. `/` is cached for
+  `revalidate`, so every reader sees the same pick until the page is next regenerated. The
+  match is on the text alone: a one-of doesn't nest, and one with no `end` is left as written.
+  Any other comment goes to the page's source.
+- **`.banner` holds the image box and `div.banner-overlay`** and sets `container-type`.
+  Positioned absolutely, the overlay is placed against the image and can size its type in
+  `cqw`; in flow, it sits below the image; with no `SITE_BANNER`, it is the banner.
+  `SITE_BANNER_TEXT` replaces all of it.
+- **A worked example is in [`docs/banner-overlay-example/`](banner-overlay-example/)**:
+  thicketry.org's overlay, a name and one of six orderings of a tagline set in the empty band
+  at the top left of its banner image. The stylesheet places a box as a share of the image and
+  sizes the type in `cqw`, so the words keep their place in the band at any width. Copy both
+  files to `site-banner/` and point the two variables at them.
 
 ### The preamble
 

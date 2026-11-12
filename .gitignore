@@ -77,6 +77,9 @@ next-env.d.ts
 # landing-page banner (src/lib/site-banner.ts, PLAN.md §17b) — deployment
 # content, not repository content, same reasoning as .env above
 /public/banner.*
+# its overlay's markup and stylesheet (docs/BLOG.md, "The banner overlay"),
+# by convention here; SITE_BANNER_OVERLAY may name files anywhere
+/site-banner/
 
 # site icons (scripts/build-icons.ts, docs/FAVICON.md) — deployment content,
 # not repository content, same reasoning as the banner above. src/app/icon.png
