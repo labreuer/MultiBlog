@@ -1,4 +1,13 @@
+/* The image and the overlay (docs/BLOG.md, "The banner overlay"). An overlay
+   placed absolutely is placed against this box, and can size its type in cqw
+   so the words keep their place on the image at any width. */
 .banner {
+  position: relative;
+  width: 100%;
+  container-type: inline-size;
+}
+
+.bannerImageBox {
   position: relative;
   width: 100%;
   /* Aspect ratio is genuinely per-deployment (SITE_BANNER_ASPECT), so it's

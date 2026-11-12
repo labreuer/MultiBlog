@@ -172,6 +172,8 @@ inlined into server code.
 | `SITE_BANNER_ALT` | — | Its alt text. |
 | `SITE_BANNER_TEXT` | — | A text banner in lieu of the image: these words, centred in the reading serif, as the page's `<h1>`. Set, it wins over `SITE_BANNER`. |
 | `SITE_BANNER_TEXT_SIZE` | `72px` | Its font size, any CSS length. Capped at `10vw`, so a long title shrinks on a phone and then wraps into balanced lines. |
+| `SITE_BANNER_OVERLAY` | — | A file of markup set on the banner: over the image, or on its own with none. Read on each render and sent as written. Ignored when `SITE_BANNER_TEXT` is set. docs/BLOG.md, "The banner overlay". |
+| `SITE_BANNER_OVERLAY_CSS` | — | The stylesheet that places it, inlined beside it. |
 
 The `SITE_BANNER*` vars are bare, unlike `NEXT_PUBLIC_SITE_TITLE`, on purpose: they
 are read server-side only, so changing them needs a **restart, not a rebuild** — and the
