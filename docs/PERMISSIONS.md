@@ -558,14 +558,15 @@ indistinguishable. `?sel=` grants nothing: a link naming a PRIVATE doc still mee
 doc's own Forbidden page.
 
 **An unminted draft is its creator's alone** — `anchoredLinkForViewer` returns null for
-anyone else, whatever their role, and every mutation (`add`/`remove`/`discard`/`mint`)
-scopes to `createdById` server-side. One open draft per user is DB-enforced
-(`anchored_link_one_draft_per_user`, a partial unique index), so there is no draft-picker
-surface to gate.
+anyone else, whatever their role, and every mutation of the tray's link (add, remove,
+reorder, discard, mint, reopen, Done) scopes to `createdById` server-side. One open link per
+creator, a draft or a minted link reopened for editing, is DB-enforced
+(`anchored_link_one_open_per_user`, a partial unique index), so there is no picker surface
+to gate.
 
 **The banner and tray add no second check.** `AnchoredLinkBanner` renders only what the
 server's filtered view handed it, from inside a page whose gate already ran — `TagChips`'
-stance. The tray shows only `loadMyDraftLink()`'s answer, which is creator-scoped by the
+stance. The tray shows only `loadMyOpenLink()`'s answer, which is creator-scoped by the
 query itself.
 
 **The landing route routes per viewer, and its empty page names nothing.** `/link/[id]`
