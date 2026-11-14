@@ -295,12 +295,37 @@ each on margin notes, tags, search, entity chips, the schema version and the sha
 tells a tab left open on it.
 
 A viewer open on a file across a promotion keeps the version it loaded: its bytes come by
-hash and its note list by version, so nothing is drawn over the wrong ink, and a capture from
-it is refused with a reload message. But until someone tries to write, nothing says the file
-has a newer version, and the notes a carry moved to it have left the tab's view. A fix: the
-note list's answer names the latest version, and one that differs from the version shown
-becomes a banner with a reload. A broadcast on the presence channel at promotion would tell
-the tab sooner, and reaches only tabs connected at that moment.
+hash and its note list by version, so nothing is drawn over the wrong ink. But nothing says
+the file has a newer version. What a reader in that tab meets:
+
+- **On the bare address**, the old bytes under an address that now means the new ones. A
+  capture from it is refused with the reload message (`assertCaptureVersion`), which is the
+  first they hear of it, after they have written the note.
+- **On a version's own address**, a toolbar that goes on saying "the latest" beside the
+  title, and no banner saying it is an earlier version now.
+- **On either**, the notes a carry moved to the new version gone from the tab's list at its
+  next refetch, with nothing to say where they went.
+
+**A fix, in two parts, the first enough by itself:**
+
+1. **The note list's answer names the latest version.** `pdfAnnotationEntriesFor`
+   (`src/lib/pdf-annotation-entries.ts`) already reads `file.current_version_id` to decide
+   the worklist, so it can answer that version's id and number, and
+   `loadPdfAnnotationEntries` hands them on. `PdfAnnotationSurface` knows what it was
+   rendered against (`version.isLatest`, `version.address`): where the answer names
+   another latest, it shows a banner, "Version n is now the latest", with a reload. The
+   surface refetches its list only after a write made from it, so to be told without
+   writing it would also refetch when the tab comes back into view (`visibilitychange`).
+2. **A broadcast at the promotion**, for a tab that stays in view. `promoteFileVersion`
+   (`src/lib/file-manage.ts`) would ask the collab server to send a stateless message on
+   the outgoing version's presence channel (`ydoc:pdf:<version id>`,
+   `ydocIdForFileVersion`), through an `/admin` endpoint beside the others in
+   `server/ydoc-hooks.ts`, and the surface would refetch on it. It reaches only tabs
+   connected at that moment, which is why it comes second.
+
+**Its test** belongs in `e2e/pdf-version-upload.spec.ts`, which already keeps a viewer open
+across a promotion and checks that its capture is refused: the banner should be there once
+the tab is brought to the front, before anything is written.
 
 **This is not one of the races**, which are closed, each by a step that fails silently if
 it is skipped: a capture that commits beside a promotion, a move written from a placement
