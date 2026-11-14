@@ -234,6 +234,61 @@ glyphs. Not yet done:
   browser it measures Arial against a Calibri selection. Passing the family through the same
   map is a one-line fix (docs/PDF_QUADS.md §5).
 
+## CLAUDE.md: move topic-only traps into their topic doc
+
+**Status:** started 2026-11-13 with one entry. CLAUDE.md is loaded into every session, and most
+of its "Architecture invariants" matter only to someone changing one area. The arrangement
+tried once: the topic doc gets a short section near its top, read whole before changing that
+area, and CLAUDE.md keeps only the lines that say when to read it. docs/PDF.md §0, "Mistakes
+that fail no check", is the example, with the four file-version traps and the four lines in
+CLAUDE.md that point to it.
+
+**Two entries known to fit**, both about PDFs and about 20 lines between them: "A PDF anchor
+cannot drift" and "Bumping `pdfjs-dist` is never routine". They join docs/PDF.md §0's list,
+and the existing pointer in CLAUDE.md grows a clause for each trigger (a change to
+`src/lib/pdf-text.ts`'s normaliser; a `pdfjs-dist` bump or a removed polyfill).
+
+**Finding the rest.** Read CLAUDE.md's "Architecture invariants" and "Gotchas" entry by entry
+and sort each into one of three, then show Luke the list before moving anything: each entry
+was decided once, and where it lives is his call.
+
+- **Moves** when all three hold:
+  - one doc in CLAUDE.md's table owns its topic;
+  - the mistake can only be made in code that a trigger can name by what it touches: a table,
+    a module, a function, a URL shape;
+  - the entry explains a mechanism, which is the doc's job.
+- **Stays** when the mistake can be made from anywhere, or the trigger would have to be "any
+  UI work" or "any server action". The date-formatting, `position: fixed`, `router.refresh()`
+  and Server-Component-key entries are of this kind: each names a shape, not an area.
+- **Stays, shortened** when it fits neither: cut it to the trap and the pointer, and move the
+  mechanism to the doc if the doc lacks it.
+
+"Running", "Database", "Checks & verification" and "Conventions" are not candidates: they
+apply to every session.
+
+**Doing a move.**
+
+- The section goes at the top of the topic doc, as a §0 or under the one it has, titled for
+  what it is ("Mistakes that fail no check"). It opens by saying what code it applies to, and
+  that CLAUDE.md holds none of it. Each item is the mistake, why nothing catches it, and the
+  function or section that holds the rule. Keep it short enough to read whole: about 30
+  lines.
+- The line left in CLAUDE.md is worded by what the code touches, never by "working on X".
+  The file-version id mix-up is as easy to make in search or MCP as in the viewer, and nobody
+  editing search thinks of it as PDF work. One pointer per doc, however many entries moved.
+- Check that the doc already says everything the entry did, and add what it doesn't.
+- Grep for the entry's bold title before deleting it: docs and code comments cite CLAUDE.md
+  entries by name.
+- Several docs have their own gotcha sections already (docs/TIPTAP.md, docs/YDOC.md,
+  docs/PDF.md §10, STYLE.md), which "Gotchas" points at. A new §0 is for what fails no
+  check, and links to those for the rest.
+
+**A first reading of which entries cluster by doc**, to be checked and not taken as the
+answer: three on comments (docs/COMMENTS.md), five on annotations (docs/ANNOTATIONS.md), one
+the two share (stored versions and the grace window), two on tables (docs/TABLES.md), and one
+each on margin notes, tags, search, entity chips, the schema version and the shared socket
+(both docs/YDOC.md), and the MCP write layer.
+
 ## PDF versions: a viewer left open is not told (docs/PDF.md §13)
 
 **Status:** low priority. No file can gain a second version yet (§13's "Built so far"), so
