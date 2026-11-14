@@ -504,6 +504,35 @@ the admin account.
   `abandonTestVersion`, which call the operation both front doors share:
   `e2e/pdf-version-upload.spec.ts`. `getFileVersionFacts` is what each left
   in the rows and on disk.
+  - **The uploader has a button for each kind of version**
+    (`pdf-upload-better-copy`, `pdf-upload-revised-text`), and the one clicked
+    decides whether a page map is asked for. Setting the hidden input
+    (`pdf-version-file`) with no click is a revised text: nothing is matched.
+  - **`inked: [n]` gives a sheet a filled rectangle**, on a fixture file or a
+    version: with no lines beside, a sheet with ink and no text, which a page
+    map places by its neighbours. A sheet with neither is blank.
+- **A note on a rectangle is made by a fixture**, `createTestAnnotation({
+  pdfRect })`: the viewer draws no rectangle selection, and a carry has rules
+  of its own for a target with no words.
+- **What a move did is read from the rows.** `getFileAnchorRows` is every
+  anchor into a file as it stands (its version, target and quote), and
+  `getFileAnchorMoves` its history and its "stays here" marks.
+  `pdf-better-copy.spec.ts` takes the first before a carry, undoes the carry
+  with `undoCarryInSql`, and compares: that fixture is the SQL of
+  docs/PDF.md §13's recipe, so a change to either is a change to both.
+- **A carry's write is raced by `carryAcrossChanges`**, which works a carry
+  out, changes the notes it is told to in between (marks one, gives one
+  another target, restamps one's text version, moves one away) and then
+  writes. What the write skipped is the test.
+- **A user the UI offers nothing is tested through the write layer.**
+  `noteActAs(email, act)` calls `moveNote`, `setNoteStays` or
+  `setNoteMoveHidden` as that user and answers the refusal. A server action
+  can't be reached from a spec but through the UI, and the gate is in the
+  layer the action wraps.
+- **The two long PDF specs share `e2e/pdf-version-helpers.ts`**: `token` for
+  bytes of a test's own, `waitForViewer`, `expectSheetText`, `selectPhrase`,
+  `expectAddress` (an exact address, which is what shows a fragment written
+  twice) and `checkFileVersions`.
 - **A test that uploads bytes gives them a token of its own.** The store is
   content-addressed, so two tests uploading the same lines share one blob, and
   abandoning a version in one counts the other's row. `pdf-version-upload.spec.ts`

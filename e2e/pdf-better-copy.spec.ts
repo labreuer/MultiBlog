@@ -686,7 +686,7 @@ test.describe("a better copy of the same text", () => {
     }
   });
 
-  // docs/PDF.md §13, "Building it", step 13. Nothing in the app writes any of
+  // docs/PDF.md §13, "Checks and tests". Nothing in the app writes any of
   // these, so each is written by hand, one to a note or a version, and the
   // script is read for the line that names it.
   test("the integrity check passes a carried file, and names a map, a move and a mark that are wrong", async ({ request }) => {

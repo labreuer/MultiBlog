@@ -4993,7 +4993,9 @@ passage in a citation".**
 Planned 2026-11-10, and redrawn 2026-11-13 around versions that are kept: new bytes for a file
 as its next version, readable for good at an address of its own, and a promotion that makes it
 the latest and waits for nothing. Notes are moved forward to it, in bulk for a better copy of
-the same text and one at a time by their authors for a revised one. **Plan, and what of it is
-built: [docs/PDF.md](docs/PDF.md) §13.** Built 2026-11-14: a file takes a new version
-(upload, promotion, abandoning) and a link names its version with `v=`; the page maps and
-the moves are not built.
+the same text and one at a time by their authors for a revised one. **As built:
+[docs/PDF.md](docs/PDF.md) §13.** Built 2026-11-14: a file takes a new version (upload,
+promotion, abandoning) and a link names its version with `v=`; a version's pages are matched
+with its base's and links are carried through that map; a bulk carry moves forward the
+notes that place themselves, and a note's author moves one at a time or marks it as staying.
+Known gaps: §13's "Open".

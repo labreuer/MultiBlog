@@ -291,53 +291,33 @@ each on margin notes, tags, search, entity chips, the schema version and the sha
 
 ## PDF versions: a viewer left open is not told (docs/PDF.md §13)
 
-**Status:** low priority, and open: a file can take a new version now (§13's "Built so
-far"), and nothing tells a tab left open on it.
+**Status:** low priority, and open. A file takes new versions (docs/PDF.md §13), and nothing
+tells a tab left open on it.
 
 A viewer open on a file across a promotion keeps the version it loaded: its bytes come by
 hash and its note list by version, so nothing is drawn over the wrong ink, and a capture from
 it is refused with a reload message. But until someone tries to write, nothing says the file
-has a newer version, and the notes moved to it have left the tab's view. A fix: the note
-list's answer names the latest version, and one that differs from the version shown becomes a
-banner with a reload. A broadcast on the presence channel at promotion would tell the tab
-sooner, and reaches only tabs connected at that moment.
+has a newer version, and the notes a carry moved to it have left the tab's view. A fix: the
+note list's answer names the latest version, and one that differs from the version shown
+becomes a banner with a reload. A broadcast on the presence channel at promotion would tell
+the tab sooner, and reaches only tabs connected at that moment.
 
-Five races the plan closes itself, kept here because each fails silently if its step is
-skipped. Three are built, and `e2e/pdf-version-upload.spec.ts` makes each of those happen
-in order; the two about moves wait for the moves:
+**This is not one of the races**, which are closed, each by a step that fails silently if
+it is skipped: a capture that commits beside a promotion, a move written from a placement
+that is no longer true, a "stays here" mark made while a carry works, a lazy writer that
+writes under another version than it parsed, and an upload beside an abandoning of the same
+bytes. docs/PDF.md §0 and §13's "Writing a move" hold each, and
+`e2e/pdf-version-upload.spec.ts` and `e2e/pdf-better-copy.spec.ts` make each happen in order.
 
-- **A capture that commits beside a promotion.** The check of the capture's version belongs
-  inside the transaction that inserts, with the file row locked, for each of: posting a note,
-  opening a draft on a selection, adding a part to a link, and MCP's `anchorPdfQuote`. From
-  `/pdf/<slug>` it is checked against `file.current_version_id`, and from a version's own
-  address against its being promoted. A check before the transaction lets a promotion commit
-  between the two, and the note lands on an earlier version with nothing said. **Built**
-  (`assertCaptureVersion`): the capture locks the file row `FOR SHARE`, and a promotion
-  locks it `FOR UPDATE` (`lockFileRow`). The spec holds a promotion open and starts a note
-  and a link part beside it: each waits for the commit and is refused.
-- **A move written from a placement that is no longer true.** Where a note goes is worked out
-  before the transaction, over seconds. The write's own condition is that the row is still on
-  the version, and at the target, the placement started from. Without it a carry overwrites a
-  target its author has just placed by hand, or two tabs' moves overwrite each other, and
-  the history records a target the note never left.
-- **A "stays here" mark made while a carry works out its placements.** The carry's write
-  refuses a marked row, and the mark is written with the file row locked. Without both the
-  note is moved and its mark deleted, against its author's word. The answers to a page map's
-  runs of sheets are written under the same lock, since the map is one JSON value and two
-  answers would otherwise each write the whole of it.
-- **The two lazy writers**, `extract` in `src/lib/pdf-page-text.ts` and `fill` in
-  `src/lib/pdf-metadata.ts`, parse for seconds and then write. Each must write under the
-  version whose bytes it read, never under "the file's latest" looked up afterwards. **Built**:
-  each takes the version's id before it parses.
-- **An upload beside an abandoning of the same bytes.** `storeUploadStream` finds the blob on
-  disk and stores nothing, and its row is written seconds later. The abandoning counts the
-  rows holding the hash and removes the blob. Both take one advisory lock on the hash: the
-  upload in the transaction that inserts its row, where it checks the blob is still there,
-  and the abandoning around its count and its removal, before it commits. Without it a
-  version's row is left with no bytes, which nothing reports until the integrity check runs.
-  **Built** (`lockFileHash`, `assertBlobStored`): the spec records an upload while the lock
-  is held as an abandoning holds it, and the upload is refused once the blob is gone.
-  Removing the check from `recordUpload` turns that test red.
+**What else versions leave open** is §13's "Open". The ones a reader would meet first:
+
+- **A link part's shown move is said nowhere.** A note's is on its card; a part has none.
+- **A hidden move leaves no sign for its author**, who shows it again only from the page of
+  the version the note left.
+- **The viewer draws no rectangle**, so a rectangle note moved by hand becomes a note on
+  text.
+- **Nothing in the app undoes a move or a carry.** §13 has the SQL that does, by a carry's
+  id.
 
 ## A client navigation with a fragment leaves it on the path (Next 16.2.11)
 

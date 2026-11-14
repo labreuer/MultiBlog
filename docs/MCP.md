@@ -1218,8 +1218,8 @@ what surrounds it. That is the question research asks most of a citation.
 A version's bytes never change, since its `sha256` is its identity. Writing a PDF therefore
 means uploading one, uploading a new version of one, and editing its metadata.
 
-**A file's bytes are its versions'** ([PDF.md](PDF.md) §13, whose "Built so far" says what
-exists). `/pdf/<slug>` names the latest version and
+**A file's bytes are its versions'** ([PDF.md](PDF.md) §13). `/pdf/<slug>` names the latest
+version and
 `/pdf/<slug>/v/<n>` version n, and `read`, `search`'s `within`, `add_note`, `create_link` and
 `download` each take either:
 
@@ -1246,6 +1246,9 @@ version (`recordVersionUpload`, `src/lib/file-ingest.ts`, which the browser's
   `/pdf/<slug>/v/<n>`, which the upload answers with its number, and `/pdf/<slug>` shows
   what it did. It builds no page map and promotes nothing: those are a person's acts on the
   candidate's page, and no tool makes them.
+- **No tool moves a note to a later version**, and no answer says a note was moved: a
+  thread names the version it is on. A bot's notes are in the worklist of the person it
+  works for, on the latest version's page (PDF.md §13, "Moving a note forward").
 - **Whoever uploads may manage the file, or is a bot whose person may**
   (`canUserUploadFileVersion`; [PERMISSIONS.md](PERMISSIONS.md), "A file's versions"). A bot
   borrows its person's place among the file's owners for this upload alone, and never their
@@ -1377,10 +1380,18 @@ check below reports.
 - **Its `v=` names the version** whose sheets a `sheet=` counts and whose labels a `p=` is
   read on. Without one it names the file's first version, or on a version's own address,
   `/pdf/<slug>/v/<n>#…`, that version.
-- **A fragment that names another version than the address is answered on the version it
-  names**, with a `note` saying so and that version's `url`: no version has a page map yet,
-  so none is carried. `read` of `/pdf/<slug>#sheet=50` on a file with three versions answers
-  version 1's sheet 50.
+- **A fragment that names another version than the address is carried to the version
+  read**, where page maps join the two (PDF.md §13, "Matching the pages"), and answered
+  where it lands. Each passage so read says the version and the page it was carried from
+  (`carriedFrom`), and the answer has a `note` where the sheet's number changed: "Read as
+  version 1's: …, and its sheet 50 is sheet 49 of version 3." After a corrected scan most
+  links land on the sheet of the same number, and say nothing.
+  - **A sheet with no counterpart is carried only by its words**, where the first passage
+    occurs exactly once in the version read, and the `note` says it was looked for so.
+  - **One that can't be carried is answered on the version it names**, with a `note` saying
+    why and that version's `url`: no page map joins the two, or its sheet has no counterpart
+    and its words don't say where it went. `read` of `/pdf/<slug>#sheet=50` on a file whose
+    three versions are drafts answers version 1's sheet 50.
 - **The tool's own `sheet`, `sheets` and `page` are of the version read**, the address's.
   The same number can so be two sheets, which is why, once a file has a second version,
   every sheet a read answers by sheet (`sheet`, `sheets`, `page`, an outline entry's pages,
@@ -1388,8 +1399,8 @@ check below reports.
   the form to write. A file with one version has none, and its answers are as they were. A
   quote's occurrences (`around`) and a fragment link's passages name their sheets without
   one, beside the `url` of the version read.
-- **A fragment whose version is abandoned, or was never the file's,** has no version to be
-  read on. With `text`, each passage is looked for by its words alone in the version read,
+- **A fragment whose version is abandoned and kept no page map, or was never the file's,**
+  has no version to be read on. With `text`, each passage is looked for by its words alone in the version read,
   and answered where exactly one sheet holds it once, marked `foundBy`. Without, one that
   names an abandoned version is `not_found`, and one that names a version the file lacks
   reads the sheet as written, with a `note`.
@@ -1507,9 +1518,13 @@ is checked for its page. So is a citation's passage, the link around a citation
 naming another work's PDF, are refused as `no_match` too ([CITATIONS.md](CITATIONS.md), "A
 passage in a citation", "Its checks").
 
-- **It reads a link as the viewer does**, each page on the version it names
-  ([PDF.md](PDF.md) §13, "Links into the file"). So a link to a version's own address is
-  checked on that version, and one stamped with an earlier version on that one.
+- **It reads a link as the viewer does** ([PDF.md](PDF.md) §13, "Links into the file"):
+  carried through the page maps to the version its address shows and checked where it
+  lands, or, where it can't be carried, on the version it names. So a link to a version's
+  own address is checked on that version, and one stamped with an earlier version where a
+  reader of it would be shown it.
+  - **Words that the version named holds and the landing doesn't are `no_match`**: a better
+    copy corrected them, and every reader of the link would be told "Not found".
   - **A link to the bare address of a file with several versions must carry `v=`**, and one
     without is refused as `invalid`: the viewer would read it as the first version's, and a
     model that has just read the file means the latest.

@@ -743,10 +743,9 @@ export type TestFileVersion = {
 
 /**
  * A further version of a throwaway file (docs/PDF.md §13): new bytes beside
- * the ones it has, made as an upload and a promotion will make them, and
- * promoted unless asked otherwise. Nothing in the app can give a file a second
- * version yet, so this is the only way the reads by version are exercised:
- * a filter by version that is missing passes every test while each file has
+ * the ones it has, made as an upload and a promotion make them, and promoted
+ * unless asked otherwise. For a spec that only reads a second version: a
+ * filter by version that is missing passes every test while each file has
  * one, and what it draws or lists wrongly here is the proof it exists.
  *
  * What is on the earlier version stays there: this moves no note and no link
@@ -1150,7 +1149,7 @@ export async function getFileAnchorMoves(fileId: string): Promise<TestAnchorMove
  * Writes one thing wrong into a throwaway file's page maps or its move
  * history, **beside every write layer**: what
  * `scripts/integrity/check-file-versions.ts` is there to report, and what
- * nothing in the app produces (docs/PDF.md §13, "Building it", step 13).
+ * nothing in the app produces (docs/PDF.md §13, "Checks and tests").
  *
  * - `map`: a version's page map replaced with `map`; with `base: null` the
  *   version also forgets its base.

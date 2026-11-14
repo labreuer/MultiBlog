@@ -37,8 +37,8 @@
 // reason — but run it after the deploy has settled, not during it.
 //
 // **Each file's writes are made with its row locked** (`lockFile`), as a
-// version's upload, promotion and abandoning are, and as a note's move will
-// be (docs/PDF.md §13, "Earlier versions"). What an anchor holds is read
+// version's upload, promotion and abandoning are, and a note's move
+// (docs/PDF.md §13, "Earlier versions"). What an anchor holds is read
 // before the transaction, so a write also names the version the anchor was
 // on then: one that has left it since is not written back over. The page
 // text of a version abandoned while the script ran is not written either.

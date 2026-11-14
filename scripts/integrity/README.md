@@ -196,7 +196,8 @@ of the same table that reaches no version, and is in none of the move checks:
 - `two-marks`: an anchor has two. The table's partial unique indexes refuse it, and this
   reads the claim back.
 
-After a carry is undone from the database (docs/PDF.md §13, "Writing a move"), this is the
+After a carry is undone from the database (docs/PDF.md §13, "Moving a note forward", which
+has the SQL), this is the
 check to run: it says whether every anchor the undo touched is where its remaining history
 says.
 
