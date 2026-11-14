@@ -554,6 +554,17 @@ the admin account.
   (`TestFile.versionId`), as an uploaded file's does and a migrated one's
   does not: code that passes a file's id for a version's fails on a fixture
   and nowhere in old data.
+- **A hard delete is made to land between two statements of a page's read**
+  (docs/DATABASE.md, "A relation is loaded in a statement of its own").
+  `lockCommentThreads(postId)` takes the lock every read of `comment_thread`
+  waits for, and answers once it is held. `deletePostUnderThreadLock(ms)`
+  deletes the post under it after `ms`, and lets go. A page asked for beside
+  the second call reads its comments and waits for their threads. The lock is on
+  the whole table, since a plain read waits for nothing less, so every other
+  worker's read of a thread waits too: one test holds it, for under a second.
+  That test checks the table's total, which is counted beside the comments: a
+  total that includes the deleted post's comment is what shows the read began
+  before the delete (`admin-table.spec.ts`).
 - **A fragment changed while a page hydrates is written back over.** A
   `page.goto` to the path the page is already on, with another fragment, is a
   same-document navigation: no load, only a `hashchange`. Next's router

@@ -368,6 +368,10 @@ running `prisma migrate dev` on anything unusual.
   its own `SET search_path`, and leave `search_lexeme`'s, `mention`'s and `citation`'s data out
   of a data-only load, or their `COPY` collides with what the triggers already refilled.
   docs/DATABASE.md.
+- **A relation Prisma types as required can arrive null.** Each is loaded in a statement of
+  its own, so a parent hard-deleted meanwhile (the e2e suite's cleanup, mostly) leaves a 500.
+  A listing that reads one takes its rows through `rowsWithParents`. docs/DATABASE.md, "A
+  relation is loaded in a statement of its own".
 - Generated Prisma client lives at `src/generated/prisma` (gitignored). Import from
   `@/generated/prisma/client` and `@/generated/prisma/enums`.
 - **One-off DB scripts can't `require()` the generated client with plain `node -e`** — it's TS

@@ -12,6 +12,7 @@ import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import CommentsTable from "@/components/CommentsTable";
 import styles from "./page.module.css";
 import { staffDisplayNameOf } from "@/lib/display-name";
+import { rowsWithParents } from "@/lib/rows-with-parents";
 
 export const metadata: Metadata = { title: "Comments" };
 
@@ -166,7 +167,10 @@ export default async function CommentsPage({
     counts.set(row.commenterId, entry);
   }
 
-  const rows = comments.map((comment) => {
+  // A post hard-deleted while this loaded takes its threads and their comments
+  // with it, and such a comment arrives here without them.
+  const present = rowsWithParents(comments, (comment) => [comment.thread, comment.thread?.post, comment.commenter]);
+  const rows = present.map((comment) => {
     const commenterCounts = counts.get(comment.commenterId) ?? { submitted: 0, inModeration: 0, spam: 0 };
     return {
       id: comment.id,

@@ -20,6 +20,7 @@ import type { SortColumn } from "@/lib/table-sort";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import AnnotationsTable, { type AnnotationRow } from "@/components/AnnotationsTable";
 import { displayNameOf, staffDisplayNameOf } from "@/lib/display-name";
+import { rowsWithParents } from "@/lib/rows-with-parents";
 import { annotationAnchorName } from "@/lib/annotation-anchor-name";
 
 export const metadata: Metadata = { title: "Annotations" };
@@ -223,8 +224,13 @@ export default async function AnnotationsPage({
   // (`noteVersions`): the row names that version where it is not the latest,
   // and links the note at that version's own address (docs/PDF.md §13,
   // "Addresses").
-  const versionOf = await noteVersions(annotations.filter((a) => a.file).map((a) => a.id));
-  const rowsWithContainer = annotations.map((a) => {
+  //
+  // A note hard-deleted while this loaded, along with its doc, its file or
+  // its author, arrives without the row its key names. That is not the
+  // disagreement the assertion is for, so those rows are left out before it.
+  const present = rowsWithParents(annotations, (a) => [a.user, ...(a.docId ? [a.doc] : []), ...(a.fileId ? [a.file] : [])]);
+  const versionOf = await noteVersions(present.filter((a) => a.file).map((a) => a.id));
+  const rowsWithContainer = present.map((a) => {
     const version = versionOf.get(a.id) ?? null;
     const container = a.doc
       ? ({ kind: "doc", id: a.doc.id, path: `/doc/${a.doc.slug}`, title: docTitleOrFallback(a.doc.title) } as const)

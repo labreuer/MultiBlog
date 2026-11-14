@@ -20,9 +20,11 @@ import {
   createTestUser,
   deleteTestDoc,
   deleteTestFile,
+  deletePostUnderThreadLock,
   deleteTestPost,
   deleteTestUser,
   getSiteDefaultColumnOrder,
+  lockCommentThreads,
   setSiteDefaultColumnOrder,
   uniqueEmail,
   uniqueTitle,
@@ -764,6 +766,59 @@ test.describe("admin table kit", () => {
       for (const table of tables) expect(await headers(table), table).toEqual(before.get(table));
     } finally {
       await setSiteDefaultColumnOrder(originalSiteDefault);
+    }
+  });
+
+  test("/comments lists what is left when a post is hard-deleted while it loads", async ({ page }) => {
+    // Prisma reads a comment's thread in a statement after the comment's own,
+    // so a post hard-deleted between the two hands the page a comment with no
+    // thread (docs/DATABASE.md, "A relation is loaded in a statement of its
+    // own"). Another worker's cleanup does that to this table somewhere in a
+    // full run. Here it is made to happen in order.
+    const author = uniqueEmail("vanish-author");
+    await createTestUser({ email: author, name: "Vanish Author", role: "AUTHOR" });
+    const kept = await createTestPost({ authorEmail: author, title: uniqueTitle("vanish kept"), publish: true });
+    const doomed = await createTestPost({ authorEmail: author, title: uniqueTitle("vanish doomed"), publish: true });
+    const commenterEmail = uniqueEmail("vanish-commenter");
+    const commentOn = (post: typeof kept, body: string) =>
+      createComment({
+        postId: post.id,
+        anchoredEventId: post.eventId!,
+        email: commenterEmail,
+        displayName: "Vanish Commenter",
+        body,
+        status: "APPROVED",
+      });
+    const { commenterId } = await commentOn(kept, "On the post that stays");
+    await commentOn(doomed, "On the post that goes");
+
+    // ?commenter= narrows the table to this test's two rows, and keeps the
+    // page's first statement off comment_thread, which the lock below holds.
+    const url = `/comments?commenter=${commenterId}`;
+    const bodyRows = page.locator("table").first().locator("tbody tr");
+    // What the page has to read its comments in, before the delete is committed.
+    const HOLD = 800;
+    try {
+      await gotoOk(page, url);
+      await expect(bodyRows).toHaveCount(2);
+
+      await lockCommentThreads(doomed.id);
+      // Begun together: the page reads its comments, and its read of their
+      // threads waits for the delete.
+      await Promise.all([deletePostUnderThreadLock(HOLD), gotoOk(page, url)]);
+
+      // The total is counted beside the comments, so "of 2" is what shows this
+      // read began before the delete: begun after it, the page would say 1 and
+      // prove nothing.
+      await expect(page.getByText("1–2 of 2", { exact: true })).toBeVisible();
+      await expect(bodyRows).toHaveCount(1);
+      await expect(bodyRows).toContainText("On the post that stays");
+    } finally {
+      // Lets the lock go if the test stopped while it was held.
+      await deletePostUnderThreadLock(0).catch(() => {});
+      await deleteTestPost(doomed.id);
+      await deleteTestPost(kept.id);
+      await deleteTestUser(author);
     }
   });
 

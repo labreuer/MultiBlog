@@ -351,7 +351,10 @@ export async function removeAnchoredLinkPart(anchorId: string): Promise<{ error?
       where: { id: anchorId, link: openLinkWhere(session.user.id) },
       select: { id: true, link: { select: { id: true, mintedAt: true } } },
     });
-    if (!anchor) {
+    // A draft discarded from another tab between this read's two statements
+    // takes the part with it, and leaves it here without its link, whatever
+    // the type says (`rowsWithParents`).
+    if (!anchor || (anchor.link as unknown) === null) {
       return { error: "That passage is no longer in your open link." };
     }
     if (anchor.link.mintedAt) {
