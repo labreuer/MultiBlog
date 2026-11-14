@@ -1514,7 +1514,9 @@ candidate standing.
   - **a warning when either version has no usable labels and citations already name a page
     of the file.** A version that moves the sheets misdirects them. It counts the citations
     in bodies the manager may read;
-  - **Promote**, with the carry or without it, and **Abandon**.
+  - **Promote** and **Abandon**, and **Promote with the carry** where the candidate has a
+    page map. Without one the carry is not offered: whoever said "a revised text" at the
+    upload is then two deliberate acts from moving everyone's notes, not one click.
 - **Abandoning** a candidate marks its row, and deletes its page text and its bytes, unless
   another row holds them. The row keeps its labels and its page map, so a link written
   against it can still find its sheet (Links into the file), and its address says where the
@@ -1534,6 +1536,7 @@ candidate standing.
 A **page map** is between a version and its base. It gives each sheet of the base a sheet of
 the version, or none. One sheet pairs with one sheet: no two sheets of the base share a
 counterpart. The map is one JSON value on the version's row, and is read in both directions.
+It records who stored it and when, and the carry that did, where one did.
 
 **A map is stored by a deliberate act, and once**:
 
@@ -1597,6 +1600,13 @@ rules 4 and 5. It is built in order of trust:
 5. **Sheets with ink but no text**, such as plates, figures and image-only scans, are placed
    between their aligned neighbours when the run between them has the same length in both
    versions. Otherwise they are left unmapped.
+6. **By position, for a person to accept.** A sheet with text that no rule above pairs is
+   proposed the sheet at its place, where rule 5 would put a sheet without text: between its
+   aligned neighbours, the run between them the same length in both versions. Its text is too
+   unlike that sheet's for the map to pair them unasked: a sheet whose text layer was rebuilt
+   from nothing in a corrected scan, or a page rewritten in a draft that kept its pagination.
+   The proposal is a question (A run of sheets, below), and without it such a sheet could
+   never be mapped.
 
 **A sheet without a counterpart is removed or unmapped**, and the map records which.
 
@@ -1605,8 +1615,9 @@ rules 4 and 5. It is built in order of trust:
   version. At either end of the base, the paired sheet on its one side has its counterpart
   at that end of the version. A blank sheet with no counterpart is removed wherever it stood
   (rule 4).
-- **Unmapped** is every other sheet no rule could place: sheets of the version stand where it
-  stood, and none of them is like it. A sheet of a revised text whose words now run over two
+- **Unmapped** is every other sheet no rule could place, and every sheet with a proposal
+  nobody has accepted: sheets of the version stand where it stood, and none of them is known
+  to be it. A sheet of a revised text whose words now run over two
   sheets is unmapped, since neither is its counterpart (Open).
 - **Only the map's page and a candidate's numbers say which a sheet is.** A reader whose link
   couldn't be carried is not told.
@@ -1616,35 +1627,44 @@ rules 4 and 5. It is built in order of trust:
 
 Nothing pairs such a sheet by hand (Open).
 
-**A run of sheets** is what a person is asked about, never one sheet. Consecutive sheets
-whose labels and text disagree under rule 2 are one run. Whenever rule 2 finds a disagreement,
-rule 3's alignment is made over the whole of both versions, and it gives each sheet of the run
-the counterpart proposed for it.
+**A run of sheets** is what a person is asked about, never one sheet. There are two
+questions, and consecutive sheets with the same one are one run:
+
+- **whether to pair the sheets as the text does, where the labels pair them otherwise**
+  (rule 2). Whenever rule 2 finds a disagreement, rule 3's alignment is made over the whole
+  of both versions, and it gives each sheet of the run the counterpart proposed for it;
+- **whether to pair the sheets by their place, where their text is too unlike to say**
+  (rule 6). The page shows each sheet's text beside the one proposed, and says where a label
+  agrees with the place.
+
+What follows holds for both:
 
 - **For example**, a scan whose labels start one sheet late has printed page 1 on sheet 11
   and the label `1` on sheet 12. Its better copy is the same 311 sheets with the labels
   corrected. By label, sheet 12 goes to sheet 11 and every numbered sheet after it goes back
   one, and each pair's text disagrees. The alignment pairs every sheet with itself. Sheets 12
   to 311 are one run, accepted in one act where sheet by sheet would take three hundred.
-- **The question is asked of whoever may manage the file**: whether the map should pair those
-  sheets as the text does, where the labels pair them otherwise. It is on the version's map
-  page, which shows the run once, with the sheets the labels give beside those the alignment
-  gives. The version list links there and counts the questions open.
+- **The question is asked of whoever may manage the file.** It is on the version's map page,
+  which shows the run once: for the first question, the sheets the labels give beside those
+  the alignment gives. The version list links there and counts the questions open.
 - **Any manager may answer at any time**: while the version is a candidate, and after its
   promotion, which closes nothing.
 - **Until one accepts, the run's sheets are unmapped.** The proposal is kept in the map beside
   each sheet, marked as not accepted, and the map's readers treat such a sheet as unmapped.
   Declining leaves them so and takes the question off the list of open ones. A declined run
   may still be accepted later.
-- **Accepting writes the alignment's sheets into the map**, and stays: an accepted run is not
-  declined afterwards, since notes and links have gone through it. Where the alignment gives
-  a sheet of the run no counterpart, that sheet stays unmapped.
+- **Accepting writes the proposed sheets into the map**, and stays: an accepted run is not
+  declined afterwards, since notes and links have gone through it. A sheet inside a stretch
+  of shifted labels that the alignment gives no counterpart is asked about by its place, as
+  a run of the second kind, or stays unmapped where rule 6 proposes nothing.
 - **An answer is written with the file row locked**, onto the map as it then reads. The map
   is one value, so two managers answering two runs would otherwise each write the whole of
   it, and one answer would be lost.
-- **Accepting carries the notes on those sheets that then place themselves**, as a bulk carry
-  would, where the version is promoted and joined to the latest. On a candidate there is
-  nothing to carry yet, and its promotion's carry reads the map as answered.
+- **Accepting moves no note.** Where the version is promoted and page maps join it to the
+  latest, the page then shows which notes on those sheets would now place themselves, and
+  the manager approves that carry or leaves it. Approved, it is written as any bulk carry
+  is. On a candidate there is nothing to carry yet, and its promotion's carry reads the map
+  as answered.
 
 **How alike two sheets must be** is one measure, which rules 2 and 3 share. It and its
 threshold are settled by measurement before a map is built.
@@ -1768,9 +1788,9 @@ and nothing offers a destination but the latest.
 
 **The bulk carry** moves forward everything that places itself.
 
-- **It is an action.** It is offered at the upload, and the promotion runs it when asked to
-  (Promotion). It stays available afterwards in the version list, for what is still on an
-  earlier version.
+- **It is an action.** A candidate with a page map offers it, and its promotion runs it when
+  asked to (Promotion). It stays available afterwards in the version list, for what is still
+  on an earlier version.
 - **Whoever may manage the file runs it**, and it moves everyone's posted notes and the parts
   of everyone's minted links. Otherwise a corrected scan would leave every other author's
   notes behind until each of them acted.
@@ -1786,12 +1806,12 @@ and nothing offers a destination but the latest.
 - **It takes the notes on every earlier version that page maps join to the latest without a
   break.** A version followed by one without a map ends the chain: a revised text followed
   it, and what is on it or before it waits for its authors.
-  - **At a promotion** the candidate's map is built first, where it has none.
+  - **At a promotion** it is offered only where the candidate has a map, and builds none.
   - **From the version list** a manager starts it on one earlier version, and it first builds
     the map of every version from there forward that has none. Starting it on a version that
     a revised text followed is that manager's judgement that the two hold the same text after
     all. It shows what would carry before it stores a map or moves a note, as a candidate's
-    page does, since neither has an undo (Open).
+    page does, since nothing in the app undoes either (The history of moves, below).
 - **What it moves is what places itself** (Placing each anchor), each to the place those
   rules give. Everything else stays where it is, for its author's worklist.
 - **Its moves are hidden by default** (The history of moves, below).
@@ -1815,27 +1835,31 @@ and nothing offers a destination but the latest.
   - **marks the note as staying.**
 - **Its move is shown by default.**
 - **The page then loads its notes again**, through `loadPdfAnnotationEntries` or a full
-  reload, as it does after a carry from the version list or an accepted run of sheets. A
-  `router.refresh()` alone is lost behind the viewer's `ssr: false` (CLAUDE.md).
+  reload, as it does after a carry from the version list or from an accepted run of sheets.
+  A `router.refresh()` alone is lost behind the viewer's `ssr: false` (CLAUDE.md).
 
 **The worklist** is "my notes on earlier versions": the viewer's notes and link parts, and
 those of the bots that work for them, on any version but the latest, less the ones marked as
 staying. Drafts and the parts of an open link are in it, and replies are not, since each
-travels with its root. It is on the latest
-version's page, as the viewer's own part of the list of notes on other versions (Addresses),
-and it is a filter in `/annotations`. Nothing is emailed.
+travels with its root. It is on the latest version's page, as the viewer's own part of the
+list of notes on other versions (Addresses), and it is a filter in `/annotations`. Nothing is
+emailed.
 
 **"Stays here" is the author's mark on their own note**: it has been looked at, and it belongs
 on its version. Without the mark, a note kept on a first draft on purpose looks the same as
 one nobody has looked at, and no worklist ever empties.
 
+- **It is offered only on a note that has a later version to go to**: in the worklist, and
+  on the author's own card on an earlier version's page, so a note posted from an earlier
+  version's address can be marked as soon as it is posted. A note on the latest has nothing
+  to stay behind from, and takes no mark in advance.
 - **The mark holds when a later version arrives**, so the note is not asked about again, and
   no bulk carry moves it.
 - **Its author may take it off**, which puts the note back in their worklist and in a carry's
   reach. Moving the note takes it off too.
-- **It is written with the file row locked**, on the version the note is then on. A carry's
-  write refuses a marked row (below), so a mark made while a carry was working out its
-  placements holds.
+- **It is written with the file row locked**, on the version the note is then on, and
+  refused where that is the latest. A carry's write refuses a marked row (below), so a mark
+  made while a carry was working out its placements holds.
 
 **Writing a move** is one transaction with the file row locked, for one note or for a carry's
 hundreds. Working out where each note goes comes first and outside it, since that reads a
@@ -1850,11 +1874,11 @@ once.
   the row is still on the version, and at the target, its placement was worked out from, and it
   returns the rows it changed. A carry's condition adds that the row has no "stays here"
   mark. A difference in text version alone passes, since the text-version script restamps
-  only a sheet that reads the same. One `INSERT` then writes the history of the rows returned, and for a
-  selective move one `DELETE` takes their "stays here" marks. All are raw SQL: Prisma has no
-  update that sets different values on different rows. A carry of any size is a handful of
-  statements, and one of several thousand notes splits its parameter inside the one
-  transaction.
+  only a sheet that reads the same. One `INSERT` then writes the history of the rows
+  returned, and for a selective move one `DELETE` takes their "stays here" marks. All are raw
+  SQL: Prisma has no update that sets different values on different rows. A carry of any size
+  is a handful of statements, and one of several thousand notes splits its parameter inside
+  the one transaction.
 - **The quote is derived on the server**, from the destination's page text, for a note placed
   by hand as for any other (§4).
 - **A row not returned was skipped**: moved from another tab, or by a carry that got there
@@ -1880,7 +1904,11 @@ move is a row of `file_anchor_move`:
   move's row records it as the one left;
 - who moved it, and when. A deleted user's id is set to NULL, and the row stays;
 - the carry it was part of, an id its rows share, or none for a selective move;
+- whether the note was marked "stays here" when it was moved, which only a selective move
+  can find;
 - whether the move is hidden.
+
+A row's id is from a sequence, and "an anchor's newest move" is by that id, never by time.
 
 **A "stays here" mark is a row of the same table that reaches no version**: the anchor, the
 version it stays on, who marked it and when. It is there while the mark holds, and a partial
@@ -1896,8 +1924,28 @@ move tells a reader nothing.
 - **The flag is on each move**, so a carry that turns out to be mistaken can be shown.
   Whoever may manage the file shows or hides the moves of one carry together, by its id. A
   note's author shows or hides any move of their own note, a carry's included.
-- **The row keeps the target the note left**, which is what an undo would replay. Undo is not
-  part of this plan (Open).
+
+**The table holds what an undo needs.** Nothing in this plan undoes a move (Open), and a
+mistaken carry has to be undoable from the database all the same. A move changes three things
+on its anchor, the target, the quote and the version, and its row keeps all three as they
+were.
+
+- **To undo a move**: where the row is its anchor's newest and the anchor is on the version
+  the row reached, write the three back and delete the row. Where the row says the note was
+  marked, write the mark back. A carry is undone by its id.
+- **Newest first.** A move that is not its anchor's newest can't be undone until the ones
+  after it are. The target a move reached is not needed for that check, since on a version
+  only a move changes where an anchor is.
+- **The kept target is true as it stands**: its sheet, its quads and its quote, since a
+  version's bytes never change. Its offsets and its text version may name an extraction the
+  text-version script has deleted since. The undo finds them again from the quote, on that
+  sheet at the current text version, or the integrity check would report the anchor.
+- **A page map records how it came to be stored**: who stored it and when, and the carry
+  that did, where one did. So undoing a carry can also take away the maps it stored, and the
+  links that were carried through them open the version they name again. A map with an
+  accepted run loses that answer with it.
+- **Step 11's tests replay a carry backwards in SQL**, and compare every anchor's row with
+  what it was before the carry.
 
 ### Promotion
 
@@ -1907,8 +1955,9 @@ carry and the move are functions of that kind too. It is refused where the versi
 the file's candidate or the file is deleted, and by nothing else: no note, no unmapped sheet and
 no run of sheets left unanswered holds it up.
 
-With the carry, the candidate's map is built where it has none, and the placements are worked
-out, before the transaction. Then one transaction, the file row locked:
+The carry is taken only where the candidate has a page map, and asking for it without one is
+refused. With it, the placements are worked out before the transaction. Then one transaction,
+the file row locked:
 
 1. **`current_version_id` becomes the candidate.**
 2. **The candidate's row records who promoted it and when**, and `promoted_at_update_id`, the
@@ -1947,8 +1996,9 @@ does a move.
   - **MCP's tools use the two words that way.** A sheet is `sheet`, a range of them `sheets`,
     and the printed page is `page`, where they are `page`, `pages` and `label` today. An
     answer says "sheet" and "page" in the same senses, and names both. A prompt written for
-    today's tools that passes `page` for a sheet then asks for a printed page, and the
-    answer's naming of both is what shows it.
+    today's tools that passes `page` for a sheet then asks for a printed page, and nothing
+    refuses it. That is accepted: the prompts and skills that call the tools are few, and are
+    changed with the rename.
   - **A tab whose bundle predates `sheet=`** ignores it: it opens such a link at the first
     sheet and draws nothing, as one that predates `p=` does with that
     (PDF_FRAGMENT_LINKS.md §6).
@@ -2243,7 +2293,8 @@ Rejected, with reasons:
   that reaches an earlier draft, and a citation that names one, are not designed.
 - **A curator who moves other people's notes.** Only a note's author moves it one at a time,
   so a note whose author is gone stays where it is unless a carry takes it.
-- **Moving a note back, or undoing a move.** The history keeps what an undo would replay.
+- **Moving a note back, or undoing a move from the app.** The history keeps what an undo
+  needs, and a carry can be undone from the database (Moving a note forward).
 - **A nudge by email** to an author with notes on earlier versions.
 - **A tool for MCP that moves a note.** A bot's notes are in the worklist of the person it
   works for. The move takes an `Actor`, so the tool is a wrapper when it is wanted.
@@ -2337,8 +2388,8 @@ down until one succeeds, whatever the script's message says of the live site.
     the carrying of links through maps (`src/lib/pdf-page-map.ts`), in the viewer, the
     cited-page route, MCP and the check.
 11. **The move**: the placing rules, `file_anchor_move`, the write, and the bulk carry at a
-    promotion, from the version list and when a run of sheets is accepted, with what would
-    carry on the candidate's page.
+    promotion, from the version list and after a run of sheets is accepted, each with what
+    would carry shown first.
     - **The working-out opens each version's document once.** `extractPageItems` opens it on
       every call, so it takes a form that reads many sheets from one open document.
 12. **The selective move**: the worklist on the latest's page and in `/annotations`, the
@@ -2348,16 +2399,18 @@ down until one succeeds, whatever the script's message says of the live site.
     - every page map pairs sheets that exist, and no two with one counterpart;
     - every move's destination is a promoted version later than the one it left, and an
       anchor is on the version its newest move reached, the marks left out of both;
-    - every "stays here" mark names the version its anchor is on, and no anchor has two.
+    - every "stays here" mark names the version its anchor is on, which is not the latest,
+      and no anchor has two.
 
 **Tests.**
 
 - **Unit**, for the pure parts:
   - the page map: a first sheet removed, a last sheet removed, blank sheets added, a label on
     two sheets, a label on two sheets of one version and three of the other, a label the version
-    lacks, labels corrected, a sheet without text inside the corrected stretch, no labels, a
-    sheet left unmapped, a reflowed pair left unmapped, and a run of sheets before and after it
-    is accepted;
+    lacks, labels corrected, a sheet without text inside the corrected stretch, a sheet whose
+    text was rebuilt and is proposed by its place, no labels, a sheet left unmapped, a
+    reflowed pair left unmapped, and a run of sheets of each kind before and after it is
+    accepted;
   - the placing rules: a tie broken by `prefix` and `suffix` and one that isn't, a quote found
     once in the version with and without them agreeing, a range carried through the diff
     cleanly and not, and the transform fit;
