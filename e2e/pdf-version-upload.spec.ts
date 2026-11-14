@@ -4,7 +4,9 @@ import { test, expect, signIn, gotoOk, annotationEditor, visibleText } from "./f
 import {
   ADMIN_EMAIL,
   abandonTestVersion,
+  createTestDoc,
   createTestFile,
+  deleteTestDoc,
   deleteTestFile,
   getFileAnchorVersions,
   getFileVersionFacts,
@@ -564,6 +566,79 @@ test.describe("a file takes a new version", () => {
       expect(onFirst.isError, JSON.stringify(onFirst.error)).toBe(false);
       expect((await getFileAnchorVersions(file.id)).annotations).toEqual([file.versionId]);
     } finally {
+      await deleteTestFile(file.id);
+      await agent.dispose();
+    }
+  });
+
+  test("the link check reads a link on the version it names, and dates one without v=", async ({ request }) => {
+    const tag = token();
+    const agent = await createAgent(request);
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: copy(tag, "first"), pageLabels: LABELS });
+    const docs: string[] = [];
+    const check = async (doc: string) => (await promisify(execFile)("npx", ["tsx", "scripts/integrity/check-pdf-fragment-links.ts", "--doc", doc, "--verbose"])).stdout;
+    const linking = (href: string) => ({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "See " }, { type: "text", text: "the passage", marks: [{ type: "link", attrs: { href } }] }, { type: "text", text: "." }] }],
+    });
+    try {
+      // Written while the file has one version: a link without v=, as every link then is.
+      const unstampedLink = `/pdf/${file.slug}#sheet=2&text=first+copy+begins`;
+      const before = await agent.call("create_doc", { markdown: `See [the passage](${unstampedLink}).`, title: `Before ${tag}` });
+      expect(before.isError, JSON.stringify(before.error)).toBe(false);
+      docs.push(String(before.result.id));
+
+      const staged = await request.put(`/api/files/${file.id}?filename=second.pdf`, { data: pdfOf(copy(tag, "second")), headers: { "Content-Type": "application/pdf" } });
+      expect(staged.status()).toBe(201);
+      expect(await promoteTestVersion((await getFileVersionFacts(file.id))[1].id, ADMIN_EMAIL)).toEqual({ ok: true, number: 2 });
+
+      // The first doc is edited afterwards, so its history runs across the
+      // second version's upload: the check replays it to that moment to see
+      // the link was already there. The new link says which version it names.
+      const edited = await agent.call("edit_doc", { url: `/doc/${before.result.id}`, edits: [{ append: `And [the new one](/pdf/${file.slug}#sheet=2&v=2&text=second+copy+begins).` }] });
+      expect(edited.isError, JSON.stringify(edited.error)).toBe(false);
+      let report = await check(String(before.result.id));
+      // The old link names version 1 and finds its words there: no fault, though the latest lacks them.
+      expect(report).toContain("0 error(s), 0 warning(s)");
+      expect(report).toContain("names version 1; the latest is version 2");
+      expect(report).not.toContain("[unstamped]");
+
+      // The same link, typed by hand into a doc written after the second version: read as version 1's, and warned of.
+      const after = await createTestDoc({ authorEmail: ADMIN_EMAIL, body: linking(unstampedLink) });
+      docs.push(after.id);
+      report = await check(after.id);
+      expect(report).toContain("[unstamped]");
+      expect(report).toContain("0 error(s), 1 warning(s)");
+
+      // A stamp for a version the file never had is an error; a link on one version's address that names another is a warning.
+      const lacking = await createTestDoc({ authorEmail: ADMIN_EMAIL, body: linking(`/pdf/${file.slug}#sheet=2&v=9&text=first+copy+begins`) });
+      docs.push(lacking.id);
+      expect(await check(lacking.id).catch((err: { stdout?: string }) => err.stdout ?? "")).toContain("[no-such-version]");
+      const crossed = await createTestDoc({ authorEmail: ADMIN_EMAIL, body: linking(`/pdf/${file.slug}/v/2#sheet=2&v=1&text=first+copy+begins`) });
+      docs.push(crossed.id);
+      expect(await check(crossed.id)).toContain("[another-version]");
+      // A link to a version's own address is a link into that version, and is checked there.
+      const own = await createTestDoc({ authorEmail: ADMIN_EMAIL, body: linking(`/pdf/${file.slug}/v/1#sheet=2&text=first+copy+begins`) });
+      docs.push(own.id);
+      expect(await check(own.id)).toContain("1 fragment and page link(s) and 0 citation passage(s) checked: 0 error(s), 0 warning(s)");
+      // Words the version named doesn't hold are a miss there, whatever the other version holds.
+      const missing = await createTestDoc({ authorEmail: ADMIN_EMAIL, body: linking(`/pdf/${file.slug}/v/1#sheet=2&text=second+copy+begins`) });
+      docs.push(missing.id);
+      expect(await check(missing.id).catch((err: { stdout?: string }) => err.stdout ?? "")).toContain("[no-match]");
+
+      // A link naming an abandoned version: nothing can confirm it.
+      expect((await request.put(`/api/files/${file.id}?filename=third.pdf`, { data: pdfOf(copy(tag, "third")), headers: { "Content-Type": "application/pdf" } })).status()).toBe(201);
+      expect(await abandonTestVersion((await getFileVersionFacts(file.id))[2].id, ADMIN_EMAIL)).toEqual({ ok: true, number: 3 });
+      const abandoned = await createTestDoc({ authorEmail: ADMIN_EMAIL, body: linking(`/pdf/${file.slug}#sheet=2&v=3&text=third+copy+begins`) });
+      docs.push(abandoned.id);
+      expect(await check(abandoned.id)).toContain("[abandoned-version]");
+      // MCP refuses to write either.
+      for (const stamp of [3, 9]) {
+        const refused = await agent.call("create_doc", { markdown: `See [it](/pdf/${file.slug}#sheet=2&v=${stamp}&text=third+copy+begins).`, title: `Refused ${tag}` });
+        expect(refused.error.code, `v=${stamp}`).toBe("no_match");
+      }
+    } finally {
+      for (const id of docs) await deleteTestDoc(id);
       await deleteTestFile(file.id);
       await agent.dispose();
     }
