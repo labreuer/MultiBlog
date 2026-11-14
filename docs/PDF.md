@@ -2945,7 +2945,7 @@ Rejected, with reasons:
 
 ### Building it
 
-Four pull requests, each merged before the next is opened.
+Five pull requests, each merged before the next is opened.
 
 1. **Steps 1 to 4** change no behaviour while every file has one version, so the existing
    suite proves them before any file can have a second.
@@ -2954,7 +2954,11 @@ Four pull requests, each merged before the next is opened.
    text whose notes can't be moved yet: a note stays where it is, and a link opens the
    version it names. Nothing is lost by stopping here, since a carry can be run on any
    earlier version later.
-4. **Steps 10 to 13** add the page maps and the moves.
+4. **The numbers steps 10 and 11 rest on**, measured, with the three rules they belong to
+   written as pure functions that nothing calls (How the numbers were measured). It changes
+   no behaviour, and it puts the numbers where they can be read apart from what is built on
+   them.
+5. **Steps 10 to 13** add the page maps and the moves.
 
 The existing suite can't prove the reads by version, since a missing filter passes every test
 while each file has one version. So the first pull request adds a fixture to
@@ -2968,7 +2972,8 @@ promoted and not abandoned, and that a file's versions are numbered from 1 with 
 **Steps 1 to 4 are built**, as three commits: steps 1 and 2 are one, since the migration
 drops the columns and no tree compiles between the schema and the readers that follow it.
 **Step 5 is built**, as the second pull request. **Steps 6 to 9 are built**, as the third,
-with no migration: every column they write was made by step 1.
+with no migration: every column they write was made by step 1. **The measured rules are
+written**, as the fourth.
 
 **The deploy that carries the first migration takes the PDF surfaces down for the length of
 its build**, and that is accepted. `deploy/deploy.sh` migrates before it builds, so until the
