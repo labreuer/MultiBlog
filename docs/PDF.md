@@ -1290,6 +1290,11 @@ note is *moved*, a map is built or a run of sheets is answered, it describes the
 subsections "Matching the pages", "Placing each anchor" and "Moving a note forward" are
 plan throughout, and so is the carry in "Promotion" and in "Links into the file".
 
+**Three measured rules of that plan are written, with nothing calling them yet**: how alike
+two sheets are (`src/lib/pdf-sheet-alike.ts`), a range carried through the diff of two
+sheets (`src/lib/pdf-quote-carry.ts`), and the transform fitted to the words two sheets
+share (`src/lib/pdf-sheet-fit.ts`). Each is pure and has its unit tests.
+
 The rest of the section is a plan in those parts, and the one exception to this file's
 "every statement is current". Where a statement below is of something built, it names the
 function or the file that holds it. When the rest lands, the section is rewritten as an
@@ -1966,9 +1971,10 @@ What follows holds for both:
   is. On a candidate there is nothing to carry yet, and its promotion's carry reads the map
   as answered.
 
-**How alike two sheets must be** is one test, which rules 2 and 3 share. Two sheets are alike
-when each holds the other's words, not when one holds the other's among more. So a sheet of a
-reflowed draft is not paired with the sheet that took most of its words.
+**How alike two sheets must be** is one test, which rules 2 and 3 share (`sheetsAlike`,
+`src/lib/pdf-sheet-alike.ts`). Two sheets are alike when each holds the other's words, not
+when one holds the other's among more. So a sheet of a reflowed draft is not paired with the
+sheet that took most of its words.
 
 The test is two numbers over the two sheets' skeletons, each taken both ways round. One
 number can't do it: a page read badly in one scan and a page that lost three lines to its
@@ -2036,7 +2042,7 @@ alone, and a suggestion shows whichever came out (Moving a note forward).
   offsets are into and which the text-version script keeps for it. It places itself where both
   ends of the range come through at a word boundary: each end in a word the two sheets share,
   or in a run the diff replaces word for word. The quote is then derived anew from the later
-  version's text, so "modem" becomes "modern".
+  version's text, so "modem" becomes "modern" (`carryRange`, `src/lib/pdf-quote-carry.ts`).
   - **A run is what stands between two shared words.** The diff also matches the space or the
     comma between two changed words. Cut there, a run pairs "empiricafphenomenon" with
     "empirical" and the range loses "phenomenon".
@@ -2045,14 +2051,18 @@ alone, and a suggestion shows whichever came out (Moving a note forward).
     that both hold are at most a third of the two skeletons together. "modem" to "modern" is
     0.27. Past a third the carried range is too often another passage, and it is a proposal
     (How the numbers were measured).
+  - **The range goes by the words it touches.** It keeps the punctuation and space it began
+    and ended with where the later sheet has the same beside those words, and its place
+    inside a shared word it began or ended within.
 - **it has no words, and the ink has not moved.** A rectangle selection is a target whose
   `position` is null. A text selection whose quote the capture dropped
   (`capturePdfTextAnchor`, on a mismatch) has a position and an empty quote, and is carried as
   a rectangle is, written with its `position` null: its offsets were into the earlier
   version's page text. Either places itself, its quads unchanged, when the mapped sheet has
   the same page box and rotation and a transform fitted to the words the two sheets share is
-  the identity: it moves no corner of the page box by more than 3 points. A text layer that
-  was corrected moves its words a little and the ink not at all.
+  the identity: it moves no corner of the page box by more than 3 points (`fitSheets` and
+  `fitIsIdentity`, `src/lib/pdf-sheet-fit.ts`). A text layer that was corrected moves its
+  words a little and the ink not at all.
   - **The transform is a shift, a turn and a scale**, fitted by least squares to the two ends
     of each shared word's box. The words are those of three letters or more that the diff
     above finds in both sheets, each measured as `quadsForRange` measures a range. A fit
@@ -3055,9 +3065,14 @@ down until one succeeds, whatever the script's message says of the live site.
     text was rebuilt and is proposed by its place, no labels, a sheet left unmapped, a
     reflowed pair left unmapped, and a run of sheets of each kind before and after it is
     accepted;
-  - the placing rules: a tie broken by `prefix` and `suffix` and one that isn't, a quote found
-    once in the version with and without them agreeing, a range carried through the diff
-    cleanly and not, and the transform fit;
+  - the placing rules: a tie broken by `prefix` and `suffix` and one that isn't, and a quote
+    found once in the version with and without them agreeing;
+  - the three measured rules, which are written (`src/lib/pdf-sheet-alike.test.ts`,
+    `pdf-quote-carry.test.ts`, `pdf-sheet-fit.test.ts`): each number at its line, words lost
+    against words moved to a neighbour, a run the diff would cut at a shared space, an end
+    inside a word that was joined, a fit pulled by words paired wrongly, and a sheet of one
+    line. The files they were measured on are not in the repository, so the tests are of
+    made text and say what each number is of, not that it is the right one;
   - a link's reading: stamped and not, by sheet and by page, from the bare address and from a
     version's own, carried through two maps, with a map missing on the way, onto a sheet with
     no counterpart with and without words, stamped with an abandoned version that kept a map
