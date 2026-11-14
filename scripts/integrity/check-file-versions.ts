@@ -74,6 +74,10 @@
 //     or was abandoned.
 //   - `move-not-forward`: a move reached a version that is not later than the
 //     one it left.
+//   - `move-out-of-time`: a move's `moved_at` is before the version it
+//     reached was uploaded, or later than now. Every time here is UTC, so a
+//     time in the server's own zone (a write left to the column's
+//     CURRENT_TIMESTAMP default) lands hours off on any server not in UTC.
 //   - `move-chain-broken`: a move left another version than the one its
 //     anchor's move before it reached. Undoing a move puts the anchor back on
 //     the version the row says it left, so a row that is wrong about that
@@ -270,6 +274,10 @@ type MoveRow = {
   toNumber: number | null;
   toPromoted: boolean | null;
   toAbandoned: boolean | null;
+  movedAt: string;
+  toUploadedAt: string | null;
+  beforeUpload: boolean | null;
+  inFuture: boolean;
 };
 
 /**
@@ -288,7 +296,12 @@ async function checkMoves(fileIds: string[] | null): Promise<void> {
            m.from_version_id AS "fromVersionId", fv.file_id AS "fromFileId", fv.number AS "fromNumber",
            (f.current_version_id = fv.id) AS "fromIsLatest",
            m.to_version_id AS "toVersionId", tv.file_id AS "toFileId", tv.number AS "toNumber",
-           (tv.promoted_at IS NOT NULL) AS "toPromoted", (tv.abandoned_at IS NOT NULL) AS "toAbandoned"
+           (tv.promoted_at IS NOT NULL) AS "toPromoted", (tv.abandoned_at IS NOT NULL) AS "toAbandoned",
+           m.moved_at::text AS "movedAt", tv.uploaded_at::text AS "toUploadedAt",
+           (m.moved_at < tv.uploaded_at) AS "beforeUpload",
+           -- The app's clock wrote moved_at and the database's is read here,
+           -- so a few minutes between them is not a fault.
+           (m.moved_at > (now() AT TIME ZONE 'UTC') + interval '5 minutes') AS "inFuture"
     FROM file_anchor_move m
     LEFT JOIN annotation a ON a.id = m.annotation_id
     LEFT JOIN anchored_link_anchor p ON p.id = m.anchored_link_anchor_id
@@ -323,6 +336,11 @@ async function checkMoves(fileIds: string[] | null): Promise<void> {
       // Numbers order one file's versions; across two files `move-off-file` has said what is wrong.
       if (row.toFileId === row.fromFileId && row.toNumber! <= row.fromNumber) {
         report(name, "move-not-forward", `moved ${anchor} from version ${row.fromNumber} to version ${row.toNumber}, which is not later`);
+      }
+      if (row.beforeUpload) {
+        report(name, "move-out-of-time", `moved ${anchor} at ${row.movedAt}, before version ${row.toNumber} was uploaded (${row.toUploadedAt} UTC)`);
+      } else if (row.inFuture) {
+        report(name, "move-out-of-time", `moved ${anchor} at ${row.movedAt}, which is later than now in UTC`);
       }
       const before = moved[index - 1];
       if (before && before.toVersionId !== row.fromVersionId) {

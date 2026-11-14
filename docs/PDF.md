@@ -3345,6 +3345,10 @@ Rejected, with reasons:
     the one it left** (`move-not-forward`), later being by version number within one file,
     **and an anchor is on the version its newest move reached** (`anchor-not-where-moved`),
     the marks left out of all three;
+  - **every move was made after the version it reached was uploaded, and not later than
+    now** (`move-out-of-time`). The times are UTC, as Prisma writes them; a `moved_at`
+    left to the column's `CURRENT_TIMESTAMP` default is the server's local time instead,
+    so `writeAnchorMoves` names it;
   - **a move left the version its anchor's move before it reached** (`move-chain-broken`),
     **and a move or a mark names versions of its anchor's own file** (`move-off-file`).
     An undo relies on both;

@@ -1227,6 +1227,9 @@ export async function getFileAnchorMoves(fileId: string): Promise<TestAnchorMove
  *   since the table's CHECK asks a move for one.
  * - `anchor`: a note put on a version by hand, its target and its history
  *   left as they were.
+ * - `moved-at`: a note's newest move given a time `hours` off from the one
+ *   it was written with, as a server that is not in UTC writes a
+ *   `moved_at` left to the column's default.
  *
  * Answers the id of the history row it wrote, or null.
  */
@@ -1234,12 +1237,21 @@ export async function makeVersionFault(
   fault:
     | { fault: "map"; versionId: string; map: unknown; base?: null }
     | { fault: "move"; annotationId: string; fromVersionId: string; toVersionId: string | null }
-    | { fault: "anchor"; annotationId: string; versionId: string },
+    | { fault: "anchor"; annotationId: string; versionId: string }
+    | { fault: "moved-at"; annotationId: string; hours: number },
 ): Promise<string | null> {
+  if (fault.fault === "moved-at") {
+    const [shifted] = await prisma.$queryRaw<{ id: bigint }[]>`
+      UPDATE file_anchor_move SET moved_at = moved_at + make_interval(hours => ${fault.hours}::int)
+      WHERE id = (SELECT max(id) FROM file_anchor_move WHERE annotation_id = ${fault.annotationId} AND to_version_id IS NOT NULL)
+      RETURNING id`;
+    if (!shifted) throw new Error(`makeVersionFault: annotation ${fault.annotationId} has no move`);
+    return String(shifted.id);
+  }
   if (fault.fault === "map") {
     await prisma.$executeRaw(Prisma.sql`
       UPDATE file_version
-      SET page_map = ${JSON.stringify(fault.map)}::jsonb, page_map_stored_at = COALESCE(page_map_stored_at, now()),
+      SET page_map = ${JSON.stringify(fault.map)}::jsonb, page_map_stored_at = COALESCE(page_map_stored_at, ${new Date()}::timestamp(3)),
           base_version_id = ${fault.base === null ? Prisma.sql`NULL` : Prisma.sql`base_version_id`}
       WHERE id = ${fault.versionId}`);
     return null;
@@ -1253,8 +1265,8 @@ export async function makeVersionFault(
       ? await prisma.$queryRaw<{ id: bigint }[]>`
           INSERT INTO file_anchor_move (annotation_id, from_version_id) VALUES (${fault.annotationId}, ${fault.fromVersionId}) RETURNING id`
       : await prisma.$queryRaw<{ id: bigint }[]>`
-          INSERT INTO file_anchor_move (annotation_id, from_version_id, from_target, from_quoted_text, to_version_id)
-          SELECT a.id, ${fault.fromVersionId}, a.pdf_target, COALESCE(a.quoted_text, ''), ${fault.toVersionId} FROM annotation a WHERE a.id = ${fault.annotationId}
+          INSERT INTO file_anchor_move (annotation_id, from_version_id, from_target, from_quoted_text, to_version_id, moved_at)
+          SELECT a.id, ${fault.fromVersionId}, a.pdf_target, COALESCE(a.quoted_text, ''), ${fault.toVersionId}, ${new Date()}::timestamp(3) FROM annotation a WHERE a.id = ${fault.annotationId}
           RETURNING id`;
   if (!row) throw new Error(`makeVersionFault: no annotation ${fault.annotationId}`);
   return String(row.id);
