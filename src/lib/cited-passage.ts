@@ -46,14 +46,17 @@ export async function placeCitedQuotation(
   return { starts, placed: passagePieces(text, filePages.pages, starts, through), pages: filePages };
 }
 
-/** The fragment for placed pieces: each on its sheet, named as a writer names it (docs/PDF_FRAGMENT_LINKS.md §8). */
+/** The fragment for placed pieces: each on its sheet, named as a writer names it (docs/PDF_FRAGMENT_LINKS.md §8), stamped with the version `pages` are of. */
 export function placedFragment(placed: readonly PlacedPassage[], pages: FilePages): string {
   return formatFragmentPassages(
     placed.map((piece) => ({
-      page: pageNameForSheet(pages.ownLabels, pages.pageCount, piece.sheet, (earlier) => {
-        const held = pages.pages.get(earlier);
-        return held !== undefined && resolvePassage(held.text, piece.passage, held.skeleton) !== null;
-      }),
+      page: {
+        ...pageNameForSheet(pages.ownLabels, pages.pageCount, piece.sheet, (earlier) => {
+          const held = pages.pages.get(earlier);
+          return held !== undefined && resolvePassage(held.text, piece.passage, held.skeleton) !== null;
+        }),
+        stamp: pages.stamp,
+      },
       ...piece.passage,
     })),
   );

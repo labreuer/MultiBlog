@@ -495,9 +495,26 @@ the admin account.
   just because a test navigates to the page — force it into the querystring
   rather than relying on the ColumnPicker. `invite.spec.ts` does this for
   `/users`' two invite columns.
-- **A file's second version comes from `addTestFileVersion`**, since nothing in
-  the app can make one yet (docs/PDF.md §13). `promote: false` leaves a
-  candidate. `e2e/pdf-versions.spec.ts` is the worked example. Every fixture
+- **A file's second version comes from `addTestFileVersion`**, where a spec
+  only reads it (docs/PDF.md §13): a row beside the first, promoted, or with
+  `promote: false` a candidate. `e2e/pdf-versions.spec.ts` is the worked
+  example. A spec that is about the version's making uploads one through the
+  route (`PUT /api/files/<id>`, or the uploader's file input, `pdf-version-file`)
+  and promotes or abandons it through the page or `promoteTestVersion` and
+  `abandonTestVersion`, which call the operation both front doors share:
+  `e2e/pdf-version-upload.spec.ts`. `getFileVersionFacts` is what each left
+  in the rows and on disk.
+- **A test that uploads bytes gives them a token of its own.** The store is
+  content-addressed, so two tests uploading the same lines share one blob, and
+  abandoning a version in one counts the other's row. `pdf-version-upload.spec.ts`
+  puts a random word in every line.
+- **A race is tested by making it happen in order.** `promoteTestVersionSlowly`
+  holds a promotion open before its commit, `holdFileHashLock` holds the lock an
+  upload and an abandoning share, and `uploadAcrossAbandon` records an upload
+  while it plays the abandoning under that lock. Each spec then starts the other
+  side and checks that it waited and what it was told. A check made outside its
+  transaction, or without its lock, passes every test that sends one request at
+  a time. Every fixture
   file's version, the first included, has an id that is not its file's
   (`TestFile.versionId`), as an uploaded file's does and a migrated one's
   does not: code that passes a file's id for a version's fails on a fixture

@@ -185,3 +185,39 @@ export function parseCaptureOrigin(raw: unknown): CaptureOrigin | null {
 
 /** What a capture is told when the page it was made on no longer shows what its writer means. */
 export const CAPTURE_RELOAD_MESSAGE = "This file has a newer version than the one this page is showing. Reload the page, then select the passage again.";
+
+/**
+ * The stamp a link the app writes carries (docs/PDF.md §13, "Links into the
+ * file"): the number of the version its writer read, once the file has a
+ * second version, and none before. **A second version is a second
+ * `file_version` row**, a candidate or an abandoned one as much as a promoted
+ * one, so `versionCount` is the file's rows and a file that has begun to
+ * stamp its links never stops.
+ */
+export function pageStampFor(versionNumber: number, versionCount: number): number | "sole" {
+  return versionCount > 1 ? versionNumber : "sole";
+}
+
+/**
+ * A PDF's reading address as a link's path writes it: `/pdf/<slug>`, or a
+ * version's own, `/pdf/<slug>/v/<n>` (and `/pdf/<slug>/v<n>`, which redirects
+ * to it). `version` is null for the bare address. Null for any other path.
+ *
+ * **Every reader of a link into a PDF parses its path here**: the fragment
+ * check, a citation's referent and the integrity script. One that takes only
+ * `/pdf/<slug>` passes over a link copied from an earlier version's address
+ * bar unchecked.
+ */
+export function parsePdfPath(pathname: string): { slug: string; version: number | null } | null {
+  const match = /^\/pdf\/([^/]+)(?:\/v\/?([^/]+))?\/?$/.exec(pathname);
+  if (!match) return null;
+  let slug: string;
+  try {
+    slug = decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+  if (match[2] === undefined) return { slug, version: null };
+  const version = parseVersionNumber(match[2]);
+  return version === null ? null : { slug, version };
+}

@@ -162,9 +162,14 @@ function PdfItem({ hit }: { hit: PdfHit }) {
         <ul className={styles.pages}>
           {hit.pages.map((page) => (
             <li key={page.page}>
-              <Link href={page.href} className={styles.pageLink}>
+              {/* A plain `<a>`: the link carries `#sheet=…` or `#p=…`, and a
+                  client navigation that carries a fragment leaves it on the
+                  path it reached, for every later client navigation there
+                  (PdfSurfaceClient's header). A plain link to the file would
+                  then open at this page, read as this version's. */}
+              <a href={page.href} className={styles.pageLink}>
                 p. {page.page}
-              </Link>{" "}
+              </a>{" "}
               <Highlighted fragments={page.snippet} className={styles.pageSnippet} />
             </li>
           ))}

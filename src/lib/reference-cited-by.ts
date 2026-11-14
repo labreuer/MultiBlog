@@ -15,7 +15,9 @@ import { parseCitedQuery } from "@/lib/cited-passage-query";
 import { formatPassageText } from "@/lib/pdf-fragment";
 import { FragmentChecker } from "@/lib/pdf-fragment-check";
 import { withoutBrackets } from "@/lib/pdf-passage-pieces";
-import { latestVersionOf, pdfNoteContainer } from "@/lib/file-version";
+import { fileVersionState, latestVersionOf, pageStampFor, pdfNoteContainer } from "@/lib/file-version";
+import { referentTarget } from "@/lib/pdf-link-reading";
+import type { PageStamp } from "@/lib/pdf-open-params";
 import { noteVersions } from "@/lib/file-version-data";
 
 // docs/CITATIONS.md, "Pages" — what a reference's public page can't show
@@ -36,8 +38,8 @@ export type ReferenceCitedBy = {
   notes: { writer: string; on: string; href: string }[];
   /** Whether either list was cut at `CITED_BY_LIMIT`. */
   more: boolean;
-  /** The work's PDF, where this viewer may read it, with each sheet's printed label and its page count for a link to a page. */
-  file: { title: string; slug: string; pageLabels: string[] | null; pageCount: number | null } | null;
+  /** The work's PDF, where this viewer may read it, with each sheet's printed label, its page count and its stamp for a link to a page: the latest version's. */
+  file: { title: string; slug: string; pageLabels: string[] | null; pageCount: number | null; stamp: PageStamp } | null;
 };
 
 const NOTHING: ReferenceCitedBy = { docs: [], notes: [], more: false, file: null };
@@ -57,8 +59,9 @@ function pageLabelsOf(stored: unknown): string[] | null {
  * alias (docs/CITATIONS.md, "The page").
  *
  * `query` is the link's raw query (src/lib/cited-passage-query.ts). A
- * `/pdf/` referent's page and `text` pairs become the PDF's fragment as they
- * are. A quotation is placed on the cited page, and on the pages after it
+ * `/pdf/` referent's page and `text` pairs are a link into the work's file,
+ * read as the viewer reads one on the bare address (`referentTarget`). A
+ * quotation is placed on the cited page, and on the pages after it
  * that a locator of several pages names, from the stored page text
  * (`placeCitedQuotation`): its brackets settled, split where a page breaks,
  * each piece in the writer's form with its own page. A quotation the page
@@ -82,7 +85,13 @@ export async function citedPageTarget(actor: Actor | null, segment: string, page
   if (!reference.fileId || reference.deleted || !filesWhere) return fallback;
   const file = await prisma.storedFile.findFirst({
     where: { AND: [filesWhere, { id: reference.fileId }] },
-    select: { id: true, slug: true, currentVersion: { select: { id: true, pageLabels: true, pageCount: true } } },
+    select: {
+      id: true,
+      slug: true,
+      currentVersionId: true,
+      currentVersion: { select: { id: true, number: true, pageLabels: true, pageCount: true } },
+      versions: { select: { id: true, number: true, promotedAt: true, abandonedAt: true } },
+    },
   });
   if (!file) return fallback;
   // A citation's page is resolved on the latest version's labels and text at
@@ -93,14 +102,20 @@ export async function citedPageTarget(actor: Actor | null, segment: string, page
   // its first citation lands on the page the labels name and not on the sheet
   // of that number.
   const pageLabels = pageLabelsOf(latest.pageLabels) ?? (await pdfMetadata(latest.id))?.pageLabels ?? null;
-  const pageHref = pdfPageHref({ slug: file.slug, pageLabels, pageCount: latest.pageCount }, first);
+  // Every link below is stamped with the latest version once the file has a second.
+  const stamp = pageStampFor(latest.number, file.versions.length);
+  const pageHref = pdfPageHref({ slug: file.slug, pageLabels, pageCount: latest.pageCount, stamp }, first);
   if (!pageHref || latest.pageCount === null) return fallback;
 
   const asked = parseCitedQuery(query);
-  if (asked.kind === "pairs") return `/pdf/${file.slug}#${asked.fragment}`;
+  if (asked.kind === "pairs") {
+    const versions = file.versions.map((version) => ({ number: version.number, state: fileVersionState(version, file.currentVersionId) }));
+    return referentTarget(file.slug, asked.fragment, latest.number, versions) ?? pageHref;
+  }
   if (asked.kind !== "quotation") return pageHref;
   const { placed, pages } = await placeCitedQuotation(new FragmentChecker(), { id: file.id, pageCount: latest.pageCount, ownLabels: pageLabels }, page, asked.text);
   if (placed && pages) return `/pdf/${file.slug}#${placedFragment(placed, pages)}`;
+  // `pageHref` ends in its page with its stamp, so the passage follows both.
   return `${pageHref}&text=${formatPassageText(withoutBrackets(asked.text))}`;
 }
 
@@ -137,7 +152,10 @@ export async function referenceCitedBy(actor: Actor, referenceId: string): Promi
         })
       : [],
     reference.fileId && filesWhere
-      ? prisma.storedFile.findFirst({ where: { AND: [filesWhere, { id: reference.fileId }] }, select: { slug: true, title: true, currentVersion: { select: { pageLabels: true, pageCount: true } } } })
+      ? prisma.storedFile.findFirst({
+          where: { AND: [filesWhere, { id: reference.fileId }] },
+          select: { slug: true, title: true, currentVersion: { select: { number: true, pageLabels: true, pageCount: true } }, _count: { select: { versions: true } } },
+        })
       : null,
   ]);
 
@@ -160,7 +178,13 @@ export async function referenceCitedBy(actor: Actor, referenceId: string): Promi
     }),
     more: docs.length > CITED_BY_LIMIT || notes.length > CITED_BY_LIMIT,
     file: file
-      ? { title: file.title, slug: file.slug, pageLabels: pageLabelsOf(latestVersionOf(file).pageLabels), pageCount: latestVersionOf(file).pageCount }
+      ? {
+          title: file.title,
+          slug: file.slug,
+          pageLabels: pageLabelsOf(latestVersionOf(file).pageLabels),
+          pageCount: latestVersionOf(file).pageCount,
+          stamp: pageStampFor(latestVersionOf(file).number, file._count.versions),
+        }
       : null,
   };
 }

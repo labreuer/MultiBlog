@@ -27,6 +27,10 @@ test("with a page, the page and text pairs are the fragment, in order and as wri
   assert.deepEqual(parseCitedQuery("?page=3"), { kind: "pairs", fragment: "page=3" });
   // sheet= is the written form of page=, and is kept as one.
   assert.deepEqual(parseCitedQuery("sheet=3&text=a&zoom=200"), { kind: "pairs", fragment: "sheet=3&text=a" });
+  // v= rides with the page it stamps, since it says whose sheets the pair counts; alone it names no page.
+  assert.deepEqual(parseCitedQuery("sheet=3&v=2&text=a&zoom=200"), { kind: "pairs", fragment: "sheet=3&v=2&text=a" });
+  assert.deepEqual(parseCitedQuery("p=49&v=1"), { kind: "pairs", fragment: "p=49&v=1" });
+  assert.deepEqual(parseCitedQuery("v=2"), { kind: "none" });
 });
 
 test("the cited pages: one, or the first and last a locator of several names", () => {

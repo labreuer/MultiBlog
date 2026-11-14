@@ -27,6 +27,11 @@
 // with its letters and without, as a citation's passage is
 // (src/lib/pdf-passage-pieces.ts).
 //
+// It reads the file's latest version, and once the file has a second version
+// the link it prints carries that version's stamp, `&v=<n>` after each page
+// (docs/PDF.md §13, "Links into the file"): a link without one names the
+// file's first version.
+//
 // Read-only, and it reads as the operator, like the integrity check.
 //
 // Usage:
@@ -39,7 +44,7 @@ import "dotenv/config";
 import { prisma } from "../src/lib/prisma";
 import { FragmentChecker } from "../src/lib/pdf-fragment-check";
 import { checkPassage, type FilePages } from "../src/lib/pdf-fragment-findings";
-import { formatFragmentPassages, parsePassageText, resolvePassage, type FragmentPassage, type PassageText } from "../src/lib/pdf-fragment";
+import { formatFragmentPassages, parsePassageText, resolvePassage, type PassageText, type StampedFragmentPassage } from "../src/lib/pdf-fragment";
 import { passagePieces, quotationText, withoutBrackets, type PlacedPassage } from "../src/lib/pdf-passage-pieces";
 import type { PageName } from "../src/lib/pdf-open-params";
 import { pageNameForSheet, sheetsLabelled, usablePageLabels } from "../src/lib/pdf-page-labels";
@@ -67,13 +72,13 @@ function locate(file: FilePages, sheets: readonly number[], passage: PassageText
   return found;
 }
 
-/** A located passage as the link names it: its page in whichever form the file takes (§8). */
-function named(file: FilePages, pageIndex: number, form: PassageText): FragmentPassage {
+/** A located passage as the link names it: its page in whichever form the file takes (§8), stamped with the latest version once the file has a second. */
+function named(file: FilePages, pageIndex: number, form: PassageText): StampedFragmentPassage {
   const page = pageNameForSheet(file.ownLabels, file.pageCount, pageIndex, (earlier) => {
     const text = file.pages.get(earlier);
     return text !== undefined && resolvePassage(text.text, form, text.skeleton) !== null;
   });
-  return { page, ...form };
+  return { page: { ...page, stamp: file.stamp }, ...form };
 }
 
 /** A sheet as the output names it: its number, and its own label where the file has usable ones. */

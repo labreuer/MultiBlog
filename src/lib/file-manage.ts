@@ -1,4 +1,12 @@
-import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
+import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
+import { lockFileHash, lockFileRow } from "@/lib/file-version-data";
+import { deleteBytesIfUnreferenced } from "@/lib/file-storage";
+
+// How long a version's write may wait for the file row or a hash: Prisma's
+// default, five seconds, is less than an upload's insert of a large book's
+// page text can hold either. The upload's own transactions take the same
+// (`VERSION_WRITE_TIMEOUTS`, file-ingest.ts, which imports nothing from here).
+const VERSION_WRITE_TIMEOUTS = { maxWait: 30_000, timeout: 60_000 } as const;
 import { canUserManageFile } from "@/lib/file-authz";
 import { changeFileSlug, freeFileSlugFor } from "@/lib/file-slug";
 import { FILE_MANAGER_ROLES } from "@/lib/role-checks";
@@ -6,8 +14,8 @@ import { ApiError, forbidden, invalid } from "@/lib/api/errors";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import type { Actor } from "@/lib/actor";
 
-// Managing an uploaded file — its visibility, title, slug, owners and soft
-// deletion — as plain functions taking an explicit actor, the file
+// Managing an uploaded file — its visibility, title, slug, owners, soft
+// deletion and the promotion or abandoning of a waiting version — as plain functions taking an explicit actor, the file
 // counterpart of src/lib/doc-manage.ts: /files' actions
 // (src/app/actions/files.ts) wrap them with the session, and the MCP
 // server's `manage` and `rename_file` with a token's user. Each refusal is an
@@ -134,4 +142,97 @@ export async function setFileDeleted(
     return claimed;
   });
   return { slug, renamedFrom: slug === file.slug ? null : file.slug };
+}
+
+// ---------------------------------------------------------------------------
+// docs/PDF.md §13 — a candidate version's two ends: promoted, which makes it
+// the file's latest, or abandoned. Both take whoever may manage the file
+// (`canUserManageFile`), and neither is open to a bot by its person's place:
+// that rule is the upload's alone.
+//
+// **Each names the version it means, and checks under the file row's lock
+// that it is still the file's candidate.** A file has one candidate at a
+// time, so "the candidate" would do for a single manager. With two it is a
+// click that lands on a version another manager uploaded since, which the
+// one who clicked never saw.
+
+/** The version, with its file, and the actor's right to manage that file. */
+async function requireManageableVersion(actor: Actor, versionId: string): Promise<{ fileId: string; slug: string; number: number; sha256: string }> {
+  const version = await prisma.fileVersion.findUnique({ where: { id: versionId }, select: { fileId: true, number: true, sha256: true } });
+  if (!version) throw new ApiError("not_found", "That version doesn't exist.");
+  const { slug } = await requireManageable(actor, version.fileId);
+  return { ...version, slug };
+}
+
+/** The version as it stands under the file row's lock, or a refusal where it is no longer the file's candidate, or the file is deleted. */
+async function lockCandidate(tx: TransactionClient, versionId: string, fileId: string, doing: "promoted" | "abandoned"): Promise<{ currentVersionId: string | null }> {
+  const file = await lockFileRow(tx, fileId);
+  if (!file) throw new ApiError("not_found", "File not found.");
+  if (file.deleted) throw new ApiError("conflict", `This file is deleted, and its waiting version can't be ${doing} until it is restored.`);
+  const version = await tx.fileVersion.findUnique({ where: { id: versionId }, select: { number: true, promotedAt: true, abandonedAt: true } });
+  if (!version || version.promotedAt !== null || version.abandonedAt !== null) {
+    const now = !version ? "is gone" : version.abandonedAt !== null ? "was abandoned" : "is already promoted";
+    throw new ApiError("conflict", `That version ${now}, so it is no longer this file's waiting version. Reload the page to see the file's versions as they are.`);
+  }
+  return file;
+}
+
+/**
+ * Makes a candidate the file's latest version (docs/PDF.md §13, "Promotion"):
+ * one transaction, the file row locked. Refused where the version is no
+ * longer the file's candidate or the file is deleted, and by nothing else:
+ * no note on the outgoing version holds it up.
+ *
+ * It moves no note. An anchor stays on the version it is on, where it is
+ * still drawn, and every other version's page lists it under that version.
+ * The file's id, slug, title, visibility, owners, tags and references are as
+ * they were; only `/pdf/<slug>` shows other bytes.
+ *
+ * The lock is what a capture's check waits on: a capture holds the file row
+ * `FOR SHARE` in the transaction that inserts its row
+ * (`assertCaptureVersion`), so this update waits for it, and a capture that
+ * starts after it sees the new latest and is refused.
+ */
+export async function promoteFileVersion(actor: Actor, versionId: string): Promise<{ slug: string; number: number }> {
+  const version = await requireManageableVersion(actor, versionId);
+  await prisma.$transaction(async (tx) => {
+    await lockCandidate(tx, versionId, version.fileId, "promoted");
+    const tail = await tx.ydocUpdate.aggregate({ _max: { id: true } });
+    await tx.fileVersion.update({
+      where: { id: versionId },
+      data: { promotedAt: new Date(), promotedByUserId: actor.userId, promotedAtUpdateId: tail._max.id ?? BigInt(0) },
+    });
+    // Through Prisma, so `updatedAt` moves: the file's search vector is
+    // refreshed by the trigger on `current_version_id`, which reads the new
+    // latest's filename.
+    await tx.storedFile.update({ where: { id: version.fileId }, data: { currentVersionId: versionId, updatedByUserId: actor.userId } });
+  }, VERSION_WRITE_TIMEOUTS);
+  return { slug: version.slug, number: version.number };
+}
+
+/**
+ * Abandons a candidate (docs/PDF.md §13, "The upload"): marks its row, and
+ * deletes its page text and its bytes, unless another row holds them. The
+ * row keeps its number, which is never reused, its hash and its labels, and
+ * its address answers with a page that says so.
+ *
+ * **The blob is removed before the transaction commits, under the lock on
+ * its hash** (`lockFileHash`), which every upload takes in the transaction
+ * that inserts its row. Removed after the commit, the blob could go from
+ * under a row an upload of the same bytes has just written. A commit that
+ * fails after the removal leaves a candidate without bytes, which
+ * `check-file-versions.ts` reports and a second abandoning clears.
+ */
+export async function abandonFileVersion(actor: Actor, versionId: string): Promise<{ slug: string; number: number }> {
+  const version = await requireManageableVersion(actor, versionId);
+  await prisma.$transaction(async (tx) => {
+    await lockCandidate(tx, versionId, version.fileId, "abandoned");
+    await lockFileHash(tx, version.sha256);
+    await tx.fileVersion.update({ where: { id: versionId }, data: { abandonedAt: new Date() } });
+    await tx.filePageText.deleteMany({ where: { fileVersionId: versionId } });
+    // Every other row holding these bytes: this one is abandoned now, and holds none.
+    const others = await tx.fileVersion.count({ where: { sha256: version.sha256, abandonedAt: null } });
+    await deleteBytesIfUnreferenced(version.sha256, others);
+  }, VERSION_WRITE_TIMEOUTS);
+  return { slug: version.slug, number: version.number };
 }

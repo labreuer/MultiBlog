@@ -1205,7 +1205,7 @@ as [@wimsatt1986](/link/def456) argues
 | Referent | Allowed on | The citation links to |
 |---|---|---|
 | `quote:prev`, `quote:next` | one work, with pages | the cited-page route, the quotation as its query |
-| `/pdf/<slug>#…` | one work, with pages, and that work's own file | the same route, the fragment's own page and `text` pairs as its query |
+| `/pdf/<slug>#…`, or `/pdf/<slug>/v/<n>#…` on one version's own address | one work, with pages, and that work's own file | the same route, the fragment's own page and `text` pairs as its query |
 | `/link/<id>`, another path on this site, an `https` URL | any citation | the referent itself |
 
 - **`referentKind` and `referentAllowed`** (`citation.ts`) say which a referent is and whether a
@@ -1280,8 +1280,21 @@ fragment.
     cost: 170 of the 5,662 links measured name more than one page (3.0%).
   - **No page break is in the query.** The route finds each one from the stored page text.
 - **For a `/pdf/` referent, the query is the fragment's own page and `text` pairs**, already in
-  the grammar, each page a `p`, a `sheet` or a `page` as the referent wrote it
-  (`fragmentPairs`). The route hands them on as written, so a referent's `page=` stays one.
+  the grammar, each page a `p`, a `sheet` or a `page` as the referent wrote it, with the `v=`
+  that says which version of the file it names (`fragmentPairs`; PDF.md §13, "Links into the
+  file").
+  - **A referent on a version's own address** (`/pdf/<slug>/v/<n>#…`, which is what a reader
+    on an earlier version copies from the address bar) names that version's sheets and
+    pages. The query has no address to say so, so each of its pages rides with `v=<n>`
+    unless it has a stamp of its own (`pdfReferentPath`).
+  - **The route reads the pairs as the viewer reads a link on the file's bare address**
+    (`referentTarget`, `src/lib/reference-cited-by.ts`) and writes them anew, so a
+    referent's `page=` leaves as `sheet=` and each page carries its stamp once the file has
+    a second version. Pairs that name the latest version open there. Pairs that name
+    another can't be carried, no version having a page map yet, and open the version they
+    name.
+  - **A quotation and a bare page are found on the latest version**, by its labels and page
+    text at every click, and their link is stamped with it.
 - **A query string, not a fragment.** The route answers with a redirect whose `Location` has a
   fragment of its own (`#sheet=…`), and a `Location` with a fragment replaces the one the browser
   had (RFC 9110 §10.2.2), so a passage in the fragment would be lost. The route already reads

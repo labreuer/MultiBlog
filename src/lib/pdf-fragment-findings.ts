@@ -1,4 +1,6 @@
-import { pageFromHash, type PageName } from "./pdf-open-params";
+import { parsePdfPath } from "./file-version";
+import { namedVersion } from "./pdf-link-reading";
+import { pageFromHash, type PageName, type PageStamp } from "./pdf-open-params";
 import { sheetsNamed, usablePageLabels } from "./pdf-page-labels";
 import {
   countPassageOccurrences,
@@ -19,6 +21,8 @@ import {
 /** How a fragment link's href names its file and passages, or a page link's its page. Null when the href is neither. */
 export type FragmentLinkHref = {
   slug: string;
+  /** The version whose own address the href names, `/pdf/<slug>/v/<n>`; null for the bare address (docs/PDF.md §13, "Links into the file"). */
+  version: number | null;
   passages: FragmentPassage[];
   /** A page link's page: an href with a `page` or a `p` and no `text`. Null for a fragment link. */
   page: PageName | null;
@@ -30,9 +34,9 @@ export type FragmentLinkHref = {
 const PROBE_ORIGIN = "https://fragment-check.invalid";
 
 /**
- * A fragment link's slug and passages: an href to `/pdf/<slug>` whose
- * fragment has at least one `text` parameter, written relative or absolute
- * on `siteOrigin`. One whose fragment has a readable `page` or `p` and no
+ * A fragment link's slug and passages: an href to `/pdf/<slug>`, or to a
+ * version's own address `/pdf/<slug>/v/<n>`, whose fragment has at least one
+ * `text` parameter, written relative or absolute on `siteOrigin`. One whose fragment has a readable `page` or `p` and no
  * `text` is a page link, with its page and no passages. A link to a PDF with
  * neither is null here.
  */
@@ -49,29 +53,39 @@ export function parseFragmentLinkHref(href: string, siteOrigin: string | null): 
   } catch {
     return null;
   }
-  const match = /^\/pdf\/([^/]+)\/?$/.exec(url.pathname);
-  if (!match) return null;
+  const path = parsePdfPath(url.pathname);
+  if (!path) return null;
   const textParams = url.hash
     .replace(/^#/, "")
     .split("&")
     .filter((param) => param.startsWith("text=")).length;
   const page = textParams === 0 ? pageFromHash(url.hash) : null;
   if (textParams === 0 && page === null) return null;
-  let slug: string;
-  try {
-    slug = decodeURIComponent(match[1]);
-  } catch {
-    return null;
-  }
-  if (page) return { slug, passages: [], page, unread: 0 };
+  const { slug, version } = path;
+  if (page) return { slug, version, passages: [], page, unread: 0 };
   const passages = parseFragmentPassages(url.hash);
-  return { slug, passages, page: null, unread: textParams - passages.length };
+  return { slug, version, passages, page: null, unread: textParams - passages.length };
 }
 
+/**
+ * The version each page of a link names, as the viewer reads it on the
+ * link's own address (`namedVersion`): its `v=`, else the version the address
+ * names, else the first.
+ */
+export function versionNamedBy(link: Pick<FragmentLinkHref, "version">, page: PageName): number {
+  return namedVersion(page, link.version === null ? { shown: 0, own: false } : { shown: link.version, own: true });
+}
+
+/** A link's page that names a version with nothing to read: abandoned, or one the file never had. */
+export type VersionFault = { kind: "abandoned-version"; /** The version named. */ version: number } | { kind: "no-such-version"; version: number };
+
 export type PassageFinding =
+  | (VersionFault & { passage: FragmentPassage })
   | {
       kind: "ok";
       passage: FragmentPassage;
+      /** The version it was read on, which is the one it names. */
+      version: number;
       /** The 1-based sheet it was found on: the first of the sheets its page names that holds it. */
       sheet: number;
       /** The page's text at the match. */
@@ -82,6 +96,7 @@ export type PassageFinding =
   | {
       kind: "no-match";
       passage: FragmentPassage;
+      version: number;
       /** The 1-based sheets its page names, in order: one for `sheet=`, any number for a repeated label. */
       sheets: number[];
       /** The longest stretch of the passage the first of them holds, and what that page has right after it. */
@@ -90,19 +105,21 @@ export type PassageFinding =
       /** The 1-based page the passage is on instead, when it occurs exactly once elsewhere in the file. */
       foundOnPage: number | null;
     }
-  | { kind: "page-out-of-range"; passage: FragmentPassage; pageCount: number }
+  | { kind: "page-out-of-range"; passage: FragmentPassage; version: number; pageCount: number }
   | {
       kind: "no-such-label";
       passage: FragmentPassage;
+      version: number;
       /** As for a miss: the page the passage is on, when it occurs exactly once in the file. */
       foundOnPage: number | null;
     };
 
 /** What a page link's page comes to. */
 export type PageLinkFinding =
-  | { kind: "ok"; /** 1-based: the sheet it opens at. */ sheet: number }
-  | { kind: "page-out-of-range"; pageCount: number }
-  | { kind: "no-such-label" };
+  | VersionFault
+  | { kind: "ok"; version: number; /** 1-based: the sheet it opens at. */ sheet: number }
+  | { kind: "page-out-of-range"; version: number; pageCount: number }
+  | { kind: "no-such-label"; version: number };
 
 export type FragmentLinkFinding =
   | { kind: "unknown-file"; slug: string }
@@ -112,6 +129,12 @@ export type FragmentLinkFinding =
       /** The file's slug now; different from `slug` when the link names a past one. */
       currentSlug: string;
       fileId: string;
+      /** How many versions the file has, every row counted; above 1, a link without `v=` names its first. */
+      versionCount: number;
+      /** The latest version's number. */
+      latestVersion: number;
+      /** The version whose own address the link names; null for the bare address. */
+      addressVersion: number | null;
       passages: PassageFinding[];
       /** A page link's finding; null for a fragment link. */
       page: PageLinkFinding | null;
@@ -125,10 +148,14 @@ export type FragmentLinkFinding =
       unread: number;
     };
 
-/** A file's stored page text, chosen once per run; see the module header for which version. */
+/** One version of a file's stored page text, chosen once per run; see the module header for which text version. */
 export type FilePages = {
   fileId: string;
   slug: string;
+  /** The version these are the pages of. */
+  versionNumber: number;
+  /** The stamp a link written against these pages carries (`pageStampFor`). */
+  stamp: PageStamp;
   pageCount: number;
   textVersion: string | null;
   /** The labels the file itself gives, one per sheet ([] for none), which a `p` is matched against; null where nothing asked for them. */
@@ -147,10 +174,11 @@ function noSheetFor(page: PageName, ownLabels: readonly string[] | null, pageCou
 }
 
 /** A page link's page against its file. */
-export function checkPage(pageCount: number, ownLabels: readonly string[] | null, page: PageName): PageLinkFinding {
+export function checkPage(file: Pick<FilePages, "versionNumber" | "pageCount">, ownLabels: readonly string[] | null, page: PageName): PageLinkFinding {
+  const { versionNumber: version, pageCount } = file;
   const sheets = sheetsNamed(page, ownLabels, pageCount);
-  if (sheets.length > 0) return { kind: "ok", sheet: sheets[0] + 1 };
-  return noSheetFor(page, ownLabels, pageCount) === "page-out-of-range" ? { kind: "page-out-of-range", pageCount } : { kind: "no-such-label" };
+  if (sheets.length > 0) return { kind: "ok", version, sheet: sheets[0] + 1 };
+  return noSheetFor(page, ownLabels, pageCount) === "page-out-of-range" ? { kind: "page-out-of-range", version, pageCount } : { kind: "no-such-label", version };
 }
 
 /**
@@ -158,12 +186,13 @@ export function checkPage(pageCount: number, ownLabels: readonly string[] | null
  * page names that holds it, which is §4's "first occurrence wins" extended
  * across the sheets a repeated label names.
  */
-export function checkPassage(file: FilePages, passage: FragmentPassage): PassageFinding {
+export function checkPassage(file: FilePages, passage: FragmentPassage): Exclude<PassageFinding, VersionFault> {
+  const version = file.versionNumber;
   const sheets = sheetsNamed(passage.page, file.ownLabels, file.pageCount);
   if (sheets.length === 0) {
     return noSheetFor(passage.page, file.ownLabels, file.pageCount) === "page-out-of-range"
-      ? { kind: "page-out-of-range", passage, pageCount: file.pageCount }
-      : { kind: "no-such-label", passage, foundOnPage: passageElsewhere(file, passage, []) };
+      ? { kind: "page-out-of-range", passage, version, pageCount: file.pageCount }
+      : { kind: "no-such-label", passage, version, foundOnPage: passageElsewhere(file, passage, []) };
   }
   for (const index of sheets) {
     const page = file.pages.get(index);
@@ -172,6 +201,7 @@ export function checkPassage(file: FilePages, passage: FragmentPassage): Passage
       return {
         kind: "ok",
         passage,
+        version,
         sheet: index + 1,
         text: page.text.slice(range.start, range.end),
         occurrences: countPassageOccurrences(page.text, passage, page.skeleton),
@@ -182,6 +212,7 @@ export function checkPassage(file: FilePages, passage: FragmentPassage): Passage
   return {
     kind: "no-match",
     passage,
+    version,
     sheets: sheets.map((index) => index + 1),
     ...(first ? whereItStops(first.text, first.skeleton, passage) : { matchedUpTo: null, pageHasThere: null }),
     foundOnPage: passageElsewhere(file, passage, sheets),

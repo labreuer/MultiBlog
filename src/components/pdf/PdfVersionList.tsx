@@ -2,13 +2,21 @@ import Link from "next/link";
 import LocalTime from "@/components/LocalTime";
 import { formatBytes } from "@/lib/file-format";
 import { filesPath, pdfPath, type FileVersionState } from "@/lib/file-version";
-import type { FileVersionSummary } from "@/lib/file-version-data";
+import type { FileVersionSummary, VersionManage } from "@/lib/file-version-data";
+import PdfCandidateActions from "./PdfCandidateActions";
+import PdfVersionUploader from "./PdfVersionUploader";
 import styles from "./PdfVersions.module.css";
 
 // docs/PDF.md §13, "Addresses" — the file's versions in the Metadata pane,
 // newest first: each with its state, who uploaded it and when, who promoted
 // it and when, a link to its own page and one to its download. Shown once a
 // file has a second version.
+//
+// **To whoever may manage the file it is also where a version is made and
+// ended** (`manage`): the upload of a new one, a waiting version's promotion
+// and abandoning, and the number of posted notes still on each earlier
+// version, which nothing moves yet. A manager sees the section on a file
+// with one version too, since the upload is how it gains a second.
 //
 // Rendered on the server and handed into the viewer island as part of its
 // `metadata` prop (PdfSurfaceClient's header). Versions are in no listing of
@@ -21,13 +29,24 @@ const STATE_LABEL: Record<FileVersionState, string> = {
   abandoned: "abandoned",
 };
 
-export default function PdfVersionList({ slug, versions, shownId }: { slug: string; versions: FileVersionSummary[]; shownId: string }) {
+type Props = {
+  slug: string;
+  versions: FileVersionSummary[];
+  shownId: string;
+  /** What a manager of the file is given; null for every other reader. */
+  manage: VersionManage | null;
+};
+
+export default function PdfVersionList({ slug, versions, shownId, manage }: Props) {
+  const latest = versions.find((version) => version.state === "latest");
+  const waiting = versions.some((version) => version.state === "candidate");
   return (
     <section className={styles.versions} data-testid="pdf-version-list">
       <h3>Versions</h3>
       <ol>
         {[...versions].reverse().map((version) => {
           const ref = { number: version.number, isLatest: version.state === "latest" };
+          const notes = manage?.notesOn[version.id] ?? 0;
           return (
             <li key={version.id} data-version={version.number}>
               <div>
@@ -47,16 +66,31 @@ export default function PdfVersionList({ slug, versions, shownId }: { slug: stri
                     {version.promotedBy && ` by ${version.promotedBy}`}
                   </>
                 )}
+                {version.abandonedAt && (
+                  <>
+                    ; abandoned <LocalTime value={version.abandonedAt} />
+                  </>
+                )}
               </div>
               {version.state !== "abandoned" && (
                 <div className={styles.versionFacts}>
                   <a href={`${filesPath(slug, ref, { own: true })}/download`}>{version.filename}</a> ({formatBytes(version.byteSize)})
                 </div>
               )}
+              {manage && version.state === "earlier" && notes > 0 && (
+                <div className={styles.versionFacts} data-testid="pdf-version-notes-left">
+                  {notes === 1 ? "1 posted note is" : `${notes} posted notes are`} still on this version.
+                </div>
+              )}
+              {manage && version.state === "candidate" && latest && (
+                <PdfCandidateActions versionId={version.id} number={version.number} latestNumber={latest.number} facts={manage.candidateFacts} />
+              )}
             </li>
           );
         })}
       </ol>
+      {/* One candidate at a time: the upload is offered again once the waiting one is promoted or abandoned. */}
+      {manage && manage.takesVersions && !waiting && <PdfVersionUploader fileId={manage.fileId} />}
     </section>
   );
 }

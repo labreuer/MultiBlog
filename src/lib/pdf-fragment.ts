@@ -2,7 +2,7 @@
 // URL: `/pdf/<slug>#sheet=<n>&text=<passage>`, or `#p=<label>&text=<passage>`
 // by the page printed on it, with no row anywhere.
 
-import { formatPageName, isPageParam, pageNameOf, type PageName } from "./pdf-open-params";
+import { formatPageName, isPageParam, pageNameOf, versionStampOf, type PageName, type StampedPageName } from "./pdf-open-params";
 //
 // Pure and isomorphic, like src/lib/pdf-text.ts beside it: the viewer reads
 // fragments with it, and the integrity check and the one-quote CLI write and
@@ -38,11 +38,16 @@ const MAX_PREFIX_WORDS = 6;
 export type FragmentPassage = PassageText & {
   /**
    * The page it names: a 1-based sheet, exactly as `#sheet=` means it, or a
-   * printed label, as `#p=` gives one (src/lib/pdf-open-params.ts). Only
-   * `sheetsNamed` (src/lib/pdf-page-labels.ts) turns a label into sheets.
+   * printed label, as `#p=` gives one (src/lib/pdf-open-params.ts), with the
+   * version its `v=` stamps it with. Only `sheetsNamed`
+   * (src/lib/pdf-page-labels.ts) turns a label into sheets, on the labels of
+   * the version the passage names (src/lib/pdf-link-reading.ts).
    */
   page: PageName;
 };
+
+/** A passage as a writer names it: its page with its stamp (`StampedPageName`), which `formatFragmentPassages` takes. */
+export type StampedFragmentPassage = PassageText & { page: StampedPageName };
 
 /**
  * One run of quoted words: whole, or by its first and last words
@@ -82,12 +87,20 @@ export type TextRange = { start: number; end: number };
  * anything else is ignored as `pageFromHash` ignores it. A passage whose
  * grammar doesn't parse, or one of whose parts has no letters or digits, is
  * dropped rather than guessed at.
+ *
+ * **A `v` stamps the page before it** (docs/PDF.md §13, "Links into the
+ * file"), and so every `text` of that page, the ones written ahead of it
+ * included: a writer puts it straight after its page, and a hand that put it
+ * after the `text` meant the same page. The first readable `v` of a page is
+ * its stamp, and one before any page is ignored.
  */
 export function parseFragmentPassages(hash: string): FragmentPassage[] {
   const passages: FragmentPassage[] = [];
   let page: PageName | null = null;
+  // Where the current page's passages begin, for a `v` that comes after one.
+  let pageStart = 0;
+  let stamped = false;
   for (const param of hash.replace(/^#/, "").split("&")) {
-    if (passages.length >= MAX_FRAGMENT_PASSAGES) break;
     const equals = param.indexOf("=");
     if (equals < 0) continue;
     const name = param.slice(0, equals);
@@ -96,7 +109,16 @@ export function parseFragmentPassages(hash: string): FragmentPassage[] {
       // An unreadable page forgets the one before it, so the texts after it
       // can't attach themselves to a page they were never written for.
       page = pageNameOf(name, value);
-    } else if (name === "text" && page !== null) {
+      pageStart = passages.length;
+      stamped = false;
+    } else if (name === "v" && page !== null && !stamped) {
+      const v = versionStampOf(value);
+      if (v === null) continue;
+      const withStamp: PageName = Object.assign({}, page, { v });
+      page = withStamp;
+      stamped = true;
+      for (let index = pageStart; index < passages.length; index++) passages[index] = { ...passages[index], page: withStamp };
+    } else if (name === "text" && page !== null && passages.length < MAX_FRAGMENT_PASSAGES) {
       const text = parsePassageText(value);
       if (text) passages.push({ page, ...text });
     }
@@ -165,7 +187,7 @@ function decodePart(part: string): string | undefined {
  * Every part becomes its words joined by `+`, so it needs no
  * percent-encoding except for letters with no ASCII base letter.
  */
-export function formatFragmentPassages(passages: readonly FragmentPassage[]): string {
+export function formatFragmentPassages(passages: readonly StampedFragmentPassage[]): string {
   return passages.map((passage) => `${formatPageName(passage.page)}&text=${formatPassageText(passage)}`).join("&");
 }
 

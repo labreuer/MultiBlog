@@ -34,10 +34,13 @@ import { postPath } from "@/lib/post-path";
 import { derivePostStatus } from "@/lib/post-status";
 import { changeDocSlug, uniqueDocSlug } from "@/lib/doc-slug";
 import { changeFileSlug, uniqueFileSlug } from "@/lib/file-slug";
-import { countVersionsHolding, createFileWithFirstVersion, latestVersionIdOf } from "@/lib/file-version-data";
+import { countVersionsHolding, createFileWithFirstVersion, latestVersionIdOf, lockFileHash, lockFileRow } from "@/lib/file-version-data";
+import { fileVersionState } from "@/lib/file-version";
+import { recordUpload, recordVersionUpload, stageUpload } from "@/lib/file-ingest";
+import { abandonFileVersion, promoteFileVersion } from "@/lib/file-manage";
 import { changeTagSlug, uniqueTagSlug } from "@/lib/tag-slug";
 import { targetFromColumns, targetToColumns, type AnchorTarget } from "@/lib/anchors";
-import { deleteBytesIfUnreferenced, storagePathFor, storeUploadStream } from "@/lib/file-storage";
+import { UploadError, deleteBytesIfUnreferenced, storagePathFor, storedByteSize, storeUploadStream } from "@/lib/file-storage";
 import { extractPdf } from "@/lib/pdf-extract";
 import { pdfMetadata } from "@/lib/pdf-metadata";
 import { parsePdfTarget } from "@/lib/pdf-anchor";
@@ -611,9 +614,12 @@ export type TestFile = {
 async function withShaLock<T>(sha256: string, work: () => Promise<T>): Promise<T> {
   return prisma.$transaction(
     async (tx) => {
-      // `$executeRaw`, not `$queryRaw`: the lock function returns `void`,
-      // which the query path refuses to deserialize as a column.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sha256}))`;
+      // The app's own lock on a hash (docs/PDF.md §13, "The upload"), which
+      // every upload's insert and every removal of a blob takes: a spec that
+      // uploads through a route and another worker's delete of the same bytes
+      // then can't cross either. Nothing `work` calls takes it again, which
+      // would wait on this transaction for good.
+      await lockFileHash(tx, sha256);
       return work();
     },
     // A cold extractPdf under a loaded suite runs well past the 5 s default.
@@ -796,6 +802,219 @@ export async function addTestFileVersion(
     });
     return { id: version.id, number: version.number, sha256: stored.sha256, pages: parsed.pages };
   });
+}
+
+/** One version of a file as its row and the disk hold it: what a spec compares with what an upload, a promotion or an abandoning should have left. */
+export type TestVersionFacts = {
+  id: string;
+  number: number;
+  state: "latest" | "earlier" | "candidate" | "abandoned";
+  sha256: string;
+  filename: string;
+  /** Whether the bytes its hash names are on disk. */
+  bytesOnDisk: boolean;
+  pageTextRows: number;
+  /** The number of the version that was the latest when this one was uploaded. */
+  baseNumber: number | null;
+  uploadedByEmail: string | null;
+  promotedByEmail: string | null;
+  /** Whether the row holds the update id a promotion stamps. */
+  promotedAtUpdateId: boolean;
+};
+
+/** A file's versions, in number order, each with what its row and the disk hold. */
+export async function getFileVersionFacts(fileId: string): Promise<TestVersionFacts[]> {
+  const file = await prismaIncludingDeleted.storedFile.findUniqueOrThrow({
+    where: { id: fileId },
+    select: {
+      currentVersionId: true,
+      versions: {
+        orderBy: { number: "asc" },
+        select: {
+          id: true,
+          number: true,
+          sha256: true,
+          filename: true,
+          promotedAt: true,
+          abandonedAt: true,
+          promotedAtUpdateId: true,
+          baseVersion: { select: { number: true } },
+          uploadedBy: { select: { email: true } },
+          promotedBy: { select: { email: true } },
+          _count: { select: { pageTexts: true } },
+        },
+      },
+    },
+  });
+  return Promise.all(
+    file.versions.map(async (version) => ({
+      id: version.id,
+      number: version.number,
+      state: fileVersionState(version, file.currentVersionId),
+      sha256: version.sha256,
+      filename: version.filename,
+      bytesOnDisk: (await storedByteSize(version.sha256)) !== null,
+      pageTextRows: version._count.pageTexts,
+      baseNumber: version.baseVersion?.number ?? null,
+      uploadedByEmail: version.uploadedBy?.email ?? null,
+      promotedByEmail: version.promotedBy?.email ?? null,
+      promotedAtUpdateId: version.promotedAtUpdateId !== null,
+    })),
+  );
+}
+
+async function testActor(email: string): Promise<{ userId: string; role: Role }> {
+  assertSafe(email);
+  const user = await prisma.user.findUniqueOrThrow({ where: { email }, select: { id: true, role: true } });
+  return { userId: user.id, role: user.role };
+}
+
+function bodyOf(bytes: Uint8Array): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
+/** What a version's act came to: done, or the refusal's message, which is what a spec asserts on. */
+export type VersionActOutcome = { ok: true; number: number } | { ok: false; error: string };
+
+async function versionAct(run: () => Promise<{ number: number }>): Promise<VersionActOutcome> {
+  try {
+    return { ok: true, number: (await run()).number };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** `promoteFileVersion` as `email`, through the operation both front doors share: the version is named, never "the candidate". */
+export async function promoteTestVersion(versionId: string, email: string): Promise<VersionActOutcome> {
+  const actor = await testActor(email);
+  return versionAct(() => promoteFileVersion(actor, versionId));
+}
+
+/** `abandonFileVersion` as `email`. */
+export async function abandonTestVersion(versionId: string, email: string): Promise<VersionActOutcome> {
+  const actor = await testActor(email);
+  return versionAct(() => abandonFileVersion(actor, versionId));
+}
+
+/**
+ * The interleaving the lock on a hash exists for, made to happen in order
+ * (docs/PDF.md §13, "The upload"). An upload of bytes a candidate holds is
+ * **staged**, which finds the blob on disk and stores nothing. It is then
+ * **recorded**, as a new file, while this holds the lock on the hash as the
+ * candidate's abandoning does: the record parses the bytes, which are still
+ * there, and waits for the lock in the transaction that inserts its row. The
+ * abandoning's own writes are made meanwhile, and the blob removed before the
+ * lock is let go, no other row holding it. The record then has the lock, and
+ * its check under it finds no blob.
+ *
+ * Without the lock the row is inserted before the removal, and without the
+ * check after it: either leaves a version's row with no bytes.
+ *
+ * The abandoning is played here, statement for statement, since the real one
+ * takes the lock itself and its place in the order couldn't be held. Answers
+ * what the record came to, and the id of any file it made, for the spec to
+ * delete.
+ */
+export async function uploadAcrossAbandon(opts: {
+  candidateVersionId: string;
+  email: string;
+  /** The candidate's bytes again, as its uploader would send them. */
+  pages: string[][];
+  pageLabels?: readonly TestPageLabelRange[];
+  /** Record them as the next version of this file, in place of a new file: `recordVersionUpload`'s check in place of `recordUpload`'s. */
+  asVersionOf?: string;
+}): Promise<{ deduped: boolean; recorded: { ok: true; fileId: string } | { ok: false; error: string; status: number } }> {
+  const actor = await testActor(opts.email);
+  const candidate = await prisma.fileVersion.findUniqueOrThrow({ where: { id: opts.candidateVersionId }, select: { sha256: true } });
+  const staged = await stageUpload(actor, { body: bodyOf(buildTestPdf(opts.pages, { pageLabels: opts.pageLabels })), filename: "again.pdf" });
+  if (staged.stored.sha256 !== candidate.sha256) throw new Error("uploadAcrossAbandon: those aren't the candidate's bytes.");
+  type Recorded = { ok: true; fileId: string } | { ok: false; error: string; status: number };
+  let recording: Promise<Recorded> | null = null;
+  await prisma.$transaction(
+    async (tx) => {
+      await lockFileHash(tx, candidate.sha256);
+      const record = opts.asVersionOf
+        ? recordVersionUpload(actor, opts.asVersionOf, staged)
+        : recordUpload(actor, staged, { title: uniqueTitle("across-abandon") });
+      recording = record.then(
+        (recorded): Recorded => ({ ok: true, fileId: recorded.file.id }),
+        (err: unknown): Recorded => ({ ok: false, error: err instanceof Error ? err.message : String(err), status: err instanceof UploadError ? err.status : 0 }),
+      );
+      // Long enough for the record to parse two sheets and reach the lock.
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      await tx.fileVersion.update({ where: { id: opts.candidateVersionId }, data: { abandonedAt: new Date() } });
+      await tx.filePageText.deleteMany({ where: { fileVersionId: opts.candidateVersionId } });
+      await deleteBytesIfUnreferenced(candidate.sha256, await tx.fileVersion.count({ where: { sha256: candidate.sha256, abandonedAt: null } }));
+    },
+    { timeout: 60_000 },
+  );
+  return { deduped: staged.stored.deduped, recorded: await recording! };
+}
+
+/**
+ * A promotion and an abandoning of one candidate, begun together: two
+ * managers' clicks. Each checks under the file row's lock that the version is
+ * still the file's candidate, so exactly one may do what it was asked.
+ * Without the lock both pass their check, and the file's latest version is
+ * left abandoned, with no bytes.
+ */
+export async function raceVersionActs(versionId: string, email: string): Promise<{ promoted: VersionActOutcome; abandoned: VersionActOutcome }> {
+  const actor = await testActor(email);
+  const [promoted, abandoned] = await Promise.all([
+    versionAct(() => promoteFileVersion(actor, versionId)),
+    versionAct(() => abandonFileVersion(actor, versionId)),
+  ]);
+  return { promoted, abandoned };
+}
+
+/**
+ * Holds the lock on a hash for `ms`, as an upload's insert or an abandoning
+ * does, and answers when it let go: a spec starts it, runs the other of the
+ * two against it, and checks that one finished only after this did.
+ */
+export async function holdFileHashLock(sha256: string, ms: number): Promise<{ releasedAt: number }> {
+  await prisma.$transaction(
+    async (tx) => {
+      await lockFileHash(tx, sha256);
+      await new Promise((resolve) => setTimeout(resolve, ms));
+    },
+    { timeout: ms + 30_000 },
+  );
+  return { releasedAt: Date.now() };
+}
+
+/**
+ * A promotion that takes `ms` to commit: the file row locked and the pointer
+ * moved, as `promoteFileVersion` does it, then a wait before the commit. A
+ * capture that starts meanwhile has already resolved the old latest, and its
+ * check, made inside its own transaction with the file row locked, has to
+ * wait for this and then refuse (docs/PDF.md §13, "Versions"). A check made
+ * before its transaction, or without the lock, lets the note land on the
+ * outgoing version with nothing said.
+ */
+export async function promoteTestVersionSlowly(versionId: string, email: string, ms: number): Promise<{ committedAt: number }> {
+  const actor = await testActor(email);
+  const version = await prisma.fileVersion.findUniqueOrThrow({ where: { id: versionId }, select: { fileId: true } });
+  await prisma.$transaction(
+    async (tx) => {
+      const file = await lockFileRow(tx, version.fileId);
+      if (!file) throw new Error(`promoteTestVersionSlowly: no file for version ${versionId}.`);
+      const tail = await tx.ydocUpdate.aggregate({ _max: { id: true } });
+      await tx.fileVersion.update({
+        where: { id: versionId },
+        data: { promotedAt: new Date(), promotedByUserId: actor.userId, promotedAtUpdateId: tail._max.id ?? BigInt(0) },
+      });
+      await tx.storedFile.update({ where: { id: version.fileId }, data: { currentVersionId: versionId, updatedByUserId: actor.userId } });
+      await new Promise((resolve) => setTimeout(resolve, ms));
+    },
+    { timeout: ms + 30_000 },
+  );
+  return { committedAt: Date.now() };
 }
 
 /** Same @example.com containment as deleteTestDoc, plus the shared-bytes rule. */
@@ -2986,6 +3205,13 @@ const handlers = {
   deleteTestFile,
   addTestFileVersion,
   getFileAnchorVersions,
+  getFileVersionFacts,
+  promoteTestVersion,
+  abandonTestVersion,
+  uploadAcrossAbandon,
+  raceVersionActs,
+  holdFileHashLock,
+  promoteTestVersionSlowly,
   createTestTag,
   tagWithTestTag,
   getTagFacts,

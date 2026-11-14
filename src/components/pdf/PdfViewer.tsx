@@ -135,6 +135,14 @@ type Props = {
   indicatorStrip?: ReactNode;
   /** The presence/follow control, rendered in the toolbar. Absent until Phase 4. */
   followBar?: ReactNode;
+  /**
+   * Whether the viewer opens at the sheet a fragment's page names
+   * (docs/PDF.md §13, "Links into the file"): the surface answers by the
+   * version the page names, since a `#sheet=50&v=1` read on version 2 names a
+   * sheet of other bytes. Absent, every page opens, as on a file with one
+   * version.
+   */
+  opensAt?: (page: PageName) => boolean;
 };
 
 const ZOOM_PRESETS = ["page-fit", "page-width", "0.5", "0.75", "1", "1.25", "1.5", "2", "3"] as const;
@@ -151,6 +159,7 @@ export default function PdfViewer({
   presenceRail,
   indicatorStrip,
   followBar,
+  opensAt,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerElementRef = useRef<HTMLDivElement>(null);
@@ -171,8 +180,10 @@ export default function PdfViewer({
   const editingPageRef = useRef(false);
   const handleRef = useRef<PdfViewerHandle | null>(null);
   const onReadyRef = useRef(onReady);
+  const opensAtRef = useRef(opensAt);
   useEffect(() => {
     onReadyRef.current = onReady;
+    opensAtRef.current = opensAt;
   });
 
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -269,7 +280,10 @@ export default function PdfViewer({
       // page opens the document there (docs/FULLTEXT.md §7). After the scale,
       // since a page jump is a scroll position and the scale change would
       // move it, and after the labels have been read, since a `p=` needs them.
-      const askedPage = pageFromHash(window.location.hash);
+      // Only a page the surface reads on this version (`opensAt`): the sheet
+      // another version's link names is a sheet of other bytes.
+      const namedPage = pageFromHash(window.location.hash);
+      const askedPage = namedPage && (opensAtRef.current?.(namedPage) ?? true) ? namedPage : null;
       const askedSheet = askedPage && openingSheet(askedPage, pending.ownPageLabels, pending.pdf.numPages);
       if (askedSheet) viewer.currentPageNumber = askedSheet;
       handleRef.current = pending;
@@ -287,7 +301,8 @@ export default function PdfViewer({
     // The same parameter arriving after load: following a second page link
     // into a document already open changes only the fragment.
     const onHashChange = () => {
-      const page = pageFromHash(window.location.hash);
+      const named = pageFromHash(window.location.hash);
+      const page = named && (opensAtRef.current?.(named) ?? true) ? named : null;
       const handle = handleRef.current;
       const sheet = page && handle && openingSheet(page, handle.ownPageLabels, handle.pdf.numPages);
       if (handle && sheet) handle.viewer.currentPageNumber = sheet;

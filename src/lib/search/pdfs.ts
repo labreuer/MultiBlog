@@ -13,7 +13,7 @@ import { readableFilesWhere } from "@/lib/file-authz";
 import { currentTextVersion } from "@/lib/pdf-extract";
 import { pageNameForSheet, usablePageLabels } from "@/lib/pdf-page-labels";
 import { formatPageName } from "@/lib/pdf-open-params";
-import { latestVersionOf } from "@/lib/file-version";
+import { latestVersionOf, pageStampFor } from "@/lib/file-version";
 import { parseHeadline, type HeadlineFragment } from "./headline";
 import { bodyHeadlineSql, cleanedText, orderNewest, rankRows, snippetsFor, type TsQuery } from "./sql";
 import { remember, taggedWhere, type KindContext, type KindSearch } from "./context";
@@ -144,11 +144,14 @@ function labelOf(file: { pageCount: number | null; pageLabels: unknown }, pageIn
  * empty or a file without usable labels (docs/PDF_FRAGMENT_LINKS.md §8). It
  * is a page link nobody chooses the form of, and is copied into bodies from
  * the address bar, so it takes the form that survives a new copy of the file.
- * From the stored labels only, as `labelOf` is.
+ * From the stored labels only, as `labelOf` is. Stamped with the latest
+ * version, whose pages search ranks, once the file has a second
+ * (docs/PDF.md §13, "Links into the file").
  */
-function pageHref(file: { slug: string; pageCount: number | null; pageLabels: unknown }, pageIndex: number): string {
+function pageHref(file: { slug: string; pageCount: number | null; pageLabels: unknown; number: number; versionCount: number }, pageIndex: number): string {
   const own = Array.isArray(file.pageLabels) ? (file.pageLabels as string[]) : null;
-  return `/pdf/${file.slug}#${formatPageName(pageNameForSheet(own, file.pageCount ?? 0, pageIndex))}`;
+  const stamp = pageStampFor(file.number, file.versionCount);
+  return `/pdf/${file.slug}#${formatPageName({ ...pageNameForSheet(own, file.pageCount ?? 0, pageIndex), stamp })}`;
 }
 
 export const pdfsSearch: KindSearch<PdfHit> = {
@@ -182,10 +185,18 @@ export const pdfsSearch: KindSearch<PdfHit> = {
       query ? pageSnippets(shown, query) : new Map<string, HeadlineFragment[]>(),
       prisma.storedFile.findMany({
         where: { id: { in: ids } },
-        select: { id: true, slug: true, updatedAt: true, currentVersion: { select: { pageCount: true, pageLabels: true } } },
+        select: {
+          id: true,
+          slug: true,
+          updatedAt: true,
+          currentVersion: { select: { number: true, pageCount: true, pageLabels: true } },
+          _count: { select: { versions: true } },
+        },
       }),
     ]);
-    const byId = new Map(rows.map(({ currentVersion, ...row }) => [row.id, { ...row, ...latestVersionOf({ id: row.id, currentVersion }) }]));
+    const byId = new Map(
+      rows.map(({ currentVersion, _count, ...row }) => [row.id, { ...row, ...latestVersionOf({ id: row.id, currentVersion }), versionCount: _count.versions }]),
+    );
     return ids.flatMap((id): PdfHit[] => {
       const file = byId.get(id);
       if (!file) return [];

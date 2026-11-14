@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { elapsedInLargestUnit, filesPath, fileVersionState, fileVersionTitle, latestVersionOf, linkPartsVersions, parseCaptureOrigin, parseVersionNumber, pdfPath } from "./file-version";
+import {
+  elapsedInLargestUnit,
+  filesPath,
+  fileVersionState,
+  fileVersionTitle,
+  latestVersionOf,
+  linkPartsVersions,
+  pageStampFor,
+  parseCaptureOrigin,
+  parsePdfPath,
+  parseVersionNumber,
+  pdfPath,
+} from "./file-version";
 
 const SECOND = 1_000;
 const DAY = 86_400 * SECOND;
@@ -100,4 +112,25 @@ test("a capture's origin is parsed from whatever a client sent, never cast", () 
     { fileVersionId: 7, address: "bare" },
   ];
   for (const raw of refused) assert.equal(parseCaptureOrigin(raw), null, JSON.stringify(raw));
+});
+
+test("a link's stamp is its version's number once the file has a second version, and none before", () => {
+  assert.equal(pageStampFor(1, 1), "sole");
+  assert.equal(pageStampFor(1, 2), 1);
+  assert.equal(pageStampFor(3, 3), 3);
+  // A second row is a second version whatever its state, so the caller counts rows.
+  assert.equal(pageStampFor(1, 4), 1);
+});
+
+test("a PDF's path is its file's address or a version's own", () => {
+  assert.deepEqual(parsePdfPath("/pdf/book"), { slug: "book", version: null });
+  assert.deepEqual(parsePdfPath("/pdf/book/"), { slug: "book", version: null });
+  assert.deepEqual(parsePdfPath("/pdf/book/v/2"), { slug: "book", version: 2 });
+  assert.deepEqual(parsePdfPath("/pdf/book/v/2/"), { slug: "book", version: 2 });
+  // The form a person types, which the site redirects.
+  assert.deepEqual(parsePdfPath("/pdf/book/v2"), { slug: "book", version: 2 });
+  assert.deepEqual(parsePdfPath("/pdf/a%20b/v/12"), { slug: "a b", version: 12 });
+  for (const path of ["/pdf", "/pdf/", "/pdf/book/v/0", "/pdf/book/v/01", "/pdf/book/v/x", "/pdf/book/v/", "/pdf/book/map", "/pdf/book/v/2/map", "/doc/book", "/pdf/%E0%A4%A"]) {
+    assert.equal(parsePdfPath(path), null, path);
+  }
 });

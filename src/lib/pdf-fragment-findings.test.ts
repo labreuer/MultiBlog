@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkPage, checkPassage, parseFragmentLinkHref, passageElsewhere, type FilePages } from "./pdf-fragment-findings";
+import { checkPage, checkPassage, parseFragmentLinkHref, passageElsewhere, versionNamedBy, type FilePages } from "./pdf-fragment-findings";
 import { onePassage, skeletonOf, type FragmentPassage } from "./pdf-fragment";
 import type { PageName } from "./pdf-open-params";
 
@@ -14,20 +14,21 @@ const ORIGIN = "https://blog.example";
 test("an href with text is a fragment link, and one with a page or a p and no text a page link", () => {
   assert.deepEqual(parseFragmentLinkHref("/pdf/book#p=49&text=a,b", null), {
     slug: "book",
+    version: null,
     passages: [{ page: { label: "49" }, prefix: null, segments: [{ start: "a", end: "b" }], suffix: null }],
     page: null,
     unread: 0,
   });
-  assert.deepEqual(parseFragmentLinkHref("/pdf/book#page=5", null), { slug: "book", passages: [], page: { sheet: 5 }, unread: 0 });
-  assert.deepEqual(parseFragmentLinkHref("/pdf/book#sheet=5", null), { slug: "book", passages: [], page: { sheet: 5 }, unread: 0 });
-  assert.deepEqual(parseFragmentLinkHref("/pdf/book#p=xii", null), { slug: "book", passages: [], page: { label: "xii" }, unread: 0 });
+  assert.deepEqual(parseFragmentLinkHref("/pdf/book#page=5", null), { slug: "book", version: null, passages: [], page: { sheet: 5 }, unread: 0 });
+  assert.deepEqual(parseFragmentLinkHref("/pdf/book#sheet=5", null), { slug: "book", version: null, passages: [], page: { sheet: 5 }, unread: 0 });
+  assert.deepEqual(parseFragmentLinkHref("/pdf/book#p=xii", null), { slug: "book", version: null, passages: [], page: { label: "xii" }, unread: 0 });
   assert.deepEqual(parseFragmentLinkHref(`${ORIGIN}/pdf/book#zoom=2&p=3`, ORIGIN)?.page, { label: "3" });
   // Neither: no page that reads, an annotation's permalink, no fragment at all, another site.
   for (const href of ["/pdf/book", "/pdf/book#page=x", "/pdf/book#p=", "/pdf/book#ada-lovelace-2026-10-04-12-00-00", "https://elsewhere.example/pdf/book#page=2", "/doc/x#page=2"]) {
     assert.equal(parseFragmentLinkHref(href, ORIGIN), null, href);
   }
   // A text that names no page is unread, and a link with text is never a page link.
-  assert.deepEqual(parseFragmentLinkHref("/pdf/book#text=orphan&p=2", null), { slug: "book", passages: [], page: null, unread: 1 });
+  assert.deepEqual(parseFragmentLinkHref("/pdf/book#text=orphan&p=2", null), { slug: "book", version: null, passages: [], page: null, unread: 1 });
 });
 
 const TEXTS = [
@@ -42,6 +43,8 @@ function file(ownLabels: readonly string[] | null): FilePages {
   return {
     fileId: "f",
     slug: "book",
+    versionNumber: 1,
+    stamp: "sole",
     pageCount: TEXTS.length,
     textVersion: "v",
     ownLabels,
@@ -90,13 +93,13 @@ test("on a file without labels, p=N is sheet N, and past the end is out of range
 });
 
 test("a page link comes to its first sheet, past the end, or a label no sheet carries", () => {
-  assert.deepEqual(checkPage(5, ["i", "1", "1", "2", ""], { label: "1" }), { kind: "ok", sheet: 2 });
-  assert.deepEqual(checkPage(5, ["i", "1", "1", "2", ""], { label: "49" }), { kind: "no-such-label" });
-  assert.deepEqual(checkPage(5, ["i", "1", "1", "2", ""], { label: "5" }), { kind: "no-such-label" });
-  assert.deepEqual(checkPage(5, [], { label: "5" }), { kind: "ok", sheet: 5 });
-  assert.deepEqual(checkPage(5, [], { label: "6" }), { kind: "page-out-of-range", pageCount: 5 });
-  assert.deepEqual(checkPage(5, null, { sheet: 6 }), { kind: "page-out-of-range", pageCount: 5 });
-  assert.deepEqual(checkPage(5, null, { sheet: 5 }), { kind: "ok", sheet: 5 });
+  assert.deepEqual(checkPage({ versionNumber: 1, pageCount: 5 }, ["i", "1", "1", "2", ""], { label: "1" }), { kind: "ok", version: 1, sheet: 2 });
+  assert.deepEqual(checkPage({ versionNumber: 1, pageCount: 5 }, ["i", "1", "1", "2", ""], { label: "49" }), { kind: "no-such-label", version: 1 });
+  assert.deepEqual(checkPage({ versionNumber: 1, pageCount: 5 }, ["i", "1", "1", "2", ""], { label: "5" }), { kind: "no-such-label", version: 1 });
+  assert.deepEqual(checkPage({ versionNumber: 1, pageCount: 5 }, [], { label: "5" }), { kind: "ok", version: 1, sheet: 5 });
+  assert.deepEqual(checkPage({ versionNumber: 1, pageCount: 5 }, [], { label: "6" }), { kind: "page-out-of-range", version: 1, pageCount: 5 });
+  assert.deepEqual(checkPage({ versionNumber: 1, pageCount: 5 }, null, { sheet: 6 }), { kind: "page-out-of-range", version: 1, pageCount: 5 });
+  assert.deepEqual(checkPage({ versionNumber: 1, pageCount: 5 }, null, { sheet: 5 }), { kind: "ok", version: 1, sheet: 5 });
 });
 
 test("the viewer's question: the one sheet outside those named that holds the passage", () => {
@@ -122,4 +125,36 @@ test("a segment that matches nowhere after the one before it is a miss, with whe
   if (misspelt.kind !== "no-match") return;
   assert.equal(misspelt.matchedUpTo, "the tot");
   assert.equal(misspelt.pageHasThere, "em passage.");
+});
+
+test("a link to a version's own address is a link into that version", () => {
+  const onVersion = parseFragmentLinkHref("/pdf/book/v/2#sheet=5&text=law+of+participation", null);
+  assert.equal(onVersion?.slug, "book");
+  assert.equal(onVersion?.version, 2);
+  assert.deepEqual(onVersion?.passages.map((p) => p.page), [{ sheet: 5 }]);
+  // The form a person types, and a page link.
+  assert.deepEqual(parseFragmentLinkHref("/pdf/book/v3#p=49", null), { slug: "book", version: 3, passages: [], page: { label: "49" }, unread: 0 });
+  assert.equal(parseFragmentLinkHref("https://site.example/pdf/book/v/2#sheet=5&text=a", "https://site.example")?.version, 2);
+  // No other path under the file is a link into it.
+  assert.equal(parseFragmentLinkHref("/pdf/book/v/x#sheet=5&text=a", null), null);
+  assert.equal(parseFragmentLinkHref("/pdf/book/v/2/map#sheet=5", null), null);
+});
+
+test("each page of a link names a version: its stamp, the address's, or the first", () => {
+  const bare = parseFragmentLinkHref("/pdf/book#sheet=5&text=a&sheet=6&v=3&text=b", null)!;
+  assert.deepEqual(bare.passages.map((p) => versionNamedBy(bare, p.page)), [1, 3]);
+  const onVersion = parseFragmentLinkHref("/pdf/book/v/2#sheet=5&text=a&sheet=6&v=3&text=b", null)!;
+  assert.deepEqual(onVersion.passages.map((p) => versionNamedBy(onVersion, p.page)), [2, 3]);
+  const pageLink = parseFragmentLinkHref("/pdf/book#p=49&v=2", null)!;
+  assert.deepEqual(pageLink.page, { label: "49", v: 2 });
+  assert.equal(versionNamedBy(pageLink, pageLink.page!), 2);
+});
+
+test("a finding names the version it was read on", () => {
+  const second: FilePages = { ...LABELLED, versionNumber: 2, stamp: 2 };
+  const ok = checkPassage(second, passage({ label: "1" }, "law of participation"));
+  assert.equal(ok.kind === "ok" && ok.version, 2);
+  const miss = checkPassage(second, passage({ sheet: 1 }, "the totem passage"));
+  assert.equal(miss.kind === "no-match" && miss.version, 2);
+  assert.deepEqual(checkPage(second, second.ownLabels, { sheet: 9 }), { kind: "page-out-of-range", version: 2, pageCount: 5 });
 });

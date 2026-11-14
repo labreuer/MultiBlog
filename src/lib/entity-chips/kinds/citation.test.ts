@@ -1,6 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { citationKind, isPageLocator, normalizeLocator, pdfPageHref, splitTrailingPages, UNKNOWN_WORK, type CitationContext, type CitationData, type CitedWork } from "./citation";
+import {
+  citationKind,
+  fragmentPairs,
+  isPageLocator,
+  normalizeLocator,
+  pdfPageHref,
+  pdfReferentPath,
+  referentKind,
+  splitTrailingPages,
+  UNKNOWN_WORK,
+  type CitationContext,
+  type CitationData,
+  type CitedWork,
+} from "./citation";
 
 // docs/CITATIONS.md — the citation chip kind: what it stores, and what each
 // form shows for it.
@@ -114,7 +127,7 @@ test("a citation of several works links to the list, each work once, at the firs
 });
 
 test("the route finds the page cited in the PDF by the file's page labels", () => {
-  const labelled = { slug: "saving", pageLabels: ["i", "ii", "1", "2", "49"], pageCount: 5 };
+  const labelled = { slug: "saving", pageLabels: ["i", "ii", "1", "2", "49"], pageCount: 5, stamp: "sole" as const };
   // A file with usable labels is linked by its printed page, as a p= link names it.
   assert.equal(pdfPageHref(labelled, "49"), "/pdf/saving#p=49");
   assert.equal(pdfPageHref(labelled, "ii"), "/pdf/saving#p=ii");
@@ -126,19 +139,19 @@ test("the route finds the page cited in the PDF by the file's page labels", () =
   assert.equal(pdfPageHref(labelled, "300"), null);
   assert.equal(pdfPageHref(labelled, undefined), null);
   // A filled-in number is not a label: a sheet whose own label is empty is no page "1".
-  assert.equal(pdfPageHref({ slug: "saving", pageLabels: ["", "", "1", "2"], pageCount: 4 }, "1"), "/pdf/saving#p=1");
-  assert.equal(pdfPageHref({ slug: "saving", pageLabels: ["", "", "5", "6"], pageCount: 4 }, "1"), null);
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: ["", "", "1", "2"], pageCount: 4, stamp: "sole" }, "1"), "/pdf/saving#p=1");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: ["", "", "5", "6"], pageCount: 4, stamp: "sole" }, "1"), null);
   // With no labels, a number is the sheet, written as one.
-  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 60 }, "49"), "/pdf/saving#sheet=49");
-  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 60 }, "xii"), null);
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 60, stamp: "sole" }, "49"), "/pdf/saving#sheet=49");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 60, stamp: "sole" }, "xii"), null);
   // As a file with no labels stores them once its metadata is read; and labels all empty, or just 1…N, are none.
-  assert.equal(pdfPageHref({ slug: "saving", pageLabels: [], pageCount: 60 }, "49"), "/pdf/saving#sheet=49");
-  assert.equal(pdfPageHref({ slug: "saving", pageLabels: ["", "", ""], pageCount: 3 }, "2"), "/pdf/saving#sheet=2");
-  assert.equal(pdfPageHref({ slug: "saving", pageLabels: ["1", "2", "3"], pageCount: 3 }, "2"), "/pdf/saving#sheet=2");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: [], pageCount: 60, stamp: "sole" }, "49"), "/pdf/saving#sheet=49");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: ["", "", ""], pageCount: 3, stamp: "sole" }, "2"), "/pdf/saving#sheet=2");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: ["1", "2", "3"], pageCount: 3, stamp: "sole" }, "2"), "/pdf/saving#sheet=2");
   // But not past the file's last sheet, nor for a file that isn't a PDF.
-  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 40 }, "49"), null);
-  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 49 }, "49"), "/pdf/saving#sheet=49");
-  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: null }, "49"), null);
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 40, stamp: "sole" }, "49"), null);
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 49, stamp: "sole" }, "49"), "/pdf/saving#sheet=49");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: null, stamp: "sole" }, "49"), null);
 });
 
 test("Page holds pages only, and an item is stored as Markdown reads it back", () => {
@@ -243,4 +256,38 @@ test("a word field is stored as Markdown with every escape but a delimiter's", (
   assert.equal(stored("ends in \\"), "ends in \\\\");
   // Stored twice, the same.
   assert.equal(citationKind.validate(citationKind.validate({ items: [{ refId: "bu", prefix: "a\; b \\\\ c\\" }] })!)?.items[0].prefix, "a; b \\\\ c\\\\");
+});
+
+test("the route's link carries the latest version's stamp once the file has a second version", () => {
+  const labelled = { slug: "saving", pageLabels: ["i", "ii", "1", "2", "49"], pageCount: 5 };
+  assert.equal(pdfPageHref({ ...labelled, stamp: 3 }, "49"), "/pdf/saving#p=49&v=3");
+  assert.equal(pdfPageHref({ slug: "saving", pageLabels: null, pageCount: 60, stamp: 2 }, "49"), "/pdf/saving#sheet=49&v=2");
+  assert.equal(pdfPageHref({ ...labelled, stamp: "sole" }, "49"), "/pdf/saving#p=49");
+});
+
+test("a referent on a version's own address is a link into the PDF, and its pages ride with that version", () => {
+  assert.equal(referentKind("/pdf/saving#sheet=5&text=a"), "pdf");
+  assert.equal(referentKind("/pdf/saving/v/2#sheet=5&text=a"), "pdf");
+  assert.equal(referentKind("/pdf/saving/v2#p=49"), "pdf");
+  assert.equal(referentKind("/pdf/saving/v/2"), "pdf");
+  // Anything else under /pdf/ is a link elsewhere, as a query makes one.
+  assert.equal(referentKind("/pdf/saving/v/x#sheet=5"), "elsewhere");
+  assert.equal(referentKind("/pdf/saving/map#sheet=5"), "elsewhere");
+  assert.equal(referentKind("/pdf/saving?sel=abc#sheet=5"), "elsewhere");
+  // A `?` in the fragment is the fragment's own.
+  assert.equal(referentKind("/pdf/saving#sheet=5&text=why?"), "pdf");
+  assert.deepEqual(pdfReferentPath("/pdf/saving/v/2#sheet=5"), { slug: "saving", version: 2 });
+  assert.deepEqual(pdfReferentPath("/pdf/saving#sheet=5"), { slug: "saving", version: null });
+  assert.equal(pdfReferentPath("/doc/saving#sheet=5"), null);
+
+  // v= is kept from a referent, since it says whose sheets a pair counts.
+  assert.equal(fragmentPairs("sheet=5&v=1&text=a&zoom=200"), "sheet=5&v=1&text=a");
+  assert.equal(fragmentPairs("zoom=200"), null);
+  // On a version's own address each page rides with that version, unless it has a stamp of its own.
+  assert.equal(fragmentPairs("sheet=5&text=a&p=xii&v=1&text=b", 2), "sheet=5&v=2&text=a&p=xii&v=1&text=b");
+  const linked = (referent: string) =>
+    citationKind.render([{ items: [{ refId: "bu", locator: "49" }], referent }], { form: "short" }, CONTEXT)[0].href;
+  assert.equal(linked("/pdf/saving/v/2#sheet=53&text=law+of+participation"), "/references/barfield1957/p/49?sheet=53&v=2&text=law+of+participation");
+  assert.equal(linked("/pdf/saving#sheet=53&v=1&text=law+of+participation"), "/references/barfield1957/p/49?sheet=53&v=1&text=law+of+participation");
+  assert.equal(linked("/pdf/saving#page=53&text=law+of+participation"), "/references/barfield1957/p/49?page=53&text=law+of+participation");
 });

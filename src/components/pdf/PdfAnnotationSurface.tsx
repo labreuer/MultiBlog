@@ -17,6 +17,8 @@ import { attachAnnoClicks, attachAnnoLayers, type AnnoLayerEntry } from "./anno-
 import { usePdfPresence } from "./use-pdf-presence";
 import { usePdfOutline } from "./use-pdf-outline";
 import { usePdfFragment } from "./use-pdf-fragment";
+import { linkVersionsFromKey, linkVersionsKey, opensSheetAsWritten, readPage } from "@/lib/pdf-link-reading";
+import type { PageName } from "@/lib/pdf-open-params";
 import PdfFragmentBanner from "./PdfFragmentBanner";
 import { PdfFollowBar, PdfIndicatorStrip, PdfPresenceRail, type AnnotationTick } from "./PdfRails";
 import {
@@ -36,7 +38,7 @@ import AnchoredLinkBanner from "@/components/anchored-link/AnchoredLinkBanner";
 import type { AnchoredLinkPart, AnchoredLinkView } from "@/lib/anchored-link-data";
 import type { OwnDraft } from "@/lib/annotation-data";
 import type { ShownVersion } from "@/lib/file-version";
-import type { FileVersionSummary } from "@/lib/file-version-data";
+import type { FileVersionSummary, VersionManage } from "@/lib/file-version-data";
 import type { OtherVersionNote } from "@/lib/pdf-annotation-entries";
 import PdfVersionBanner from "./PdfVersionBanner";
 import { PdfCaptureProvider } from "./pdf-capture-context";
@@ -93,6 +95,8 @@ type Props = {
    */
   version: ShownVersion;
   versions: FileVersionSummary[];
+  /** What a manager of the file is given on a waiting version's banner; null for every other reader. */
+  manage: VersionManage | null;
   fileUrl: string;
   title: string;
   entries: PdfAnnotationEntry[];
@@ -120,6 +124,7 @@ export default function PdfAnnotationSurface({
   slug,
   version,
   versions,
+  manage,
   fileUrl,
   title,
   entries,
@@ -344,7 +349,24 @@ export default function PdfAnnotationSurface({
   // names, found in this document on arrival and on every hashchange. Drawn
   // with a followed anchored link's outline, and mirrored into a ref for the
   // layer's callbacks like the link parts above.
-  const fragment = usePdfFragment(handle, fileId, version.id);
+  //
+  // Each is read by the version it names (docs/PDF.md §13, "Links into the
+  // file"): `linkContext` is what that reading takes, this page's address and
+  // the file's versions.
+  //
+  // **Keyed on what the versions are, never on the `versions` prop itself.**
+  // That prop is the server's, and has a new identity on every
+  // `router.refresh()`: posting a note, editing one, tagging the file. A
+  // context that changed with it would resolve the fragment again each time,
+  // scroll the reader back to the linked passage and bring back a banner they
+  // had dismissed.
+  const versionsKey = linkVersionsKey(versions);
+  const linkContext = useMemo(
+    () => ({ address: { shown: version.number, own: version.address === "version" }, versions: linkVersionsFromKey(versionsKey) }),
+    [version.number, version.address, versionsKey],
+  );
+  const opensAt = useCallback((page: PageName) => opensSheetAsWritten(readPage(page, linkContext.address, linkContext.versions)), [linkContext]);
+  const fragment = usePdfFragment(handle, fileId, version.id, linkContext);
   const fragmentRegionsRef = useRef(fragment.regions);
   useEffect(() => {
     fragmentRegionsRef.current = fragment.regions;
@@ -966,6 +988,7 @@ export default function PdfAnnotationSurface({
           fileUrl={fileUrl}
           title={title}
           onReady={onReady}
+          opensAt={opensAt}
           panes={panes}
           activePane={activePane}
           onSelectPane={setActivePane}
@@ -998,12 +1021,12 @@ export default function PdfAnnotationSurface({
           }
         />
 
-        {(anchoredLink || fragment.regions.length > 0 || !version.isLatest) && (
+        {(anchoredLink || fragment.regions.length > 0 || fragment.page !== null || !version.isLatest) && (
           // One overlay for every banner: a ?sel= visit and a fragment can
           // arrive together, on a version that is not the latest, and fixed
           // boxes at one spot would cover each other.
           <div className={styles.anchoredLinkOverlay}>
-            <PdfVersionBanner slug={slug} version={version} versions={versions} className={styles.overlayBanner} />
+            <PdfVersionBanner slug={slug} version={version} versions={versions} manage={manage} className={styles.overlayBanner} />
             {anchoredLink && (
               <AnchoredLinkBanner
                 link={anchoredLink}
@@ -1015,11 +1038,16 @@ export default function PdfAnnotationSurface({
                 }}
               />
             )}
-            {fragment.regions.length > 0 && (
+            {(fragment.regions.length > 0 || fragment.page !== null) && (
               <PdfFragmentBanner
                 // A new fragment is a new arrival: one dismissed before shows again.
                 key={fragment.resolution}
                 regions={fragment.regions}
+                page={fragment.page}
+                slug={slug}
+                shownVersion={version.number}
+                address={linkContext.address}
+                versionCount={versions.length}
                 pageLabels={handle?.pageLabels ?? null}
                 className={styles.overlayBanner}
                 onJumpToTarget={(target) => jumpToTarget(target)}

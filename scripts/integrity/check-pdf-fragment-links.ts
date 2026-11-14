@@ -10,6 +10,13 @@
 // the thing that notices. A page link (`#sheet=<n>` or `#p=<label>` and no
 // `text`) is checked for its page.
 //
+// **A link is read as the viewer reads it** (docs/PDF.md §13, "Links into the
+// file"): each page on the version it names, its `v=`, or without one the
+// version its own address names (`/pdf/<slug>/v/<n>`), or the file's first.
+// No version has a page map yet, so no link is carried, and the version a
+// link names is the one it opens: words that are gone from the latest
+// version are no fault in a link that names an earlier one.
+//
 // What it reads: link marks in docs' `proseJson`, posts' `proseJson`, comment
 // bodies and annotation bodies, none of them deleted. `Doc.proseJson` lags the
 // live doc by a store debounce, which is fine for a check that positions
@@ -30,10 +37,22 @@
 //          the page it is on when that is unambiguous), a page past the end, a
 //          label no page carries, an unknown or deleted file, a `text`
 //          parameter that doesn't parse
+//          and a `v=` naming a version the file never had
 //   warn   a passage its page holds more than once (the link points at the
 //          first), a link naming a file's past slug (it still works, through
-//          the slug-history redirect), and a `p=` on a file without usable
-//          page labels, where it is a sheet number (with its `sheet=` form)
+//          the slug-history redirect), a `p=` on a file without usable
+//          page labels, where it is a sheet number (with its `sheet=` form),
+//          a link naming an abandoned version (nothing can confirm it), a
+//          link on a version's own address that names another version (the
+//          viewer stays, and offers the passage on the version named), and
+//          **a link without `v=` written after its file's second version was
+//          uploaded**, which only a hand can have typed and whose writer
+//          most likely meant the latest. The check dates a link by the
+//          update log (src/lib/pdf-link-dating.ts), which the viewer can't.
+//
+// A link that names a version other than the latest, and finds its words
+// there, is no fault: every link written before a file's second version is
+// one. `--verbose` lists it.
 //
 // And for a citation's passage:
 //   ERROR  a quotation the cited page doesn't hold, a cited page no sheet
@@ -53,16 +72,16 @@
 import "dotenv/config";
 import { prisma } from "../../src/lib/prisma";
 import { FragmentChecker } from "../../src/lib/pdf-fragment-check";
-import { linkHrefsIn, parseFragmentLinkHref, type FragmentLinkFinding } from "../../src/lib/pdf-fragment-findings";
-import { formatFragmentPassages, formatPassageText, type FragmentPassage } from "../../src/lib/pdf-fragment";
-import type { PageName } from "../../src/lib/pdf-open-params";
+import { linkHrefsIn, parseFragmentLinkHref, type FragmentLinkFinding, type VersionFault } from "../../src/lib/pdf-fragment-findings";
+import { formatPassageText, type FragmentPassage } from "../../src/lib/pdf-fragment";
+import { formatPageName, type PageName } from "../../src/lib/pdf-open-params";
+import { LinkDater, pdfHrefsIn, type LinkHolder } from "../../src/lib/pdf-link-dating";
 import { checkCitedHref } from "../../src/lib/cited-passage";
 import { parseCitedHref } from "../../src/lib/cited-passage-query";
 import { chipInputsForBody } from "../../src/lib/entity-chips/context";
-import { CITATION, referentKind } from "../../src/lib/entity-chips/kinds/citation";
+import { CITATION, pdfReferentPath, referentKind } from "../../src/lib/entity-chips/kinds/citation";
 import { chipRenderings, chipsInJSON } from "../../src/lib/entity-chips/renderings";
 import { resolveFileParam } from "../../src/lib/file-slug";
-import { parseFragmentLinkHref as fragmentOf } from "../../src/lib/pdf-fragment-findings";
 import { referenceByKey } from "../../src/lib/reference-data";
 
 type Severity = "error" | "warn";
@@ -82,8 +101,8 @@ function note(message: string): void {
   if (verbose) console.log(`       ${message}`);
 }
 
-/** One body that may hold links: what it is, for the report, its JSON, and whether it holds chips (a post holds none). */
-type Body = { where: string; json: unknown; chips: boolean };
+/** One body that may hold links: what it is, for the report, its JSON, whether it holds chips (a post holds none), and what dates its links. */
+type Body = { where: string; json: unknown; chips: boolean; holder: LinkHolder };
 
 async function bodies(docArg: string | undefined): Promise<Body[]> {
   if (docArg) {
@@ -92,36 +111,61 @@ async function bodies(docArg: string | undefined): Promise<Body[]> {
       select: { id: true, slug: true, proseJson: true },
     });
     if (!doc) throw new Error(`No doc with id or slug "${docArg}".`);
-    return [{ where: `doc ${doc.slug}`, json: doc.proseJson, chips: true }];
+    return [{ where: `doc ${doc.slug}`, json: doc.proseJson, chips: true, holder: { kind: "doc", id: doc.id } }];
   }
   const [docs, posts, comments, annotations] = await Promise.all([
-    prisma.doc.findMany({ where: { deletedByUserId: null }, select: { slug: true, proseJson: true } }),
-    prisma.post.findMany({ where: { deletedByUserId: null }, select: { slug: true, proseJson: true } }),
+    prisma.doc.findMany({ where: { deletedByUserId: null }, select: { id: true, slug: true, proseJson: true } }),
+    prisma.post.findMany({ where: { deletedByUserId: null }, select: { id: true, slug: true, proseJson: true } }),
     prisma.comment.findMany({ where: { deletedByUserId: null }, select: { id: true, body: true } }),
     prisma.annotation.findMany({ where: { deletedByUserId: null }, select: { id: true, proseJson: true } }),
   ]);
   return [
-    ...docs.map((doc) => ({ where: `doc ${doc.slug}`, json: doc.proseJson, chips: true })),
-    ...posts.map((post) => ({ where: `post ${post.slug}`, json: post.proseJson, chips: false })),
-    ...comments.map((comment) => ({ where: `comment ${comment.id}`, json: comment.body, chips: true })),
-    ...annotations.map((annotation) => ({ where: `annotation ${annotation.id}`, json: annotation.proseJson, chips: true })),
+    ...docs.map((doc): Body => ({ where: `doc ${doc.slug}`, json: doc.proseJson, chips: true, holder: { kind: "doc", id: doc.id } })),
+    ...posts.map((post): Body => ({ where: `post ${post.slug}`, json: post.proseJson, chips: false, holder: { kind: "post", id: post.id } })),
+    ...comments.map((comment): Body => ({ where: `comment ${comment.id}`, json: comment.body, chips: true, holder: { kind: "comment", id: comment.id } })),
+    ...annotations.map((annotation): Body => ({ where: `annotation ${annotation.id}`, json: annotation.proseJson, chips: true, holder: { kind: "annotation", id: annotation.id } })),
   ];
 }
 
-/** A page as a report names it: its sheet, or its label as the link wrote it. */
+/** A page as a report names it: its sheet, or its label as the link wrote it, with its stamp where it has one. */
 function pageText(page: PageName): string {
-  return "sheet" in page ? `page ${page.sheet}` : `p=${page.label}`;
+  return `${"sheet" in page ? `page ${page.sheet}` : `p=${page.label}`}${page.v !== undefined ? ` (v=${page.v})` : ""}`;
 }
 
 /** A passage as a report names it: its page, then its `text` as a writer formats it. */
 function passageText(passage: FragmentPassage): string {
-  return `${pageText(passage.page)}, ${formatFragmentPassages([passage]).replace(/^[^&]*&/, "")}`;
+  return `${pageText(passage.page)}, text=${formatPassageText(passage)}`;
 }
 
-/** The warning for a `p=` on a file without usable labels, where it is the sheet number it names. */
+/** The warning for a `p=` on a file without usable labels, where it is the sheet number it names. The form it gives keeps the link's own stamp. */
 function unlabelled(where: string, page: PageName, sheet: number, usableLabels: boolean | null): void {
   if ("label" in page && usableLabels === false) {
-    report("warn", where, "unlabelled-p", `p=${page.label}: the file has no page labels, so this is a sheet number; write sheet=${sheet}`);
+    report("warn", where, "unlabelled-p", `p=${page.label}: the file has no page labels, so this is a sheet number; write ${formatPageName({ sheet, stamp: page.v ?? "sole" })}`);
+  }
+}
+
+type Checked = Extract<FragmentLinkFinding, { kind: "checked" }>;
+
+/** What a page that names a version with nothing to read is reported as: a warning for an abandoned one, since nothing can confirm the link, and an error for one the file never had. */
+function reportVersionFault(where: string, label: string, fault: VersionFault, finding: Checked, href: string): void {
+  if (fault.kind === "abandoned-version") {
+    report("warn", where, "abandoned-version", `${label} names version ${fault.version}, which was abandoned and kept no page map, so nothing can confirm the link: ${href}`);
+  } else {
+    report("error", where, "no-such-version", `${label} names version ${fault.version}, and the file has ${finding.versionCount}: ${href}`);
+  }
+}
+
+/** What follows from the version a page was read on: a warning where the link's own address shows another, and a verbose line where it isn't the latest. */
+function reportVersionRead(where: string, label: string, version: number, finding: Checked): void {
+  if (finding.addressVersion !== null && version !== finding.addressVersion) {
+    report(
+      "warn",
+      where,
+      "another-version",
+      `${label} names version ${version} on the address of version ${finding.addressVersion}: the viewer stays on version ${finding.addressVersion} and offers the passage on version ${version}`,
+    );
+  } else if (version !== finding.latestVersion) {
+    note(`    ${label} names version ${version}; the latest is version ${finding.latestVersion}, and no page map joins them`);
   }
 }
 
@@ -139,6 +183,11 @@ function reportFinding(where: string, href: string, page: PageName | null, findi
   }
   if (finding.page && page) {
     const label = pageText(page);
+    if (finding.page.kind === "abandoned-version" || finding.page.kind === "no-such-version") {
+      reportVersionFault(where, label, finding.page, finding, href);
+      return;
+    }
+    reportVersionRead(where, label, finding.page.version, finding);
     if (finding.page.kind === "ok") {
       unlabelled(where, page, finding.page.sheet, finding.usableLabels);
       note(`ok  ${label}: a page link to page ${finding.page.sheet}`);
@@ -150,6 +199,11 @@ function reportFinding(where: string, href: string, page: PageName | null, findi
   }
   for (const passage of finding.passages) {
     const label = passageText(passage.passage);
+    if (passage.kind === "abandoned-version" || passage.kind === "no-such-version") {
+      reportVersionFault(where, label, passage, finding, href);
+      continue;
+    }
+    reportVersionRead(where, label, passage.version, finding);
     if (passage.kind === "ok") {
       if (passage.occurrences > 1) {
         report("warn", where, "repeats", `${label} occurs ${passage.occurrences} times on its page; the link points at the first`);
@@ -171,6 +225,24 @@ function reportFinding(where: string, href: string, page: PageName | null, findi
       report("error", where, "no-match", `${label} isn't on ${on}.${stop}${instead}`);
     }
   }
+}
+
+/**
+ * The warning for a link without `v=` that was written after its file's
+ * second version was uploaded (docs/PDF.md §13, "Links into the file"). The
+ * viewer reads such a link as the first version's, since it can't tell when a
+ * URL was written; the check can, and a link that postdates the second
+ * version was typed by hand, most likely for the latest. A link on a
+ * version's own address needs no stamp: the address says which.
+ */
+async function reportUnstamped(body: Body, href: string, checker: FragmentChecker, dater: LinkDater, origin: string | null): Promise<void> {
+  const link = parseFragmentLinkHref(href, origin);
+  if (!link || link.version !== null) return;
+  const pages = [...link.passages.map((passage) => passage.page), ...(link.page ? [link.page] : [])];
+  if (pages.every((page) => page.v !== undefined)) return;
+  const mark = await checker.secondVersionMark(link.slug);
+  if (!mark || !(await dater.writtenAfter(body.holder, href, mark))) return;
+  report("warn", body.where, "unstamped", `written after its file's second version and without v=, so it is read as version 1's; say which version it names: ${href}`);
 }
 
 let citations = 0;
@@ -243,8 +315,8 @@ async function checkCitation(where: string, href: string, referent: string | nul
   }
   // A `/pdf/` referent names a PDF; the route sends a reader to the work's, so the two must be one.
   if (referent && referentKind(referent) === "pdf") {
-    const slug = fragmentOf(referent, null)?.slug ?? decodeURIComponent(referent.replace(/^\/pdf\/([^/#?]+).*$/, "$1"));
-    const [named, work] = await Promise.all([resolveFileParam(slug, { id: true }), referenceByKey(finding.key)]);
+    const slug = pdfReferentPath(referent)?.slug ?? null;
+    const [named, work] = await Promise.all([slug === null ? null : resolveFileParam(slug, { id: true }), referenceByKey(finding.key)]);
     if (named && work?.fileId && named.file.id !== work.fileId) {
       report("error", where, "another-file", `${referent.slice(0, 120)} names a PDF other than ${finding.key}'s own, where the link looks for its passage`);
     }
@@ -259,6 +331,7 @@ async function main(): Promise<void> {
   const origin = process.env.APP_URL ?? null;
 
   const checker = new FragmentChecker();
+  const dater = new LinkDater();
   for (const body of await bodies(docArg)) {
     for (const href of linkHrefsIn(body.json)) {
       const link = parseFragmentLinkHref(href, origin);
@@ -271,6 +344,8 @@ async function main(): Promise<void> {
       reportFinding(body.where, href, link.page, await checker.check(link));
     }
     for (const citation of await citationLinks(body)) await checkCitation(body.where, citation.href, citation.referent, checker, origin);
+    // Every link into a PDF the body holds, a citation's `/pdf/` referent included, once each.
+    for (const href of new Set(pdfHrefsIn(body.json))) await reportUnstamped(body, href, checker, dater, origin);
   }
 
   console.log(`\n${links} fragment and page link(s) and ${citations} citation passage(s) checked: ${errors} error(s), ${warnings} warning(s).`);

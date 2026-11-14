@@ -188,6 +188,25 @@ export const getFileAnchorVersions = (
   ...args: Parameters<DbHandlers["getFileAnchorVersions"]>
 ): ReturnType<DbHandlers["getFileAnchorVersions"]> => call("getFileAnchorVersions", ...args);
 
+// docs/PDF.md §13 — a file's versions as their rows and the disk hold them,
+// the two acts on a candidate through the operation both front doors share,
+// and the three ways a spec makes a race happen in order (db-worker.ts).
+export const getFileVersionFacts = (...args: Parameters<DbHandlers["getFileVersionFacts"]>): ReturnType<DbHandlers["getFileVersionFacts"]> =>
+  call("getFileVersionFacts", ...args);
+export const promoteTestVersion = (...args: Parameters<DbHandlers["promoteTestVersion"]>): ReturnType<DbHandlers["promoteTestVersion"]> =>
+  call("promoteTestVersion", ...args);
+export const abandonTestVersion = (...args: Parameters<DbHandlers["abandonTestVersion"]>): ReturnType<DbHandlers["abandonTestVersion"]> =>
+  call("abandonTestVersion", ...args);
+export const uploadAcrossAbandon = (...args: Parameters<DbHandlers["uploadAcrossAbandon"]>): ReturnType<DbHandlers["uploadAcrossAbandon"]> =>
+  call("uploadAcrossAbandon", ...args);
+export const raceVersionActs = (...args: Parameters<DbHandlers["raceVersionActs"]>): ReturnType<DbHandlers["raceVersionActs"]> =>
+  call("raceVersionActs", ...args);
+export const holdFileHashLock = (...args: Parameters<DbHandlers["holdFileHashLock"]>): ReturnType<DbHandlers["holdFileHashLock"]> =>
+  call("holdFileHashLock", ...args);
+export const promoteTestVersionSlowly = (
+  ...args: Parameters<DbHandlers["promoteTestVersionSlowly"]>
+): ReturnType<DbHandlers["promoteTestVersionSlowly"]> => call("promoteTestVersionSlowly", ...args);
+
 // PLAN.md §20 — tag fixtures. See db-worker.ts's createTestTag for why
 // containment here is by E2E_ title prefix rather than by an author email.
 export const createTestTag = (...args: Parameters<DbHandlers["createTestTag"]>): Promise<TestTag> =>

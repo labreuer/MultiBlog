@@ -311,6 +311,32 @@ Three consequences worth stating plainly, because they are what the user-facing 
 That it can see PDF annotations at all is one of the reasons they are Postgres rows rather
 than entries in a per-file ydoc (PLAN.md §19).
 
+**A file's versions** ([PDF.md](PDF.md) §13). A file can be given new bytes, which become
+its next version: uploaded, it waits as a candidate at its own address, and is then promoted
+to be the latest, or abandoned.
+
+| Act | Who may | Where it is asked |
+|---|---|---|
+| Read any version of a file: the latest, an earlier one, a candidate, or the page an abandoned one's address answers with | Whoever may read the file (`canUserReadFile`) | `/pdf/[slug]/v/[n]`, `/files/[slug]/v/[n]`, the bytes route, MCP's `read` |
+| Upload a new version | Whoever may manage the file (`canUserManageFile`), **and a bot whose person may** (`canUserUploadFileVersion`) | `assertMayUploadVersion` in `src/lib/file-ingest.ts`, for `PUT /api/files/[id]` and `POST /api/mcp/files?versionOf=` |
+| Promote a candidate, or abandon one | Whoever may manage the file (`canUserManageFile`), and no bot by its person's place | `promoteFileVersion` / `abandonFileVersion` in `src/lib/file-manage.ts` |
+| See the version list's management half: the upload, a candidate's two acts and what a promotion would do, the notes still on each earlier version | Whoever may manage the file | `src/app/pdf/[slug]/reading.tsx` sends it to no one else |
+| Write a note or a link part on a version | Whoever may annotate the file, on the latest or an earlier version, never on a candidate or an abandoned one | `assertCaptureVersion` in `src/lib/file-version-data.ts` |
+
+- **A version has no visibility, owners or deletion of its own**, so there is no second read
+  rule to keep in step with the file's. A candidate is readable by everyone who may read the
+  file: the version list marks it as one, which is all a reader needs.
+- **A bot borrows its person's place among a file's owners for the upload of a version, and
+  for nothing else.** `canUserManageFile` is asked a second time with the person's id and the
+  bot's own role, so the bot never borrows their role, and one whose role can't manage files
+  uploads nothing. Otherwise a file its person uploaded in the browser would refuse the bot
+  that corrected its text. It can so upload to a PRIVATE file it can't read; it still can't
+  read it, or promote what it uploaded.
+- **Promoting and abandoning are refused while the file is deleted**, and so is an upload. A
+  candidate waits with its file.
+- **A file the uploader can't read answers 404** to an upload, and one they can read and not
+  manage 403, as the bytes route keeps a PRIVATE file's existence from its non-owners.
+
 ## Tags ([TAGS.md](TAGS.md))
 
 **A term is vocabulary; an assignment is one person's act of tagging.** The two have
@@ -721,7 +747,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Read / edit a doc; the two `where`-clause equivalents | `src/lib/doc-authz.ts` |
 | Read / manage a file; its `where`-clause equivalent | `src/lib/file-authz.ts` |
 | `/files` row scoping + the "Show all files" override | `src/app/files/page.tsx` |
-| File mutations (visibility, title, slug, delete) | `src/app/actions/files.ts` |
+| File mutations (visibility, title, slug, delete; a version's promotion and abandoning) | `src/app/actions/files.ts` |
 | Who owns a file (`file_owner`, the doc tables' `doc_author`) | `prisma/schema.prisma`'s `FileOwner` |
 | File bytes: who may download | `src/app/api/files/[id]/[hash]/route.ts` |
 | File presence token (always read-only) | `src/app/api/file/[id]/token/route.ts` |
@@ -737,7 +763,8 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Collab token: writable vs read-only vs refused | `src/app/api/doc/[id]/token/route.ts` |
 | A doc's history (`canUserEditDoc`): the scrub bar's replay, and MCP's `since` | `src/app/api/doc/[id]/replay/route.ts`; `readDoc` in `src/lib/mcp/read/doc.ts` |
 | Doc mutations (visibility, byline, slug, record, delete) | `src/lib/doc-manage.ts`, wrapped by `src/app/actions/docs.ts` |
-| File mutations (visibility, title, slug, owners, delete) and the upload | `src/lib/file-manage.ts`, `src/lib/file-ingest.ts` |
+| File mutations (visibility, title, slug, owners, delete), a version's promotion and abandoning, and the upload of a file or of a version | `src/lib/file-manage.ts`, `src/lib/file-ingest.ts` |
+| Who may upload a new version of a file (its managers, and a bot whose person manages it) | `canUserUploadFileVersion` in `src/lib/file-authz.ts` |
 | Annotation create / delete / restore | `src/app/actions/annotations.ts`; delete and restore in `src/lib/annotation-manage.ts` |
 | Doc links | `src/app/actions/doc-links.ts` |
 | Tag role floors (`canApplyTags`, `canCurateTags`) | `src/lib/role-checks.ts` |

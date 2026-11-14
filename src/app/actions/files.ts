@@ -5,8 +5,9 @@ import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import { canUserManageFile } from "@/lib/file-authz";
 import { revertFileSlug as revertFileSlugInDb } from "@/lib/file-slug";
-import { setFileDeleted, setFileSlug, setFileTitle, setFileVisibility } from "@/lib/file-manage";
-import { actorFromSessionUser } from "@/lib/actor";
+import { abandonFileVersion, promoteFileVersion, setFileDeleted, setFileSlug, setFileTitle, setFileVisibility } from "@/lib/file-manage";
+import { actorFromSessionUser, type Actor } from "@/lib/actor";
+import { ApiError } from "@/lib/api/errors";
 import { DocVisibility } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 
@@ -99,4 +100,39 @@ export async function refreshFilesListing(): Promise<void> {
     throw new Error("Unauthorized.");
   }
   revalidatePath("/files");
+}
+
+/** What a version's action answers: where the file is now, or why nothing was done, in words for whoever clicked. */
+export type VersionActionResult = { ok: true; slug: string; number: number } | { ok: false; error: string };
+
+/**
+ * A refusal as an answer, not a throw: a production build hides a thrown
+ * error's message from the browser, and these refusals (the version is no
+ * longer the candidate, the file is deleted) are what the manager needs to
+ * read.
+ */
+async function versionAction(run: (actor: Actor) => Promise<{ slug: string; number: number }>): Promise<VersionActionResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "You are signed out. Sign in, then try again." };
+  try {
+    const done = await run(actorFromSessionUser(session.user));
+    revalidatePath("/files");
+    return { ok: true, ...done };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, error: err.message };
+    console.error("[files] a version's action failed:", err);
+    return { ok: false, error: "That didn't work. Reload the page and try again." };
+  }
+}
+
+/** Makes a waiting version the file's latest (docs/PDF.md §13, "Promotion"). It names the version, never "the candidate". */
+export async function promoteVersion(versionId: string): Promise<VersionActionResult> {
+  if (typeof versionId !== "string") return { ok: false, error: "That isn't a version." };
+  return versionAction((actor) => promoteFileVersion(actor, versionId));
+}
+
+/** Abandons a waiting version: its bytes and page text go, its number and its address stay (docs/PDF.md §13, "The upload"). */
+export async function abandonVersion(versionId: string): Promise<VersionActionResult> {
+  if (typeof versionId !== "string") return { ok: false, error: "That isn't a version." };
+  return versionAction((actor) => abandonFileVersion(actor, versionId));
 }

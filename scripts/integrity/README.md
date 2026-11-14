@@ -132,6 +132,27 @@ or is abandoned, one with no version 1, and one whose versions are not numbered 
 count. All are ERRORs. The pair key already makes the latest one of the file's own versions;
 `check-tag-constraints.ts` proves that key.
 
+**Every version that is not abandoned has its bytes on disk** (`no-bytes`), and an abandoned
+one has no page text left (`abandoned-with-text`). Abandoning removes a blob before its
+transaction commits, under a lock on the hash that every upload takes, so a version without
+bytes is a commit that failed after the removal, a database restored without its
+`FILE_STORAGE_DIR`, or a write that skipped the lock.
+
+**Every anchor into a file names a version it may be on**, over all four tables that can
+hold a PDF target (`annotation`, `tag_anchor`, `anchored_link_anchor`,
+`comment_quote_anchor`):
+
+- `anchor-without-version`: a row with a PDF target names no version. The tables' CHECKs
+  refuse it, and this reads the claim back.
+- `anchor-on-candidate`, `anchor-on-abandoned`: a capture checks its version inside the
+  transaction that inserts it, and a candidate takes no note or link part, since abandoning
+  it removes the sheets the anchor was measured on. This is the one thing that reports an
+  anchor that got through.
+- `unmoved-kind`: a `tag_anchor` or `comment_quote_anchor` row holds a `PDF_TEXT` selector on
+  a file with more than one version. Neither table has a writer of one, and nothing would
+  move such a row to a later version, so one appearing means a writer was added without its
+  place in the move.
+
 ```
 npx tsx scripts/integrity/check-file-versions.ts [--file <idOrSlug>] [--verbose]
 ```
@@ -139,17 +160,29 @@ npx tsx scripts/integrity/check-file-versions.ts [--file <idOrSlug>] [--verbose]
 ## `check-pdf-fragment-links.ts` (docs/PDF_FRAGMENT_LINKS.md §9)
 
 The PDF side's other check, and the only one here that verifies something with no row behind
-it. A fragment link (`/pdf/<slug>#page=<n>&text=<words>`) lives in an href, and the viewer
+it. A fragment link (`/pdf/<slug>#sheet=<n>&text=<words>`) lives in an href, and the viewer
 finds its passage again on every open, so a link with the wrong page, a word the PDF spells
 differently, or a pdfjs bump that changes what a page extracts shows only when someone
 follows it. This finds every one in docs, posts, comments and annotation bodies, and resolves
-each passage against the file's stored page text with the viewer's own match.
+each passage against the stored page text of the file version it names, with the viewer's
+own match. It reads a link as the viewer does (docs/PDF.md §13, "Links into the file"): its
+`v=` names the version, or without one the version its own address names, or the file's
+first.
 
 - **ERROR**: a passage not on its page (with where it stops matching, and the page it is on
   when that is unambiguous), a page past the end, an unknown or deleted file, a `text`
-  parameter that doesn't parse.
-- **warn**: a passage its page holds more than once (the link points at the first), and a
-  link naming a file's past slug, which still works through the slug-history redirect.
+  parameter that doesn't parse, a `v=` naming a version the file never had.
+- **warn**: a passage its page holds more than once (the link points at the first), a
+  link naming a file's past slug, which still works through the slug-history redirect, a
+  link naming an abandoned version, which nothing can confirm, a link on one version's
+  address that names another, and **a link without `v=` written after its file's second
+  version was uploaded**. The viewer reads such a link as the first version's, since it
+  can't tell when a URL was written. The check can: it dates a link by the update log
+  (`src/lib/pdf-link-dating.ts`), and one that postdates the second version was typed by
+  hand, most likely for the latest.
+
+A link that names an earlier version and finds its words there is no fault, though the
+latest lacks them: `--verbose` lists it.
 
 It is read-only, never extracting a file's text on a miss as `storedPageText` would. Run it
 after importing a doc that carries fragment links, with `--doc`, and after

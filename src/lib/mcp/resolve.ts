@@ -76,6 +76,8 @@ export type ResolvedFile = {
   /** The reference named the version by its own address, /pdf/<slug>/v/<n>; false for the bare address, which means the latest. */
   versionAddressed: boolean;
   versionState: FileVersionState;
+  /** Every version of the file, by number: what a link's `v=` is read against (src/lib/pdf-link-reading.ts). */
+  versions: { number: number; state: FileVersionState }[];
   /** The address read: the version's own where the reference named it, the bare one otherwise. */
   url: string;
   filename: string;
@@ -131,6 +133,7 @@ export async function readableFileBySlug(actor: Actor, slugOrId: string, version
     isLatest,
     versionAddressed,
     versionState,
+    versions: file.versions.map((candidate) => ({ number: candidate.number, state: fileVersionState(candidate, file.currentVersionId) })).sort((a, b) => a.number - b.number),
     url: pdfPath(file.slug, { number: version.number, isLatest }, { own: versionAddressed }),
     filename: version.filename,
     contentType: version.contentType,

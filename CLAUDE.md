@@ -24,12 +24,12 @@ to re-derive the decision from.
 | [docs/TABLES.md](docs/TABLES.md) | Tables as built: the native nodes and where they are not, pasted column widths, CSV into an existing doc and out again (the grid, the format table, the cap, the policy calls), auto-size, and the three specs. |
 | [docs/research/tables.md](docs/research/tables.md) | Why doc tables are TipTap's native nodes and not an external block (anything else holds no text in the ydoc, so nothing in it can be quoted or annotated), the CSV design and where the build departed from it, and what xlsx and docx would add. |
 | [docs/ANCHORED_LINKS.md](docs/ANCHORED_LINKS.md) | Anchored links as built: one `/link/<id>` URL for passages across docs and PDFs — schema, the landing route that redirects or excerpts per viewer, the per-target visibility rule, the tray (a draft, or a minted link reopened for editing — one open link per creator), and every deviation from the plan. |
-| [docs/PDF_FRAGMENT_LINKS.md](docs/PDF_FRAGMENT_LINKS.md) | PDF fragment links as built: a link to a PDF passage that is only a URL (`/pdf/<slug>#sheet=<n>&text=<words>`, or `#p=<label>` by printed page, no row) — the grammar, which sheet a printed page names (the file's own labels, never a filled-in number), the letters-and-digits skeleton match, quads measured from text items, cross-page passages, a miss looked for beyond its page, the check and the page links it reads, its integrity script and one-quote CLI, which page form a writer, search and a citation take, writing them from a corrected extraction, and the words a quotation leaves out (`...`, with brackets and page breaks settled by `passagePieces`); §13 plans how the viewer shows those gaps. |
+| [docs/PDF_FRAGMENT_LINKS.md](docs/PDF_FRAGMENT_LINKS.md) | PDF fragment links as built: a link to a PDF passage that is only a URL (`/pdf/<slug>#sheet=<n>&text=<words>`, or `#p=<label>` by printed page, with `&v=<n>` for the file's version; no row) — the grammar, which sheet a printed page names (the file's own labels, never a filled-in number), the letters-and-digits skeleton match, quads measured from text items, cross-page passages, a miss looked for beyond its page, the check and the page links it reads, its integrity script and one-quote CLI, which page form a writer, search and a citation take, writing them from a corrected extraction, and the words a quotation leaves out (`...`, with brackets and page breaks settled by `passagePieces`); §13 plans how the viewer shows those gaps. |
 | [docs/PDF_QUADS.md](docs/PDF_QUADS.md) | Quads from text items without a selection: where an edge inside an item falls, the browser's canvas measurer, the Liberation width tables a server measures with and their generator, `extractPageItems`, and how close each lands to a real selection. |
 | [docs/DOCS.md](docs/DOCS.md) | Docs as built: the entity beside its ydoc, the `title`/`prose_json` caches and the live title, roles and visibility, routes, the reading view and its freeze, the editor, what is deferred. |
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, the `/admin` endpoints and the token they take, restarts, IndexedDB, and the schema-version gate that refuses a tab whose bundle predates a schema change. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
-| [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures; §13 is versions of a file, **partly built** (its "Built so far" says which parts): the `file_version` table, addresses by version and the capture check exist, and the upload of a version, page maps and moving notes forward are planned. |
+| [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures; §13 is versions of a file, **partly built** (its "Built so far" says which parts): a file takes a new version (upload, promotion, abandoning), every address and anchor goes by version and a link names its version with `v=`; page maps and moving notes forward are planned. |
 | [docs/mobile/coordinates.html](docs/mobile/coordinates.html) | Fixed popovers vs. the iOS keyboard: the two coordinate spaces, and what changed on desktop. |
 | [docs/BLOG.md](docs/BLOG.md) | The public blog as built: the landing page (the banner, the `FRONT PAGE` preamble, the latest posts, the contributor list and the dashboard panel a contributor edits it from), a post's page at its `/yyyy/mm/dd/slug` URL, why its date is UTC, and how a slug changes and redirects, the date archives, the author pages, the RSS feed, the links between a post's three pages, which posts are public (published and due, with no status column and no sweep) and the one order every listing uses, `/page/N` continuing `/` (a path, not `?page=`, so `/` keeps its cache), a post's older and newer neighbours, which public pages are cached at all, and what each change revalidates. |
 | [docs/DASHBOARD.md](docs/DASHBOARD.md) | /dashboard: the section cards, Recent docs, the Settings tiers, the Connections card, and where an author color is cached. |
@@ -108,7 +108,9 @@ before changing the behavior it describes.
   is split browser-safe (`index.ts`) vs. server (`capture.ts`) the way `avatar-url.ts` and
   `avatar.ts` are — don't barrel them together. A row holding a PDF target also names the
   version it was measured on (`file_version_id`, set exactly then, by a CHECK and a key on the
-  pair). PLAN.md §20a, §20b, docs/PDF.md §13.
+  pair), and a new version of the file rewrites no row: a capture checks its version inside
+  the transaction that inserts it, and a candidate takes none. PLAN.md §20a, §20b,
+  docs/PDF.md §13.
 - **Search ranks only inside ids a read rule chose.** Each read rule has one exported `where`
   helper beside its per-row check (`readableDocsWhere`, `readablePostWhere`,
   `readableFilesWhere`, `readableAnnotationsWhere`, `publicCommentsWhere`), and every listing
@@ -198,10 +200,14 @@ before changing the behavior it describes.
   different clientIDs (the attribution cache keys on the pair; `e2e/shared-socket.spec.ts`);
   and two providers for one document name on one socket throw, where separate sockets used to
   make the duplicate harmless. docs/YDOC.md "One socket per page".
-- **A PDF anchor cannot drift**, because a file version's `sha256` is its identity — no tracking
-  plugin, no re-resolution, no text-version stamp to chase. Don't reach for the doc side's drift machinery.
-  The one thing that *can* invalidate a stored anchor is our own normaliser, so bump
-  `NORMALISER_VERSION` (`src/lib/pdf-text.ts`) on **any** behavioural change. docs/PDF.md §4.
+- **A PDF anchor cannot drift, because it is on one version of its file**, and a version's
+  bytes never change (its `sha256` is its identity) — no tracking plugin, no re-resolution, no
+  text-version stamp to chase. Don't reach for the doc side's drift machinery. A file *can*
+  be given other bytes, as its next version: an anchor stays on the version it names, where
+  it is drawn and resolved, and nothing puts it on another but a deliberate move. The one
+  thing that *can* invalidate a stored anchor is our own normaliser, so bump
+  `NORMALISER_VERSION` (`src/lib/pdf-text.ts`) on **any** behavioural change. docs/PDF.md §4,
+  §13.
 - **Before changing code that takes a file's id, reads `file`, `file_version` or
   `file_page_text`, links to `/pdf/…` or writes an anchor with a PDF target, read docs/PDF.md
   §0, "Mistakes that fail no check".** Search, MCP, links and tags are such code, not only
@@ -531,6 +537,12 @@ working on.
   Where a value is kept in visual-viewport space *and* rendered, the two are separate fields
   (`marker` vs `markerStyle`); collapsing them applies the shift twice.
   docs/mobile/coordinates.html.
+- **A client navigation that carries a fragment leaves it on the path.** Next's router
+  (16.2.11) puts the `#…` of a `<Link>` or a `router.push`/`replace` on every later client
+  navigation to that path, so a plain link then arrives by a fragment its reader never
+  followed. On a PDF that fragment names a sheet and a version, and sends them elsewhere: a
+  link to `/pdf/…#sheet=…` is a plain `<a>`, and the viewer's own going is
+  `location.replace`. TODO.md, "A client navigation with a fragment…"; docs/PDF.md §0.
 - **A Next dynamic-route `params` value arrives percent-encoded, not literal.** `getParamValue`
   runs `encodeURIComponent` on every string param before handing it to user code (verified
   against `next@16.2.11`), so a route packing two ids into one segment as `a+b` would see
