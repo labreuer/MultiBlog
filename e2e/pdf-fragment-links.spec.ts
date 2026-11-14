@@ -3,7 +3,7 @@ import { ADMIN_EMAIL, TEST_PASSWORD, createTestFile, deleteTestFile, renameTestF
 import type { TestPageLabelRange } from "../scripts/make-test-pdf";
 
 // docs/PDF_FRAGMENT_LINKS.md — a link to a passage that is only a URL,
-// `/pdf/<slug>#page=<n>&text=<words>`. Nothing is written anywhere, so every
+// `/pdf/<slug>#sheet=<n>&text=<words>`. Nothing is written anywhere, so every
 // assertion here is about what the viewer finds and draws on arrival: the
 // outline a followed anchored link would draw, the jump, the banner, and the
 // fragment surviving the two redirects a link can meet (sign-in, and a
@@ -54,7 +54,7 @@ test.describe("pdf fragment links", () => {
   }
 
   test("a whole passage is outlined, listed in the PDF's words, and jumped to", async ({ page }) => {
-    await open(page, "page=2&text=law+of+participation");
+    await open(page, "sheet=2&text=law+of+participation");
 
     await expect(banner(page)).toBeVisible({ timeout: 20_000 });
     await expect(banner(page)).toContainText("Linked passage");
@@ -92,7 +92,8 @@ test.describe("pdf fragment links", () => {
   });
 
   test("a quote across a page break is two passages, one on each page", async ({ page }) => {
-    await open(page, "page=3&text=It+may+also,within+but+it&page=4&text=is+detected+primarily+without");
+    // sheet= is the written form, and page= is still read: one link may hold both.
+    await open(page, "sheet=3&text=It+may+also,within+but+it&page=4&text=is+detected+primarily+without");
     const rows = banner(page).getByRole("listitem");
     await expect(rows).toHaveCount(2, { timeout: 20_000 });
     await expect(rows.nth(0)).toHaveText("It may also sometimes be detected within, but it");
@@ -111,7 +112,7 @@ test.describe("pdf fragment links", () => {
   });
 
   test("a new fragment on an open page is found too", async ({ page }) => {
-    await open(page, "page=2&text=law+of+participation");
+    await open(page, "sheet=2&text=law+of+participation");
     await expect(linkRects(page, 2)).toHaveCount(1, { timeout: 20_000 });
     await page.evaluate(() => {
       window.location.hash = "page=4&text=The+rest+of+the+fourth+page";

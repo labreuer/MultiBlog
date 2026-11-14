@@ -53,7 +53,7 @@ export type PostHit = {
 };
 
 export type PdfPageHit = {
-  /** 1-based, as the viewer's page box and `#page=` count. */
+  /** 1-based, as the viewer's page box and `#sheet=` count. */
   page: number;
   /** What the PDF calls the page, where it has labels worth showing; null otherwise. */
   label: string | null;

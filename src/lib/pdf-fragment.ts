@@ -1,5 +1,5 @@
 // docs/PDF_FRAGMENT_LINKS.md — a link to a passage of a PDF that is only a
-// URL: `/pdf/<slug>#page=<n>&text=<passage>`, or `#p=<label>&text=<passage>`
+// URL: `/pdf/<slug>#sheet=<n>&text=<passage>`, or `#p=<label>&text=<passage>`
 // by the page printed on it, with no row anywhere.
 
 import { formatPageName, isPageParam, pageNameOf, type PageName } from "./pdf-open-params";
@@ -37,7 +37,7 @@ const MAX_PREFIX_WORDS = 6;
  */
 export type FragmentPassage = PassageText & {
   /**
-   * The page it names: a 1-based sheet, exactly as `#page=` means it, or a
+   * The page it names: a 1-based sheet, exactly as `#sheet=` means it, or a
    * printed label, as `#p=` gives one (src/lib/pdf-open-params.ts). Only
    * `sheetsNamed` (src/lib/pdf-page-labels.ts) turns a label into sheets.
    */
@@ -77,8 +77,8 @@ export type TextRange = { start: number; end: number };
 
 /**
  * The passages a fragment names, in order. Parameters are read left to right,
- * as RFC 8118 reads a PDF's own: each `text` belongs to the nearest `page` or
- * `p` before it, a `text` with no valid page before it is ignored, and
+ * as RFC 8118 reads a PDF's own: each `text` belongs to the nearest `sheet`,
+ * `page` or `p` before it, a `text` with no valid page before it is ignored, and
  * anything else is ignored as `pageFromHash` ignores it. A passage whose
  * grammar doesn't parse, or one of whose parts has no letters or digits, is
  * dropped rather than guessed at.

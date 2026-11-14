@@ -34,6 +34,7 @@ import { chipLabels, displayTextBetween, type ChipLabels } from "@/lib/entity-ch
 import type { McpContext, ToolResult } from "./tool";
 import { parse, readableContainer, readableDocByParam, readableFileBySlug, type ResolvedContainer } from "./resolve";
 import { annotationByFragment } from "./read/threads";
+import { isViewerFragment } from "./url";
 import { checkFragmentLinks } from "./fragment-links";
 import { anchorPdfQuote } from "./pdf-anchoring";
 
@@ -67,7 +68,7 @@ async function resolveOn(ctx: McpContext, on: string): Promise<Target> {
   if (parsed.kind === "id") {
     const annotation = await prisma.annotation.findUnique({ where: { id: parsed.id }, select: { id: true } });
     if (annotation) parentId = annotation.id;
-  } else if ((parsed.kind === "doc" || parsed.kind === "pdf") && parsed.fragment && !/(^|&)(page|text)=/.test(parsed.fragment)) {
+  } else if ((parsed.kind === "doc" || parsed.kind === "pdf") && parsed.fragment && !isViewerFragment(parsed.fragment)) {
     const container = await readableContainer(ctx.actor, on.split("#")[0]);
     parentId = await annotationByFragment(
       container.kind === "doc" ? { docId: container.doc.id } : { fileId: container.file.id },
@@ -130,7 +131,7 @@ function findOne(
   };
 }
 
-export type QuoteInput = QuoteSpec & { version?: string; page?: number; label?: string };
+export type QuoteInput = QuoteSpec & { version?: string; sheet?: number; page?: string };
 
 /**
  * A root's anchor in a doc, measured at `version` (the tail by default): the
@@ -212,8 +213,8 @@ export async function annotateFor(ctx: McpContext, input: QuoteInput & { on: str
   if (!quoted && (input.quote !== undefined || input.start !== undefined || input.end !== undefined)) {
     throw invalid("Name a passage by quote, or by both start and end.");
   }
-  if ((input.page !== undefined || input.label !== undefined) && (container.kind !== "file" || parent)) {
-    throw invalid("page and label narrow a quote on a PDF.");
+  if ((input.sheet !== undefined || input.page !== undefined) && (container.kind !== "file" || parent)) {
+    throw invalid("sheet and page narrow a quote on a PDF.");
   }
   let anchor: PostedAnchor;
   let passage: Record<string, unknown> | null = null;
@@ -230,7 +231,7 @@ export async function annotateFor(ctx: McpContext, input: QuoteInput & { on: str
   } else {
     const at = await anchorPdfQuote(container.file, input);
     anchor = { kind: "pdf", target: at.target, quotedText: at.quotedText, fileVersionId: at.fileVersionId, claim: at.claim };
-    passage = { text: at.quotedText, page: at.target.pageIndex + 1, ...(at.label ? { label: at.label } : {}) };
+    passage = { text: at.quotedText, sheet: at.target.pageIndex + 1, ...(at.label ? { page: at.label } : {}) };
   }
 
   const created = await createPostedAnnotation(ctx.actor, {

@@ -27,6 +27,8 @@ test("PDF URLs keep their fragment, and a fragment link is told from a card's na
   const passage = parseRef("/pdf/book#page=3&text=the%20end,of%20it", ORIGIN);
   assert.equal(passage.kind === "pdf" && isViewerFragment(passage.fragment), true);
   assert.equal(isViewerFragment("luke-breuer-2026-10-07-14-23-01"), false);
+  assert.equal(isViewerFragment("sheet=12"), true);
+  assert.equal(isViewerFragment("p=xii"), true);
   assert.deepEqual(parseRef("/pdf/book?sel=clink123", ORIGIN), { kind: "link", id: "clink123" });
 });
 

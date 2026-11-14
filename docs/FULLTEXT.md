@@ -457,13 +457,15 @@ for the same reason `LocalTime` exists: the server's time zone isn't the reader'
 |---|---|
 | Doc | `/doc/<slug>` |
 | Post | its public path, or `/post/<id>/edit` when unpublished |
-| PDF page | `/pdf/<slug>#p=<label>`, or `#page=<n>` (below) |
+| PDF page | `/pdf/<slug>#p=<label>`, or `#sheet=<n>` (below) |
 | Annotation | its doc or PDF, plus the permalink fragment its card renders (`annotationAnchorName`) |
 | Comment | its post's path, plus the fragment its card renders (`commentAnchorName`) |
 
-- **`#page=` follows the PDF Open Parameters convention**
-  ([pdf-open-params.ts](../src/lib/pdf-open-params.ts)). The viewer reads it once the document
-  is laid out, and again on `hashchange`, and reads `#p=`, the printed page, the same way.
+- **`#sheet=` is the sheet**, the PDF Open Parameters convention's `#page=` under the name
+  that leaves "page" to the printed one ([pdf-open-params.ts](../src/lib/pdf-open-params.ts),
+  PDF_FRAGMENT_LINKS.md §2), and `#page=` is still read as it. The viewer reads either once
+  the document is laid out, and again on `hashchange`, and reads `#p=`, the printed page, the
+  same way.
 - **A page hit links by its printed page** where its sheet is the first carrying its own label,
   and by its sheet otherwise, as for a sheet whose own label is empty or a file without usable
   labels: a page link is copied into bodies from the address bar, and `p=` survives a new copy
@@ -524,7 +526,7 @@ in `page.module.css` and use STYLE.md's color tokens, `<mark>` included.
     feature, and one that would turn "the draft isn't found" into "something else is" whenever a
     neighbouring test's word happens to be near.
 - **Unit tests** cover the pure parts: the parameters, dates (every day of a year in zones whose
-  rules are awkward), headlines, which words qualify for correction, and `#page=`.
+  rules are awkward), headlines, which words qualify for correction, and `#sheet=`.
 - **`scripts/integrity/check-search-index.ts`**: every trigger exists and is enabled, every
   vector equals its function's output, every lexeme is in the vocabulary (an ERROR each), and
   vocabulary rows no vector holds (a WARN). `--repair` re-fires the triggers for drifted rows

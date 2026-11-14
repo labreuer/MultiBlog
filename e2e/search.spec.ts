@@ -299,7 +299,7 @@ test.describe("/search", () => {
       const pdfs = section(page, "PDFs");
       await expect(pdfs.getByRole("link", { name: file.title })).toBeVisible();
       await pdfs.getByRole("link", { name: "p. 3" }).click();
-      await expect(page).toHaveURL(new RegExp(`/pdf/${file.slug}#page=3$`));
+      await expect(page).toHaveURL(new RegExp(`/pdf/${file.slug}#sheet=3$`));
       await expect(page.getByLabel("Page number")).toHaveValue("3", { timeout: 30_000 });
     } finally {
       await deleteTestFile(file.id);

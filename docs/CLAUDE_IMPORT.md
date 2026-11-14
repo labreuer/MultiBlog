@@ -247,10 +247,11 @@ its doc survive the edit, and would not survive the doc being deleted and import
 
 **Quoting a PDF.** A file's quotations link their passages as PDF fragment links
 ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)), written straight into the Markdown, so the
-import is the only write: `[could not yet 'call his soul his own'](/pdf/<slug>#page=122&text=could+not+yet+call+his+soul+his+own)`.
+import is the only write: `[could not yet 'call his soul his own'](/pdf/<slug>#sheet=122&text=could+not+yet+call+his+soul+his+own)`.
 
 - **The page is the printed page, `p=<label>`, where the PDF's own labels agree with the
-  copy's**, and otherwise `page=`, the 1-based sheet number. A booktext extraction's header
+  copy's**, and otherwise `sheet=`, the 1-based sheet number (`page=`, its older name, is
+  read the same). A booktext extraction's header
   gives the mapping to sheets ("pdf page = printed page -1"). Which form a PDF takes, and the
   places `p=` can't name a sheet: PDF_FRAGMENT_LINKS.md §8, "Which page form a writer takes".
 - **The words are the quote's letters and digits, joined by `+`**, from the corrected copy

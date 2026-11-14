@@ -33,7 +33,7 @@ export const listPaging = z.strictObject({
 
 export const readInput = z.strictObject({
   url: objectRef.describe(
-    "What to read: /doc/<slug> (or its id, or /edit); /pdf/<slug>, with #page=N (or #p=<label>) for a page or a fragment link's #page=N&text=… (or #p=<label>&text=…) for its passage; /files/<slug>; /annotations; /link/<id> or a URL with ?sel=<id>; a doc or PDF URL with an annotation card's #fragment for that thread; a post's path or /post/<id>/edit, with a comment card's #fragment for that comment; /tag/<slug>; /authors/<slug>. Past slugs work.",
+    "What to read: /doc/<slug> (or its id, or /edit); /pdf/<slug>, with #sheet=N (or #p=<label>) for a page or a fragment link's #sheet=N&text=… (or #p=<label>&text=…) for its passage; /files/<slug>; /annotations; /link/<id> or a URL with ?sel=<id>; a doc or PDF URL with an annotation card's #fragment for that thread; a post's path or /post/<id>/edit, with a comment card's #fragment for that comment; /tag/<slug>; /authors/<slug>. Past slugs work.",
   ),
   format: z.enum(["markdown", "text"]).optional().describe("Doc and post bodies: markdown (default), or text, which a quote can be copied from exactly."),
   whole: z.boolean().optional().describe("A doc whole, up to the bound the description gives; without it, one over 40,000 answers with its outline."),
@@ -56,13 +56,13 @@ export const readInput = z.strictObject({
   context: z.number().int().min(0).max(5).optional().describe("With around, on a doc: blocks either side, 1 by default."),
   occurrences: z.number().int().min(1).max(10).optional().describe("With around: how many occurrences, 5 by default."),
   since: versionString.optional().describe("What changed in a doc since this version: each changed block as a word diff naming who added what. For a doc you can edit."),
-  page: z.number().int().min(1).optional().describe("A PDF page by its 1-based sheet number."),
-  pages: z
+  sheet: z.number().int().min(1).optional().describe("A PDF sheet by its 1-based number."),
+  sheets: z
     .string()
     .regex(/^\d+(-\d+)?$/, "N or N-M")
     .optional()
     .describe("A range of PDF sheets, N-M."),
-  label: z.string().min(1).max(50).optional().describe("Every PDF page carrying this printed label."),
+  page: z.string().min(1).max(50).optional().describe("Every PDF sheet that has this printed page, its label."),
   entry: z.string().min(1).max(500).optional().describe("A PDF outline entry, by title: its pages' text."),
   include: z
     .array(z.enum(["annotations", "links", "comments"]))

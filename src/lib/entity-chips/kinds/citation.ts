@@ -253,9 +253,9 @@ function referentHref(referent: string | undefined, cited: readonly { key: strin
   return pairs ? `${citedPagePath(key, locator)}?${pairs}` : null;
 }
 
-/** A fragment's `page`, `p` and `text` parameters, in order and as written: what a `/pdf/` referent hands the cited-page route. Null for none. */
+/** A fragment's `sheet`, `page`, `p` and `text` parameters, in order and as written: what a `/pdf/` referent hands the cited-page route. Null for none. */
 export function fragmentPairs(fragment: string): string | null {
-  const kept = fragment.split("&").filter((param) => /^(?:page|p|text)=/.test(param));
+  const kept = fragment.split("&").filter((param) => /^(?:sheet|page|p|text)=/.test(param));
   return kept.length > 0 ? kept.join("&") : null;
 }
 
@@ -331,7 +331,7 @@ function itemLabel(item: CitationItem, form: CitationForm, name: string): Label 
 /**
  * The PDF at a locator's first page, else null: `/pdf/<slug>#p=<label>`, with
  * the label as the file's own labels give it, on a file with usable labels,
- * and `#page=<sheet>`, the page taken as the sheet itself, on one without,
+ * and `#sheet=<sheet>`, the page taken as the sheet itself, on one without,
  * if the file has that many. It is the rule a `p=` link's sheet is found by
  * (`sheetsLabelled`, docs/PDF_FRAGMENT_LINKS.md §2), so a citation and a
  * `p=` link of the same page land on the same sheet. `pageLabels` are the

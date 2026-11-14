@@ -10,11 +10,11 @@
 //   - **The page is a hint.** It looks on the page given, then on its two
 //     neighbours, then anywhere in the file, and uses the page the quote is on
 //     when that is unambiguous. A printed page number given by mistake for a
-//     sheet number is the usual cause. Given as a printed page (`--label`), it
+//     sheet number is the usual cause. Given as a printed page (`--page`), it
 //     looks on every sheet carrying that label first, then on the first one's
 //     neighbours.
 //   - **It prints whichever form the file takes** (§8): `p=` with the printed
-//     page where the file has usable labels, and `page=` where it has none,
+//     page where the file has usable labels, and `sheet=` where it has none,
 //     where the sheet's own label is empty, or where an earlier sheet with
 //     the same label holds the passage.
 //   - **A quote across a page break comes back as two passages**, split
@@ -30,10 +30,10 @@
 // Read-only, and it reads as the operator, like the integrity check.
 //
 // Usage:
-//   npx tsx scripts/pdf-fragment-link.ts <file-slug> <page> "<quote>"
-//   npx tsx scripts/pdf-fragment-link.ts <file-slug> --label <label> "<quote>"
-//   <page> is the 1-based sheet number, as #page= takes it; <label> is the
-//   page printed on it, as #p= takes it.
+//   npx tsx scripts/pdf-fragment-link.ts <file-slug> <sheet> "<quote>"
+//   npx tsx scripts/pdf-fragment-link.ts <file-slug> --page <label> "<quote>"
+//   <sheet> is the 1-based sheet number, as #sheet= takes it; <label> is the
+//   page printed on it, as #p= takes it. `--label` is read as `--page`.
 
 import "dotenv/config";
 import { prisma } from "../src/lib/prisma";
@@ -91,11 +91,12 @@ function print(file: FilePages, passages: readonly PlacedPassage[], asked: reado
   if (!asked.includes(passages[0].sheet)) console.log(`  note: found on ${sheetText(file, passages[0].sheet)}, not ${askedText}`);
 }
 
-const USAGE = 'Usage: npx tsx scripts/pdf-fragment-link.ts <file-slug> <page> "<quote>"\n       npx tsx scripts/pdf-fragment-link.ts <file-slug> --label <label> "<quote>"';
+const USAGE = 'Usage: npx tsx scripts/pdf-fragment-link.ts <file-slug> <sheet> "<quote>"\n       npx tsx scripts/pdf-fragment-link.ts <file-slug> --page <label> "<quote>"   (or --label <label>)';
 
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
-  const byLabel = args[1] === "--label";
+  // `--page` in MCP's and the links' sense, the printed page; `--label` is its older name, kept for what already calls it.
+  const byLabel = args[1] === "--page" || args[1] === "--label";
   const [slug, pageArg, quote] = byLabel ? [args[0], args[2], args[3]] : args;
   if (!slug || !pageArg?.trim() || !quote || (!byLabel && (!/^\d+$/.test(pageArg) || Number(pageArg) < 1))) {
     console.error(USAGE);
@@ -116,7 +117,7 @@ async function main(): Promise<number> {
 
   // The sheets the page names: one for a sheet; every sheet carrying a label.
   const asked = "sheet" in askedName ? [askedName.sheet - 1] : sheetsLabelled(file.ownLabels, file.pageCount, askedName.label);
-  const askedText = "sheet" in askedName ? `page ${askedName.sheet}` : `the page labelled ${askedName.label}`;
+  const askedText = "sheet" in askedName ? `sheet ${askedName.sheet}` : `page ${askedName.label}`;
   if ("label" in askedName && asked.length === 0) console.error(`  note: no page of "${file.slug}" is labelled ${askedName.label}; looking in the whole file`);
 
   const passage = passageFor(quote);

@@ -10,7 +10,7 @@ import { quadSourceItems, quadsForRange, type MeasureText, type QuadSourceItem }
 import { QUOTE_CONTEXT_LENGTH, type PdfTarget } from "@/lib/pdf-anchor";
 import { PDFJS_VERSION } from "@/lib/pdfjs-client";
 
-// docs/PDF_FRAGMENT_LINKS.md §6 — the passages a `#page=<n>&text=<words>`
+// docs/PDF_FRAGMENT_LINKS.md §6 — the passages a `#sheet=<n>&text=<words>`
 // (or `#p=<label>&text=<words>`) fragment names, found in this document and
 // measured into `PdfTarget`s the surface draws as link regions.
 //
@@ -21,7 +21,7 @@ import { PDFJS_VERSION } from "@/lib/pdfjs-client";
 // integrity check finds is one this finds.
 //
 // A passage is looked for on the sheets its page names, in order, which is
-// one sheet for `page=` and every sheet carrying the label for `p=`. When
+// one sheet for `sheet=` and every sheet carrying the label for `p=`. When
 // none holds it, the server is asked where it is instead (§6, "A miss looks
 // beyond its page"), once for every miss of the fragment, and the one page
 // it answers is read here and drawn.

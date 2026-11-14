@@ -282,9 +282,9 @@ type Placed = {
   /** Sort keys, and the group the thread goes under. */
   order: number;
   group: string | null;
-  page?: number;
-  label?: string;
-  /** Set for a thread on a version of the PDF other than the one read: its page and label are that version's. */
+  sheet?: number;
+  page?: string;
+  /** Set for a thread on a version of the PDF other than the one read: its sheet and page are that version's. */
   version?: number;
   blocks?: BlockSpan;
 };
@@ -371,9 +371,9 @@ function placeInPdf(threads: Thread[], placing: PdfPlacing): Placed[] {
       passage: target.quote.exact,
       lost: false,
       order: (elsewhere ? 1e13 + (999 - Math.min(version.number, 999)) * 1e10 : 0) + target.pageIndex * 1_000_000 + (target.position?.start ?? 0),
-      group: `${elsewhere ? `version ${version.number}, ` : ""}page ${target.pageIndex + 1}`,
-      page: target.pageIndex + 1,
-      ...(version?.labels ? { label: version.labels[target.pageIndex] } : {}),
+      group: `${elsewhere ? `version ${version.number}, ` : ""}sheet ${target.pageIndex + 1}`,
+      sheet: target.pageIndex + 1,
+      ...(version?.labels ? { page: version.labels[target.pageIndex] } : {}),
       ...(elsewhere ? { version: version.number } : {}),
     };
   });
@@ -414,8 +414,8 @@ function grouped(placed: Placed[], format: "markdown" | "text"): Record<string, 
     if (!current || current.key !== key) {
       current = { key, threads: [] };
       const header: Record<string, unknown> =
-        p.page !== undefined
-          ? { ...(p.version !== undefined ? { version: p.version } : {}), page: p.page, ...(p.label ? { label: p.label } : {}) }
+        p.sheet !== undefined
+          ? { ...(p.version !== undefined ? { version: p.version } : {}), sheet: p.sheet, ...(p.page ? { page: p.page } : {}) }
           : key
             ? { heading: key }
             : { unanchored: true };
@@ -591,10 +591,10 @@ export async function oneThread(ctx: McpContext, annotationId: string, args: Rea
     container = {
       url: path,
       title,
-      ...(placed.page ? { page: placed.page, ...(placed.label ? { label: placed.label } : {}) } : {}),
+      ...(placed.sheet ? { sheet: placed.sheet, ...(placed.page ? { page: placed.page } : {}) } : {}),
     };
   }
-  const heading = placed.group && !placed.page ? { heading: placed.group } : {};
+  const heading = placed.group && !placed.sheet ? { heading: placed.group } : {};
   const root = thread.root;
   const card = `${container.url}#${annotationAnchorName(displayNameOf(root.user), root.createdAt)}`;
 

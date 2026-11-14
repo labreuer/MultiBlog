@@ -233,8 +233,8 @@ async function searchPdf(file: ResolvedFile, q: string, exact: boolean, cursorRa
     total: hits.length,
     ...(corrected ? { corrected: true } : {}),
     hits: page.map((p) => ({
-      page: p.pageIndex + 1,
-      ...(labels ? { label: labels[p.pageIndex] } : {}),
+      sheet: p.pageIndex + 1,
+      ...(labels ? { page: labels[p.pageIndex] } : {}),
       snippet: markedSnippet(snippets.get(`${file.id}:${p.pageIndex}`) ?? []),
     })),
     ...(cursor.offset + cursor.size < hits.length ? { next: encodeCursor({ offset: cursor.offset + cursor.size, size: cursor.size }) } : {}),

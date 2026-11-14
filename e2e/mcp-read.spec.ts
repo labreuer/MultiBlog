@@ -401,33 +401,44 @@ test("reading a PDF: the file with its labels and outline, pages, around a quote
   });
   try {
     const meta = await agent.call("read", { url: `/pdf/${file.slug}` });
-    expect(meta.result).toMatchObject({ kind: "pdf", id: file.id, pages: 3 });
+    expect(meta.result).toMatchObject({ kind: "pdf", id: file.id, sheets: 3 });
     expect(meta.result.labels).toEqual([
-      { sheets: "1", labels: "i" },
-      { sheets: "2-3", labels: "1-2" },
+      { sheets: "1", pages: "i" },
+      { sheets: "2-3", pages: "1-2" },
     ]);
     expect((meta.result.outline as { entries: unknown[] }).entries).toEqual([
-      { depth: 1, title: "Chapter one", page: 2, label: "1", pages: 1 },
-      { depth: 1, title: "Chapter two", page: 3, label: "2", pages: 1 },
+      { depth: 1, title: "Chapter one", sheet: 2, page: "1", sheets: 1 },
+      { depth: 1, title: "Chapter two", sheet: 3, page: "2", sheets: 1 },
     ]);
 
-    const page = await agent.call("read", { url: `/pdf/${file.slug}#page=2` });
-    expect((page.result.pages as { page: number; label: string; text: string }[])[0]).toMatchObject({ page: 2, label: "1" });
-    const byLabel = await agent.call("read", { url: `/pdf/${file.slug}`, label: "2" });
-    expect((byLabel.result.pages as { page: number }[]).map((p) => p.page)).toEqual([3]);
+    const page = await agent.call("read", { url: `/pdf/${file.slug}#sheet=2` });
+    expect((page.result.sheets as { sheet: number; page: string; text: string }[])[0]).toMatchObject({ sheet: 2, page: "1" });
+    // page= in a URL is still read as the sheet.
+    const old = await agent.call("read", { url: `/pdf/${file.slug}#page=2` });
+    expect((old.result.sheets as { sheet: number }[])[0]).toMatchObject({ sheet: 2 });
+    const bySheet = await agent.call("read", { url: `/pdf/${file.slug}`, sheet: 3 });
+    expect((bySheet.result.sheets as { sheet: number }[]).map((p) => p.sheet)).toEqual([3]);
+    const byPage = await agent.call("read", { url: `/pdf/${file.slug}`, page: "2" });
+    expect((byPage.result.sheets as { sheet: number }[]).map((p) => p.sheet)).toEqual([3]);
+    const bySheets = await agent.call("read", { url: `/pdf/${file.slug}`, sheets: "1-2" });
+    expect((bySheets.result.sheets as { sheet: number }[]).map((p) => p.sheet)).toEqual([1, 2]);
+    // A call written before the rename is refused, never misread: page was a sheet's number, and label a page.
+    for (const old of [{ page: 2 }, { label: "1" }, { pages: "1-2" }]) {
+      expect((await agent.call("read", { url: `/pdf/${file.slug}`, ...old })).error.code, JSON.stringify(old)).toBe("invalid");
+    }
     const entry = await agent.call("read", { url: `/pdf/${file.slug}`, entry: "Chapter two" });
-    expect((entry.result.pages as { text: string }[])[0].text).toContain("Second chapter");
+    expect((entry.result.sheets as { text: string }[])[0].text).toContain("Second chapter");
 
     const around = await agent.call("read", { url: `/pdf/${file.slug}`, around: "xylophone marmalade" });
     expect(around.result).toMatchObject({ kind: "pdf-around", total: 1 });
-    expect((around.result.occurrences as { page: number; text: string }[])[0]).toMatchObject({ page: 2, text: "xylophone marmalade" });
+    expect((around.result.occurrences as { sheet: number; page: string; text: string }[])[0]).toMatchObject({ sheet: 2, page: "1", text: "xylophone marmalade" });
 
-    const passage = await agent.call("read", { url: `/pdf/${file.slug}#page=2&text=xylophone%20marmalade` });
+    const passage = await agent.call("read", { url: `/pdf/${file.slug}#sheet=2&text=xylophone%20marmalade` });
     expect(passage.result.kind).toBe("pdf-passages");
     expect((passage.result.passages as { text: string; before: string }[])[0]).toMatchObject({ text: "xylophone marmalade" });
     const missed = await agent.call("read", { url: `/pdf/${file.slug}#page=3&text=xylophone%20marmalade` });
     expect(missed.error.code).toBe("no_match");
-    expect(missed.error.foundOnPage).toBe(2);
+    expect(missed.error.foundOnSheet).toBe(2);
   } finally {
     await deleteTestFile(file.id);
     await agent.dispose();

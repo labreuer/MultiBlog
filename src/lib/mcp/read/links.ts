@@ -108,7 +108,7 @@ export async function readLink(ctx: McpContext, linkId: string): Promise<ToolRes
             ...numbered(part.anchorId),
             ...quoteOf(part),
             ...(elsewhere ? { version: part.version!.number } : {}),
-            ...(pageIndex !== null ? { page: pageIndex + 1, ...(labels ? { label: labels[pageIndex] } : {}) } : {}),
+            ...(pageIndex !== null ? { sheet: pageIndex + 1, ...(labels ? { page: labels[pageIndex] } : {}) } : {}),
           };
         }),
       };
@@ -157,8 +157,8 @@ export async function linksInto(
           : part.selector?.kind === "PDF_TEXT"
             ? {
                 ...(part.fileVersion && part.fileVersion.id !== target.versionId ? { version: part.fileVersion.number } : {}),
-                page: part.selector.selector.pageIndex + 1,
-                ...(labels ? { label: labels[part.selector.selector.pageIndex] } : {}),
+                sheet: part.selector.selector.pageIndex + 1,
+                ...(labels ? { page: labels[part.selector.selector.pageIndex] } : {}),
               }
             : {};
       return {

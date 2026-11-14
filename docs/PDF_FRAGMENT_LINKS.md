@@ -7,7 +7,7 @@ locator rule and the server-side quads of [MCP.md](MCP.md), the MCP server's pla
 A **fragment link** is a URL that names a passage of a PDF by its words:
 
 ```
-/pdf/owen-barfield-saving-the-appearances#page=122&text=could+not+yet+call+his+soul+his+own
+/pdf/owen-barfield-saving-the-appearances#sheet=122&text=could+not+yet+call+his+soul+his+own
 ```
 
 Following it opens the PDF at that page with the passage outlined, exactly as a followed
@@ -53,7 +53,7 @@ body. Comments need one change for it (§8).
 ## 2. The URL
 
 ```
-/pdf/<slug>#page=<n>&text=<passage>[&page=<n>&text=<passage>…]
+/pdf/<slug>#sheet=<n>&text=<passage>[&sheet=<n>&text=<passage>…]
 /pdf/<slug>#p=<label>&text=<passage>[&p=<label>&text=<passage>…]
 
 passage = [<prefix>-,]<segment>*("..." <segment>)[,-<suffix>]
@@ -61,15 +61,19 @@ segment = <start>[,<end>]
 prefix, start, end, suffix = word *("+" word)
 ```
 
-- **`page`** is the 1-based sheet number, exactly as `#page=` means it
-  (`src/lib/pdf-open-params.ts`): never a label. It also keeps any reader of `#page=` working:
-  `PdfViewer` applies it on its own, so the viewer opens at the passage's page before the
-  passage is found, and a build that predates fragment links opens there too.
+- **`sheet`** is the 1-based sheet number (`src/lib/pdf-open-params.ts`): never a label.
+  `PdfViewer` applies it on its own, so the viewer opens at the passage's sheet before the
+  passage is found.
+- **`page` is read as `sheet` for good**, and nothing writes it. It is RFC 8118's name for a
+  sheet, and every link written before `sheet=` uses it. Beside `p`, "page" is the word a
+  reader takes for the printed page, which is why the written form is `sheet` (PDF.md §13,
+  "Links into the file"). A tab whose bundle predates `sheet=` ignores it, as one that
+  predates `p=` ignores that (§6).
 - **`p`** is the page printed on the sheet, its label, found by the rule below. A reader of a
   book names the page printed on it, so an author quoting from a corrected copy writes the page
   the copy cites rather than converting it to a sheet by hand, and a new copy of the file that
   adds or removes a sheet before it doesn't move the link ([PDF.md](PDF.md) §13 plans versions
-  of a file, with `sheet=` as the written form of `page=` and a `v=` on links of either form).
+  of a file, with a `v=` on links of either form).
   `/references/<key>#p=49` uses `p` for a printed page too (CITATIONS.md, Pages). One link may
   use both forms.
 - **`text`** is [Text Fragments](https://wicg.github.io/scroll-to-text-fragment/)' grammar, minus
@@ -99,9 +103,10 @@ prefix, start, end, suffix = word *("+" word)
     One at an end says only that the quotation starts or stops mid-sentence, and would leave an
     empty segment.
 - **Pairing.** Parameters are read left to right, as RFC 8118 reads a PDF's own. Each `text`
-  belongs to the nearest `page` or `p` before it, so a `text` with no page before it is ignored,
-  and a page whose value doesn't read forgets the one before it. A `page` or a `p` with no
-  `text` after it is a **page link**, opened as a bare `#page=` is (§6). Anything else is
+  belongs to the nearest `sheet`, `page` or `p` before it, so a `text` with no page before it
+  is ignored, and a page whose value doesn't read forgets the one before it. A `sheet`, a
+  `page` or a `p` with no `text` after it is a **page link**, opened as a bare `#sheet=` is
+  (§6). Anything else is
   ignored too, as `pdf-open-params.ts` already ignores what it doesn't support.
 - **Words are letters and digits only.** Writers drop punctuation, quotation marks, dashes,
   hyphens and apostrophes, fold accents to their base letters, keep case as written, and join
@@ -122,11 +127,11 @@ prefix, start, end, suffix = word *("+" word)
 stores today:
 
 ```
-#page=122&text=could+not+yet+call+his+soul+his+own                   a whole passage
-#page=8&text=a+direction+in,a+beatific+consummation                  first words, last words
-#page=30&text=law+of+participation                                   the first of two on the page
-#page=30&text=identity+but+of+the-,law+of+participation              the second, by its prefix
-#page=40&text=It+may+also,within+but+it&page=41&text=is+detected+primarily+without
+#sheet=122&text=could+not+yet+call+his+soul+his+own                  a whole passage
+#sheet=8&text=a+direction+in,a+beatific+consummation                 first words, last words
+#sheet=30&text=law+of+participation                                  the first of two on the page
+#sheet=30&text=identity+but+of+the-,law+of+participation             the second, by its prefix
+#sheet=40&text=It+may+also,within+but+it&sheet=41&text=is+detected+primarily+without
                                                                      one quote across a page break
 #p=8&text=a+direction+in...a+beatific+consummation                   words left out between two
 #p=12&text=the+human+soul...is+detected,primarily+without            a shortened second segment
@@ -135,7 +140,7 @@ stores today:
 **Why the fragment, not the query string.**
 
 - **A fragment names part of a resource** (RFC 3986), and every precedent for a place in a PDF
-  is one: RFC 8118's `page=`, `highlight=` and `search=`, and this viewer's own `#page=`.
+  is one: RFC 8118's `page=`, `highlight=` and `search=`, and this viewer's own `#sheet=`.
 - **It never reaches a server.** There's nothing in access logs, no proxy limit on URL length,
   and nothing in a `Referer`.
 - **There is nothing for the server to do with it.** The viewer is a client island behind
@@ -178,7 +183,7 @@ from pdfjs (§6), and the check from the latest version's `file_version.page_lab
 **A filled-in number is not a label.** `usablePageLabels` says whether a file has labels worth
 using, and fills an empty one with its sheet's number for the page box. On a file with usable
 labels, `p=5` never names a sheet whose own label is empty, in a link or in a citation: only
-`page=` names such a sheet. So a `p` is matched against the labels as read, and never against
+`sheet=` names such a sheet. So a `p` is matched against the labels as read, and never against
 what `usablePageLabels` returns.
 
 ### A quotation's segments
@@ -222,7 +227,8 @@ The viewer only ever receives plain segments.
 ## 3. How big
 
 Measured over the sample's 65 quotes, as relative URLs on that file's 36-character slug. The
-fixed part, `/pdf/<slug>#page=&text=`, is 53 characters of each.
+fixed part, `/pdf/<slug>#page=&text=`, is 53 characters of each, as the sample was measured:
+`sheet=` adds one to every figure below that holds a page.
 
 | Encoding | median | p90 | max |
 |---|---|---|---|
@@ -322,8 +328,8 @@ page (`captureTextTarget`, `capturePdfTextAnchor`).
 
 `usePdfFragment` (`src/components/pdf/use-pdf-fragment.ts`) resolves the fragment on arrival
 and on every `hashchange`, and `PdfAnnotationSurface` draws what it finds. `PdfViewer` applies
-`#page=` and `#p=` on its own (`pageFromHash`), so the viewer opens on the right page before
-the passage is found.
+`#sheet=` (or `#page=`) and `#p=` on its own (`pageFromHash`), so the viewer opens on the right
+page before the passage is found.
 
 **A `p=` waits for the labels**, which pdfjs reads on load (`usablePageLabels` in
 `PdfViewer.tsx`). The handle keeps them as read (`ownPageLabels`) beside the filled-in ones it
@@ -335,7 +341,7 @@ name the same sheets.
    (`src/lib/pdf-fragment.ts`). Each names a sheet or a label (`PageName`,
    `src/lib/pdf-open-params.ts`).
 2. **Find each passage on the sheets its page names**, in order (`sheetsNamed`): one for
-   `page=`, every sheet carrying the label for `p=`. Each page is read once per document, from
+   `sheet=`, every sheet carrying the label for `p=`. Each page is read once per document, from
    `pdf.getPage(n).getTextContent()` through `normalisePageText`: the same text the stored page
    text came from. The passage is matched by skeleton, each segment after the one before (§4).
    **The outline covers the whole range**, the words left out between segments included; how
@@ -351,7 +357,7 @@ name the same sheets.
      answers every miss as a file that holds none of them does (§8, "It reads as the
      operator"). It searches the stored page text (`FragmentChecker.sheetHolding`), so the
      viewer extracts no page beyond the one answered.
-   - This is what carries a `p=` link through labels that were corrected, and a `page=` link
+   - This is what carries a `p=` link through labels that were corrected, and a `sheet=` link
      through a sheet added or removed before it.
 4. **Measure its quads from the items' geometry**, with `quadsForRange`
    (`src/lib/pdf-quads.ts`). The offsets map the range to items, and each item's transform,
@@ -388,7 +394,7 @@ name the same sheets.
    - **A passage found elsewhere** names both pages, the one the link gave and the one it was
      found on: "On page 50, not 49:" before its words, since the row clamps them.
    - **Every page is named by its label**, as the rest of the viewer names it
-     (`pageLabelFor`), whichever form the link used. So a `page=53` miss reads "Not found on
+     (`pageLabelFor`), whichever form the link used. So a `sheet=53` miss reads "Not found on
      page 49" where sheet 53 is labelled 49. A `p=` whose label no sheet carries is named as
      the link wrote it, and its row goes nowhere, since no page is the one it names.
    - **The banner shows the PDF's words at the match, never the URL's.** Otherwise a crafted
@@ -405,15 +411,19 @@ unbroken passage, misses, and says "Not found".
 nothing. In a link that mixes the two forms it pairs a `p=`'s `text` with the `page=` before it,
 and reports that passage not found there.
 
+**A tab whose bundle predates `sheet=`** ignores it in the same way: it opens such a link at the
+first sheet and draws nothing, and pairs its `text`s with the `page=` or `p=` before them, if
+any.
+
 ## 7. Arriving signed out, or by an old slug
 
 **Sign-in hands the fragment on.** The PDF route's gate sends a signed-out reader to
 `signInPath(pathWithQuery(…, { sel }))`. No gate can put a fragment in `callbackUrl`, since
-none reaches a server, but the browser carries it onto `/sign-in?callbackUrl=…#page=…` (RFC
+none reaches a server, but the browser carries it onto `/sign-in?callbackUrl=…#sheet=…` (RFC
 9110 §10.2.2). The form then navigates through `withArrivalFragment`
 (`src/lib/sign-in-redirect.ts`), which appends that fragment when `callbackUrl` has none of its
 own. Search's page links and annotation permalinks ride along the same way, and a `p=` exactly
-as a `page=` does. The no-JS path can't see the hash, and can't run the viewer either.
+as a `sheet=` does. The no-JS path can't see the hash, and can't run the viewer either.
 
 **A renamed slug needs nothing.** The slug-history redirect's `Location` has no fragment, so the
 browser re-applies this one. That rule governs real HTTP redirects. Prose links are plain
@@ -441,12 +451,12 @@ extended alike.
 
 **Which page form a writer takes** (`pageNameForSheet`, `src/lib/pdf-page-labels.ts`):
 
-- **`p=` when the file has usable labels, and `page=` otherwise.** A `p=` written against a file
+- **`p=` when the file has usable labels, and `sheet=` otherwise.** A `p=` written against a file
   without labels is a sheet number by §2's rule 2, and would turn into a printed page the day
-  the file gained labels. The check warns on one, giving its `page=` form.
-- **`page=` also where the label repeats** and an earlier sheet with that label holds the
+  the file gained labels. The check warns on one, giving its `sheet=` form.
+- **`sheet=` also where the label repeats** and an earlier sheet with that label holds the
   passage, since rule 3 would draw it there.
-- **`page=` also for a sheet whose own label is empty**, which no `p` names.
+- **`sheet=` also for a sheet whose own label is empty**, which no `p` names.
 - **The writer's form is unchanged.** Uniqueness is still judged on the sheet that holds the
   passage.
 - **Search's page links** (`src/lib/search/pdfs.ts`) **and the cited-page route's redirect**
@@ -455,17 +465,18 @@ extended alike.
   - A page link has no passage for rule 3 to find, so it opens at the first sheet carrying its
     label.
   - A search hit starts from a sheet. It writes `p=` when that sheet is the first carrying its
-    own label, and `page=` otherwise, as for a sheet whose own label is empty. It reads the
+    own label, and `sheet=` otherwise, as for a sheet whose own label is empty. It reads the
     stored labels only, as its label does, so a file whose labels haven't been read yet is
     linked by sheet.
   - The redirect starts from a label (`pageNameForLabel`). On a file with usable labels it
-    writes `p=`, with the label as the file gives it, and on one without, `page=` with the
+    writes `p=`, with the label as the file gives it, and on one without, `sheet=` with the
     page as the sheet itself, if the file has that many. Its sheet is found by §2's rule, so a
     citation and a `p=` link of the same page land on the same sheet: a label matches trimmed
     and in any case, and a file whose labels are all empty takes the page as a sheet number. A
     file whose labels haven't been read yet has them read and stored on the first citation
     followed into it (`pdfMetadata`, MCP.md §8).
-- **Existing `page=` links stay as written.** Most of them are hand-written citations, which
+- **Existing `page=` links stay as written**, and are read as `sheet=` (§2). Most of them are
+  hand-written citations, which
   CITATIONS.md's "Converting the hand-written citations" turns into citation chips. A URL that
   conversion keeps as a referent gets `p=` where its file has usable labels.
 
@@ -499,11 +510,11 @@ sheet"). It reports, per link:
 - a page out of range, which is also a `p=N` past the end of a file without usable labels;
 - **a label no sheet carries**, with the page the passage is on when it occurs exactly once in
   the file;
-- **a warning for a `p=` on a file without usable labels**, with its `page=` form;
+- **a warning for a `p=` on a file without usable labels**, with its `sheet=` form;
 - **an unknown file**: no live file has the slug, past slugs followed. A link naming a past slug
   is a warning, since the redirect still carries it.
 
-**It reads page links too**: an href to `/pdf/<slug>` with a `page` or a `p` and no `text`
+**It reads page links too**: an href to `/pdf/<slug>` with a `sheet`, a `page` or a `p` and no `text`
 (`parseFragmentLinkHref`). A page past the end and a label no sheet carries are findings for
 one as for a passage, and so is a `p=` on a file without usable labels, in the integrity script
 and in MCP's write check.
@@ -531,8 +542,8 @@ Three properties of the check:
 It runs in:
 
 1. **The integrity script** (§9), over everything or over one doc.
-2. **A one-quote CLI**, `npx tsx scripts/pdf-fragment-link.ts <slug> <page> "<quote>"`, or
-   `--label <label>` in place of `<page>`. It prints the writer's form in whichever page form the
+2. **A one-quote CLI**, `npx tsx scripts/pdf-fragment-link.ts <slug> <sheet> "<quote>"`, or
+   `--page <label>` in place of `<sheet>` (`--label`, its older name, is read the same). It prints the writer's form in whichever page form the
    file takes, or the reason there isn't one, for checking a quote before writing it.
    - The page is a hint: it tries the page given, then its neighbours, then the one page in the
      file that holds the quote once. A label is tried on every sheet carrying it first, then on
@@ -547,7 +558,7 @@ It runs in:
    miss, a page past the end or a label no sheet carries refuses the call with `no_match`, as
    MCP.md §7 answers an anchor (MCP.md §8), and a `p=` on a file without labels is a warning.
    `create_doc`'s description tells the model to write the printed page, and `read` takes a
-   `p=` link as it takes a `page=` one.
+   `p=` link as it takes a `sheet=` one.
 
 **Any text that holds a link holds them.**
 
@@ -614,9 +625,9 @@ When to run it:
 
 | | |
 |---|---|
-| `src/lib/pdf-fragment.ts` | the grammar and its segments, the skeleton match, the writer's form, the cross-page split; unit-tested, with pairing by `page` and `p` |
+| `src/lib/pdf-fragment.ts` | the grammar and its segments, the skeleton match, the writer's form, the cross-page split; unit-tested, with pairing by `sheet`, `page` and `p` |
 | `src/lib/pdf-passage-pieces.ts` (`quotationText`, `passagePieces`) | a written quotation as segments, and those settled against the pages: brackets and page breaks; unit-tested |
-| `src/lib/pdf-open-params.ts` | a page as a fragment names it, `page=` or `p=` (`PageName`), read and written; unit-tested |
+| `src/lib/pdf-open-params.ts` | a page as a fragment names it, `sheet=` (or `page=`, read only) or `p=` (`PageName`), read and written; unit-tested |
 | `src/lib/pdf-page-labels.ts` (`sheetsLabelled`, `sheetsNamed`, `pageNameForSheet`, `pageNameForLabel`) | which sheet a label names, and which form a writer takes; unit-tested: repeated labels, a file without labels, a label no sheet carries, a sheet whose own label is empty |
 | `src/lib/pdf-quads.ts` | the quads of a range of normalised text, from text items; unit-tested |
 | `src/components/pdf/use-pdf-fragment.ts` | the viewer's resolution, with the canvas measurer |
@@ -749,7 +760,8 @@ measured again.
 - **RFC 8118, the `application/pdf` media type** ([RFC](https://www.rfc-editor.org/rfc/rfc8118.html)).
   - Fragment parameters such as `page=`, `nameddest=`, `highlight=<l,r,t,b>` and `search=<words>`,
     separated by `&` and processed left to right.
-  - `#page=` is what this viewer reads; `highlight=` is the geometric form rejected in §2.
+  - `#page=` is what this viewer reads, as `sheet=`'s older name (§2); `highlight=` is the
+    geometric form rejected in §2.
 - **W3C Selectors and States** (2017, [note](https://www.w3.org/TR/selectors-states/), §5).
   - The general form: `#selector(type=TextQuoteSelector,exact=…,prefix=…,suffix=…)`.
   - The note itself warns that such URLs grow long.

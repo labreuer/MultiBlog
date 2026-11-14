@@ -22,9 +22,10 @@ import { readBoundFor, type ReadArgs } from "./args";
 // label, an outline entry's pages, every occurrence of a quote with its
 // surroundings, and a fragment link read as its passage.
 //
-// **Numbering.** A tool's `page` is the 1-based sheet number, as `#page=` and
-// search's hits use it; responses carry the label beside it wherever the PDF
-// has usable ones. Labels are a lookup, never a coordinate.
+// **Numbering.** A tool's `sheet` is the 1-based sheet number, as `#sheet=`
+// and search's hits use it, and its `page` is the printed page, the sheet's
+// label; responses carry the page beside the sheet wherever the PDF has
+// usable labels. Labels are a lookup, never a coordinate.
 
 /** About this much of the page either side of a quote or a fragment link's passage. */
 const SURROUNDINGS = 300;
@@ -49,7 +50,7 @@ function allPages(pageCount: number): number[] {
   return Array.from({ length: pageCount }, (_, index) => index);
 }
 
-/** The outline as a read shows it: entries to a depth, each with its page, label and how many pages it spans. */
+/** The outline as a read shows it: entries to a depth, each with its sheet, page and how many sheets it spans. */
 function outlineOf(
   entries: readonly StoredOutlineEntry[],
   labels: string[] | null,
@@ -94,9 +95,9 @@ function outlineOf(
       title: entry.title,
       ...(pages
         ? {
-            page: pages.from + 1,
-            ...(labels ? { label: labels[pages.from] } : {}),
-            pages: pages.to - pages.from + 1,
+            sheet: pages.from + 1,
+            ...(labels ? { page: labels[pages.from] } : {}),
+            sheets: pages.to - pages.from + 1,
           }
         : {}),
     });
@@ -113,7 +114,7 @@ function findEntry(entries: readonly StoredOutlineEntry[], title: string): numbe
     throw new ApiError("ambiguous", `More than one outline entry is titled "${title}".`, {
       entries: found.slice(0, ERROR_LIST_CAP).map((index) => ({
         depth: entries[index].depth + 1,
-        page: entries[index].pageIndex === null ? null : entries[index].pageIndex! + 1,
+        sheet: entries[index].pageIndex === null ? null : entries[index].pageIndex! + 1,
       })),
       total: found.length,
     });
@@ -122,9 +123,9 @@ function findEntry(entries: readonly StoredOutlineEntry[], title: string): numbe
 }
 
 /**
- * Pages as a read returns them, fitted to the token's bound: each with its sheet
- * number, its label and its text, and the next page to ask for when they don't
- * all fit.
+ * Sheets as a read returns them, fitted to the token's bound: each with its
+ * number, its printed page and its text, and the next sheet to ask for when
+ * they don't all fit.
  */
 async function pagesResult(file: ResolvedFile, labels: string[] | null, indexes: number[], maxChars: number): Promise<ToolResult> {
   const texts = await pageTexts(file.versionId, indexes);
@@ -132,7 +133,7 @@ async function pagesResult(file: ResolvedFile, labels: string[] | null, indexes:
   let size = 0;
   let next: number | null = null;
   for (const index of indexes) {
-    const entry = { page: index + 1, ...(labels ? { label: labels[index] } : {}), text: texts.get(index) ?? "" };
+    const entry = { sheet: index + 1, ...(labels ? { page: labels[index] } : {}), text: texts.get(index) ?? "" };
     const cost = JSON.stringify(entry).length;
     if (pages.length > 0 && size + cost > maxChars - 1000) {
       next = index + 1;
@@ -141,21 +142,21 @@ async function pagesResult(file: ResolvedFile, labels: string[] | null, indexes:
     pages.push(entry);
     size += cost;
   }
-  return { kind: "pdf-pages", url: file.url, pages, ...(next !== null ? { next } : {}) };
+  return { kind: "pdf-pages", url: file.url, sheets: pages, ...(next !== null ? { next } : {}) };
 }
 
-/** `1-based N` or `N-M` into 0-based page indexes, inside the file. */
+/** `1-based N` or `N-M` sheets into 0-based page indexes, inside the file. */
 function pageRange(spec: string, pageCount: number): number[] {
   const [a, b] = spec.split("-").map(Number);
   const from = a;
   const to = b ?? a;
   if (from < 1 || to < from || from > pageCount) {
-    throw invalid(`This PDF has ${pageCount} pages; ${spec} isn't a range of them.`);
+    throw invalid(`This PDF has ${pageCount} sheets; ${spec} isn't a range of them.`);
   }
   return Array.from({ length: Math.min(to, pageCount) - from + 1 }, (_, k) => from - 1 + k);
 }
 
-/** What the fragment names: a page (`#page=N`, or `#p=<label>` by printed page) and whether it has a fragment link's `text` parameters. */
+/** What the fragment names: a page (`#sheet=N`, or `#p=<label>` by printed page) and whether it has a fragment link's `text` parameters. */
 function viewerFragment(fragment: string): { page: PageName | null; hasText: boolean } {
   const hasText = fragmentParams(fragment).some(([key]) => key === "text");
   return { page: pageFromHash(`#${fragment}`), hasText };
@@ -163,13 +164,13 @@ function viewerFragment(fragment: string): { page: PageName | null; hasText: boo
 
 /** A page as an answer names it. */
 function pageText(page: PageName): string {
-  return "sheet" in page ? `page ${page.sheet}` : `the page labelled ${page.label}`;
+  return "sheet" in page ? `sheet ${page.sheet}` : `page ${page.label}`;
 }
 
 export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArgs, fragment: string, extras: () => Promise<ToolResult>): Promise<ToolResult> {
   if (file.pageCount === null) return readPlainFile(file);
   for (const docOnly of ["since", "section", "from", "to", "whole"] as const) {
-    if (args[docOnly] !== undefined) throw invalid(`${docOnly} is for a doc; a PDF reads by page, label or outline entry.`);
+    if (args[docOnly] !== undefined) throw invalid(`${docOnly} is for a doc; a PDF reads by sheet, sheets, page or outline entry.`);
   }
   const metadata = await pdfMetadata(file.versionId);
   const labels = metadata ? usablePageLabels(metadata.pageLabels, file.pageCount) : null;
@@ -194,24 +195,24 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
     return pagesResult(file, labels, allPages(pageCount).slice(span.from, span.to + 1), maxChars);
   }
 
-  const asked = [args.page !== undefined, args.pages !== undefined, args.label !== undefined].filter(Boolean).length;
-  if (asked > 1) throw invalid("Name pages one way per read: page, pages or label.");
-  if (args.label !== undefined) {
-    const indexes = pagesLabelled(labels, args.label).filter((index) => index < pageCount);
-    if (indexes.length === 0) throw new ApiError("not_found", `No page of this PDF is labelled "${args.label}".`);
+  const asked = [args.sheet !== undefined, args.sheets !== undefined, args.page !== undefined].filter(Boolean).length;
+  if (asked > 1) throw invalid("Name sheets one way per read: sheet, sheets or page.");
+  if (args.page !== undefined) {
+    const indexes = pagesLabelled(labels, args.page).filter((index) => index < pageCount);
+    if (indexes.length === 0) throw new ApiError("not_found", `No sheet of this PDF has the printed page "${args.page}".`);
     return pagesResult(file, labels, indexes, maxChars);
   }
-  if (args.pages !== undefined) return pagesResult(file, labels, pageRange(args.pages, pageCount), maxChars);
+  if (args.sheets !== undefined) return pagesResult(file, labels, pageRange(args.sheets, pageCount), maxChars);
   // A page link opens at the first sheet carrying its label, as the viewer does.
-  if (args.page === undefined && fragmentPage !== null && "label" in fragmentPage) {
+  if (args.sheet === undefined && fragmentPage !== null && "label" in fragmentPage) {
     const sheets = sheetsLabelled(ownLabels, pageCount, fragmentPage.label);
-    if (sheets.length === 0) throw new ApiError("not_found", `No page of this PDF is labelled "${fragmentPage.label}".`);
+    if (sheets.length === 0) throw new ApiError("not_found", `No sheet of this PDF has the printed page "${fragmentPage.label}".`);
     return pagesResult(file, labels, [sheets[0]], maxChars);
   }
-  const page = args.page ?? (fragmentPage && "sheet" in fragmentPage ? fragmentPage.sheet : null);
-  if (page !== null && page !== undefined) {
-    if (page > pageCount) throw invalid(`This PDF has ${pageCount} pages.`);
-    return pagesResult(file, labels, [page - 1], maxChars);
+  const sheet = args.sheet ?? (fragmentPage && "sheet" in fragmentPage ? fragmentPage.sheet : null);
+  if (sheet !== null && sheet !== undefined) {
+    if (sheet > pageCount) throw invalid(`This PDF has ${pageCount} sheets.`);
+    return pagesResult(file, labels, [sheet - 1], maxChars);
   }
 
   // The file itself.
@@ -227,7 +228,7 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
     title: file.title,
     filename: file.filename,
     visibility: file.visibility,
-    pages: pageCount,
+    sheets: pageCount,
     ...(labels ? { labels: labelRanges(labels) } : {}),
     ...(outline.entries.length > 0 ? { outline: { entries: outline.entries, ...(outline.deeper ? { deeper: outline.deeper } : {}) } } : {}),
     ...(row ? { updated: dayOf(row.updatedAt) } : {}),
@@ -269,12 +270,12 @@ function surroundings(text: string, start: number, end: number) {
 async function aroundQuote(file: ResolvedFile, labels: string[] | null, args: ReadArgs): Promise<ToolResult> {
   const pageCount = file.pageCount!;
   const indexes =
-    args.page !== undefined
-      ? [args.page - 1]
-      : args.pages !== undefined
-        ? pageRange(args.pages, pageCount)
-        : args.label !== undefined
-          ? pagesLabelled(labels, args.label)
+    args.sheet !== undefined
+      ? [args.sheet - 1]
+      : args.sheets !== undefined
+        ? pageRange(args.sheets, pageCount)
+        : args.page !== undefined
+          ? pagesLabelled(labels, args.page)
           : allPages(pageCount);
   const texts = await pageTexts(file.versionId, indexes);
   const passage = (quote: string, prefix?: string, suffix?: string): PassageText => onePassage(quote, { prefix, suffix });
@@ -299,7 +300,7 @@ async function aroundQuote(file: ResolvedFile, labels: string[] | null, args: Re
       for (const window of overlapWindows(text, args.around!, 3)) {
         misses.push({
           score: window.score,
-          miss: { page: index + 1, ...(labels ? { label: labels[index] } : {}), text: text.slice(window.start, window.end) },
+          miss: { sheet: index + 1, ...(labels ? { page: labels[index] } : {}), text: text.slice(window.start, window.end) },
         });
       }
     }
@@ -317,8 +318,8 @@ async function aroundQuote(file: ResolvedFile, labels: string[] | null, args: Re
     total: found.length,
     ...(viaMarkdown ? { matchedAs: "markdown" } : {}),
     occurrences: found.slice(0, limit).map(({ index, range }) => ({
-      page: index + 1,
-      ...(labels ? { label: labels[index] } : {}),
+      sheet: index + 1,
+      ...(labels ? { page: labels[index] } : {}),
       ...surroundings(texts.get(index) ?? "", range.start, range.end),
     })),
   };
@@ -374,16 +375,16 @@ async function fragmentPassages(
           ? {
               matchedUpTo: finding.matchedUpTo,
               pageHasThere: finding.pageHasThere,
-              ...(finding.foundOnPage !== null ? { foundOnPage: finding.foundOnPage } : {}),
+              ...(finding.foundOnPage !== null ? { foundOnSheet: finding.foundOnPage } : {}),
             }
           : finding.kind === "page-out-of-range"
-            ? { pageCount }
+            ? { sheetCount: pageCount }
             : finding.kind === "no-such-label"
-              ? { noSuchLabel: true, ...(finding.foundOnPage !== null ? { foundOnPage: finding.foundOnPage } : {}) }
+              ? { noSuchPage: true, ...(finding.foundOnPage !== null ? { foundOnSheet: finding.foundOnPage } : {}) }
               : {}),
       });
     }
-    out.push({ page: found.index + 1, ...(labels ? { label: labels[found.index] } : {}), ...surroundings(found.text, found.range.start, found.range.end) });
+    out.push({ sheet: found.index + 1, ...(labels ? { page: labels[found.index] } : {}), ...surroundings(found.text, found.range.start, found.range.end) });
   }
   return { kind: "pdf-passages", url: file.url, passages: out };
 }

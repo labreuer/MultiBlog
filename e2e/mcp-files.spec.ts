@@ -37,7 +37,7 @@ test("upload and curl: a PRIVATE file owned by the actor and the issuer; the sam
     });
 
     const read = await agent.call("read", { url: first.body.url });
-    expect(read.result).toMatchObject({ kind: "pdf", pages: 2, labels: expect.any(Array) });
+    expect(read.result).toMatchObject({ kind: "pdf", sheets: 2, labels: expect.any(Array) });
 
     // The same bytes, under another title: the file already there.
     const again = await upload(`&title=${encodeURIComponent(`${title} again`)}`);

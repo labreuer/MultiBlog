@@ -25,6 +25,8 @@ test("a text alone is a quotation, read before decoding as a fragment's is", () 
 test("with a page, the page and text pairs are the fragment, in order and as written", () => {
   assert.deepEqual(parseCitedQuery("p=49&text=a+b...c&page=54&text=d&zoom=200"), { kind: "pairs", fragment: "p=49&text=a+b...c&page=54&text=d" });
   assert.deepEqual(parseCitedQuery("?page=3"), { kind: "pairs", fragment: "page=3" });
+  // sheet= is the written form of page=, and is kept as one.
+  assert.deepEqual(parseCitedQuery("sheet=3&text=a&zoom=200"), { kind: "pairs", fragment: "sheet=3&text=a" });
 });
 
 test("the cited pages: one, or the first and last a locator of several names", () => {

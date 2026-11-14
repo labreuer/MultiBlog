@@ -179,7 +179,8 @@ export function labelStyle(label: string): LabelStyle {
   return null;
 }
 
-export type LabelRange = { sheets: string; labels: string };
+/** A run of sheets and the printed pages on them, in MCP's two words (docs/MCP.md §8). */
+export type LabelRange = { sheets: string; pages: string };
 
 /**
  * Labels as ranges: each run of sheets whose labels count up by one, in one
@@ -200,7 +201,7 @@ export function labelRanges(labels: readonly string[]): LabelRange[] {
     }
     ranges.push({
       sheets: start === end ? String(start + 1) : `${start + 1}-${end + 1}`,
-      labels: start === end ? labels[start] : `${labels[start]}-${labels[end]}`,
+      pages: start === end ? labels[start] : `${labels[start]}-${labels[end]}`,
     });
     start = end + 1;
   }
@@ -230,7 +231,7 @@ export function pagesLabelled(labels: readonly string[] | null, label: string): 
 // them — never `usablePageLabels`' copy, whose empty labels are filled with
 // their sheet's number for the page box. A filled-in number is not a label, so on a
 // labelled file `p=5` never names a sheet whose own label is empty; only
-// `page=` names such a sheet.
+// `sheet=` names such a sheet.
 
 /**
  * The 0-based sheets the printed page `label` names, in order. On a file with
@@ -257,9 +258,9 @@ export function sheetsNamed(page: PageName, ownLabels: readonly string[] | null 
 
 /**
  * How a writer names the sheet at 0-based `sheetIndex` (PDF_FRAGMENT_LINKS.md
- * §8): `p=` with its own label where the file has usable labels, and `page=`
+ * §8): `p=` with its own label where the file has usable labels, and `sheet=`
  * where it has none, where a `p=` would turn into a printed page the day the
- * file gained labels. Also `page=` for a sheet whose own label is empty,
+ * file gained labels. Also `sheet=` for a sheet whose own label is empty,
  * which no `p` names, and where an earlier sheet carrying the same label
  * `holds` what the link names, since a `p=` would find it there first.
  *
@@ -283,7 +284,7 @@ export function pageNameForSheet(
 /**
  * How a writer names the printed page `label` in a link that has no passage,
  * the cited-page redirect's: `p=` with the label as the file gives it, on a
- * file with usable labels; `page=` with its sheet on one without, where
+ * file with usable labels; `sheet=` with its sheet on one without, where
  * `p=` would turn into a printed page the day the file gained labels. Null
  * when no sheet carries it.
  */

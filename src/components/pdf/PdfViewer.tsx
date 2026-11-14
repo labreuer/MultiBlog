@@ -265,7 +265,7 @@ export default function PdfViewer({
       // Settable only once the first page has been laid out; assigning earlier
       // is silently dropped and the viewer opens at some default.
       viewer.currentScaleValue = "page-width";
-      // `#page=<n>` or `#p=<label>` (pdf-open-params.ts) — a search hit on a
+      // `#sheet=<n>` or `#p=<label>` (pdf-open-params.ts) — a search hit on a
       // page opens the document there (docs/FULLTEXT.md §7). After the scale,
       // since a page jump is a scroll position and the scale change would
       // move it, and after the labels have been read, since a `p=` needs them.

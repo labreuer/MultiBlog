@@ -9,7 +9,7 @@ the `anchored-links` branch). UI sketch, drawn in `globals.css`'s own tokens:
 editing.
 
 A single passage of one PDF can also be a **fragment link**, a URL with no row at all
-(`/pdf/<slug>#page=<n>&text=<words>`): [PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md). It is drawn
+(`/pdf/<slug>#sheet=<n>&text=<words>`): [PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md). It is drawn
 with the same outline as a followed link's PDF part, and everything below about rows, the tray,
 the landing route and `/links` is what it does without.
 

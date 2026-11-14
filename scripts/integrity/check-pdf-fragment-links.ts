@@ -1,13 +1,13 @@
 // Verifies that every PDF fragment link still finds its passage
 // (docs/PDF_FRAGMENT_LINKS.md §9).
 //
-// A fragment link (`/pdf/<slug>#page=<n>&text=<words>`, or `#p=<label>&…` by
+// A fragment link (`/pdf/<slug>#sheet=<n>&text=<words>`, or `#p=<label>&…` by
 // printed page) has no row: it lives in the href of whatever text holds it,
 // and the viewer finds its passage again on every open. So nothing else
 // notices one going wrong. A link written against the wrong page, a quote
 // with a word the PDF spells differently, or a pdfjs bump that changes which
 // letters a page extracts shows only when someone follows the link. This is
-// the thing that notices. A page link (`#page=<n>` or `#p=<label>` and no
+// the thing that notices. A page link (`#sheet=<n>` or `#p=<label>` and no
 // `text`) is checked for its page.
 //
 // What it reads: link marks in docs' `proseJson`, posts' `proseJson`, comment
@@ -33,7 +33,7 @@
 //   warn   a passage its page holds more than once (the link points at the
 //          first), a link naming a file's past slug (it still works, through
 //          the slug-history redirect), and a `p=` on a file without usable
-//          page labels, where it is a sheet number (with its `page=` form)
+//          page labels, where it is a sheet number (with its `sheet=` form)
 //
 // And for a citation's passage:
 //   ERROR  a quotation the cited page doesn't hold, a cited page no sheet
@@ -121,7 +121,7 @@ function passageText(passage: FragmentPassage): string {
 /** The warning for a `p=` on a file without usable labels, where it is the sheet number it names. */
 function unlabelled(where: string, page: PageName, sheet: number, usableLabels: boolean | null): void {
   if ("label" in page && usableLabels === false) {
-    report("warn", where, "unlabelled-p", `p=${page.label}: the file has no page labels, so this is a sheet number; write page=${sheet}`);
+    report("warn", where, "unlabelled-p", `p=${page.label}: the file has no page labels, so this is a sheet number; write sheet=${sheet}`);
   }
 }
 

@@ -100,19 +100,19 @@ test("a labels array out of step with the page count still answers", () => {
 test("labelRanges folds a counted run into one entry and leaves anything else alone", () => {
   const labels = ["Cover", "i", "ii", "iii", "1", "2", "3", "A-1", "A-2", "Index"];
   assert.deepEqual(labelRanges(labels), [
-    { sheets: "1", labels: "Cover" },
-    { sheets: "2-4", labels: "i-iii" },
-    { sheets: "5-7", labels: "1-3" },
-    { sheets: "8-9", labels: "A-1-A-2" },
-    { sheets: "10", labels: "Index" },
+    { sheets: "1", pages: "Cover" },
+    { sheets: "2-4", pages: "i-iii" },
+    { sheets: "5-7", pages: "1-3" },
+    { sheets: "8-9", pages: "A-1-A-2" },
+    { sheets: "10", pages: "Index" },
   ]);
   // A restart, a skip and a change of case each start a new range.
   assert.deepEqual(labelRanges(["1", "2", "1", "2", "5", "IV", "v"]), [
-    { sheets: "1-2", labels: "1-2" },
-    { sheets: "3-4", labels: "1-2" },
-    { sheets: "5", labels: "5" },
-    { sheets: "6", labels: "IV" },
-    { sheets: "7", labels: "v" },
+    { sheets: "1-2", pages: "1-2" },
+    { sheets: "3-4", pages: "1-2" },
+    { sheets: "5", pages: "5" },
+    { sheets: "6", pages: "IV" },
+    { sheets: "7", pages: "v" },
   ]);
   assert.deepEqual(labelRanges([]), []);
 });

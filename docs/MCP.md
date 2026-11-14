@@ -1197,8 +1197,8 @@ exported pieces (`normalizeForMatch`, `flattenForMatch`, `quotedTextAt`):
 - near misses, for `no_match`.
 
 **On a PDF**, the quote is searched for in the page text (§8), optionally restricted to a
-`page` or `label`, by its **skeleton**: its letters and digits in order, with accents and case
-folded, starting and ending on a word boundary. A PDF's extracted text splits and joins words,
+`sheet` or a printed `page`, by its **skeleton**: its letters and digits in order, with accents
+and case folded, starting and ending on a word boundary. A PDF's extracted text splits and joins words,
 which no folding of typography undoes (§8).
 PDF fragment links match by the same rule, built as `skeletonOf` and `resolvePassage` in
 `src/lib/pdf-fragment.ts` ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md) §4).
@@ -1207,7 +1207,7 @@ retry as Markdown; only a match anchors; ambiguity is refused; and near misses a
 never anchored.
 
 **The same matching is a read.** `read` with `around` (§6, §8) runs it and writes nothing:
-whether a quote is really in a doc or PDF, where (its blocks, or its page and label), and
+whether a quote is really in a doc or PDF, where (its blocks, or its sheet and page), and
 what surrounds it. That is the question research asks most of a citation.
 
 ## 8. PDFs
@@ -1282,17 +1282,23 @@ everything the bytes decide is ([PDF.md](PDF.md) §13).
   `src/lib/pdf-page-labels.ts` is pure.
 - **A read returns labels as ranges**, never one string per page. A run of sheets whose labels
   count up by one, in one style and with one prefix, is one entry, such as
-  `{ "sheets": "19-471", "labels": "1-453" }`; any other label stands alone. For a 471-page
+  `{ "sheets": "19-471", "pages": "1-453" }`; any other label stands alone. For a 471-page
   book with roman front matter that is 28 tokens, where one string per page is 948. The column
   keeps one string per page, which a lookup by label wants.
-- **Labels are a lookup, never a coordinate.** A request may name pages by label, but every
+- **Labels are a lookup, never a coordinate.** A request may name a printed page, but every
   stored anchor keeps `pageIndex`, so [PDF.md](PDF.md)'s "a label never enters a computation"
   holds.
 - **Labels are not unique.** Front matter and body can both have a page "1". A label therefore
   resolves to every page carrying it, where the viewer's page box takes the first.
-- **Numbering.** A tool's `page` is the 1-based sheet number, as `#page=` and search's hits
-  use it. The viewer's page box shows the label instead wherever the PDF has usable ones, with
-  the sheet number in its tooltip. Responses carry both.
+- **Numbering: a sheet and a page.** A tool's `sheet` is the 1-based sheet number, as
+  `#sheet=` and search's hits use it, `sheets` a range of them, and its `page` is the printed
+  page, a sheet's label (PDF.md §13, "Links into the file"). The viewer's page box shows the
+  label wherever the PDF has usable ones, with the sheet number in its tooltip. An answer
+  carries both under the same two names, `{ "sheet": 53, "page": "49" }`, the page only where
+  the PDF has usable labels. A count is of sheets: a file's `sheets`, an outline entry's
+  `sheets`, a miss's `foundOnSheet`, a page past the end's `sheetCount`.
+  - **A call that passes `page` as a number is refused**, since `page` is a label and a
+    string. That is what a call written before the rename does, when `page` was the sheet.
 - **Search's page hits carry the label too.** `/search` can then show "p. xii" where it shows
   "p. 12" today. This is display only, so PDF.md's rule holds.
 
@@ -1307,22 +1313,23 @@ filled the same way: lazily on first read. A book is read by chapter.
   destination doesn't resolve. NULL is "not computed" and `[]` "the PDF has none", as for
   labels.
 - **Reading.** A read of the file carries it to its first level, flat as a doc's outline is
-  (§6): each entry with its depth, its title, its sheet number and label, and how many pages
+  (§6): each entry with its depth, its title, its `sheet` and `page`, and how many `sheets`
   it spans, then how many entries lie deeper. `depth` opens more levels, and an entry named by
   its title keeps the entries inside it, as a doc's outline does for a section.
   A read can also name an entry to get its pages: from its page to the one before the next
   entry at its depth or above, as a doc's section runs to the next heading (§6). A title that
   occurs twice is refused, naming each.
 
-**Reading text.** `read` serves page text at the current text version: one page by sheet
-(`#page=`), several by range, or every page carrying a label. `around` a quote returns each
-occurrence's page, label and about 300 characters either side. A read of the file itself
-carries its title, page count, labels, outline and tags.
+**Reading text.** `read` serves page text at the current text version: one sheet (`sheet`,
+or `#sheet=`), several by range (`sheets`), or every sheet carrying a printed page (`page`, or
+`#p=`). `around` a quote returns each occurrence's sheet, page and about 300 characters either
+side. A read of the file itself carries its title, its count of `sheets`, its labels, outline
+and tags.
 
-**A fragment link reads as its passage.** `read` of `/pdf/<slug>#page=<n>&text=…`, or
+**A fragment link reads as its passage.** `read` of `/pdf/<slug>#sheet=<n>&text=…`, or
 `#p=<label>&text=…` by printed page, resolves each `text` as the viewer does (`resolvePassage`,
 on the first of the sheets its page names that holds it) and returns the passage with about 300
-characters either side, its page and its label, rather than the page. A `#p=<label>` with no
+characters either side, its sheet and its page, rather than the sheet. A `#p=<label>` with no
 `text` reads the first page carrying the label, where the viewer opens it. The books on the development
 instance average 2,500 to 3,250 characters a page, so following a summary's citations page by
 page would read mostly other text. A passage that isn't there answers `no_match` with what the
@@ -1342,7 +1349,7 @@ check below reports.
     "inter- national" is indexed as `inter` and `nation`, and a quote of "international" would
     find no page.
   - **So the locator scans.** It selects the file's rows at the current version, restricted
-    with `page_index = ANY(…)` when a page or label is named, and matches in JS.
+    with `page_index = ANY(…)` when a sheet or a printed page is named, and matches in JS.
 
 The locator's details:
 
@@ -1428,12 +1435,12 @@ property [PDF.md](PDF.md) §4 rests on: an anchor measured once is correct forev
 
 **Fragment links in what the MCP server writes are checked.** A doc or annotation body may link
 a PDF passage by URL alone, as a fragment link ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)):
-`/pdf/<slug>#p=<label>&text=<words>` by printed page, or `#page=<n>&text=<words>` by sheet.
+`/pdf/<slug>#p=<label>&text=<words>` by printed page, or `#sheet=<n>&text=<words>` by sheet.
 `create_doc`'s description tells the model to write the printed page, with the label a read
 gives it, and the sheet for a page with none. Each one is checked before anything is written,
 by the check the integrity script and the one-quote CLI already share: `FragmentChecker`
 (`src/lib/pdf-fragment-check.ts`), with `linkHrefsIn` to find the links in a body
-(`src/lib/pdf-fragment-findings.ts`). A page link, `#page=<n>` or `#p=<label>` with no `text`,
+(`src/lib/pdf-fragment-findings.ts`). A page link, `#sheet=<n>` or `#p=<label>` with no `text`,
 is checked for its page. So is a citation's passage, the link around a citation
 (`[[@bu, p. 49]](quote:prev)`): a quotation the cited page doesn't hold, and a `/pdf/` referent
 naming another work's PDF, are refused as `no_match` too ([CITATIONS.md](CITATIONS.md), "A
@@ -1460,12 +1467,12 @@ The answers:
 - **A miss refuses the call with `no_match`.** The answer names the link, says where its
   skeleton stops matching and what the page has there, and gives the page the passage is on
   when it occurs exactly once elsewhere in the file: the checker's `matchedUpTo`,
-  `pageHasThere` and `foundOnPage`. That is §7's answer for an anchor. An agent
+  `pageHasThere` and `foundOnPage`, which MCP answers as `foundOnSheet`. That is §7's answer for an anchor. An agent
   can fix the quote in the same turn, where otherwise a broken link shows only when someone
   follows it.
 - **A page past the end, or a label no sheet carries, refuses it with `no_match` too**, for a
   passage or a page link. A label no sheet carries gives the page the passage is on, as a miss
-  does. The answer says that a page with no label of its own is named by `page=`, since the
+  does. The answer says that a page with no label of its own is named by `sheet=`, since the
   labels a read shows fill such a page's in with its sheet number, and a `p` is never matched
   against those.
 - **A file the actor can't read is `not_found`**, the same as one that doesn't exist (§4), so the
@@ -1619,7 +1626,7 @@ checks read access to the container. The UI checks that only when the draft is c
     Read alone, by its URL or id, such a thread is rebuilt at its stamp, where its mark is by
     construction (`check-annotation-anchors`' `mark-at-stamp`), and carries the passage it had
     then. A list doesn't, to keep each read to one rebuild.
-  - **On a PDF**, an annotation carries its page, label and quote. **A reply** carries its
+  - **On a PDF**, an annotation carries its sheet, page and quote. **A reply** carries its
     quote in its parent's body.
 - **Each writer is a name, never an email.** The loaders name a writer through
   `displayNameOf` (`src/lib/display-name.ts`), which labels an account with no name
@@ -1646,7 +1653,7 @@ checks read access to the container. The UI checks that only when the draft is c
     `anchoredLinkForViewer` gives its parts, each group filtered by its own target's read rule
     and an unreadable group left out without a trace ([ANCHORED_LINKS.md](ANCHORED_LINKS.md)).
   - Each part carries its target's URL, kind and title, and its quote with prefix and suffix.
-    A PDF part adds its page and label.
+    A PDF part adds its sheet and page.
   - A doc part is resolved against the doc as read (§6) with `resolveAnchorInDoc`, and adds
     its block numbers, its heading and the read's `version`. A part that no longer resolves
     says so, and keeps its stored quote.
@@ -2002,7 +2009,7 @@ never parses a URL; it passes one back, and every tool takes one (§4, §15).
 |---|---|---|
 | Doc | `href`, `/doc/<slug>` | `chars` (above) |
 | Post | `href`: its public path once published, `/post/<id>/edit` before | Nothing. Never its doc's id (§13) |
-| PDF | `href`, `/pdf/<slug>`; each page by its 1-based number | Each page's label (§8) |
+| PDF | `href`, `/pdf/<slug>`; each sheet by its 1-based number, as `sheets` | Each sheet's printed `page` (§8); `moreSheets` |
 | Annotation | `id`, since its card's fragment changes when its writer renames themselves (§15) | Its container's `href`; the writer's `slug`, when the writer has a name; `parentId`, so hits group into threads; `status`, when it is RAISED |
 | Comment | `href`: its post's path and its card's fragment, which never changes (§15) | Nothing. Never the commenter's user id (§13) |
 
@@ -2188,8 +2195,8 @@ restore-to-a-point exists ([DOCS.md](DOCS.md), "Deferred").
 |---|---|
 | `/doc/<slug>`, also by id and with `/edit` | The doc whole, its outline, or a range of it (§6); `include` its annotations, or the links into it |
 | `/pdf/<slug>` | The file's title, page count, labels as ranges, outline and tags (§8); `include` as for a doc; an outline entry's pages |
-| `/pdf/<slug>#page=<n>`, or `#p=<label>` | That page's text, the first carrying the label; `pages` or `label` for others (§8) |
-| `/pdf/<slug>#page=<n>&text=…` or `#p=<label>&text=…`, a fragment link | Its passage, with its context, page and label (§8) |
+| `/pdf/<slug>#sheet=<n>`, or `#p=<label>` | That sheet's text, the first carrying the label; `sheet`, `sheets` or `page` for others (§8) |
+| `/pdf/<slug>#sheet=<n>&text=…` or `#p=<label>&text=…`, a fragment link | Its passage, with its context, sheet and page (§8) |
 | `/annotations` | The threads on every doc and PDF the actor can read, filtered as a container's are, grouped by container (§9) |
 | `/files/<slug>` | Any file, a .docx included: its title, filename, size and tags (§8); a PDF's text is read at `/pdf/<slug>` |
 | either, with an annotation card's fragment | That annotation's thread (§9) |
@@ -2496,7 +2503,7 @@ code beside each says why as well.
   parts. A read shows the numbers to the link's creator only: to anyone else a gap would say a
   part they can't read exists.
 - **A part's `on` is a doc or PDF**, not a fragment link; a fragment link's passage is quoted
-  with `page` instead.
+  with `sheet` or `page` instead.
 - **The `/links` page's query is unchanged.** The links into a target come from
   `linkPartsInto` (`src/lib/anchored-link-data.ts`), a query of its own beside the page's.
 

@@ -105,6 +105,17 @@ test("other parameters and an annotation permalink are ignored", () => {
   assert.deepEqual(parseFragmentPassages(""), []);
 });
 
+test("sheet= and page= are one parameter, each pairing with the texts after it", () => {
+  const passages = parseFragmentPassages("#sheet=3&text=a&page=4&text=b&p=xii&text=c");
+  assert.deepEqual(passages.map((p) => p.page), [{ sheet: 3 }, { sheet: 4 }, { label: "xii" }]);
+  // An unreadable sheet= forgets the page before it, as page= does.
+  assert.deepEqual(parseFragmentPassages("#page=3&text=a&sheet=x&text=b").map((p) => p.page), [{ sheet: 3 }]);
+  // What a writer writes reads back as itself.
+  const written = formatFragmentPassages(passages);
+  assert.equal(written, "sheet=3&text=a&sheet=4&text=b&p=xii&text=c");
+  assert.deepEqual(parseFragmentPassages(written), passages);
+});
+
 test("at most MAX_FRAGMENT_PASSAGES passages are read", () => {
   const hash = Array.from({ length: 20 }, (_, i) => `page=${i + 1}&text=word${i}`).join("&");
   assert.equal(parseFragmentPassages(hash).length, MAX_FRAGMENT_PASSAGES);
@@ -115,14 +126,14 @@ test("a writer emits letters and digits joined by +, folding accents and keeping
   assert.deepEqual(fragmentWords("Lévy-Bruhl’s ﬁnding"), ["Levy", "Bruhl", "s", "finding"]);
   assert.equal(
     formatFragmentPassages([{ page: { sheet: 30 }, ...whole("law of participation", { prefix: "identity, but of the" }) }]),
-    "page=30&text=identity+but+of+the-,law+of+participation",
+    "sheet=30&text=identity+but+of+the-,law+of+participation",
   );
   assert.equal(
     formatFragmentPassages([
       { page: { sheet: 40 }, prefix: null, segments: [{ start: "It may also", end: "within, but it" }], suffix: null },
       { page: { sheet: 41 }, prefix: null, segments: [{ start: "is detected", end: null }], suffix: "primarily" },
     ]),
-    "page=40&text=It+may+also,within+but+it&page=41&text=is+detected,-primarily",
+    "sheet=40&text=It+may+also,within+but+it&sheet=41&text=is+detected,-primarily",
   );
   // A printed page is written p=, and reads back as itself.
   const labelled = formatFragmentPassages([
@@ -133,7 +144,7 @@ test("a writer emits letters and digits joined by +, folding accents and keeping
   assert.deepEqual(parseFragmentPassages(labelled).map((p) => p.page), [{ label: "49" }, { label: "A 1" }]);
   // A letter with no ASCII base is percent-encoded, and survives the round trip.
   const greek = formatFragmentPassages([{ page: { sheet: 1 }, prefix: null, segments: [{ start: "εἴδωλον", end: null }], suffix: null }]);
-  assert.match(greek, /^page=1&text=%/);
+  assert.match(greek, /^sheet=1&text=%/);
   assert.equal(fragmentWords(parseFragmentPassages(greek)[0].segments[0].start).join(" "), fragmentWords("εἴδωλον").join(" "));
 });
 
