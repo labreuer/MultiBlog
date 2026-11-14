@@ -31,6 +31,34 @@ around it.
 6. **Pin `pdfjs-dist` to an exact version.** `PDFViewerApplication` and `PDFViewer` internals
    are not a public API and break across releases.
 
+### Mistakes that fail no check
+
+Read these before changing code that takes a file's id, reads `file`, `file_version` or
+`file_page_text`, links to `/pdf/…`, or writes an anchor with a PDF target. That is search,
+MCP, anchored links, tags and the listings as much as the viewer. Each mistake compiles,
+lints and works on every file that has one version. CLAUDE.md points here and holds none of
+it, so this list is the whole of the warning.
+
+- **A PDF's bytes, page text, labels and anchors are a version's, never the file's** (§13,
+  "Versions"). A file's id and a version's are both strings, and a migrated version 1 has its
+  file's id, so passing one for the other works on every file uploaded before versions
+  existed. Only a file whose version has an id of its own shows the mistake, and the e2e
+  fixture's is the only one (`addTestFileVersion`).
+- **A link to a note, a card or a link part on a PDF is built by `pdfPath` from the version
+  the note is on** (`noteVersions`; a reply's is its root's), never from a template string
+  (§13, "Addresses"). One written as `/pdf/${slug}` lands on the note's entry in the list of
+  notes on other versions, and not on its card.
+- **A surface draws only the notes and link parts of the version it shows.** Notes are
+  narrowed on the server. A followed link's parts and the open link's are another table's
+  rows and are filtered in the browser, so a new source of drawn targets needs its own
+  filter. A part drawn on another version's sheets sits over other ink.
+- **A capture's version is checked inside the transaction that inserts its row**
+  (`assertCaptureVersion`), never before it. A promotion between an earlier check and the
+  insert puts the row on a version its page didn't show.
+
+`e2e/pdf-versions.spec.ts` guards the first three. No test can tell a check inside the
+transaction from one just before it.
+
 ---
 
 ## 1. Why PDF.js

@@ -202,17 +202,10 @@ before changing the behavior it describes.
   plugin, no re-resolution, no text-version stamp to chase. Don't reach for the doc side's drift machinery.
   The one thing that *can* invalidate a stored anchor is our own normaliser, so bump
   `NORMALISER_VERSION` (`src/lib/pdf-text.ts`) on **any** behavioural change. docs/PDF.md §4.
-- **A PDF's bytes, page text, labels and anchors are a *version's*, never the file's.** A
-  file's id and a version's are both strings, and a migrated version 1 has its file's id, so
-  passing one for the other compiles and works on every old file: only a fixture's file,
-  whose version has an id of its own, fails. Three more things fail no check. A link to a
-  note, a card or a link part on a PDF goes through `pdfPath` with the note's version
-  (`noteVersions`, a reply's being its root's), or it lands on the wrong page. A surface
-  draws only the notes and link parts whose version it shows, and the parts are filtered in
-  the browser. And a capture's version is checked inside the transaction that inserts
-  (`assertCaptureVersion`), never before it. `e2e/pdf-versions.spec.ts` guards the first
-  three; no test can tell a check inside the transaction from one before it. docs/PDF.md
-  §13, "Versions" and "Addresses".
+- **Before changing code that takes a file's id, reads `file`, `file_version` or
+  `file_page_text`, links to `/pdf/…` or writes an anchor with a PDF target, read docs/PDF.md
+  §0, "Mistakes that fail no check".** Search, MCP, links and tags are such code, not only
+  the viewer. A file's id passed for a version's compiles and works on every real file.
 - **Bumping `pdfjs-dist` is never routine**, and neither is deleting the test that looks
   trivial. Pinning protects the *API* pdfjs offers, not the JavaScript runtime it assumes
   underneath, and WebKit ships those built-ins late or not at all — so a bump needs
