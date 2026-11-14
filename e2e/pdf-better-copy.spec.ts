@@ -15,13 +15,14 @@ import {
   getFileAnchorMoves,
   getFileAnchorRows,
   getFileVersionFacts,
+  makeVersionFault,
   setTestReferenceFile,
   undoCarryInSql,
   type TestAnchorRow,
   type TestFile,
 } from "./db";
 import { callTool, createAgent } from "./mcp";
-import { expectAddress, expectSheetText, selectPhrase, token, waitForViewer, type Page } from "./pdf-version-helpers";
+import { checkFileVersions, expectAddress, expectSheetText, selectPhrase, token, waitForViewer, type Page } from "./pdf-version-helpers";
 import { buildTestPdf, type TestPageLabelRange } from "../scripts/make-test-pdf";
 
 // docs/PDF.md §13 — a better copy of the same text: uploaded as one, its
@@ -208,7 +209,10 @@ test.describe("a better copy of the same text", () => {
       await expectAddress(page, `${at}/v/1#sheet=1`);
 
       // Backwards, on the earlier version's own address: the latest's sheet 1 is its sheet 2.
-      await page.goto(`${at}/v/1#sheet=1&v=2&text=law+of+participation`);
+      // From another page: the address is already this path, still hydrating after the
+      // viewer's own `location.replace`, and a fragment changed then is written back
+      // over by Next's router (e2e/README.md, "A fragment changed while a page hydrates").
+      await follow(page, `${at}/v/1#sheet=1&v=2&text=law+of+participation`);
       await waitForViewer(page);
       await expect(fragmentBanner(page).getByTestId("pdf-fragment-carried")).toContainText("Read as version 2: its sheet 1 is sheet 2 here", { timeout: 30_000 });
       // The blank sheet the better copy gained is one the first copy lacks.
@@ -536,6 +540,9 @@ test.describe("a better copy of the same text", () => {
       });
       await expect(two.page.getByTestId("pdf-other-version-notes").locator(`[data-thread-id="${later}"]`).getByTestId("pdf-note-moved-to")).toHaveCount(0);
 
+      // ---- the integrity check, over two carries and a mark ------------------------
+      expect((await checkFileVersions(file.id)).stdout).toContain("0 error(s).");
+
       // ---- each carry replayed backwards, in SQL --------------------------------
       // The history holds what an undo needs: every anchor's row is again what it was.
       expect(await undoCarryInSql(secondCarry)).toEqual({ moves: 1, maps: 0 });
@@ -545,6 +552,8 @@ test.describe("a better copy of the same text", () => {
       expect(restored.filter((row) => row.id !== later && row.id !== laterKept)).toEqual(before);
       // Nothing of either carry is left: only the mark, which no carry made.
       expect((await getFileAnchorMoves(file.id)).map((move) => ({ anchorId: move.anchorId, toNumber: move.toNumber }))).toEqual([{ anchorId: laterKept, toNumber: null }]);
+      // And an undo leaves nothing the check reports.
+      expect((await checkFileVersions(file.id)).stdout).toContain("0 error(s).");
     } finally {
       await deleteTestFile(file.id);
     }
@@ -673,6 +682,112 @@ test.describe("a better copy of the same text", () => {
       expect(JSON.parse(moved.row).pdf_target.pageIndex).toBe(1);
     } finally {
       await deleteTestFile(file.id);
+      await agent.dispose();
+    }
+  });
+
+  // docs/PDF.md §13, "Building it", step 13. Nothing in the app writes any of
+  // these, so each is written by hand, one to a note or a version, and the
+  // script is read for the line that names it.
+  test("the integrity check passes a carried file, and names a map, a move and a mark that are wrong", async ({ request }) => {
+    test.setTimeout(180_000);
+    const tag = token();
+    const agent = await createAgent(request, { person: true });
+    const file: TestFile = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: firstCopy(tag), pageLabels: FIRST_LABELS, inked: [4] });
+    const other: TestFile = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: [sheetA(tag)] });
+    const at = `/pdf/${file.slug}`;
+    try {
+      const note = async (quote: string) => {
+        const posted = await agent.call("add_note", { on: at, body: `On "${quote}" ${tag}.`, quote });
+        expect(posted.isError, JSON.stringify(posted.error)).toBe(false);
+        return String(posted.result.id);
+      };
+      const astray = await note("law of participation");
+      const backwards = await note("collective representations");
+      const toCandidate = await note("Final participation");
+      const skipped = await note("symptoms of iconoclasm");
+      const markedElsewhere = await note("future of meaning");
+      const offFile = await note("Idolatry is the name");
+
+      // Version 2 is promoted and a carry takes all six to it, storing its map; version 3 is then the latest, and version 4 a candidate.
+      const second = await addTestFileVersion(file.id, { pages: betterCopy(tag), pageLabels: BETTER_LABELS, inked: [4] });
+      expect(await carryAcrossChanges(file.versionId, ADMIN_EMAIL, {})).toMatchObject({ moved: 6, skipped: 0, storedMaps: [2] });
+      const third = await addTestFileVersion(file.id, { pages: betterCopy(`${tag} again`), pageLabels: BETTER_LABELS, inked: [4] });
+      const candidate = await addTestFileVersion(file.id, { pages: betterCopy(`${tag} once more`), pageLabels: BETTER_LABELS, inked: [4], promote: false });
+      const onLatest = await note("phenomena were not yet objects");
+      expect((await getFileAnchorRows(file.id)).map((row) => row.versionNumber)).toEqual([2, 2, 2, 2, 2, 2, 3]);
+
+      const clean = await checkFileVersions(file.id);
+      expect(clean.stdout).toContain("1 page map(s) checked.");
+      expect(clean.stdout).toContain('6 move(s) and 0 "stays here" mark(s) checked.');
+      expect(clean.stdout).toContain("0 error(s).");
+      expect(clean.failed).toBe(false);
+
+      // ---- a page map --------------------------------------------------------
+      // Two sheets of version 1 given one counterpart, and the map said to be onto a sheet version 2 lacks.
+      await makeVersionFault({ fault: "map", versionId: second.id, map: { from: 5, to: 6, sheets: [-1, 0, 0, 3, 4], runs: [], blank: { from: [], to: [1] } } });
+      // A value that is no map at all.
+      await makeVersionFault({ fault: "map", versionId: third.id, map: { sheets: "as they were" } });
+      // A sound map on a version that names no base.
+      await makeVersionFault({ fault: "map", versionId: candidate.id, map: { from: 5, to: 5, sheets: [0, 1, 2, 3, 4], runs: [], blank: { from: [1], to: [1] } }, base: null });
+
+      // ---- a move ------------------------------------------------------------
+      // A note put back on version 1 by hand: its newest move reached version 2.
+      await makeVersionFault({ fault: "anchor", annotationId: astray, versionId: file.versionId });
+      // A move from version 2 back to version 1, the note left where that row says.
+      const back = await makeVersionFault({ fault: "move", annotationId: backwards, fromVersionId: second.id, toVersionId: file.versionId });
+      await makeVersionFault({ fault: "anchor", annotationId: backwards, versionId: file.versionId });
+      // A move to the candidate.
+      const early = await makeVersionFault({ fault: "move", annotationId: toCandidate, fromVersionId: second.id, toVersionId: candidate.id });
+      await makeVersionFault({ fault: "anchor", annotationId: toCandidate, versionId: candidate.id });
+      // A move that says its note left version 1, when the move before it had reached version 2.
+      const gap = await makeVersionFault({ fault: "move", annotationId: skipped, fromVersionId: file.versionId, toVersionId: third.id });
+      await makeVersionFault({ fault: "anchor", annotationId: skipped, versionId: third.id });
+      // A move that names a version of another file.
+      const stray = await makeVersionFault({ fault: "move", annotationId: offFile, fromVersionId: second.id, toVersionId: other.versionId });
+
+      // ---- a "stays here" mark -------------------------------------------------
+      // One that names version 1, on a note that is on version 2; and one on a note on the latest.
+      const wrongVersion = await makeVersionFault({ fault: "move", annotationId: markedElsewhere, fromVersionId: file.versionId, toVersionId: null });
+      const noLater = await makeVersionFault({ fault: "move", annotationId: onLatest, fromVersionId: third.id, toVersionId: null });
+
+      const { failed, stdout } = await checkFileVersions(file.id);
+      expect(failed).toBe(true);
+      const lines = stdout.split("\n").filter((line) => line.startsWith("ERROR"));
+      const said = (subject: string, name: string) => lines.filter((line) => line.includes(`${subject}  [${name}]`));
+      const fileName = `${file.id} (${file.slug})`;
+
+      expect(said(fileName, "map-fault").map((line) => line.split("version 1: ")[1]).sort()).toEqual(["it is onto 6 sheets, and its version has 5", "sheets 2 and 3 both map to sheet 1"]);
+      expect(said(fileName, "map-unreadable")).toHaveLength(1);
+      expect(said(fileName, "map-unreadable")[0]).toContain("version 3's page map");
+      expect(said(fileName, "map-without-base")).toHaveLength(1);
+      expect(said(fileName, "map-without-base")[0]).toContain("version 4 ");
+
+      expect(said(`annotation ${astray}`, "anchor-not-where-moved")).toHaveLength(1);
+      expect(said(`file_anchor_move ${back}`, "move-not-forward")).toHaveLength(1);
+      expect(said(`file_anchor_move ${early}`, "move-to-unpromoted")).toHaveLength(1);
+      expect(said(`file_anchor_move ${gap}`, "move-chain-broken")).toHaveLength(1);
+      expect(said(`file_anchor_move ${stray}`, "move-off-file")).toHaveLength(1);
+      expect(said(`file_anchor_move ${wrongVersion}`, "mark-off-version")).toHaveLength(1);
+      expect(said(`file_anchor_move ${noLater}`, "mark-on-latest")).toHaveLength(1);
+
+      // Each note is named for what was done to it and for nothing else:
+      // a move to the candidate leaves its note on one, which the anchor check
+      // also says, and a move off the file leaves its note short of where the row says it went.
+      const named = (id: string | null) => lines.filter((line) => id !== null && (line.includes(` ${id}  [`) || line.includes(`annotation ${id},`) || line.includes(`annotation ${id} `)));
+      const names = (found: string[]) => found.map((line) => /\[([a-z0-9-]+)\]/.exec(line)![1]).sort();
+      expect(names(named(astray))).toEqual(["anchor-not-where-moved"]);
+      expect(names(named(backwards))).toEqual(["move-not-forward"]);
+      expect(names(named(toCandidate))).toEqual(["anchor-on-candidate", "move-to-unpromoted"]);
+      expect(names(named(skipped))).toEqual(["move-chain-broken"]);
+      expect(names(named(offFile))).toEqual(["anchor-not-where-moved", "move-off-file"]);
+      expect(names(named(markedElsewhere))).toEqual(["mark-off-version"]);
+      expect(names(named(onLatest))).toEqual(["mark-on-latest"]);
+      expect(stdout).toContain(`${lines.length} error(s).`);
+      expect(lines).toHaveLength(13);
+    } finally {
+      await deleteTestFile(file.id);
+      await deleteTestFile(other.id);
       await agent.dispose();
     }
   });

@@ -519,6 +519,26 @@ the admin account.
   (`TestFile.versionId`), as an uploaded file's does and a migrated one's
   does not: code that passes a file's id for a version's fails on a fixture
   and nowhere in old data.
+- **A fragment changed while a page hydrates is written back over.** A
+  `page.goto` to the path the page is already on, with another fragment, is a
+  same-document navigation: no load, only a `hashchange`. Next's router
+  (16.2.11) takes the address, fragment included, when hydration starts, and
+  writes it back with `history.replaceState` at its first commit
+  (`HistoryUpdater`), so a fragment that changed in between is undone and the
+  page shows the link it first had. On a PDF that window opens whenever the
+  viewer has just sent the reader on with `location.replace`: the address
+  already matches, so an assertion on it passes while the new page is still
+  hydrating. Open the next link from another page (`pdf-better-copy.spec.ts`'s
+  `follow`), or wait for the viewer first. It fails on the dev target, where
+  hydration is slow, and reads like a link that was not carried.
+- **An integrity script is run from a spec with `execFile`**, and exits
+  non-zero on any error, which rejects with what it printed:
+  `checkFileVersions(fileId)` (`e2e/pdf-version-helpers.ts`) answers both. What
+  a check exists to report is something no write layer produces, so a spec
+  writes it by hand: `makeVersionFault` puts one thing wrong into a page map,
+  the move history or a note's version, and
+  `pdf-better-copy.spec.ts`'s last test reads the script for the line that
+  names each.
 - **Two notes by one writer in one second have the same card name.** A card's
   fragment is its writer and the second it was made in, so a fixture that has
   one bot write several notes spaces them a second apart

@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { expect } from "./fixtures";
 
 // What the specs of a file's versions share (docs/PDF.md §13): waiting for
@@ -15,6 +17,19 @@ export type Page = import("@playwright/test").Page;
  */
 export function token(): string {
   return `q${Math.random().toString(36).slice(2, 10).replace(/[0-9]/g, "x")}${Date.now().toString(36).replace(/[0-9]/g, "z")}`;
+}
+
+/**
+ * Runs `scripts/integrity/check-file-versions.ts` over one file: its
+ * versions, its page maps, its anchors and its moves. The script exits
+ * non-zero on any error, and `execFile` then rejects with what it printed.
+ */
+export async function checkFileVersions(fileId: string): Promise<{ failed: boolean; stdout: string }> {
+  try {
+    return { failed: false, stdout: (await promisify(execFile)("npx", ["tsx", "scripts/integrity/check-file-versions.ts", "--file", fileId])).stdout };
+  } catch (err) {
+    return { failed: true, stdout: String((err as { stdout?: string }).stdout ?? err) };
+  }
 }
 
 export async function waitForViewer(page: Page) {

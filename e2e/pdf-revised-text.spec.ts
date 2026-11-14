@@ -12,7 +12,7 @@ import {
   type TestFile,
 } from "./db";
 import { callTool, createAgent } from "./mcp";
-import { expectAddress, expectSheetText, selectPhrase, token, waitForViewer, type Page } from "./pdf-version-helpers";
+import { checkFileVersions, expectAddress, expectSheetText, selectPhrase, token, waitForViewer, type Page } from "./pdf-version-helpers";
 import { buildTestPdf, type TestPageLabelRange } from "../scripts/make-test-pdf";
 
 // docs/PDF.md §13 — a revised text: uploaded as one, it has no page map, so
@@ -366,6 +366,9 @@ test.describe("a revised text", () => {
       expect(await noteActAs(one.user.email, { act: "move", kind: "annotation", id: cut, toVersionId: versions[1].id, target: JSON.parse(rowOf(rows, survives).row).pdf_target })).toEqual({ ok: true, moved: true });
       moves = await getFileAnchorMoves(file.id);
       expect(moves.filter((move) => move.anchorId === cut)).toEqual([expect.objectContaining({ fromNumber: 1, toNumber: 2, wasMarked: true, hidden: false })]);
+
+      // ---- the integrity check, over every move and mark made here ------------------------
+      expect((await checkFileVersions(file.id)).stdout).toContain("0 error(s).");
     } finally {
       await deleteTestFile(file.id);
       await bot.dispose();

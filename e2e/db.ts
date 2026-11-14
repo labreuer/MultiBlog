@@ -192,6 +192,8 @@ export const getFileAnchorMoves = (...args: Parameters<DbHandlers["getFileAnchor
   call("getFileAnchorMoves", ...args);
 export const undoCarryInSql = (...args: Parameters<DbHandlers["undoCarryInSql"]>): ReturnType<DbHandlers["undoCarryInSql"]> =>
   call("undoCarryInSql", ...args);
+export const makeVersionFault = (...args: Parameters<DbHandlers["makeVersionFault"]>): ReturnType<DbHandlers["makeVersionFault"]> =>
+  call("makeVersionFault", ...args);
 export const carryAcrossChanges = (...args: Parameters<DbHandlers["carryAcrossChanges"]>): ReturnType<DbHandlers["carryAcrossChanges"]> =>
   call("carryAcrossChanges", ...args);
 export const noteActAs = (...args: Parameters<DbHandlers["noteActAs"]>): ReturnType<DbHandlers["noteActAs"]> => call("noteActAs", ...args);

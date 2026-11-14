@@ -1276,7 +1276,7 @@ available without rendering.
 
 ## 13. Versions of a file — plan
 
-**Built so far: steps 1 to 12 of "Building it".** A file takes a new version: whoever may
+**Every step of "Building it" is built.** A file takes a new version: whoever may
 manage it uploads new bytes, which wait as a candidate at their own address, and promotes
 or abandons them. Every version has its own address, and what is drawn, listed, titled and
 linked goes by version. Every anchor into a PDF names its version, and a capture's write
@@ -1289,9 +1289,8 @@ that places itself, at a promotion, from the version list and from a version's m
 each showing what it would move first (Placing each anchor, Moving a note forward). A note's
 author moves it one at a time from their worklist on the latest's page, by a suggestion or
 by selecting its passage, or marks it as staying, and a shown move is on the note's card and
-on its entry on the page of the version it left.
-
-**Not built: the integrity checks for maps and moves**, step 13.
+on its entry on the page of the version it left. `scripts/integrity/check-file-versions.ts`
+reads every page map, move and "stays here" mark back.
 
 The rest of the section is a plan in those parts, and the one exception to this file's
 "every statement is current". Where a statement below is of something built, it names the

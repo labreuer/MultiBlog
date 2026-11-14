@@ -118,7 +118,9 @@ at all, so its findings are never downstream of a bad blob.
 
 ## `check-file-versions.ts` (docs/PDF.md §13)
 
-Every file has a latest version, and the version it names is one a reader may be shown.
+Every file has a latest version, and the version it names is one a reader may be shown;
+every anchor into a file names a version it may be on; and every page map, move and "stays
+here" mark is one the write layer could have made.
 
 A file and its first version name each other, so `file.current_version_id` is nullable for
 the one step in which the file exists and its version doesn't, inside the transaction that
@@ -152,6 +154,51 @@ hold a PDF target (`annotation`, `tag_anchor`, `anchored_link_anchor`,
   a file with more than one version. Neither table has a writer of one, and nothing would
   move such a row to a later version, so one appearing means a writer was added without its
   place in the move.
+
+**Every page map pairs sheets that exist, and no two with one counterpart**
+(docs/PDF.md §13, "Matching the pages"). A link is carried through each map it meets and
+lands where the map says, so a map that is wrong sends every link through it to the wrong
+sheet, and nothing else reads a map back:
+
+- `map-unreadable`: a version's `page_map` is not a map. Every reader takes such a value
+  for no map, so links stop being carried there and nothing says why.
+- `map-without-base`: a version holds a map and names no base for it to be from.
+- `map-fault`: the map is of another number of sheets than its base has, or onto another
+  number than its version has; two sheets of the base have one counterpart; an accepted run
+  of sheets is not written in, or one that is not accepted has a sheet paired. One line per
+  fault (`pageMapFaults`, `src/lib/pdf-page-map.ts`).
+
+An abandoned version's map is checked too: a link that names the version is still carried
+through it.
+
+**Every move went forward, and every anchor is where its history says**, over
+`file_anchor_move` (docs/PDF.md §13, "Moving a note forward"). A move's row is what an
+undo reads, so a row that is wrong undoes to the wrong place. A "stays here" mark is a row
+of the same table that reaches no version, and is in none of the move checks:
+
+- `move-off-file`: a move or a mark names a version that is not one of its anchor's
+  file's, or its anchor is into no file.
+- `move-to-unpromoted`: a move reached a version that was never promoted, or was abandoned.
+- `move-not-forward`: a move reached a version that is not later than the one it left.
+- `move-chain-broken`: a move left another version than the one its anchor's move before
+  it reached.
+- `anchor-not-where-moved`: an anchor is not on the version its newest move reached.
+  Newest is by `id`, which is from a sequence, never by `moved_at`: two moves in one
+  transaction share a time.
+
+**Every "stays here" mark names the version its anchor is on**:
+
+- `mark-off-version`: a mark names another version. A move of a marked note takes the mark
+  off in its own transaction, so one left behind is a write that went round it, and it
+  would hide the note from its author's worklist and from every carry.
+- `mark-on-latest`: a mark names its file's latest version, where there is nothing to stay
+  behind from.
+- `two-marks`: an anchor has two. The table's partial unique indexes refuse it, and this
+  reads the claim back.
+
+After a carry is undone from the database (docs/PDF.md §13, "Writing a move"), this is the
+check to run: it says whether every anchor the undo touched is where its remaining history
+says.
 
 ```
 npx tsx scripts/integrity/check-file-versions.ts [--file <idOrSlug>] [--verbose]

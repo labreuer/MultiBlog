@@ -1147,6 +1147,52 @@ export async function getFileAnchorMoves(fileId: string): Promise<TestAnchorMove
 }
 
 /**
+ * Writes one thing wrong into a throwaway file's page maps or its move
+ * history, **beside every write layer**: what
+ * `scripts/integrity/check-file-versions.ts` is there to report, and what
+ * nothing in the app produces (docs/PDF.md §13, "Building it", step 13).
+ *
+ * - `map`: a version's page map replaced with `map`; with `base: null` the
+ *   version also forgets its base.
+ * - `move`: a row of the history written by hand, a "stays here" mark where
+ *   `toVersionId` is null. A move's row keeps the note's target as it stands,
+ *   since the table's CHECK asks a move for one.
+ * - `anchor`: a note put on a version by hand, its target and its history
+ *   left as they were.
+ *
+ * Answers the id of the history row it wrote, or null.
+ */
+export async function makeVersionFault(
+  fault:
+    | { fault: "map"; versionId: string; map: unknown; base?: null }
+    | { fault: "move"; annotationId: string; fromVersionId: string; toVersionId: string | null }
+    | { fault: "anchor"; annotationId: string; versionId: string },
+): Promise<string | null> {
+  if (fault.fault === "map") {
+    await prisma.$executeRaw(Prisma.sql`
+      UPDATE file_version
+      SET page_map = ${JSON.stringify(fault.map)}::jsonb, page_map_stored_at = COALESCE(page_map_stored_at, now()),
+          base_version_id = ${fault.base === null ? Prisma.sql`NULL` : Prisma.sql`base_version_id`}
+      WHERE id = ${fault.versionId}`);
+    return null;
+  }
+  if (fault.fault === "anchor") {
+    await prisma.$executeRaw`UPDATE annotation SET file_version_id = ${fault.versionId} WHERE id = ${fault.annotationId}`;
+    return null;
+  }
+  const [row] =
+    fault.toVersionId === null
+      ? await prisma.$queryRaw<{ id: bigint }[]>`
+          INSERT INTO file_anchor_move (annotation_id, from_version_id) VALUES (${fault.annotationId}, ${fault.fromVersionId}) RETURNING id`
+      : await prisma.$queryRaw<{ id: bigint }[]>`
+          INSERT INTO file_anchor_move (annotation_id, from_version_id, from_target, from_quoted_text, to_version_id)
+          SELECT a.id, ${fault.fromVersionId}, a.pdf_target, COALESCE(a.quoted_text, ''), ${fault.toVersionId} FROM annotation a WHERE a.id = ${fault.annotationId}
+          RETURNING id`;
+  if (!row) throw new Error(`makeVersionFault: no annotation ${fault.annotationId}`);
+  return String(row.id);
+}
+
+/**
  * Replays a carry backwards, **in SQL alone**, as docs/PDF.md §13 says a
  * mistaken one is undone from the database ("The table holds what an undo
  * needs"): nothing in the app undoes a move, so this is the proof that the
@@ -3485,6 +3531,7 @@ const handlers = {
   getFileAnchorRows,
   getFileAnchorMoves,
   undoCarryInSql,
+  makeVersionFault,
   carryAcrossChanges,
   noteActAs,
   getFileVersionFacts,
