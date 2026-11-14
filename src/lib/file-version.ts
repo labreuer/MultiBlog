@@ -132,8 +132,11 @@ export function elapsedInLargestUnit(milliseconds: number): string {
  * it. The file stays one group whichever versions its parts are on, so a
  * link that went straight into the PDF before a promotion still does after.
  *
- * `title` names every version the parts are on that is not the latest, so a
- * reader sees which bytes a passage was measured on before opening it.
+ * `title` names the versions the parts are on wherever one of them is not the
+ * latest, the latest included ("Book, versions 1 and 2"): naming the earlier
+ * one alone would read as though every part were on it. Parts all on the
+ * latest leave the title bare. A reader so sees which bytes a passage was
+ * measured on before opening it.
  */
 export function linkPartsVersions(
   fileTitle: string,

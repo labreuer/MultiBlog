@@ -136,8 +136,8 @@ omitted): it crosses into client props on both surfaces.
 "Addresses"): `anchored_link_anchor.file_version_id`, set with every `PDF_TEXT` selector,
 and on the view as `part.version` with the part's own address. A file stays one group
 whichever versions its parts are on. Its `href` goes to the newest version holding a part,
-the latest wherever a part is on it, and its `label` names each version that is not the
-latest (`linkPartsVersions`, shared with `/links` and MCP). **The PDF surface draws only the
+the latest wherever a part is on it, and its `label` names the versions its parts are on
+wherever one of them is not the latest (`linkPartsVersions`, shared with `/links` and MCP). **The PDF surface draws only the
 parts whose version it shows**, a followed link's and the open link's alike
 (`OpenLinkPart.fileVersionId`): they are filtered in the browser, and a part drawn on another
 version's sheets sits over other ink. The banner names the rest, each linked at its own

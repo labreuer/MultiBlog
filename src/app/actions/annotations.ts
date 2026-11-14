@@ -440,6 +440,14 @@ function raiseRecipientWhere(posterUserId: string) {
   return { userId: { not: posterUserId }, user: { deletedByUserId: null } };
 }
 
+/**
+ * What a post answers. `captureRefused` marks an error that is about the
+ * version the post's page shows and not about the draft (docs/PDF.md §13,
+ * "Versions"): nothing was written, the draft is whole, and a caller that
+ * discards a draft it could not post must keep this one.
+ */
+export type PostAnnotationResult = { error?: string; captureRefused?: true };
+
 // Flips a DRAFT to LIVE (or RAISED — PLAN.md §13d) — the live ydoc editor
 // (AnnotationBody) has already been writing the real content in via the
 // collab server the whole time (server/annotation-cache.ts's store debounce
@@ -497,7 +505,7 @@ export async function postAnnotation(opts: {
   // the viewer loaded and the address it loaded it from. Sent by the PDF
   // surface with every post, and checked wherever the note has a target.
   pdfOrigin?: unknown;
-}): Promise<{ error?: string }> {
+}): Promise<PostAnnotationResult> {
   const session = await auth();
   if (!session?.user) {
     return { error: "Unauthorized." };
@@ -1127,7 +1135,7 @@ async function postFileAnnotation(opts: {
   authorUserId: string;
   /** A reply's selection in its parent's body, as the client read it: verification input only. */
   replyAnchor: { from: number; to: number; quotedText: string } | null;
-}): Promise<{ error?: string }> {
+}): Promise<PostAnnotationResult> {
   const { annotationId, fileId, parentId, settled, raise, raisedBy, replyAnchor } = opts;
   const bodyText = settled.bodyText;
 
@@ -1152,7 +1160,7 @@ async function postFileAnnotation(opts: {
   const wantsAnchor = parentId === null && (opts.rawTarget !== undefined || opts.draftTarget !== null);
   const origin = wantsAnchor ? opts.origin : null;
   if (wantsAnchor && !origin) {
-    return { error: CAPTURE_RELOAD_MESSAGE };
+    return { error: CAPTURE_RELOAD_MESSAGE, captureRefused: true };
   }
   const captured = !origin
     ? null
@@ -1160,7 +1168,7 @@ async function postFileAnnotation(opts: {
       ? await capturePdfTextAnchor({ fileVersionId: origin.fileVersionId, rawTarget: opts.rawTarget })
       : opts.draftTarget;
   if (captured && origin && captured.fileVersionId !== origin.fileVersionId) {
-    return { error: "This draft is on another version of the file. Open it on that version's page to post it." };
+    return { error: "This draft is on another version of the file. Open it on that version's page to post it.", captureRefused: true };
   }
   const claim = captured && origin ? { ...origin, fileId } : null;
   const quotedText = captured?.quotedText ?? "";
@@ -1246,7 +1254,7 @@ async function postFileAnnotation(opts: {
   // The draft stays a draft, with the body its writer settled: nothing of the
   // post was written.
   if (refused !== null) {
-    return { error: refused };
+    return { error: refused, captureRefused: true };
   }
 
   if (raise) {
@@ -1305,6 +1313,11 @@ export async function loadPdfAnnotationEntries(
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
+  }
+  // A server action is sent whatever its caller likes, and both of these go
+  // into a `where`: an object there is a filter, not an id.
+  if (typeof fileId !== "string" || typeof fileVersionId !== "string") {
+    throw new Error("That isn't a version of this file.");
   }
   const file = await prisma.storedFile.findUnique({
     where: { id: fileId },

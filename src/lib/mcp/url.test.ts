@@ -30,6 +30,19 @@ test("PDF URLs keep their fragment, and a fragment link is told from a card's na
   assert.deepEqual(parseRef("/pdf/book?sel=clink123", ORIGIN), { kind: "link", id: "clink123" });
 });
 
+test("a version's own address names its number, in either spelling, and nothing else after the slug does", () => {
+  assert.deepEqual(parseRef("/pdf/book/v/2#page=3", ORIGIN), { kind: "pdf", slug: "book", fragment: "page=3", version: 2 });
+  // The short spelling the site redirects.
+  assert.deepEqual(parseRef("/pdf/book/v2", ORIGIN), { kind: "pdf", slug: "book", fragment: "", version: 2 });
+  assert.deepEqual(parseRef("/files/report/v/3", ORIGIN), { kind: "file", slug: "report", version: 3 });
+  // A link's ?sel= wins over the address it was written on, a version's included.
+  assert.deepEqual(parseRef("/pdf/book/v/2?sel=clink123", ORIGIN), { kind: "link", id: "clink123" });
+  // Not second addresses of version 1, and not addresses of the file.
+  for (const path of ["/pdf/book/v/01", "/pdf/book/v/0", "/pdf/book/v/1x", "/pdf/book/v/", "/pdf/book/v/1/extra", "/pdf/book/version/1", "/pdf/book/v-1"]) {
+    assert.equal(parseRef(path, ORIGIN).kind, "unknown", path);
+  }
+});
+
 test("the other reading routes", () => {
   assert.deepEqual(parseRef("/files/report", ORIGIN), { kind: "file", slug: "report" });
   assert.deepEqual(parseRef("/files/report/download", ORIGIN), { kind: "file", slug: "report" });

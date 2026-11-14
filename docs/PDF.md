@@ -796,7 +796,7 @@ The stored copy drops them, for §10b's reason.
   ordering trap as `currentScaleValue`; both are done in `completeReady`.
 - **A label can hold NULs.** pdfjs passes them through from the PDF's strings, and a prefix
   padded with them puts one *mid*-label: `/P (A-\0)` gives `"A-\u00001"`. The copy stored on
-  `file` (docs/MCP.md §8) can't keep them, because `jsonb` refuses U+0000 and one NUL fails
+  `file_version` (docs/MCP.md §8) can't keep them, because `jsonb` refuses U+0000 and one NUL fails
   the whole upload, so `extractPdfMetadata` drops every NUL rather than trimming a trailing
   run. The viewer uses its own copy as pdfjs returns it.
 
@@ -1421,6 +1421,11 @@ Three rules hold throughout:
       version's page and no other: the post names the page's version, and one that differs
       from the draft's is refused. "Your private notes" links such a draft to its version
       in place of offering Edit.
+    - **A post refused for its version leaves the draft whole**, and says so in its answer
+      (`captureRefused`, `PostAnnotationResult`). One caller discards a draft it could not
+      post: the composer, when another draft is reopened over the one it holds, on the
+      grounds that only an empty draft fails. A refusal over the version is not that, so
+      the draft is kept there, listed under "Your private notes".
     - **MCP's claim is the address it was given**: a version's own, or the bare one, which
       means the latest and is refused once it no longer is. A candidate is refused before
       anything is measured, and again by the check.
@@ -1478,9 +1483,11 @@ Three rules hold throughout:
   each goes through one helper that takes the version: `pdfPath` for the address
   (`src/lib/file-version.ts`), with `pdfNoteContainer` for a listing's title and address
   together. One that is missed lands on the note's entry and not its card (below).
-  - **A link's group names every version its parts are on that is not the latest**:
-    "Book, versions 1 and 2". `linkPartsVersions` is the one rule for that title and for
-    where the link lands, for the landing route, `/links` and MCP.
+  - **A link's group names the versions its parts are on wherever one of them is not the
+    latest**, the latest included: "Book, versions 1 and 2". Naming only the earlier one
+    would read as though every part were on it. A file whose parts are all on the latest
+    keeps its bare title. `linkPartsVersions` is the one rule for that title and for where
+    the link lands, for the landing route, `/links` and MCP.
   - **The raise email links the version's address with no card fragment**, as it linked the
     file's.
 - **A version's own address always names its version**, the latest's included. The page at

@@ -26,7 +26,8 @@ import type { PdfAnnotationEntry } from "@/components/pdf/PdfAnnotationPanel";
 // - `elsewhere` are the threads on the file's other versions, as entries that
 //   name the version and link the note at its own address. Each carries its
 //   card's fragment id and its replies', so a card's link written for one
-//   address of the file finds its note from any other.
+//   address of the file finds its note from any other. A thread with nothing
+//   left to show is in neither list.
 //
 // The thread → entry transform is identical for both containers; only the PDF
 // target is extra, joined back on **by thread id** rather than by position so
@@ -83,6 +84,11 @@ export async function pdfAnnotationEntriesFor(file: { id: string; slug: string }
       const version = { number, isLatest: thread.fileVersionId === row?.currentVersionId };
       const rootAnchor = annotationAnchorName(root.displayName, root.createdAt);
       const replies = thread.comments.filter((comment) => comment.id !== thread.id);
+      // The cards' own rule (`entryHasVisibleContent`): a deleted note with
+      // no reply left to show is listed nowhere, and a deleted reply is not
+      // counted.
+      const liveReplies = replies.filter((reply) => reply.deletedByUserId === null);
+      if (root.deletedByUserId !== null && liveReplies.length === 0) return [];
       return [
         {
           threadId: thread.id,
@@ -94,7 +100,7 @@ export async function pdfAnnotationEntriesFor(file: { id: string; slug: string }
           displayName: root.displayName,
           createdAt: root.createdAt,
           bodyText: root.deletedByUserId ? "" : root.bodyText,
-          replies: replies.length,
+          replies: liveReplies.length,
         },
       ];
     })

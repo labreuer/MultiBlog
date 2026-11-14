@@ -70,13 +70,18 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
   const [pending, startTransition] = useTransition();
   const { movedDraft, setMovedDraft } = useAnnotationMove();
   const reloadAnnotations = useAnnotationReload();
+  // On a PDF, the version this page shows and how it was reached, which every
+  // capture and every post from this slot names (docs/PDF.md §13).
+  const pdfOrigin = usePdfCaptureOrigin();
 
   // PLAN.md §13g — "Move to bottom" hands this slot an already-created
   // draft (same row, same ydoc, nothing copied). If this slot already had
   // its own draft open, it's committed first — posted, quiet,
   // document-level — rather than silently discarded for the incoming one;
   // an empty previous draft has nothing worth keeping, so a post that fails
-  // because it's empty falls back to discarding it instead.
+  // because it's empty falls back to discarding it instead. A post refused
+  // for the version its page shows (`captureRefused`) is neither: the draft
+  // has text, and stays a draft, listed under "Your private notes".
   useEffect(() => {
     if (!movedDraft) return;
     const incoming = movedDraft;
@@ -92,8 +97,11 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
           anchorFrom: previous.anchorFrom,
           anchorTo: previous.anchorTo,
           quotedText: previous.quotedText,
+          // The draft's own stored target is its anchor; the origin says
+          // which version's page is posting it.
+          pdfOrigin: pdfOrigin ?? undefined,
         });
-        if (result.error) {
+        if (result.error && !result.captureRefused) {
           await discardDraftAnnotation(previous.id).catch(() => {});
         }
       }
@@ -105,12 +113,9 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
         storedQuote: incoming.storedQuote,
       });
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `open`/startTransition are read at fire time, not tracked as retrigger deps for this cross-tree signal
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `open`/`pdfOrigin`/startTransition are read at fire time, not tracked as retrigger deps for this cross-tree signal
   }, [movedDraft, setMovedDraft]);
 
-  // On a PDF, the version this page shows and how it was reached, which the
-  // capture below names (docs/PDF.md §13).
-  const pdfOrigin = usePdfCaptureOrigin();
   const openNew = useCallback(() => {
     setError(null);
     startTransition(async () => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { elapsedInLargestUnit, filesPath, fileVersionState, fileVersionTitle, latestVersionOf, linkPartsVersions, parseVersionNumber, pdfPath } from "./file-version";
+import { elapsedInLargestUnit, filesPath, fileVersionState, fileVersionTitle, latestVersionOf, linkPartsVersions, parseCaptureOrigin, parseVersionNumber, pdfPath } from "./file-version";
 
 const SECOND = 1_000;
 const DAY = 86_400 * SECOND;
@@ -63,7 +63,7 @@ test("the time between two uploads is in the largest unit that fits, rounded to 
   assert.equal(elapsedInLargestUnit(-100 * DAY), "3 months");
 });
 
-test("a link lands on the newest version holding one of its parts, and its file is named with the versions that are not the latest", () => {
+test("a link lands on the newest version holding one of its parts, and its file is named with its parts' versions wherever one is not the latest", () => {
   const v1 = { id: "one", number: 1 };
   const v2 = { id: "two", number: 2 };
   const v3 = { id: "three", number: 3 };
@@ -78,4 +78,26 @@ test("a link lands on the newest version holding one of its parts, and its file 
   assert.deepEqual(linkPartsVersions("Book", [v1, v2, v3], "three"), { landing: { number: 3, isLatest: true }, title: "Book, versions 1, 2 and 3" });
   // A part with no version (a doc's, or a target that names none) decides nothing.
   assert.deepEqual(linkPartsVersions("Book", [null, undefined], "two"), { landing: null, title: "Book" });
+});
+
+test("a capture's origin is parsed from whatever a client sent, never cast", () => {
+  assert.deepEqual(parseCaptureOrigin({ fileVersionId: "cversion", address: "bare" }), { fileVersionId: "cversion", address: "bare" });
+  // Only the two fields come back: nothing else a caller sent rides along into a query.
+  assert.deepEqual(parseCaptureOrigin({ fileVersionId: "cversion", address: "version", fileId: "other" }), { fileVersionId: "cversion", address: "version" });
+  const refused: unknown[] = [
+    null,
+    undefined,
+    "cversion",
+    [],
+    {},
+    { fileVersionId: "cversion" },
+    { address: "bare" },
+    { fileVersionId: "", address: "bare" },
+    { fileVersionId: "x".repeat(65), address: "bare" },
+    { fileVersionId: "cversion", address: "latest" },
+    // An object where an id belongs is a Prisma filter, not an id.
+    { fileVersionId: { not: "" }, address: "bare" },
+    { fileVersionId: 7, address: "bare" },
+  ];
+  for (const raw of refused) assert.equal(parseCaptureOrigin(raw), null, JSON.stringify(raw));
 });

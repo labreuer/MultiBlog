@@ -51,7 +51,7 @@ export type AnchoredLinkPart = {
 
 export type AnchoredLinkTargetGroup = {
   target: AnchorTarget;
-  /** The target's title, for the banner's group rows. A file's names each version its parts are on that is not the latest. */
+  /** The target's title, for the banner's group rows. A file's names the versions its parts are on, wherever one of them is not the latest. */
   label: string;
   /**
    * Carries `?sel=` already — doc by id (rename-proof; docs have no slug

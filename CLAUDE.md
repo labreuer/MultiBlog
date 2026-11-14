@@ -210,8 +210,9 @@ before changing the behavior it describes.
   (`noteVersions`, a reply's being its root's), or it lands on the wrong page. A surface
   draws only the notes and link parts whose version it shows, and the parts are filtered in
   the browser. And a capture's version is checked inside the transaction that inserts
-  (`assertCaptureVersion`), never before it. `e2e/pdf-versions.spec.ts` is the guard for all
-  four. docs/PDF.md §13, "Versions" and "Addresses".
+  (`assertCaptureVersion`), never before it. `e2e/pdf-versions.spec.ts` guards the first
+  three; no test can tell a check inside the transaction from one before it. docs/PDF.md
+  §13, "Versions" and "Addresses".
 - **Bumping `pdfjs-dist` is never routine**, and neither is deleting the test that looks
   trivial. Pinning protects the *API* pdfjs offers, not the JavaScript runtime it assumes
   underneath, and WebKit ships those built-ins late or not at all — so a bump needs

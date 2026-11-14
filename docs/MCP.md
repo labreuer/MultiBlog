@@ -1274,10 +1274,10 @@ everything the bytes decide is ([PDF.md](PDF.md) §13).
   - otherwise it holds one string per page.
 - **Existing files** are filled lazily on first read, following `storedPageText`'s precedent,
   so there is no deploy-time backfill to forget.
-- **The lazy fill writes with raw SQL**, as [FULLTEXT.md](FULLTEXT.md) §3's backfill does. A
-  Prisma `update` stamps `@updatedAt`, and a file's `updatedAt` is search's "updated" date for a
-  PDF and the date its hit shows (FULLTEXT.md §6). Through Prisma, the first reader of an old
-  PDF would make it "updated today".
+- **The lazy fill writes the version's row and never the file's.** A file's `updatedAt` is
+  search's "updated" date for a PDF and the date its hit shows (FULLTEXT.md §6), and a
+  Prisma `update` of `file` stamps it, so a fill there would make an old PDF "updated today"
+  for its first reader. `file_version` has no such column.
 - **Reading.** `usablePageLabels` is applied at read time, as the viewer applies it.
   `src/lib/pdf-page-labels.ts` is pure.
 - **A read returns labels as ranges**, never one string per page. A run of sheets whose labels
@@ -1296,8 +1296,8 @@ everything the bytes decide is ([PDF.md](PDF.md) §13).
 - **Search's page hits carry the label too.** `/search` can then show "p. xii" where it shows
   "p. 12" today. This is display only, so PDF.md's rule holds.
 
-**The outline goes on `file` too**, as `outline Json?`, for the reasons labels do, and filled
-the same way: lazily on first read, with raw SQL. A book is read by chapter.
+**The outline goes on `file_version` too**, as `outline Json?`, for the reasons labels do, and
+filled the same way: lazily on first read. A book is read by chapter.
 
 - **What it is.** What the viewer's Contents pane shows: pdfjs's `getOutline()`, each
   destination resolved to a page with `getDestination` and `getPageIndex`, as

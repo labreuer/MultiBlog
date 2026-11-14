@@ -40,14 +40,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!file || file.deletedByUserId !== null) {
     return NextResponse.json({ error: "File not found" }, { status: 404 });
   }
-  // The version must be one of this file's: the gate below is the file's, and
+  // The gate first: a viewer who can't read the file learns nothing of which
+  // ids are its versions.
+  if (!(await canUserReadFile(session.user.id, session.user.role, file))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  // The version must be one of this file's: the gate above is the file's, and
   // it mustn't open another file's channel.
   const versionId = asked ?? file.currentVersionId;
   if (!versionId || !file.versions.some((version) => version.id === versionId)) {
     return NextResponse.json({ error: "File not found" }, { status: 404 });
-  }
-  if (!(await canUserReadFile(session.user.id, session.user.role, file))) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const documentName = ydocIdForFileVersion(versionId);

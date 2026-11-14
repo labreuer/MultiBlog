@@ -6,6 +6,7 @@ import {
   deleteTestAnchoredLink,
   deleteTestFile,
   getFileAnchorVersions,
+  getFileAnnotationFacts,
   renameTestFileSlug,
   type TestFile,
   type TestFileVersion,
@@ -344,6 +345,22 @@ test.describe("a file with two versions", () => {
       await gotoOk(page, `/files/${file.slug}/v/1`);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(`${file.title}, version 1`);
 
+      // ---- MCP's download: the address asked for is the version sent ---------
+      const downloaded = async (ref: string, extra = "") => {
+        const grant = await agent.call("download", { file: ref });
+        expect(grant.isError, JSON.stringify(grant.error)).toBe(false);
+        const url = String(grant.result.url);
+        const response = await request.get(`${url}${extra}`);
+        return { named: /[?&]v=(\d+)/.exec(url)?.[1] ?? null, status: response.status(), etag: response.headers()["etag"] };
+      };
+      expect(await downloaded(`/pdf/${file.slug}`)).toEqual({ named: null, status: 200, etag: `"${v2.sha256}"` });
+      expect(await downloaded(`/pdf/${file.slug}/v/1`)).toEqual({ named: "1", status: 200, etag: `"${file.sha256}"` });
+      expect(await downloaded(`/files/${file.slug}/v/2`)).toEqual({ named: "2", status: 200, etag: `"${v2.sha256}"` });
+      // The route's own parameter, on a grant for the file.
+      expect(await downloaded(`/pdf/${file.slug}`, "&v=1")).toMatchObject({ status: 200, etag: `"${file.sha256}"` });
+      expect((await downloaded(`/pdf/${file.slug}`, "&v=3")).status).toBe(404);
+      expect((await downloaded(`/pdf/${file.slug}`, "&v=01")).status).toBe(404);
+
       // ---- the presence channel is a version's ------------------------------
       const channel = async (query: string) => {
         const response = await page.request.post(`/api/file/${file.id}/token${query}`);
@@ -529,6 +546,157 @@ test.describe("a file with two versions", () => {
       const whole = await agent.call("add_note", { on: `/pdf/${file.slug}/v/3`, body: "On the whole file, from the candidate." });
       expect(whole.isError, JSON.stringify(whole.error)).toBe(false);
       expect((await getFileAnchorVersions(file.id)).annotations).toEqual([file.versionId, file.versionId, v2.id]);
+    } finally {
+      await deleteTestFile(file.id);
+      await agent.dispose();
+    }
+  });
+
+  test("a draft is posted from a page showing its version, and a post that page can't make keeps it", async ({ page }) => {
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: [V1_LINES] });
+    const KEPT = "A private note, kept for later.";
+    const OPEN = "A draft left open when another is reopened.";
+    const STALE = "Typed before the promotion, posted after.";
+    const privateNotes = page.getByText("Your private notes").locator("..");
+    const listed = (body: string) => privateNotes.locator("li", { hasText: body });
+    const posted = async () => (await getFileAnnotationFacts(file.id)).map((note) => ({ body: note.bodyText, quote: note.quotedText }));
+    const openDraft = async (quote: string, body: string) => {
+      await selectPhrase(page, 1, quote);
+      await page.getByRole("button", { name: "Annotate" }).click();
+      const editor = annotationEditor(page);
+      await editor.click();
+      await editor.pressSequentially(body);
+    };
+    const savePrivately = async () => {
+      await page.getByRole("combobox", { name: "Annotation visibility" }).selectOption("private");
+      await page.getByRole("button", { name: "Save" }).click();
+      await expect(page.getByRole("button", { name: "Write an annotation..." })).toBeVisible({ timeout: 15_000 });
+    };
+    try {
+      await signIn(page, ADMIN_EMAIL);
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+
+      // ---- one version, as every file has today -----------------------------
+      // Reopening a private note while another draft is open posts the open
+      // one, with its passage. The post names the page's version like any
+      // other; one that didn't was refused, and the draft discarded for it.
+      await openDraft(V1_LINK_QUOTE, KEPT);
+      await savePrivately();
+      await expect(listed(KEPT)).toBeVisible({ timeout: 15_000 });
+      await openDraft(V1_NOTE_QUOTE, OPEN);
+      await listed(KEPT).getByRole("button", { name: "Edit" }).click();
+      await expect(annotationEditor(page)).toHaveText(KEPT, { timeout: 15_000 });
+      await expect.poll(posted, { timeout: 15_000 }).toEqual([{ body: OPEN, quote: V1_NOTE_QUOTE }]);
+      await savePrivately();
+      await expect(listed(KEPT)).toBeVisible({ timeout: 15_000 });
+
+      // ---- a second version is promoted under an open composer --------------
+      await openDraft(V1_DRAFT_PHRASE, STALE);
+      const v2 = await addTestFileVersion(file.id, { pages: [V2_LINES] });
+      // The same gesture now can't post the open draft: this page shows
+      // version 1 at the address that means "the latest". The draft has
+      // words, so it is kept, where an empty one would be discarded.
+      await listed(KEPT).getByRole("button", { name: "Edit" }).click();
+      await expect(annotationEditor(page)).toHaveText(KEPT, { timeout: 15_000 });
+      // And the composer's own post (SHARED is the select's default) is
+      // refused, with the reason.
+      await page.getByRole("button", { name: "Save" }).click();
+      await expect(page.getByText("Reload the page").first()).toBeVisible({ timeout: 15_000 });
+      expect(await posted()).toEqual([{ body: OPEN, quote: V1_NOTE_QUOTE }]);
+
+      // ---- reloaded: the latest's page lists both drafts under their version
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+      await expectSheetText(page, V2_LINES[0]);
+      for (const body of [KEPT, STALE]) {
+        await expect(listed(body).getByRole("link", { name: "On version 1" })).toHaveAttribute("href", `/pdf/${file.slug}/v/1`, { timeout: 15_000 });
+      }
+      // Reopened where its passage is, and nowhere else.
+      await expect(privateNotes.getByRole("button", { name: "Edit" })).toHaveCount(0);
+
+      // ---- version 1's page reopens and posts it, on version 1 ---------------
+      await listed(STALE).getByRole("link", { name: "On version 1" }).click();
+      await expect(page).toHaveURL(new RegExp(`/pdf/${file.slug}/v/1$`));
+      await waitForViewer(page);
+      await listed(STALE).getByRole("button", { name: "Edit" }).click();
+      await expect(annotationEditor(page)).toHaveText(STALE, { timeout: 15_000 });
+      await page.getByRole("button", { name: "Save" }).click();
+      await expect(page.getByRole("button", { name: "Write an annotation..." })).toBeVisible({ timeout: 15_000 });
+      await expect.poll(posted, { timeout: 15_000 }).toEqual([
+        { body: OPEN, quote: V1_NOTE_QUOTE },
+        { body: STALE, quote: V1_DRAFT_PHRASE },
+      ]);
+      // Both posted notes and the private one are version 1's; nothing is on version 2.
+      const versions = (await getFileAnchorVersions(file.id)).annotations;
+      expect(versions).toEqual([file.versionId, file.versionId, file.versionId]);
+      expect(versions).not.toContain(v2.id);
+
+      // ---- a deleted note is listed on no version's page --------------------
+      // Deletion keeps the row, so the list of notes on other versions has to
+      // let go of it as the cards do.
+      // Dispatched, not clicked: with two cards in the rail this one sits
+      // under the panel's toolbar until the rail is scrolled, and where a
+      // card rests is not what is being tested.
+      await page.locator("[data-margin-note-id]", { hasText: OPEN }).getByRole("button", { name: "Delete", exact: true }).dispatchEvent("click");
+      await page.getByRole("button", { name: "Yes", exact: true }).dispatchEvent("click");
+      await expect(page.locator("[data-margin-note-id]", { hasText: OPEN })).toHaveCount(0, { timeout: 20_000 });
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+      const others = page.getByTestId("pdf-other-version-notes");
+      await expect(others).toContainText(STALE, { timeout: 15_000 });
+      await expect(others).not.toContainText(OPEN);
+      await expect(others).not.toContainText("(deleted)");
+    } finally {
+      await deleteTestFile(file.id);
+    }
+  });
+
+  test("a version's address, bytes and channel are behind its file's gate", async ({ page, request, secondUser }) => {
+    const agent = await createAgent(request);
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "PRIVATE", pages: [V1_LINES] });
+    try {
+      const v2 = await addTestFileVersion(file.id, { pages: [V2_LINES] });
+      // The owner reads every address.
+      await signIn(page, ADMIN_EMAIL);
+      expect((await page.request.get(`/pdf/${file.slug}/v/1`)).status()).toBe(200);
+      expect((await page.request.get(`/api/files/${file.id}/${file.sha256}`)).status()).toBe(200);
+
+      // A signed-in reader the file isn't shared with gets, at a version's
+      // address, exactly what the bare address answers them.
+      const { page: outsider } = await secondUser({ role: "AUTHOR" });
+      const status = async (path: string) => (await outsider.request.get(path)).status();
+      // A refused page is a 200 that says so, so what is compared is what it
+      // lets out: the file's title, its id (the bytes' address) and a hash.
+      const shown = async (path: string) => {
+        const response = await outsider.request.get(path);
+        const html = await response.text();
+        return { status: response.status(), leaks: [file.title, file.id, file.sha256, v2.sha256].filter((secret) => html.includes(secret)) };
+      };
+      for (const root of ["pdf", "files"]) {
+        const bare = await shown(`/${root}/${file.slug}`);
+        expect(bare.leaks).toEqual([]);
+        expect(await shown(`/${root}/${file.slug}/v/1`)).toEqual(bare);
+        expect(await shown(`/${root}/${file.slug}/v/2`)).toEqual(bare);
+      }
+      expect(await status(`/files/${file.slug}/v/1/download`)).toBe(await status(`/files/${file.slug}/download`));
+      const latestBytes = await status(`/api/files/${file.id}/${v2.sha256}`);
+      expect(latestBytes).toBeGreaterThanOrEqual(400);
+      expect(await status(`/api/files/${file.id}/${file.sha256}`)).toBe(latestBytes);
+      // The channel's gate answers before anything about the version does:
+      // an id that is a version and one that is not are refused alike.
+      const channel = async (query: string) => (await outsider.request.post(`/api/file/${file.id}/token${query}`)).status();
+      expect(await channel("")).toBe(403);
+      expect(await channel(`?v=${file.versionId}`)).toBe(403);
+      expect(await channel(`?v=${file.id}`)).toBe(403);
+
+      // A token whose account can't read the file: a version's address is as absent as the file's.
+      const code = async (args: Record<string, unknown>, tool = "read") => (await agent.call(tool, args)).error?.code;
+      const absent = await code({ url: `/pdf/${file.slug}` });
+      expect(absent).toBeTruthy();
+      expect(await code({ url: `/pdf/${file.slug}/v/1` })).toBe(absent);
+      expect(await code({ file: `/pdf/${file.slug}/v/1` }, "download")).toBe(await code({ file: `/pdf/${file.slug}` }, "download"));
+      expect(await code({ on: `/pdf/${file.slug}/v/1`, body: "x", quote: V1_NOTE_QUOTE }, "add_note")).toBeTruthy();
     } finally {
       await deleteTestFile(file.id);
       await agent.dispose();

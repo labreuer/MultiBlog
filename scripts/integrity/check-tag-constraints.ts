@@ -350,6 +350,93 @@ MUST_REJECT.push(
         INSERT INTO comment_quote_anchor (id, comment_id, file_id, selector_kind, selector)
         VALUES ('probe-quote-unversioned', ${f.commentId}, ${f.fileId}, 'PDF_TEXT', '{}'::jsonb)`,
   },
+  // The rest of the grid: each rule on each of the four tables. A table left
+  // out here is one whose constraint could be mistyped in a migration with
+  // nothing to say so.
+  {
+    name: "a PDF_TEXT tag_anchor with no version",
+    constraint: "tag_anchor_file_version_check",
+    why: "a tagged passage of a PDF is drawn on one version's sheets, as a note is",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO tag_anchor (id, assignment_id, file_id, selector_kind, selector)
+        VALUES ('probe-tag-unversioned', ${f.assignmentId}, ${f.fileId}, 'PDF_TEXT', '{}'::jsonb)`,
+  },
+  {
+    name: "a PDF_TEXT tag_anchor naming a version of another file",
+    constraint: "tag_anchor_file_version_id_file_id_fkey",
+    why: "the pair key, as on an annotation",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO tag_anchor (id, assignment_id, file_id, file_version_id, selector_kind, selector)
+        VALUES ('probe-tag-foreign', ${f.assignmentId}, ${f.fileId}, ${f.otherFileVersionId}, 'PDF_TEXT', '{}'::jsonb)`,
+  },
+  {
+    name: "a PDF_TEXT comment_quote_anchor naming a version of another file",
+    constraint: "comment_quote_anchor_file_version_id_file_id_fkey",
+    why: "the pair key, as on an annotation",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO comment_quote_anchor (id, comment_id, file_id, file_version_id, selector_kind, selector)
+        VALUES ('probe-quote-foreign', ${f.commentId}, ${f.fileId}, ${f.otherFileVersionId}, 'PDF_TEXT', '{}'::jsonb)`,
+  },
+  {
+    name: "a whole-file link part naming a version",
+    constraint: "anchored_link_anchor_file_version_check",
+    why: "a part with no PDF selector is on the file and no version of it",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link_anchor (id, link_id, file_id, file_version_id)
+        VALUES ('probe-link-versioned', ${f.linkId}, ${f.fileId}, ${f.fileVersionId})`,
+  },
+  {
+    name: "a whole-file comment_quote_anchor naming a version",
+    constraint: "comment_quote_anchor_file_version_check",
+    why: "a part with no PDF selector is on the file and no version of it",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO comment_quote_anchor (id, comment_id, file_id, file_version_id)
+        VALUES ('probe-quote-versioned', ${f.commentId}, ${f.fileId}, ${f.fileVersionId})`,
+  },
+  // The CHECK's second half. A pair key with a NULL column is not checked at
+  // all, so a version beside a NULL `file_id` would be held by nothing: these
+  // rows name a doc and a version of some file.
+  {
+    name: "an annotation on a doc naming a file's version",
+    constraint: "annotation_file_version_check",
+    why: "a row with a version has a file, or the pair key never looks at the version",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO annotation (id, user_id, doc_id, pdf_target, file_version_id)
+        VALUES ('probe-note-doc-versioned', ${f.userId}, ${f.docId}, '{}'::jsonb, ${f.fileVersionId})`,
+  },
+  {
+    name: "a tag_anchor on a doc naming a file's version",
+    constraint: "tag_anchor_file_version_check",
+    why: "a row with a version has a file, or the pair key never looks at the version",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO tag_anchor (id, assignment_id, doc_id, file_version_id, selector_kind, selector)
+        VALUES ('probe-tag-doc-versioned', ${f.assignmentId}, ${f.docId}, ${f.fileVersionId}, 'PDF_TEXT', '{}'::jsonb)`,
+  },
+  {
+    name: "a link part on a doc naming a file's version",
+    constraint: "anchored_link_anchor_file_version_check",
+    why: "a row with a version has a file, or the pair key never looks at the version",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link_anchor (id, link_id, doc_id, file_version_id, selector_kind, selector)
+        VALUES ('probe-link-doc-versioned', ${f.linkId}, ${f.docId}, ${f.fileVersionId}, 'PDF_TEXT', '{}'::jsonb)`,
+  },
+  {
+    name: "a comment_quote_anchor on a doc naming a file's version",
+    constraint: "comment_quote_anchor_file_version_check",
+    why: "a row with a version has a file, or the pair key never looks at the version",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO comment_quote_anchor (id, comment_id, doc_id, file_version_id, selector_kind, selector)
+        VALUES ('probe-quote-doc-versioned', ${f.commentId}, ${f.docId}, ${f.fileVersionId}, 'PDF_TEXT', '{}'::jsonb)`,
+  },
 );
 
 // A constraint set that rejects everything is not a passing test. These are
