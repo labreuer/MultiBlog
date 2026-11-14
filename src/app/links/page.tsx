@@ -1,3 +1,4 @@
+import { linkPartsVersions, pdfPath } from "@/lib/file-version";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
@@ -268,6 +269,7 @@ export default async function LinksPage({
             docId: true,
             postId: true,
             fileId: true,
+            fileVersion: { select: { id: true, number: true } },
             targetAnnotationId: true,
             targetCommentId: true,
             quotedText: true,
@@ -297,7 +299,7 @@ export default async function LinksPage({
     fileIds.length > 0 && fileWhere
       ? prisma.storedFile.findMany({
           where: { ...fileWhere, id: { in: fileIds } },
-          select: { id: true, title: true, slug: true },
+          select: { id: true, title: true, slug: true, currentVersionId: true },
         })
       : [],
   ]);
@@ -308,23 +310,29 @@ export default async function LinksPage({
     // Group parts by target in first-appearance order, as the landing page
     // does; hrefs carry ?sel= — doc by id (rename-proof), file by slug.
     const sel = `?sel=${encodeURIComponent(link.id)}`;
-    const groups = new Map<string, { target: AnchorTarget; quotes: string[] }>();
+    const groups = new Map<string, { target: AnchorTarget; quotes: string[]; versions: ({ id: string; number: number } | null)[] }>();
     for (const anchor of link.anchors) {
       const target = targetFromColumns(anchor);
       if (!target) continue;
       const key = targetKey(target);
-      const group = groups.get(key) ?? { target, quotes: [] };
+      const group = groups.get(key) ?? { target, quotes: [], versions: [] };
+      group.versions.push(anchor.fileVersion);
       group.quotes.push(shownQuote({ quotedText: anchor.quotedText, selector: parseSelector(anchor.selectorKind, anchor.selector) }));
       groups.set(key, group);
     }
     const targets: LinkRowTarget[] = [];
-    for (const { target, quotes } of groups.values()) {
+    for (const { target, quotes, versions } of groups.values()) {
       if (target.kind === "doc") {
         const doc = docsById.get(target.id);
         if (doc) targets.push({ kind: "doc", title: docTitleOrFallback(doc.title), href: `/doc/${doc.id}${sel}`, quotes });
       } else if (target.kind === "file") {
         const file = filesById.get(target.id);
-        if (file) targets.push({ kind: "file", title: file.title, href: `/pdf/${file.slug}${sel}`, quotes });
+        if (file) {
+          // The landing route's own rule for which version a link opens, and
+          // what its file is called there (docs/PDF.md §13, "Addresses").
+          const { landing, title } = linkPartsVersions(file.title, versions, file.currentVersionId);
+          targets.push({ kind: "file", title, href: `${pdfPath(file.slug, landing)}${sel}`, quotes });
+        }
       }
       // post / annotation: the v1 writer never produces these; omitted, as
       // anchoredLinkForViewer omits them.

@@ -495,6 +495,31 @@ the admin account.
   just because a test navigates to the page — force it into the querystring
   rather than relying on the ColumnPicker. `invite.spec.ts` does this for
   `/users`' two invite columns.
+- **A file's second version comes from `addTestFileVersion`**, since nothing in
+  the app can make one yet (docs/PDF.md §13). `promote: false` leaves a
+  candidate. `e2e/pdf-versions.spec.ts` is the worked example. Every fixture
+  file's version, the first included, has an id that is not its file's
+  (`TestFile.versionId`), as an uploaded file's does and a migrated one's
+  does not: code that passes a file's id for a version's fails on a fixture
+  and nowhere in old data.
+- **Two notes by one writer in one second have the same card name.** A card's
+  fragment is its writer and the second it was made in, so a fixture that has
+  one bot write several notes spaces them a second apart
+  (`pdf-versions.spec.ts`'s `note`), or a locator by fragment finds two.
+- **A PDF note with no target has a card that is not in the rail.** Above the
+  rail's width it is in the panel and out of view, so assert `toBeAttached`,
+  not `toBeVisible`.
+- **Two PDF notes on one line near the top of page 1 can leave a rail card
+  under the panel's toolbar**, where a click lands on the toolbar and times
+  out. `pdf-versions.spec.ts` dispatches the click there. Whether a person can
+  reach that card has not been looked at.
+- **A failed run can leave throwaway references that stop the next one at
+  setup.** Cleanup can't delete the shared admin while a reference it created
+  remains (`reference_created_by_id_fkey`), and
+  `reference-import-export.spec.ts`'s interrupted-import test leaves some when
+  it fails. Delete them by hand, then run again:
+  `DELETE FROM reference r USING "user" u WHERE u.id = r.created_by_id AND
+  u.email LIKE 'e2e-%@example.com' AND r.key ~ '^e2e[a-z0-9-]{4,}';`
 
 ## Why the DB helpers run in a child process
 

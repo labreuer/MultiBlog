@@ -45,7 +45,7 @@ export type PdfFragment = {
 
 type PageText = { items: QuadSourceItem[]; normalised: NormalisedPage };
 
-export function usePdfFragment(handle: PdfViewerHandle | null, fileId: string): PdfFragment {
+export function usePdfFragment(handle: PdfViewerHandle | null, fileId: string, fileVersionId: string): PdfFragment {
   const [state, setState] = useState<PdfFragment>({ regions: [], resolution: 0 });
 
   useEffect(() => {
@@ -77,6 +77,7 @@ export function usePdfFragment(handle: PdfViewerHandle | null, fileId: string): 
       if (misses.length > 0) {
         const answers = await locateFragmentMisses(
           fileId,
+          fileVersionId,
           misses.map(({ passage: { prefix, segments, suffix }, named }) => ({ passage: { prefix, segments, suffix }, named })),
         ).catch((error: unknown) => {
           console.warn("[pdf] couldn't ask where a linked passage is instead:", error);
@@ -105,7 +106,7 @@ export function usePdfFragment(handle: PdfViewerHandle | null, fileId: string): 
       generation++;
       window.removeEventListener("hashchange", resolve);
     };
-  }, [handle, fileId]);
+  }, [handle, fileId, fileVersionId]);
 
   return state;
 }

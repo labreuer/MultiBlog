@@ -34,13 +34,21 @@ export default function OwnDraftsList({ drafts }: { drafts: OwnDraft[] }) {
               </span>
               {draft.quotedText && <span className={styles.quote}>on “{draft.quotedText}”</span>}
             </span>
-            <button
-              type="button"
-              onClick={() => setMovedDraft({ id: draft.id, storedQuote: draft.quotedText || undefined })}
-              className={styles.editButton}
-            >
-              Edit
-            </button>
+            {draft.otherVersion ? (
+              // A draft on another version of the file (docs/PDF.md §13): it
+              // is reopened where its passage is, on that version's page.
+              <a href={draft.otherVersion.href} className={styles.editButton}>
+                On version {draft.otherVersion.number}
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setMovedDraft({ id: draft.id, storedQuote: draft.quotedText || undefined })}
+                className={styles.editButton}
+              >
+                Edit
+              </button>
+            )}
           </li>
         ))}
       </ul>

@@ -1215,6 +1215,23 @@ what surrounds it. That is the question research asks most of a citation.
 A file's bytes never change, since its `sha256` is its identity. Writing a PDF therefore means
 uploading one and editing its metadata.
 
+**A file's bytes are its versions'** ([PDF.md](PDF.md) §13, whose "Built so far" says what
+exists; no tool gives a file a second version yet). `/pdf/<slug>` names the latest version and
+`/pdf/<slug>/v/<n>` version n, and `read`, `search`'s `within`, `add_note`, `create_link` and
+`download` each take either:
+
+- **A read answers the address it was given**: a version's own pages, labels and outline, and
+  its `url`.
+- **Threads and link parts are listed by version.** The bare address answers the latest's and
+  then those on other versions, each with `version: n` beside its page. A version's own
+  address answers that version's, with the notes that have no passage.
+- **A card's URL answers its thread on whichever version holds it**, at that version's
+  address and under its title, `<title>, version <n>`.
+- **A note or a link part lands on the version of the address quoted from.** The write checks
+  it: a quote from the bare address is refused with `conflict` once that version is no longer
+  the latest, and a version that is not yet the latest takes none.
+- **`download` of a version's address** gives a URL with `&v=<n>`, that version's bytes.
+
 **Upload.**
 
 - Everything in `src/app/api/files/upload/route.ts` after its session check moves into
@@ -1241,7 +1258,8 @@ uploading one and editing its metadata.
   row (§19).
 - Downloads go through a byte route of their own (§5), behind the bytes route's gate.
 
-**Page labels go on `file`, not `file_page_text`.**
+**Page labels go on `file_version`, not `file_page_text`.** They are a version's, as
+everything the bytes decide is ([PDF.md](PDF.md) §13).
 
 - **Why.** Labels are a property of the bytes, while `file_page_text` is keyed by
   `text_version`. A label column there would be copied for every version and would need three
@@ -1256,10 +1274,10 @@ uploading one and editing its metadata.
   - otherwise it holds one string per page.
 - **Existing files** are filled lazily on first read, following `storedPageText`'s precedent,
   so there is no deploy-time backfill to forget.
-- **The lazy fill writes with raw SQL**, as [FULLTEXT.md](FULLTEXT.md) §3's backfill does. A
-  Prisma `update` stamps `@updatedAt`, and a file's `updatedAt` is search's "updated" date for a
-  PDF and the date its hit shows (FULLTEXT.md §6). Through Prisma, the first reader of an old
-  PDF would make it "updated today".
+- **The lazy fill writes the version's row and never the file's.** A file's `updatedAt` is
+  search's "updated" date for a PDF and the date its hit shows (FULLTEXT.md §6), and a
+  Prisma `update` of `file` stamps it, so a fill there would make an old PDF "updated today"
+  for its first reader. `file_version` has no such column.
 - **Reading.** `usablePageLabels` is applied at read time, as the viewer applies it.
   `src/lib/pdf-page-labels.ts` is pure.
 - **A read returns labels as ranges**, never one string per page. A run of sheets whose labels
@@ -1278,8 +1296,8 @@ uploading one and editing its metadata.
 - **Search's page hits carry the label too.** `/search` can then show "p. xii" where it shows
   "p. 12" today. This is display only, so PDF.md's rule holds.
 
-**The outline goes on `file` too**, as `outline Json?`, for the reasons labels do, and filled
-the same way: lazily on first read, with raw SQL. A book is read by chapter.
+**The outline goes on `file_version` too**, as `outline Json?`, for the reasons labels do, and
+filled the same way: lazily on first read. A book is read by chapter.
 
 - **What it is.** What the viewer's Contents pane shows: pdfjs's `getOutline()`, each
   destination resolved to a page with `getDestination` and `getPageIndex`, as
@@ -2399,7 +2417,7 @@ Each phase ships with four things:
 - a clean run of the integrity checks that cover what the phase writes:
   `check-annotation-anchors`, `check-annotation-snapshots`, `check-pdf-anchors`,
   `check-tag-constraints`, `check-pdf-fragment-links` for any phase that writes a fragment
-  link, and `check-search-index` for any phase that writes text or `file.page_labels`.
+  link, and `check-search-index` for any phase that writes text or `file_version.page_labels`.
 
 ## 19. Open decisions
 

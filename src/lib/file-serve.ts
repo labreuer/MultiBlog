@@ -18,33 +18,62 @@ import type { Actor } from "@/lib/actor";
 // the kind of regression nobody notices.
 
 /**
- * The bytes of `fileId` for `actor`, or 404 for a file that doesn't exist or
- * that the actor can't read — the same answer, since whether a PRIVATE file
- * exists is itself something its non-owners shouldn't learn, and a route like
- * this one is reachable by guessing an id.
+ * The bytes of one version of `fileId` for `actor`, or 404 for a file that
+ * doesn't exist or that the actor can't read — the same answer, since whether
+ * a PRIVATE file exists is itself something its non-owners shouldn't learn,
+ * and a route like this one is reachable by guessing an id.
  *
- * `hash` is the content hash the URL carries, when it carries one: a URL
- * naming the file's current bytes is immutable, and answers `immutable`.
+ * **Which version** (docs/PDF.md §13, "Addresses"):
+ *
+ * - `hash`, the content hash the URL carries: the bytes served are exactly
+ *   those, when a version of the file that is not abandoned holds them, and
+ *   the answer is `immutable`. Any other hash is 404, never the current
+ *   bytes — so a viewer open on one version reads that version's bytes for as
+ *   long as it is open, and can't splice another's in by range. `version`
+ *   beside it names the download: that version's filename, once it is
+ *   checked to hold the hash. Without it, the newest version holding the
+ *   hash does, so the same bytes uploaded twice under two names each save
+ *   under their own.
+ * - no `hash`: the latest version's bytes, or with `version` that one's.
  */
 export async function serveStoredFile(
   request: Request,
   actor: Actor,
   fileId: string,
-  opts: { hash?: string; forceAttachment?: boolean } = {},
+  opts: { hash?: string; version?: number; forceAttachment?: boolean } = {},
 ): Promise<Response> {
-  const file = await prisma.storedFile.findUnique({
+  const notFound = () => new Response("Not found", { status: 404 });
+  const row = await prisma.storedFile.findUnique({
     where: { id: fileId },
-    select: { id: true, visibility: true, sha256: true, byteSize: true, contentType: true, filename: true },
+    select: {
+      id: true,
+      visibility: true,
+      currentVersionId: true,
+      versions: {
+        // An abandoned version keeps its row without its bytes.
+        where: { abandonedAt: null },
+        orderBy: { number: "desc" },
+        select: { id: true, number: true, sha256: true, contentType: true, filename: true },
+      },
+    },
   });
-  if (!file || !(await canUserReadFile(actor.userId, actor.role, file))) {
-    return new Response("Not found", { status: 404 });
-  }
+  if (!row || !(await canUserReadFile(actor.userId, actor.role, row))) return notFound();
+
+  const held = opts.hash === undefined ? row.versions : row.versions.filter((candidate) => candidate.sha256 === opts.hash);
+  const version =
+    opts.version !== undefined
+      ? held.find((candidate) => candidate.number === opts.version)
+      : opts.hash !== undefined
+        ? held[0]
+        : held.find((candidate) => candidate.id === row.currentVersionId);
+  if (!version) return notFound();
+  const file = { id: row.id, sha256: version.sha256, contentType: version.contentType, filename: version.filename };
 
   const etag = `"${file.sha256}"`;
   // `private`, never `public`: an intermediary caching this would serve one
-  // reader's PRIVATE file to another.
-  const fresh = file.sha256 === opts.hash;
-  const cacheControl = fresh
+  // reader's PRIVATE file to another. A URL naming the hash can never mean
+  // other bytes; one that doesn't (the MCP route's) means "the latest".
+  const cacheControl = opts.hash !== undefined
     ? "private, max-age=31536000, immutable"
     : "private, max-age=0, must-revalidate";
 

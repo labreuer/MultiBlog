@@ -15,6 +15,8 @@ import { parseCitedQuery } from "@/lib/cited-passage-query";
 import { formatPassageText } from "@/lib/pdf-fragment";
 import { FragmentChecker } from "@/lib/pdf-fragment-check";
 import { withoutBrackets } from "@/lib/pdf-passage-pieces";
+import { latestVersionOf, pdfNoteContainer } from "@/lib/file-version";
+import { noteVersions } from "@/lib/file-version-data";
 
 // docs/CITATIONS.md, "Pages" — what a reference's public page can't show
 // everyone: the docs and notes citing the work, and the work's PDF, for one
@@ -80,21 +82,24 @@ export async function citedPageTarget(actor: Actor | null, segment: string, page
   if (!reference.fileId || reference.deleted || !filesWhere) return fallback;
   const file = await prisma.storedFile.findFirst({
     where: { AND: [filesWhere, { id: reference.fileId }] },
-    select: { id: true, slug: true, pageLabels: true, pageCount: true },
+    select: { id: true, slug: true, currentVersion: { select: { id: true, pageLabels: true, pageCount: true } } },
   });
   if (!file) return fallback;
-  // A file whose labels haven't been read yet (NULL) has them read and stored
-  // now, as every reader of them does (src/lib/pdf-metadata.ts), so its first
-  // citation lands on the page the labels name and not on the sheet of that
-  // number.
-  const pageLabels = pageLabelsOf(file.pageLabels) ?? (await pdfMetadata(file.id))?.pageLabels ?? null;
-  const pageHref = pdfPageHref({ slug: file.slug, pageLabels, pageCount: file.pageCount }, first);
-  if (!pageHref || file.pageCount === null) return fallback;
+  // A citation's page is resolved on the latest version's labels and text at
+  // every click (docs/PDF.md §13, "Links into the file").
+  const latest = latestVersionOf(file);
+  // A version whose labels haven't been read yet (NULL) has them read and
+  // stored now, as every reader of them does (src/lib/pdf-metadata.ts), so
+  // its first citation lands on the page the labels name and not on the sheet
+  // of that number.
+  const pageLabels = pageLabelsOf(latest.pageLabels) ?? (await pdfMetadata(latest.id))?.pageLabels ?? null;
+  const pageHref = pdfPageHref({ slug: file.slug, pageLabels, pageCount: latest.pageCount }, first);
+  if (!pageHref || latest.pageCount === null) return fallback;
 
   const asked = parseCitedQuery(query);
   if (asked.kind === "pairs") return `/pdf/${file.slug}#${asked.fragment}`;
   if (asked.kind !== "quotation") return pageHref;
-  const { placed, pages } = await placeCitedQuotation(new FragmentChecker(), { id: file.id, pageCount: file.pageCount, ownLabels: pageLabels }, page, asked.text);
+  const { placed, pages } = await placeCitedQuotation(new FragmentChecker(), { id: file.id, pageCount: latest.pageCount, ownLabels: pageLabels }, page, asked.text);
   if (placed && pages) return `/pdf/${file.slug}#${placedFragment(placed, pages)}`;
   return `${pageHref}&text=${formatPassageText(withoutBrackets(asked.text))}`;
 }
@@ -121,6 +126,7 @@ export async function referenceCitedBy(actor: Actor, referenceId: string): Promi
       ? prisma.annotation.findMany({
           where: { AND: [notesWhere, cites] },
           select: {
+            id: true,
             createdAt: true,
             user: { select: { name: true, slug: true } },
             doc: { select: { slug: true, title: true } },
@@ -131,17 +137,21 @@ export async function referenceCitedBy(actor: Actor, referenceId: string): Promi
         })
       : [],
     reference.fileId && filesWhere
-      ? prisma.storedFile.findFirst({ where: { AND: [filesWhere, { id: reference.fileId }] }, select: { slug: true, title: true, pageLabels: true, pageCount: true } })
+      ? prisma.storedFile.findFirst({ where: { AND: [filesWhere, { id: reference.fileId }] }, select: { slug: true, title: true, currentVersion: { select: { pageLabels: true, pageCount: true } } } })
       : null,
   ]);
 
+  // A note on a PDF is linked at the version it is on, and names it where
+  // that is not the latest (docs/PDF.md §13, "Addresses").
+  const versionOf = await noteVersions(notes.flatMap((note) => (note.file ? [note.id] : [])));
   return {
     docs: docs.slice(0, CITED_BY_LIMIT).map((doc) => ({ title: docTitleOrFallback(doc.title), href: `/doc/${doc.slug}` })),
     notes: notes.slice(0, CITED_BY_LIMIT).flatMap((note) => {
+      const pdf = note.file ? pdfNoteContainer(note.file, versionOf.get(note.id)) : null;
       const container = note.doc
         ? { href: `/doc/${note.doc.slug}`, title: docTitleOrFallback(note.doc.title) }
-        : note.file
-          ? { href: `/pdf/${note.file.slug}`, title: note.file.title }
+        : pdf
+          ? { href: pdf.path, title: pdf.title }
           : null;
       if (!container) return [];
       // The name its card shows, which is what the card's permalink is built from.
@@ -149,6 +159,8 @@ export async function referenceCitedBy(actor: Actor, referenceId: string): Promi
       return [{ writer, on: container.title, href: `${container.href}#${annotationAnchorName(writer, note.createdAt)}` }];
     }),
     more: docs.length > CITED_BY_LIMIT || notes.length > CITED_BY_LIMIT,
-    file: file ? { title: file.title, slug: file.slug, pageLabels: pageLabelsOf(file.pageLabels), pageCount: file.pageCount } : null,
+    file: file
+      ? { title: file.title, slug: file.slug, pageLabels: pageLabelsOf(latestVersionOf(file).pageLabels), pageCount: latestVersionOf(file).pageCount }
+      : null,
   };
 }

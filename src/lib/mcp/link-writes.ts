@@ -1,3 +1,4 @@
+import { CaptureRefused, type CaptureClaim } from "@/lib/file-version-data";
 import { prisma } from "@/lib/prisma";
 import {
   addLinkParts,
@@ -27,7 +28,7 @@ import { anchorPdfQuote } from "./pdf-anchoring";
 export type PartInput = QuoteInput & { on: string };
 
 /** One part, captured: its target read-checked and its quote found, or the refusal that names where. */
-async function capturePart(ctx: McpContext, part: PartInput, where: Record<string, number>): Promise<LinkPartRow> {
+async function capturePart(ctx: McpContext, part: PartInput, where: Record<string, number>, claims: CaptureClaim[]): Promise<LinkPartRow> {
   try {
     if (!hasQuote(part)) throw invalid("A link part names its passage: a quote, or start and end.");
     const container = await readableContainer(ctx.actor, part.on);
@@ -43,6 +44,7 @@ async function capturePart(ctx: McpContext, part: PartInput, where: Record<strin
     // the quote and the quads come from the same text here, so a mismatch
     // means two normalisers disagree, which is worth surfacing.
     const at = await anchorPdfQuote(container.file, part);
+    claims.push(at.claim);
     return pdfPartRow(container.file.id, at);
   } catch (err) {
     if (!(err instanceof ApiError)) throw err;
@@ -51,6 +53,12 @@ async function capturePart(ctx: McpContext, part: PartInput, where: Record<strin
       .join(", ");
     throw new ApiError(err.code, `${place[0].toUpperCase()}${place.slice(1)}: ${err.message}`, { ...where, ...err.details });
   }
+}
+
+/** A PDF part's version moved under the write (docs/PDF.md §13): the whole call is refused, to be made again from what the file shows now. */
+function refusedAsConflict(err: unknown): never {
+  if (err instanceof CaptureRefused) throw new ApiError("conflict", err.message);
+  throw err;
 }
 
 /** A link by its URL or id. */
@@ -67,14 +75,15 @@ async function partCount(linkId: string): Promise<number> {
 
 export async function createLinksFor(ctx: McpContext, links: { name?: string; parts: PartInput[] }[]): Promise<ToolResult> {
   const captured: { name: string | null; parts: LinkPartRow[] }[] = [];
+  const claims: CaptureClaim[] = [];
   for (const [i, link] of links.entries()) {
     const parts: LinkPartRow[] = [];
     for (const [j, part] of link.parts.entries()) {
-      parts.push(await capturePart(ctx, part, links.length > 1 ? { link: i + 1, part: j + 1 } : { part: j + 1 }));
+      parts.push(await capturePart(ctx, part, links.length > 1 ? { link: i + 1, part: j + 1 } : { part: j + 1 }, claims));
     }
     captured.push({ name: link.name ?? null, parts });
   }
-  const ids = await mintLinks(ctx.actor, captured);
+  const ids = await mintLinks(ctx.actor, captured, claims).catch(refusedAsConflict);
   return {
     links: ids.map((id, i) => ({
       url: `/link/${id}`,
@@ -87,8 +96,9 @@ export async function createLinksFor(ctx: McpContext, links: { name?: string; pa
 export async function addLinkPartsFor(ctx: McpContext, input: { link: string; parts: PartInput[] }): Promise<ToolResult> {
   const linkId = linkIdOf(input.link);
   const parts: LinkPartRow[] = [];
-  for (const [j, part] of input.parts.entries()) parts.push(await capturePart(ctx, part, { part: j + 1 }));
-  await addLinkParts(ctx.actor, linkId, parts);
+  const claims: CaptureClaim[] = [];
+  for (const [j, part] of input.parts.entries()) parts.push(await capturePart(ctx, part, { part: j + 1 }, claims));
+  await addLinkParts(ctx.actor, linkId, parts, claims).catch(refusedAsConflict);
   return { url: `/link/${linkId}`, parts: await partCount(linkId) };
 }
 

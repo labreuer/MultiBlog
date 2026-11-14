@@ -1,3 +1,5 @@
+import { noteVersions } from "@/lib/file-version-data";
+import { pdfPath } from "@/lib/file-version";
 import { parseChipRecords, quoteWithChipLabels, type ChipRecord } from "./anchors";
 import type { JSONContent } from "@tiptap/core";
 import { prisma } from "@/lib/prisma";
@@ -222,6 +224,12 @@ export type OwnDraft = {
   quotedText: string;
   /** A reply posts under its parent wherever it is reopened, so the list says so. */
   isReply: boolean;
+  /**
+   * Set for a draft on a version of the file other than the one shown
+   * (docs/PDF.md §13, "Addresses"): the list names that version and links
+   * the draft there, where it is reopened, in place of offering Edit here.
+   */
+  otherVersion?: { number: number; href: string };
 };
 
 const OWN_DRAFT_SELECT = {
@@ -280,7 +288,15 @@ export async function getOwnDraftAnnotations(docId: string, userId: string): Pro
 // Same DRAFT exclusion, for the same reason (§13a: a draft is owner-only with
 // no admin override); getOwnFileDraftAnnotations is the narrower query that
 // lets an author find their own again.
-export async function getFileAnnotationsAsThreads(fileId: string): Promise<AnnotationThread[]> {
+//
+// **Every version's threads, each naming its version** (docs/PDF.md §13):
+// `fileVersionId` is the version a thread's root was measured on, or null for
+// a root with no target, which is the file's and is listed on every version's
+// page. A stored target that no longer parses is listed the same way. The
+// caller narrows to the version it shows (`pdfAnnotationEntriesFor`).
+export type FileAnnotationThread = AnnotationThread & { fileVersionId: string | null };
+
+export async function getFileAnnotationsAsThreads(fileId: string): Promise<FileAnnotationThread[]> {
   const annotations = await prisma.annotation.findMany({
     where: { fileId, ...postedAnnotationWhere() },
     orderBy: { createdAt: "asc" },
@@ -290,7 +306,7 @@ export async function getFileAnnotationsAsThreads(fileId: string): Promise<Annot
   });
   const versions = await versionContextFor(annotations, annotations);
 
-  const threads: AnnotationThread[] = [];
+  const threads: FileAnnotationThread[] = [];
   for (const [rootId, members] of groupByRoot(annotations)) {
     const root = members.find((a) => a.id === rootId);
     if (!root) continue;
@@ -301,6 +317,7 @@ export async function getFileAnnotationsAsThreads(fileId: string): Promise<Annot
     const pdfTarget = parsePdfTarget(root.pdfTarget);
     threads.push({
       id: rootId,
+      fileVersionId: pdfTarget ? root.fileVersionId : null,
       // Not applicable to a file thread — these are *doc* offsets. The PDF
       // anchor is pdfTarget below.
       anchorFrom: null,
@@ -320,13 +337,31 @@ export async function getFileAnnotationsAsThreads(fileId: string): Promise<Annot
 // The file counterpart of getOwnDraftAnnotations, under the same rule: the
 // caller's own id only. /pdf/[slug] lists it on first paint, and
 // loadPdfAnnotationEntries returns it after every change inside the island.
-export async function getOwnFileDraftAnnotations(fileId: string, userId: string): Promise<OwnDraft[]> {
+//
+// **The file's drafts, on whichever version**, so a draft on an earlier
+// version is on the page its author opens (docs/PDF.md §13, "Addresses"). One
+// on a version other than `shown` names it and links there; a reply's version
+// is its root's (`noteVersions`).
+export async function getOwnFileDraftAnnotations(
+  fileId: string,
+  userId: string,
+  shown: { slug: string; fileVersionId: string },
+): Promise<OwnDraft[]> {
   const drafts = await prisma.annotation.findMany({
     where: { fileId, userId, status: "DRAFT" },
     orderBy: { createdAt: "desc" },
     select: OWN_DRAFT_SELECT,
   });
-  return drafts.map(toOwnDraft);
+  const versions = await noteVersions(drafts.map((draft) => draft.id));
+  return drafts.map((draft) => {
+    const version = versions.get(draft.id);
+    return {
+      ...toOwnDraft(draft),
+      ...(version && version.id !== shown.fileVersionId
+        ? { otherVersion: { number: version.number, href: pdfPath(shown.slug, version) } }
+        : {}),
+    };
+  });
 }
 
 type AnnotationRow = {

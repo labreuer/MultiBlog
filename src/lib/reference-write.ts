@@ -1,3 +1,4 @@
+import { latestVersionOf } from "@/lib/file-version";
 import { Prisma } from "@/generated/prisma/client";
 import type { Actor } from "@/lib/actor";
 import { ApiError, forbidden, invalid, notFound } from "@/lib/api/errors";
@@ -125,9 +126,9 @@ async function firstFree(base: string, free: (key: string) => Promise<boolean>):
 const freeKey = (tx: Prisma.TransactionClient, base: string) => firstFree(base, async (key) => !(await keyTaken(tx, key)));
 
 async function requireFile(actor: Actor, fileId: string): Promise<void> {
-  const file = await prisma.storedFile.findUnique({ where: { id: fileId }, select: { id: true, visibility: true, contentType: true } });
+  const file = await prisma.storedFile.findUnique({ where: { id: fileId }, select: { id: true, visibility: true, currentVersion: { select: { contentType: true } } } });
   if (!file || !(await canUserReadFile(actor.userId, actor.role, file))) throw notFound("That file");
-  if (file.contentType !== PDF_CONTENT_TYPE) throw invalid("That file isn't a PDF. A reference's file is the work's PDF.");
+  if (latestVersionOf(file).contentType !== PDF_CONTENT_TYPE) throw invalid("That file isn't a PDF. A reference's file is the work's PDF.");
 }
 
 function shortOf(raw: string | null | undefined): string | null {

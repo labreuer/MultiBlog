@@ -1,5 +1,6 @@
 "use client";
 
+import { usePdfCaptureOrigin } from "@/components/pdf/pdf-capture-context";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -134,6 +135,10 @@ export default function LiveAnnotationComposer({
   // so that the one place deciding `editable` is the token, on both surfaces.
   const { provider, ydoc, readOnly, error: connectionError, outOfDate } = useAnnotationProvider(annotationId, connection);
   const [pending, setPending] = useState(false);
+  // On a PDF, the version this page shows and how it was reached, which a
+  // post names so its anchor lands on the version its writer is reading
+  // (docs/PDF.md §13). Null on a doc.
+  const pdfOrigin = usePdfCaptureOrigin();
   const [error, setError] = useState<string | null>(null);
   const [visibility, setVisibility] = useState<Visibility>("post");
 
@@ -184,6 +189,7 @@ export default function LiveAnnotationComposer({
             raise: visibility === "raise",
             ydocUpdateId: ydocUpdateId ?? undefined,
             pdfTarget,
+            pdfOrigin: pdfOrigin ?? undefined,
           });
     setPending(false);
     if (result.error) {

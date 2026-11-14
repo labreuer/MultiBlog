@@ -1,3 +1,4 @@
+import { assertCaptureVersion, type CaptureClaim } from "@/lib/file-version-data";
 import type { JSONContent } from "@tiptap/core";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -39,7 +40,7 @@ export type PostedAnchor =
   /** Columns into a doc (a root) or into the parent's body (a reply), measured at `stamp`. */
   | { kind: "range"; stamp: bigint; from: number; to: number; quotedText: string; chips?: ChipRecord[] }
   /** A root on a PDF page: the whole target, its quote derived by this server. */
-  | { kind: "pdf"; target: PdfTarget; quotedText: string };
+  | { kind: "pdf"; target: PdfTarget; quotedText: string; fileVersionId: string; claim: CaptureClaim };
 
 export async function createPostedAnnotation(
   actor: Actor,
@@ -80,6 +81,8 @@ export async function createPostedAnnotation(
       settled,
       userId: actor.userId,
       at: now,
+      // The anchor's version, checked in the transaction that writes it.
+      ...(anchor.kind === "pdf" ? { before: (tx) => assertCaptureVersion(tx, anchor.claim) } : {}),
       alongside: {
         status: "LIVE",
         postedAt: now,
@@ -87,7 +90,11 @@ export async function createPostedAnnotation(
         ...(anchor.kind === "range"
           ? { anchorFrom: anchor.from, anchorTo: anchor.to, quotedText: anchor.quotedText, anchorChips: chipRecordsColumn(anchor.chips) }
           : anchor.kind === "pdf"
-            ? { pdfTarget: anchor.target as unknown as Prisma.InputJsonValue, quotedText: anchor.quotedText }
+            ? {
+                pdfTarget: anchor.target as unknown as Prisma.InputJsonValue,
+                quotedText: anchor.quotedText,
+                fileVersion: { connect: { id: anchor.fileVersionId } },
+              }
             : {}),
       },
     });

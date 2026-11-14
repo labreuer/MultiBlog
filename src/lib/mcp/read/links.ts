@@ -88,17 +88,26 @@ export async function readLink(ctx: McpContext, linkId: string): Promise<ToolRes
           parts: group.parts.map((part) => ({ ...numbered(part.anchorId), ...quoteOf(part), ...placeDocPart(state, part) })),
         };
       }
-      const labels = await pdfLabels(group.target.id);
-      const file = await prisma.storedFile.findUnique({ where: { id: group.target.id }, select: { slug: true } });
+      // The group's own address, less its ?sel=: the newest version holding a
+      // part (docs/PDF.md §13, "Addresses"). A part on another version says
+      // which, and its page and label are that version's.
+      const target = group.href.split("?")[0];
+      const labelsOf = new Map<string, string[] | null>();
+      for (const part of group.parts) {
+        if (part.version && !labelsOf.has(part.version.id)) labelsOf.set(part.version.id, await pdfLabels(part.version.id));
+      }
       return {
-        target: file ? `/pdf/${file.slug}` : group.href,
+        target,
         kind: "pdf",
         title: group.label,
         parts: group.parts.map((part) => {
           const pageIndex = part.selector?.kind === "PDF_TEXT" ? part.selector.selector.pageIndex : null;
+          const labels = part.version ? labelsOf.get(part.version.id) : null;
+          const elsewhere = part.version !== null && part.version.href.split("?")[0] !== target;
           return {
             ...numbered(part.anchorId),
             ...quoteOf(part),
+            ...(elsewhere ? { version: part.version!.number } : {}),
             ...(pageIndex !== null ? { page: pageIndex + 1, ...(labels ? { label: labels[pageIndex] } : {}) } : {}),
           };
         }),
@@ -123,20 +132,31 @@ export async function readLink(ctx: McpContext, linkId: string): Promise<ToolRes
  */
 export async function linksInto(
   ctx: McpContext,
-  target: { kind: "doc"; id: string; state: DocState } | { kind: "file"; id: string },
+  target: { kind: "doc"; id: string; state: DocState } | { kind: "file"; id: string; versionId: string; versionAddressed: boolean },
   args: ReadArgs,
 ): Promise<ToolResult> {
-  const parts = await linkPartsInto({ kind: target.kind, id: target.id }, viewerOf(ctx.actor));
+  const every = await linkPartsInto({ kind: target.kind, id: target.id }, viewerOf(ctx.actor));
+  // As a PDF's threads are listed (docs/PDF.md §13, "Addresses"): a version's
+  // own address answers the parts on that version, and the bare one every
+  // part, each on another version than the latest naming it.
+  const parts = target.kind === "file" && target.versionAddressed ? every.filter((part) => part.fileVersion?.id === target.versionId) : every;
   const page = pageOf(parts, decodeCursor(args.links?.cursor, args.links?.limit ?? 20));
-  const labels = target.kind === "file" ? await pdfLabels(target.id) : null;
+  const labelsOf = new Map<string, string[] | null>();
+  if (target.kind === "file") {
+    for (const part of page.items) {
+      if (part.fileVersion && !labelsOf.has(part.fileVersion.id)) labelsOf.set(part.fileVersion.id, await pdfLabels(part.fileVersion.id));
+    }
+  }
   return {
     total: parts.length,
     parts: page.items.map((part) => {
+      const labels = part.fileVersion ? labelsOf.get(part.fileVersion.id) : null;
       const where: Record<string, unknown> =
         target.kind === "doc"
           ? placeDocPart(target.state, part)
           : part.selector?.kind === "PDF_TEXT"
             ? {
+                ...(part.fileVersion && part.fileVersion.id !== target.versionId ? { version: part.fileVersion.number } : {}),
                 page: part.selector.selector.pageIndex + 1,
                 ...(labels ? { label: labels[part.selector.selector.pageIndex] } : {}),
               }

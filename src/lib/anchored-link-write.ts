@@ -1,3 +1,4 @@
+import { assertCaptureVersion, type CaptureClaim } from "@/lib/file-version-data";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { canUserReadDoc } from "@/lib/doc-authz";
@@ -69,9 +70,11 @@ export function docRangePartRow(
  * offsets and stamp stay null — the shape check-tag-constraints names as
  * intended.
  */
-export function pdfPartRow(fileId: string, captured: { target: PdfTarget; quotedText: string }): LinkPartRow {
+export function pdfPartRow(fileId: string, captured: { target: PdfTarget; quotedText: string; fileVersionId: string }): LinkPartRow {
   return {
     ...targetToColumns({ kind: "file", id: fileId }),
+    // The version whose sheets the quads were measured on (docs/PDF.md §13).
+    fileVersionId: captured.fileVersionId,
     selectorKind: "PDF_TEXT",
     selector: captured.target as unknown as Prisma.InputJsonValue,
     quotedText: captured.quotedText,
@@ -85,10 +88,16 @@ export function pdfPartRow(fileId: string, captured: { target: PdfTarget; quoted
  * covers only links that are unminted or reopened. Callers have captured
  * every part first and run the gate on each target.
  */
-export async function mintLinks(actor: Actor, links: { name: string | null; parts: LinkPartRow[] }[]): Promise<string[]> {
+export async function mintLinks(
+  actor: Actor,
+  links: { name: string | null; parts: LinkPartRow[] }[],
+  /** The claim of every PDF part among them, checked here, in the transaction that inserts (docs/PDF.md §13). */
+  claims: readonly CaptureClaim[],
+): Promise<string[]> {
   if (links.some((link) => link.parts.length === 0)) throw invalid("A link needs at least one passage.");
   const now = new Date();
   return prisma.$transaction(async (tx) => {
+    await assertCaptureVersions(tx, claims);
     const ids: string[] = [];
     for (const link of links) {
       const row = await tx.anchoredLink.create({
@@ -104,6 +113,12 @@ export async function mintLinks(actor: Actor, links: { name: string | null; part
     }
     return ids;
   });
+}
+
+/** Each distinct claim checked once, under its file row's lock, in file order so two writers lock alike. */
+export async function assertCaptureVersions(tx: Tx, claims: readonly CaptureClaim[]): Promise<void> {
+  const distinct = new Map(claims.map((claim) => [`${claim.fileId}:${claim.fileVersionId}:${claim.address}`, claim]));
+  for (const key of [...distinct.keys()].sort()) await assertCaptureVersion(tx, distinct.get(key)!);
 }
 
 /** A change to a *minted* link's parts is an edit; a draft's changes are not. */
@@ -128,9 +143,10 @@ async function ownMintedLink(tx: Tx, actor: Actor, linkId: string): Promise<{ id
 }
 
 /** More parts on a minted link of the actor's, after its last. */
-export async function addLinkParts(actor: Actor, linkId: string, parts: LinkPartRow[]): Promise<void> {
+export async function addLinkParts(actor: Actor, linkId: string, parts: LinkPartRow[], claims: readonly CaptureClaim[]): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const link = await ownMintedLink(tx, actor, linkId);
+    await assertCaptureVersions(tx, claims);
     const last = await tx.anchoredLinkAnchor.aggregate({ where: { linkId: link.id }, _max: { partOrder: true } });
     const start = (last._max.partOrder ?? -1) + 1;
     for (const [index, part] of parts.entries()) {

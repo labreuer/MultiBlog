@@ -1,9 +1,9 @@
 # Integrity checks
 
-Ten scripts. Three are about the doc/ydoc chain and are described first; then two about
+Twelve scripts. Three are about the doc/ydoc chain and are described first; then three about
 the PDF side, one about the schema itself, the three that arrived with PLAN.md §22 and
-§23 — the two edit-history checks and the quotation check — and the search index's at the
-bottom.
+§23 — the two edit-history checks and the quotation check — the mentions check, and the search
+index's at the bottom.
 
 The doc/ydoc three: two verify one link each in the chain that turns an append-only
 log into the columns the app reads; the third verifies a claim made *about* a
@@ -94,15 +94,17 @@ else would ever notice it breaking.
 
 It is a separate script rather than a branch inside `check-annotation-anchors.ts` because the
 two check different things against different substrates. A doc annotation's anchor is
-verified by replaying a ydoc to a stamped version; a file has no ydoc and no version to
-replay to — its bytes are immutable, which is precisely why its anchor is checked against
-the stored page text (`file_page_text`) instead.
+verified by replaying a ydoc to a stamped version; a file has no ydoc to replay — a
+version's bytes are immutable, which is precisely why its anchor is checked against the
+stored page text (`file_page_text`) instead: the page text of the version the anchor names
+(`file_version_id`, docs/PDF.md §13), whichever version is now the file's latest.
 
 What it can and cannot see:
 
 - **Can**: a quote that disagrees with the page text at its own offsets; a target whose
-  `textVersion` has no matching extraction; a `pageIndex` past the end of the document; a
-  malformed target blob; a quote stored with no target at all.
+  `textVersion` has no matching extraction; a `pageIndex` past the end of its version; a
+  malformed target blob; a quote stored with no target at all; a target that names no
+  version.
 - **Cannot**: the quads. They are geometry, and checking them would mean rendering the PDF,
   which needs a browser. They are also the part least likely to be wrong — they were
   measured against bytes that cannot change.
@@ -113,6 +115,26 @@ npx tsx scripts/integrity/check-pdf-anchors.ts [--file <idOrSlug>] [--verbose]
 
 Unlike the other three it does **not** need to run after the ydoc check: it touches no ydoc
 at all, so its findings are never downstream of a bad blob.
+
+## `check-file-versions.ts` (docs/PDF.md §13)
+
+Every file has a latest version, and the version it names is one a reader may be shown.
+
+A file and its first version name each other, so `file.current_version_id` is nullable for
+the one step in which the file exists and its version doesn't, inside the transaction that
+makes both. The database therefore can't say "every file has a latest version", and every
+reader of a file's bytes goes through `latestVersionOf`, which throws on a file without one:
+a broken page, a search query that throws, an MCP read that fails, and nothing reporting it
+until someone opens that file.
+
+It reports a file with no latest version (`no-latest`), one whose latest was never promoted
+or is abandoned, one with no version 1, and one whose versions are not numbered 1 to their
+count. All are ERRORs. The pair key already makes the latest one of the file's own versions;
+`check-tag-constraints.ts` proves that key.
+
+```
+npx tsx scripts/integrity/check-file-versions.ts [--file <idOrSlug>] [--verbose]
+```
 
 ## `check-pdf-fragment-links.ts` (docs/PDF_FRAGMENT_LINKS.md §9)
 
@@ -177,6 +199,13 @@ draft must be refused, as must a reopened link beside a draft and `reopened_at` 
 second link for a user whose first is *minted* must go in, as must a reopened link once the
 slot is free), and the not-blank CHECK on `name` (a whitespace-only name must be refused; a
 real one must go in — docs/ANCHORED_LINKS.md, "Naming a link").
+
+docs/PDF.md §13's migrations (`file_versions`, `file_version_anchor_checks`) add theirs: the
+one-candidate partial index on `file_version`, the pair keys that make a file's latest
+version and an anchor's version one of that file's own, and the CHECK on each anchor table
+that a row names a version exactly when it holds a PDF target. A whole-file `tag_anchor`
+naming a version is the probe that matters most: its `selector_kind` is NULL, which a plain
+equality in the CHECK would let through.
 
 ## `check-comment-quotes.ts` (PLAN.md §23)
 

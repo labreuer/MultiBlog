@@ -76,10 +76,17 @@ const KINDS: Kind[] = [
     touch: "body_text",
   },
   { table: "comment", key: "id", vector: "comment_search_vector(body_text)", touch: "body_text" },
-  { table: "file", key: "id", vector: "file_search_vector(title, filename)", touch: "title" },
+  {
+    table: "file",
+    key: "id",
+    // The filename is the latest version's (docs/PDF.md §13), read as the row
+    // trigger reads it.
+    vector: 'file_search_vector(title, (SELECT v.filename FROM file_version v WHERE v.id = "file".current_version_id))',
+    touch: "title",
+  },
   {
     table: "file_page_text",
-    key: "file_id || ' p' || page_index || ' @' || text_version",
+    key: "file_version_id || ' p' || page_index || ' @' || text_version",
     vector: "file_page_text_search_vector(text)",
     touch: "text",
   },

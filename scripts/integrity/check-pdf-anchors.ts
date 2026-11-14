@@ -12,14 +12,18 @@
 // It is a separate script rather than a branch inside check-annotation-anchors
 // because the two verify different things against different substrates. A doc
 // annotation's anchor is checked by replaying a ydoc to a stamped version; a
-// file has no ydoc and no version to replay to — its bytes are immutable, which
-// is exactly why its anchor is checked against stored page text instead.
+// file has no ydoc to replay — a version's bytes are immutable, which is
+// exactly why its anchor is checked against stored page text instead.
+//
+// **Against the version the anchor names** (`file_version_id`, docs/PDF.md
+// §13): page text is a version's, and an anchor's quads and offsets were
+// measured on that version's sheets, whichever version is now the latest.
 //
 // What it can and cannot see:
 //
 //   - It **can** catch a quote that disagrees with the page text at its own
-//     offsets, a target whose textVersion has no matching extraction, and a
-//     malformed target blob.
+//     offsets, a target whose textVersion has no matching extraction, a
+//     malformed target blob, and a target that names no version.
 //   - It **cannot** check the quads. They are geometry, and verifying them
 //     would mean rendering the PDF — which is the client's job and needs a
 //     browser. The quads are also the anchor least likely to be wrong: they
@@ -79,21 +83,23 @@ async function main(): Promise<void> {
       quotedText: true,
       pdfTarget: true,
       deletedAt: true,
-      file: { select: { slug: true, pageCount: true } },
+      fileVersionId: true,
+      fileVersion: { select: { pageCount: true } },
     },
   });
 
   console.log(`Checking ${annotations.length} file annotation(s)…\n`);
 
-  // Page text is fetched per (file, page, textVersion) and cached: several
-  // annotations routinely share a page, and this is the only query in the loop.
+  // Page text is fetched per (file version, page, textVersion) and cached:
+  // several annotations routinely share a page, and this is the only query in
+  // the loop.
   const pageTextCache = new Map<string, string | null>();
-  async function pageText(fileId: string, pageIndex: number, textVersion: string): Promise<string | null> {
-    const key = `${fileId}:${pageIndex}:${textVersion}`;
+  async function pageText(fileVersionId: string, pageIndex: number, textVersion: string): Promise<string | null> {
+    const key = `${fileVersionId}:${pageIndex}:${textVersion}`;
     const hit = pageTextCache.get(key);
     if (hit !== undefined) return hit;
     const row = await prisma.filePageText.findUnique({
-      where: { fileId_pageIndex_textVersion: { fileId, pageIndex, textVersion } },
+      where: { fileVersionId_pageIndex_textVersion: { fileVersionId, pageIndex, textVersion } },
       select: { text: true },
     });
     pageTextCache.set(key, row?.text ?? null);
@@ -128,18 +134,22 @@ async function main(): Promise<void> {
       report("error", a.id, "target-malformed", "pdfTarget is present but doesn't parse as a Target");
       continue;
     }
+    if (a.fileVersionId === null) {
+      report("error", a.id, "no-version", "has a pdfTarget but names no version of its file, so nothing says whose sheets it was measured on");
+      continue;
+    }
 
     if (target.quads.length === 0) {
       report("error", a.id, "no-quads", "target has no quads — nothing anchors it");
     }
 
-    const pageCount = a.file?.pageCount;
+    const pageCount = a.fileVersion?.pageCount;
     if (pageCount !== null && pageCount !== undefined && target.pageIndex >= pageCount) {
       report(
         "error",
         a.id,
         "page-out-of-range",
-        `pageIndex ${target.pageIndex} but the file has ${pageCount} page(s)`,
+        `pageIndex ${target.pageIndex} but its version of the file has ${pageCount} page(s)`,
       );
       continue;
     }
@@ -151,7 +161,7 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const text = await pageText(a.fileId, target.pageIndex, target.textVersion);
+    const text = await pageText(a.fileVersionId, target.pageIndex, target.textVersion);
     if (text === null) {
       // Not an error: a `textVersion` bump leaves older rows pointing at an
       // extraction that is still valid but no longer the newest, and
@@ -216,7 +226,8 @@ async function main(): Promise<void> {
       fileId: true,
       selector: true,
       quotedText: true,
-      file: { select: { pageCount: true } },
+      fileVersionId: true,
+      fileVersion: { select: { pageCount: true } },
     },
   });
 
@@ -236,12 +247,16 @@ async function main(): Promise<void> {
       report("error", part.id, "target-malformed", "selector is present but doesn't parse as a Target");
       continue;
     }
+    if (part.fileVersionId === null) {
+      report("error", part.id, "no-version", "has a PDF_TEXT selector but names no version of its file");
+      continue;
+    }
     if (target.quads.length === 0) {
       report("error", part.id, "no-quads", "target has no quads — nothing anchors it");
     }
-    const pageCount = part.file?.pageCount;
+    const pageCount = part.fileVersion?.pageCount;
     if (pageCount !== null && pageCount !== undefined && target.pageIndex >= pageCount) {
-      report("error", part.id, "page-out-of-range", `pageIndex ${target.pageIndex} but the file has ${pageCount} page(s)`);
+      report("error", part.id, "page-out-of-range", `pageIndex ${target.pageIndex} but its version of the file has ${pageCount} page(s)`);
       continue;
     }
 
@@ -261,7 +276,7 @@ async function main(): Promise<void> {
       note(`${part.id}: region part on page ${target.pageIndex + 1} — no quote to verify`);
       continue;
     }
-    const text = await pageText(part.fileId, target.pageIndex, target.textVersion);
+    const text = await pageText(part.fileVersionId, target.pageIndex, target.textVersion);
     if (text === null) {
       report(
         "warn",

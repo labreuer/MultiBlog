@@ -7,15 +7,20 @@
 // hit or an earlier result can be passed straight back. A bare id is
 // accepted too, and resolve.ts tries each kind that has one.
 
+import { parseVersionNumber } from "@/lib/file-version";
 import type { ToolName } from "./tool";
 
 export type ParsedRef =
   /** /doc/<slug or id>, with or without /edit. */
   | { kind: "doc"; param: string; fragment: string }
-  /** /pdf/<slug>, with its fragment: #page=…, a fragment link's text=…, or an annotation card's name. */
-  | { kind: "pdf"; slug: string; fragment: string }
-  /** /files/<slug>: any file, a .docx included. */
-  | { kind: "file"; slug: string }
+  /**
+   * /pdf/<slug>, with its fragment: #page=…, a fragment link's text=…, or an
+   * annotation card's name. `version` is set for a version's own address,
+   * /pdf/<slug>/v/<n> (docs/PDF.md §13, "Addresses"); without it, the latest.
+   */
+  | { kind: "pdf"; slug: string; fragment: string; version?: number }
+  /** /files/<slug>: any file, a .docx included; /files/<slug>/v/<n> for one version of it. */
+  | { kind: "file"; slug: string; version?: number }
   /** /annotations: the threads on every container the actor can read. */
   | { kind: "annotations" }
   /** /link/<id>, or a reading route carrying ?sel=<id>. */
@@ -34,6 +39,13 @@ export type ParsedRef =
 
 /** A cuid, the shape every id here has: lowercase letters and digits, about 25 long. */
 const ID_RE = /^c[a-z0-9]{20,32}$/;
+
+/** The version a file's address names after its slug: `v/<n>`, or `v<n>`, which the site redirects to it. Null for anything else. */
+function versionOf(rest: readonly string[]): number | null {
+  if (rest.length === 2 && rest[0] === "v") return parseVersionNumber(rest[1]);
+  if (rest.length === 1 && rest[0].startsWith("v")) return parseVersionNumber(rest[0].slice(1));
+  return null;
+}
 
 function decode(segment: string): string | null {
   try {
@@ -76,14 +88,19 @@ export function parseRef(ref: string, appOrigin: string | null): ParsedRef {
     const param = decode(second);
     return param ? { kind: "doc", param, fragment } : { kind: "unknown", path };
   }
-  if (first === "pdf" && second && segments.length === 2) {
+  if (first === "pdf" && second && (segments.length === 2 || versionOf(segments.slice(2)) !== null)) {
     if (sel) return { kind: "link", id: sel };
     const slug = decode(second);
-    return slug ? { kind: "pdf", slug, fragment } : { kind: "unknown", path };
+    const version = versionOf(segments.slice(2));
+    return slug ? { kind: "pdf", slug, fragment, ...(version !== null ? { version } : {}) } : { kind: "unknown", path };
   }
-  if (first === "files" && second && (segments.length === 2 || (segments.length === 3 && third === "download"))) {
-    const slug = decode(second);
-    return slug ? { kind: "file", slug } : { kind: "unknown", path };
+  if (first === "files" && second) {
+    const rest = segments[segments.length - 1] === "download" ? segments.slice(2, -1) : segments.slice(2);
+    const version = versionOf(rest);
+    if (rest.length === 0 || version !== null) {
+      const slug = decode(second);
+      return slug ? { kind: "file", slug, ...(version !== null ? { version } : {}) } : { kind: "unknown", path };
+    }
   }
   if (first === "annotations" && segments.length === 1) return { kind: "annotations" };
   if (first === "link" && second && segments.length === 2) return { kind: "link", id: second };

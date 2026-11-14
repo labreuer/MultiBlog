@@ -48,7 +48,9 @@ export const downloadTool = defineTool({
     if ((args.file === undefined) === (args.export !== true)) throw invalid("Ask for a file, or export:true, one of them.");
     if (args.file !== undefined) {
       const file = await readableFile(ctx.actor, args.file);
-      const granted = await grantedUrl(ctx.token.id, BYTE_ROUTES.downloadFile(file.id));
+      const grant = await grantedUrl(ctx.token.id, BYTE_ROUTES.downloadFile(file.id));
+      // A version's own address downloads that version's bytes; the bare one, the latest's.
+      const granted = file.versionAddressed ? { ...grant, url: `${grant.url}&v=${file.versionNumber}` } : grant;
       return { ...granted, method: "GET", usage: `curl -fsSL -o '${file.filename.replace(/'/g, "")}' '<url>'` };
     }
     const granted = await grantedUrl(ctx.token.id, BYTE_ROUTES.exportDocs);

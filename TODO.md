@@ -234,6 +234,107 @@ glyphs. Not yet done:
   browser it measures Arial against a Calibri selection. Passing the family through the same
   map is a one-line fix (docs/PDF_QUADS.md §5).
 
+## CLAUDE.md: move topic-only traps into their topic doc
+
+**Status:** started 2026-11-13 with one entry. CLAUDE.md is loaded into every session, and most
+of its "Architecture invariants" matter only to someone changing one area. The arrangement
+tried once: the topic doc gets a short section near its top, read whole before changing that
+area, and CLAUDE.md keeps only the lines that say when to read it. docs/PDF.md §0, "Mistakes
+that fail no check", is the example, with the four file-version traps and the four lines in
+CLAUDE.md that point to it.
+
+**Two entries known to fit**, both about PDFs and about 20 lines between them: "A PDF anchor
+cannot drift" and "Bumping `pdfjs-dist` is never routine". They join docs/PDF.md §0's list,
+and the existing pointer in CLAUDE.md grows a clause for each trigger (a change to
+`src/lib/pdf-text.ts`'s normaliser; a `pdfjs-dist` bump or a removed polyfill).
+
+**Finding the rest.** Read CLAUDE.md's "Architecture invariants" and "Gotchas" entry by entry
+and sort each into one of three, then show Luke the list before moving anything: each entry
+was decided once, and where it lives is his call.
+
+- **Moves** when all three hold:
+  - one doc in CLAUDE.md's table owns its topic;
+  - the mistake can only be made in code that a trigger can name by what it touches: a table,
+    a module, a function, a URL shape;
+  - the entry explains a mechanism, which is the doc's job.
+- **Stays** when the mistake can be made from anywhere, or the trigger would have to be "any
+  UI work" or "any server action". The date-formatting, `position: fixed`, `router.refresh()`
+  and Server-Component-key entries are of this kind: each names a shape, not an area.
+- **Stays, shortened** when it fits neither: cut it to the trap and the pointer, and move the
+  mechanism to the doc if the doc lacks it.
+
+"Running", "Database", "Checks & verification" and "Conventions" are not candidates: they
+apply to every session.
+
+**Doing a move.**
+
+- The section goes at the top of the topic doc, as a §0 or under the one it has, titled for
+  what it is ("Mistakes that fail no check"). It opens by saying what code it applies to, and
+  that CLAUDE.md holds none of it. Each item is the mistake, why nothing catches it, and the
+  function or section that holds the rule. Keep it short enough to read whole: about 30
+  lines.
+- The line left in CLAUDE.md is worded by what the code touches, never by "working on X".
+  The file-version id mix-up is as easy to make in search or MCP as in the viewer, and nobody
+  editing search thinks of it as PDF work. One pointer per doc, however many entries moved.
+- Check that the doc already says everything the entry did, and add what it doesn't.
+- Grep for the entry's bold title before deleting it: docs and code comments cite CLAUDE.md
+  entries by name.
+- Several docs have their own gotcha sections already (docs/TIPTAP.md, docs/YDOC.md,
+  docs/PDF.md §10, STYLE.md), which "Gotchas" points at. A new §0 is for what fails no
+  check, and links to those for the rest.
+
+**A first reading of which entries cluster by doc**, to be checked and not taken as the
+answer: three on comments (docs/COMMENTS.md), five on annotations (docs/ANNOTATIONS.md), one
+the two share (stored versions and the grace window), two on tables (docs/TABLES.md), and one
+each on margin notes, tags, search, entity chips, the schema version and the shared socket
+(both docs/YDOC.md), and the MCP write layer.
+
+## PDF versions: a viewer left open is not told (docs/PDF.md §13)
+
+**Status:** low priority. No file can gain a second version yet (§13's "Built so far"), so
+nothing is wrong today. It is for whoever builds the plan's promotion step.
+
+A viewer open on a file across a promotion keeps the version it loaded: its bytes come by
+hash and its note list by version, so nothing is drawn over the wrong ink, and a capture from
+it is refused with a reload message. But until someone tries to write, nothing says the file
+has a newer version, and the notes moved to it have left the tab's view. A fix: the note
+list's answer names the latest version, and one that differs from the version shown becomes a
+banner with a reload. A broadcast on the presence channel at promotion would tell the tab
+sooner, and reaches only tabs connected at that moment.
+
+Five races the plan closes itself, kept here because each fails silently if its step is
+skipped:
+
+- **A capture that commits beside a promotion.** The check of the capture's version belongs
+  inside the transaction that inserts, with the file row locked, for each of: posting a note,
+  opening a draft on a selection, adding a part to a link, and MCP's `anchorPdfQuote`. From
+  `/pdf/<slug>` it is checked against `file.current_version_id`, and from a version's own
+  address against its being promoted. A check before the transaction lets a promotion commit
+  between the two, and the note lands on an earlier version with nothing said. **Built**
+  (`assertCaptureVersion`): the capture locks the file row `FOR SHARE`. That a promotion's
+  update waits for it is Postgres's documented behaviour, and is not tested until a
+  promotion exists to race it; `e2e/pdf-versions.spec.ts` covers the refusal itself.
+- **A move written from a placement that is no longer true.** Where a note goes is worked out
+  before the transaction, over seconds. The write's own condition is that the row is still on
+  the version, and at the target, the placement started from. Without it a carry overwrites a
+  target its author has just placed by hand, or two tabs' moves overwrite each other, and
+  the history records a target the note never left.
+- **A "stays here" mark made while a carry works out its placements.** The carry's write
+  refuses a marked row, and the mark is written with the file row locked. Without both the
+  note is moved and its mark deleted, against its author's word. The answers to a page map's
+  runs of sheets are written under the same lock, since the map is one JSON value and two
+  answers would otherwise each write the whole of it.
+- **The two lazy writers**, `extract` in `src/lib/pdf-page-text.ts` and `fill` in
+  `src/lib/pdf-metadata.ts`, parse for seconds and then write. Each must write under the
+  version whose bytes it read, never under "the file's latest" looked up afterwards. **Built**:
+  each takes the version's id before it parses.
+- **An upload beside an abandoning of the same bytes.** `storeUploadStream` finds the blob on
+  disk and stores nothing, and its row is written seconds later. The abandoning counts the
+  rows holding the hash and removes the blob. Both take one advisory lock on the hash: the
+  upload in the transaction that inserts its row, where it checks the blob is still there,
+  and the abandoning around its count and its removal, before it commits. Without it a
+  version's row is left with no bytes, which nothing reports until the integrity check runs.
+
 ## The MCP server: what is left (docs/MCP.md)
 
 **Status:** built through MCP.md §18's phase 5, and merged in stages: tokens and every read,

@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
-import type { Prisma } from "@/generated/prisma/client";
-import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
 import { canManageFiles } from "@/lib/role-checks";
 import { readableFilesWhere } from "@/lib/file-authz";
 import { claimFileSlug } from "@/lib/file-slug";
+import { countVersionsHolding, createFileWithFirstVersion } from "@/lib/file-version-data";
 import { UploadError, deleteBytesIfUnreferenced, storagePathFor, storeUploadStream, type StoredBytes } from "@/lib/file-storage";
 import { extractPdf, extractPdfMetadata, type PdfMetadata } from "@/lib/pdf-extract";
 import { UPLOAD_ACCEPT_LABEL, contentTypeForKind, titleFromFilename, uploadKindForFilename, type UploadKind } from "@/lib/file-format";
@@ -22,10 +22,11 @@ import type { Actor } from "@/lib/actor";
 // 1. `stageUpload`: the role check, the filename and its format, and the
 //    streamed write, hashed, its magic checked mid-flight — so a mislabelled
 //    upload is refused after a few bytes rather than after the whole transfer.
-// 2. `recordUpload`: a PDF's parse, then the row with its owners, page text,
-//    labels and outline in one transaction — or, when asked, the file the
-//    actor can already read that holds these bytes. A failure removes the
-//    bytes if this upload is what put them there.
+// 2. `recordUpload`: a PDF's parse, then the file with its owners and its
+//    version 1, which holds what the bytes decide, with its page text, in
+//    one transaction — or, when asked, the file the actor can already read
+//    whose latest version holds these bytes. A failure removes the bytes if
+//    this upload is what put them there.
 
 export type StagedUpload = { stored: StoredBytes; kind: UploadKind; filename: string };
 
@@ -55,8 +56,7 @@ export async function stageUpload(actor: Actor, opts: { body: ReadableStream<Uin
 /** Removes staged bytes nothing references — counted, since a concurrent upload of the same bytes may have landed. */
 export async function discardStagedUpload(staged: StagedUpload): Promise<void> {
   if (staged.stored.deduped) return;
-  const references = await prismaIncludingDeleted.storedFile.count({ where: { sha256: staged.stored.sha256 } });
-  await deleteBytesIfUnreferenced(staged.stored.sha256, references);
+  await deleteBytesIfUnreferenced(staged.stored.sha256, await countVersionsHolding(staged.stored.sha256));
 }
 
 export async function recordUpload(
@@ -67,7 +67,11 @@ export async function recordUpload(
     title?: string;
     /** The owners, in order; by default the actor alone, as the uploader always was. */
     owners?: readonly string[];
-    /** Return a live file the actor can read that already holds these bytes, rather than make another row. */
+    /**
+     * Return a live file the actor can read whose latest version already holds
+     * these bytes, rather than make another row. Bytes only an earlier version
+     * holds make a new file, since the file found would show other bytes.
+     */
     reuseReadable?: boolean;
   } = {},
 ): Promise<RecordedUpload> {
@@ -77,7 +81,7 @@ export async function recordUpload(
     const readable = readableFilesWhere(actor.userId, actor.role);
     const existing = readable
       ? await prisma.storedFile.findFirst({
-          where: { AND: [{ sha256: stored.sha256 }, readable] },
+          where: { AND: [{ currentVersion: { sha256: stored.sha256 } }, readable] },
           orderBy: { createdAt: "asc" },
           select: { id: true, slug: true, title: true },
         })
@@ -126,35 +130,14 @@ export async function recordUpload(
       // simultaneous uploads of `report.pdf` become `report` and `report-2`
       // rather than one of them dying on the unique index (lockFileSlug).
       const slug = await claimFileSlug(tx, title);
-      const created = await tx.storedFile.create({
-        data: {
-          slug,
-          title,
-          filename,
-          contentType: contentTypeForKind(kind),
-          byteSize: stored.byteSize,
-          sha256: stored.sha256,
-          pageCount,
-          ...(metadata
-            ? { pageLabels: metadata.pageLabels as Prisma.InputJsonValue, outline: metadata.outline as unknown as Prisma.InputJsonValue }
-            : {}),
-          createdByUserId: actor.userId,
-          updatedByUserId: actor.userId,
-          // "Owner" rather than "author" because nobody here wrote the PDF
-          // (schema.prisma's FileOwner). It is also what makes the file
-          // visible to them at all under PRIVATE, which is the default.
-          owners: { create: owners.map((userId, ownerOrder) => ({ userId, ownerOrder })) },
-        },
-        select: { id: true, slug: true, title: true },
+      const made = await createFileWithFirstVersion(tx, {
+        slug,
+        title,
+        uploaderId: actor.userId,
+        ownerIds: owners,
+        bytes: { filename, contentType: contentTypeForKind(kind), byteSize: stored.byteSize, sha256: stored.sha256, pageCount, metadata, pages },
       });
-      // Only a parsed format has page text. A .docx stores none — which is
-      // what the null pageCount says as well.
-      if (pages) {
-        await tx.filePageText.createMany({
-          data: pages.texts.map((text, pageIndex) => ({ fileId: created.id, pageIndex, textVersion: pages.textVersion, text })),
-        });
-      }
-      return created;
+      return { id: made.id, slug: made.slug, title: made.title };
     });
     return { file, sha256: stored.sha256, existing: false };
   } catch (err) {

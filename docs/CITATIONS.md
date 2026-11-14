@@ -1466,6 +1466,8 @@ refuse every open tab to close that gap, so there is none.
     with `p=` for its `page=` where the file has usable labels, by the writers' rule
     (PDF_FRAGMENT_LINKS.md §8, "Which page form a writer takes"). So a converted citation
     carries a sheet number only into a file without labels, or onto a sheet `p=` can't name.
+    Once the file has a second version, a referent of either form carries `v=` (PDF.md §13,
+    "Links into the file").
   - Measured over the 5,662 links in explore's docs, 2026-11-10, about 81% become `quote:prev`
     and about 19% keep their own URL. 88% have a quotation directly before (87% right before
     the link, 1% earlier in its clause); for 7% of those, 6% of all links, the old link outlines

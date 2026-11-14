@@ -45,12 +45,12 @@ export async function findReadablePdfs(actor: Actor, query: string, limit: numbe
     where: {
       AND: [
         readable,
-        { contentType: PDF_CONTENT_TYPE },
+        { currentVersion: { contentType: PDF_CONTENT_TYPE } },
         ...words.map((word) => ({
           OR: [
             { title: { contains: word, mode: "insensitive" as const } },
             { slug: { contains: word, mode: "insensitive" as const } },
-            { filename: { contains: word, mode: "insensitive" as const } },
+            { currentVersion: { filename: { contains: word, mode: "insensitive" as const } } },
           ],
         })),
       ],

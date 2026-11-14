@@ -19,10 +19,10 @@ import type { Quad } from "@/lib/pdf-anchor";
 import type { PdfViewerHandle } from "./PdfViewer";
 import { displayNameOf } from "@/lib/display-name";
 
-// PLAN.md §19 Phase 4 — the presence connection for one PDF, and the follow
-// mechanics on top of it.
+// PLAN.md §19 Phase 4 — the presence connection for one version of a PDF, and
+// the follow mechanics on top of it.
 //
-// The document it connects to is empty and stays that way (see ydocIdForFile):
+// The document it connects to is empty and stays that way (see ydocIdForFileVersion):
 // this is an awareness channel wearing a ydoc's clothes, because Hocuspocus
 // awareness rides a document connection. No IndexedDB is attached — there is no
 // content to persist — and the token is unconditionally read-only.
@@ -51,7 +51,7 @@ export type PdfPresenceState = {
   publishSelection: (selection: { pageIndex: number; quads: Quad[] } | null) => void;
 };
 
-export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): PdfPresenceState {
+export function usePdfPresence(fileId: string, fileVersionId: string, handle: PdfViewerHandle | null): PdfPresenceState {
   const { data: session } = useSession();
   const { getSocket, reportSignedOut } = useDocPresence();
   const [readers, setReaders] = useState<RemoteReader[]>([]);
@@ -84,6 +84,9 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
     // fetched below, as DocEditor's does. A 401 goes to the page; a 403 (lost
     // access to the file) just stops presence, which has nothing to tell the
     // reader.
+    // The channel is the version's (docs/PDF.md §13, "Addresses"): a reader
+    // following a presenter must never be led to a sheet of other bytes.
+    const tokenUrl = `/api/file/${fileId}/token?v=${encodeURIComponent(fileVersionId)}`;
     let firstToken: string | null = null;
     async function fetchToken(): Promise<string> {
       if (firstToken !== null) {
@@ -92,7 +95,7 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
         return t;
       }
       try {
-        return await refreshCollabToken(`/api/file/${fileId}/token`);
+        return await refreshCollabToken(tokenUrl);
       } catch (e) {
         if (e instanceof CollabTokenDenied) {
           if (e.denial === "signed-out") reportSignedOut();
@@ -103,7 +106,7 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
     }
 
     (async () => {
-      const response = await fetch(`/api/file/${fileId}/token`, { method: "POST" });
+      const response = await fetch(tokenUrl, { method: "POST" });
       if (!response.ok || cancelled) return;
       const { token, documentName } = (await response.json()) as { token: string; documentName: string };
       if (cancelled) return;
@@ -154,7 +157,7 @@ export function usePdfPresence(fileId: string, handle: PdfViewerHandle | null): 
       localRef.current = null;
       provider?.destroy();
     };
-  }, [fileId, session?.user, getSocket, reportSignedOut]);
+  }, [fileId, fileVersionId, session?.user, getSocket, reportSignedOut]);
 
   const publish = useCallback((patch: Partial<PdfPresence>) => {
     const provider = providerRef.current;

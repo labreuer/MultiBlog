@@ -4046,12 +4046,12 @@ nothing left for a bottom clamp to catch.
 
 #### Transport
 
-A per-file ydoc `ydoc:pdf:<fileId>` that stays **empty** and carries awareness only —
-docs/PDF.md invariant 5 taken literally. Additions:
+A ydoc per version of a file, `ydoc:pdf:<file version id>` (docs/PDF.md §13), that stays
+**empty** and carries awareness only — docs/PDF.md invariant 5 taken literally. Additions:
 
-- `src/lib/ydoc-names.ts`: `YDOC_PDF_PREFIX = "ydoc:pdf:"`, `ydocIdForFile`,
-  `fileIdFromYdocId`, and `docIdFromYdocId` excludes the new prefix the same way it already
-  excludes `ydoc:annotation:`.
+- `src/lib/ydoc-names.ts`: `YDOC_PDF_PREFIX = "ydoc:pdf:"`, `ydocIdForFileVersion`, and
+  `docIdFromYdocId` excludes the new prefix the same way it already excludes
+  `ydoc:annotation:`.
 - `src/app/api/file/[id]/token/route.ts` mirroring
   [api/doc/[id]/token/route.ts](src/app/api/doc/[id]/token/route.ts). Every token is
   `readOnly: true` — nobody ever writes content to this document, and awareness is unaffected
@@ -4987,3 +4987,11 @@ built: [docs/PDF_FRAGMENT_LINKS.md](docs/PDF_FRAGMENT_LINKS.md) §2 ("Which shee
 quotation's segments"), §4, §6, §8, §9, and §12 for the departures; the viewer's gaps are
 still a plan, §13 there. A citation's passage: [docs/CITATIONS.md](docs/CITATIONS.md), "A
 passage in a citation".**
+
+## 33. Versions of a PDF
+
+Planned 2026-11-10, and redrawn 2026-11-13 around versions that are kept: new bytes for a file
+as its next version, readable for good at an address of its own, and a promotion that makes it
+the latest and waits for nothing. Notes are moved forward to it, in bulk for a better copy of
+the same text and one at a time by their authors for a revised one. **Plan:
+[docs/PDF.md](docs/PDF.md) §13.**

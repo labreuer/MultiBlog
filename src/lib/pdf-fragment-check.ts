@@ -1,3 +1,4 @@
+import { latestVersionOf } from "@/lib/file-version";
 import { readFile } from "node:fs/promises";
 import { prisma } from "./prisma";
 import { resolveFileParam } from "./file-slug";
@@ -30,22 +31,30 @@ import {
 // user can't read as not found, or the check becomes a way to ask what a
 // PRIVATE file says.
 //
-// **Read-only.** `storedPageText` extracts a file lazily when its text is
-// missing at the current version; this doesn't, so a check never writes.
-// It reads the current version where the file has one, and otherwise the
-// newest it has, as search does (docs/FULLTEXT.md §4): a skeleton barely
-// depends on the version (src/lib/pdf-fragment.ts), so either answers. A
-// `p=` needs the file's page labels: `file.page_labels`, or, for a file whose
-// labels haven't been read yet (NULL, filled on first read: docs/MCP.md §8),
-// the labels read from its bytes and not stored.
+// **The latest version's text and labels** (docs/PDF.md §13): the one
+// `/pdf/<slug>` shows. Every read of page text below is by that version's id.
+//
+// **Read-only.** `storedPageText` extracts a version lazily when its text is
+// missing at the current text version; this doesn't, so a check never writes.
+// It reads the current text version where the file's version has it, and
+// otherwise the newest it has, as search does (docs/FULLTEXT.md §4): a
+// skeleton barely depends on the text version (src/lib/pdf-fragment.ts), so
+// either answers. A `p=` needs the page labels: `file_version.page_labels`,
+// or, where they haven't been read yet (NULL, filled on first read:
+// docs/MCP.md §8), the labels read from the bytes and not stored.
 //
 // The pure half, the href's parse and the findings, is
 // src/lib/pdf-fragment-findings.ts.
 
-type FileRef = Omit<FilePages, "pages" | "ownLabels"> & { sha256: string; storedLabels: unknown };
+type FileRef = Omit<FilePages, "pages" | "ownLabels"> & { versionId: string; sha256: string; storedLabels: unknown };
 type PageMap = FilePages["pages"];
 
-const FILE_SELECT = { id: true, slug: true, sha256: true, pageCount: true, pageLabels: true, deletedByUserId: true } as const;
+const FILE_SELECT = {
+  id: true,
+  slug: true,
+  deletedByUserId: true,
+  currentVersion: { select: { id: true, sha256: true, pageCount: true, pageLabels: true } },
+} as const;
 
 /**
  * Reads, for one run, each page a link names once, so a doc that quotes one
@@ -60,9 +69,10 @@ const FILE_SELECT = { id: true, slug: true, sha256: true, pageCount: true, pageL
  */
 export class FragmentChecker {
   private files = new Map<string, Promise<FileRef | null>>();
+  // Labels and pages are a version's, so they are kept by version id.
   private labels = new Map<string, Promise<string[]>>();
   private cited = new Map<string, PageMap>();
-  private whole: { fileId: string; pages: Promise<PageMap> } | null = null;
+  private whole: { versionId: string; pages: Promise<PageMap> } | null = null;
   private version: Promise<string> | null = null;
 
   /**
@@ -83,9 +93,14 @@ export class FragmentChecker {
    * isn't on the sheets its link names (§6). Null otherwise, and for a file
    * that is deleted or has no stored text. Reads the whole file's stored
    * text, and extracts nothing.
+   *
+   * `fileVersionId` is the version the viewer shows, which need not be the
+   * latest (docs/PDF.md §13): the sheets it has looked on are that version's,
+   * so the rest of that version is where the passage is looked for. A version
+   * of another file answers null.
    */
-  async sheetHolding(fileId: string, passage: PassageText, named: readonly number[]): Promise<number | null> {
-    const file = await this.fileById(fileId);
+  async sheetHolding(fileId: string, fileVersionId: string, passage: PassageText, named: readonly number[]): Promise<number | null> {
+    const file = await this.fileVersionById(fileId, fileVersionId);
     if (!file) return null;
     return passageElsewhere({ pages: await this.wholeFile(file) }, passage, named);
   }
@@ -99,10 +114,10 @@ export class FragmentChecker {
   async pagesAt(fileId: string, indexes: readonly number[]): Promise<FilePages | null> {
     const file = await this.fileById(fileId);
     if (!file) return null;
-    let cited = this.cited.get(file.fileId);
+    let cited = this.cited.get(file.versionId);
     if (!cited) {
       cited = new Map();
-      this.cited.set(file.fileId, cited);
+      this.cited.set(file.versionId, cited);
     }
     const toRead = indexes.filter((index) => index >= 0 && index < file.pageCount && !cited.has(index));
     for (const [index, page] of await this.readPages(file, toRead)) cited.set(index, page);
@@ -114,6 +129,22 @@ export class FragmentChecker {
     if (!pending) {
       pending = prisma.storedFile.findUnique({ where: { id: fileId }, select: FILE_SELECT }).then((file) => (file ? this.refFor(file) : null));
       this.files.set(`id:${fileId}`, pending);
+    }
+    return pending;
+  }
+
+  /** One version of a file, whatever its state; null where it isn't that file's, is abandoned, or the file is deleted. */
+  private fileVersionById(fileId: string, fileVersionId: string): Promise<FileRef | null> {
+    const key = `version:${fileVersionId}`;
+    let pending = this.files.get(key);
+    if (!pending) {
+      pending = prisma.fileVersion
+        .findFirst({
+          where: { id: fileVersionId, fileId, abandonedAt: null },
+          select: { id: true, sha256: true, pageCount: true, pageLabels: true, file: { select: { id: true, slug: true, deletedByUserId: true } } },
+        })
+        .then((version) => (version ? this.refFor({ ...version.file, currentVersion: version }) : null));
+      this.files.set(key, pending);
     }
     return pending;
   }
@@ -130,23 +161,30 @@ export class FragmentChecker {
   private async refFor(file: {
     id: string;
     slug: string;
-    sha256: string;
-    pageCount: number | null;
-    pageLabels: unknown;
     deletedByUserId: string | null;
+    currentVersion: { id: string; sha256: string; pageCount: number | null; pageLabels: unknown } | null;
   }): Promise<FileRef | null> {
-    if (file.deletedByUserId !== null || file.pageCount === null) return null;
+    const latest = latestVersionOf(file);
+    if (file.deletedByUserId !== null || latest.pageCount === null) return null;
     this.version ??= currentTextVersion();
     const current = await this.version;
-    const versions = await prisma.filePageText.groupBy({ by: ["textVersion"], where: { fileId: file.id } });
+    const versions = await prisma.filePageText.groupBy({ by: ["textVersion"], where: { fileVersionId: latest.id } });
     const names = versions.map((row) => row.textVersion);
     const textVersion = names.includes(current) ? current : (names.sort().at(-1) ?? null);
-    return { fileId: file.id, slug: file.slug, sha256: file.sha256, pageCount: file.pageCount, textVersion, storedLabels: file.pageLabels };
+    return {
+      fileId: file.id,
+      versionId: latest.id,
+      slug: file.slug,
+      sha256: latest.sha256,
+      pageCount: latest.pageCount,
+      textVersion,
+      storedLabels: latest.pageLabels,
+    };
   }
 
   /** The file's own labels: as stored, or read from its bytes and not stored where they haven't been read yet. [] when they can't be read. */
   private labelsOf(file: FileRef): Promise<string[]> {
-    let pending = this.labels.get(file.fileId);
+    let pending = this.labels.get(file.versionId);
     if (!pending) {
       const stored = file.storedLabels;
       pending = Array.isArray(stored)
@@ -158,14 +196,14 @@ export class FragmentChecker {
               console.error(`[pdf-fragment-check] couldn't read the page labels of file ${file.fileId}:`, error);
               return [];
             });
-      this.labels.set(file.fileId, pending);
+      this.labels.set(file.versionId, pending);
     }
     return pending;
   }
 
   private wholeFile(file: FileRef): Promise<PageMap> {
-    if (this.whole?.fileId !== file.fileId) {
-      this.whole = { fileId: file.fileId, pages: this.readPages(file, null) };
+    if (this.whole?.versionId !== file.versionId) {
+      this.whole = { versionId: file.versionId, pages: this.readPages(file, null) };
     }
     return this.whole.pages;
   }
@@ -175,7 +213,7 @@ export class FragmentChecker {
     const pages: PageMap = new Map();
     if (file.textVersion === null || indexes?.length === 0) return pages;
     const rows = await prisma.filePageText.findMany({
-      where: { fileId: file.fileId, textVersion: file.textVersion, ...(indexes ? { pageIndex: { in: [...indexes] } } : {}) },
+      where: { fileVersionId: file.versionId, textVersion: file.textVersion, ...(indexes ? { pageIndex: { in: [...indexes] } } : {}) },
       select: { pageIndex: true, text: true },
     });
     for (const row of rows) pages.set(row.pageIndex, { text: row.text, skeleton: skeletonOf(row.text) });
@@ -194,10 +232,10 @@ export class FragmentChecker {
       return { kind: "checked", slug: link.slug, currentSlug: file.slug, fileId: file.fileId, passages: [], page: checkPage(file.pageCount, ownLabels, link.page), usableLabels, unread: 0 };
     }
 
-    let cited = this.cited.get(file.fileId);
+    let cited = this.cited.get(file.versionId);
     if (!cited) {
       cited = new Map();
-      this.cited.set(file.fileId, cited);
+      this.cited.set(file.versionId, cited);
     }
     const toRead = [...new Set(link.passages.flatMap((passage) => sheetsNamed(passage.page, ownLabels, file.pageCount)))].filter(
       (index) => !cited.has(index),

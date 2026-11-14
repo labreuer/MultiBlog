@@ -29,17 +29,17 @@ import { readBoundFor, type ReadArgs } from "./args";
 /** About this much of the page either side of a quote or a fragment link's passage. */
 const SURROUNDINGS = 300;
 
-/** The page text at the current text version, extracting the file once on a miss (storedPageText). */
-export async function pageTexts(fileId: string, pageIndexes: readonly number[]): Promise<Map<number, string>> {
+/** A version's page text at the current text version, extracting it once on a miss (storedPageText). */
+export async function pageTexts(fileVersionId: string, pageIndexes: readonly number[]): Promise<Map<number, string>> {
   const version = await currentTextVersion();
   const read = () =>
     prisma.filePageText.findMany({
-      where: { fileId, textVersion: version, pageIndex: { in: [...pageIndexes] } },
+      where: { fileVersionId, textVersion: version, pageIndex: { in: [...pageIndexes] } },
       select: { pageIndex: true, text: true },
     });
   let rows = await read();
   if (rows.length < pageIndexes.length && pageIndexes.length > 0) {
-    await storedPageText(fileId, pageIndexes[0], version);
+    await storedPageText(fileVersionId, pageIndexes[0], version);
     rows = await read();
   }
   return new Map(rows.map((row) => [row.pageIndex, row.text]));
@@ -127,7 +127,7 @@ function findEntry(entries: readonly StoredOutlineEntry[], title: string): numbe
  * all fit.
  */
 async function pagesResult(file: ResolvedFile, labels: string[] | null, indexes: number[], maxChars: number): Promise<ToolResult> {
-  const texts = await pageTexts(file.id, indexes);
+  const texts = await pageTexts(file.versionId, indexes);
   const pages: Record<string, unknown>[] = [];
   let size = 0;
   let next: number | null = null;
@@ -141,7 +141,7 @@ async function pagesResult(file: ResolvedFile, labels: string[] | null, indexes:
     pages.push(entry);
     size += cost;
   }
-  return { kind: "pdf-pages", url: `/pdf/${file.slug}`, pages, ...(next !== null ? { next } : {}) };
+  return { kind: "pdf-pages", url: file.url, pages, ...(next !== null ? { next } : {}) };
 }
 
 /** `1-based N` or `N-M` into 0-based page indexes, inside the file. */
@@ -171,7 +171,7 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
   for (const docOnly of ["since", "section", "from", "to", "whole"] as const) {
     if (args[docOnly] !== undefined) throw invalid(`${docOnly} is for a doc; a PDF reads by page, label or outline entry.`);
   }
-  const metadata = await pdfMetadata(file.id);
+  const metadata = await pdfMetadata(file.versionId);
   const labels = metadata ? usablePageLabels(metadata.pageLabels, file.pageCount) : null;
   // The labels the file itself gives, which a `p=` is matched against, never `labels`' filled-in copy.
   const ownLabels = metadata?.pageLabels ?? null;
@@ -187,7 +187,7 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
     const index = findEntry(entries, args.entry);
     const outline = outlineOf(entries, labels, pageCount, { depth: args.depth, within: index });
     if (args.outline) {
-      return { kind: "pdf-outline", url: `/pdf/${file.slug}`, entries: outline.entries, ...(outline.deeper ? { deeper: outline.deeper } : {}) };
+      return { kind: "pdf-outline", url: file.url, entries: outline.entries, ...(outline.deeper ? { deeper: outline.deeper } : {}) };
     }
     const span = outline.spanOf(index);
     if (!span) throw new ApiError("not_found", `The outline entry "${args.entry}" points at no page of this file.`);
@@ -223,7 +223,7 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
   return {
     kind: "pdf",
     id: file.id,
-    url: `/pdf/${file.slug}`,
+    url: file.url,
     title: file.title,
     filename: file.filename,
     visibility: file.visibility,
@@ -276,7 +276,7 @@ async function aroundQuote(file: ResolvedFile, labels: string[] | null, args: Re
         : args.label !== undefined
           ? pagesLabelled(labels, args.label)
           : allPages(pageCount);
-  const texts = await pageTexts(file.id, indexes);
+  const texts = await pageTexts(file.versionId, indexes);
   const passage = (quote: string, prefix?: string, suffix?: string): PassageText => onePassage(quote, { prefix, suffix });
   const find = (p: PassageText) =>
     indexes.flatMap((index) => {
@@ -313,7 +313,7 @@ async function aroundQuote(file: ResolvedFile, labels: string[] | null, args: Re
   const limit = args.occurrences ?? 5;
   return {
     kind: "pdf-around",
-    url: `/pdf/${file.slug}`,
+    url: file.url,
     total: found.length,
     ...(viaMarkdown ? { matchedAs: "markdown" } : {}),
     occurrences: found.slice(0, limit).map(({ index, range }) => ({
@@ -344,7 +344,7 @@ async function fragmentPassages(
   if (passages.length === 0) throw invalid("That fragment's text= parameters don't parse as a fragment link.");
   const pageCount = file.pageCount!;
   const sheetsOf = passages.map((passage) => sheetsNamed(passage.page, ownLabels, pageCount));
-  const texts = await pageTexts(file.id, [...new Set(sheetsOf.flat())]);
+  const texts = await pageTexts(file.versionId, [...new Set(sheetsOf.flat())]);
   const out: Record<string, unknown>[] = [];
   for (const [n, passage] of passages.entries()) {
     let found: { index: number; text: string; range: { start: number; end: number } } | null = null;
@@ -358,7 +358,7 @@ async function fragmentPassages(
     }
     if (!found) {
       // The check's own finding, over every page, for the answer.
-      const all = await pageTexts(file.id, allPages(pageCount));
+      const all = await pageTexts(file.versionId, allPages(pageCount));
       const pages: FilePages = {
         fileId: file.id,
         slug: file.slug,
@@ -385,5 +385,5 @@ async function fragmentPassages(
     }
     out.push({ page: found.index + 1, ...(labels ? { label: labels[found.index] } : {}), ...surroundings(found.text, found.range.start, found.range.end) });
   }
-  return { kind: "pdf-passages", url: `/pdf/${file.slug}`, passages: out };
+  return { kind: "pdf-passages", url: file.url, passages: out };
 }

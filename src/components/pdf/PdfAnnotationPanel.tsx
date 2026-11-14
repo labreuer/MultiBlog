@@ -1,5 +1,7 @@
 "use client";
 
+import PdfOtherVersionNotes from "./PdfOtherVersionNotes";
+import type { OtherVersionNote } from "@/lib/pdf-annotation-entries";
 import { useCallback, useMemo, useState } from "react";
 import AnnotationNode, { type AnnotationNodeData } from "@/components/annotation/AnnotationNode";
 import { entryHasVisibleContent } from "@/lib/annotation-visibility";
@@ -63,6 +65,10 @@ type Props = {
   entries: PdfAnnotationEntry[];
   /** The viewer's own drafts, for "Your private notes" under the composer. */
   ownDrafts: OwnDraft[];
+  /** The file's notes on its other versions, listed under the version each is on (docs/PDF.md §13). */
+  elsewhere: OtherVersionNote[];
+  /** A card's link named a note on another version: its entry here is what it lands on. */
+  onArriveElsewhere: () => void;
   /** Viewport-space top edge per annotation id, for the ones on a rendered page. */
   resolveTops: () => Map<string, number>;
   /** Subscribe to "the rendering moved" — the viewer's scroll/render/scale events. */
@@ -96,6 +102,8 @@ export default function PdfAnnotationPanel({
   fileId,
   entries,
   ownDrafts,
+  elsewhere,
+  onArriveElsewhere,
   resolveTops,
   subscribe,
   positioned,
@@ -245,6 +253,7 @@ export default function PdfAnnotationPanel({
           hands it to the composer above, which posts it with the target the
           row was created with. */}
       <OwnDraftsList drafts={ownDrafts} />
+      <PdfOtherVersionNotes notes={elsewhere} onArrive={onArriveElsewhere} />
 
       {sorted.length === 0 && (
         <p className={styles.empty}>No annotations yet. Select text in the document to add one.</p>

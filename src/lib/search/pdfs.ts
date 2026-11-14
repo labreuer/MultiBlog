@@ -1,6 +1,11 @@
 // docs/FULLTEXT.md — searching PDFs: a file's title and filename, and its
 // pages' text, under canUserReadFile's rule (§2). Pages are ranked inside
 // the readable files and grouped under them, best page first (§4).
+//
+// **The latest version's pages alone** (docs/PDF.md §13, "Versions"): page
+// text is keyed by version, and a hit from an earlier version's text would
+// come from words `/pdf/<slug>` doesn't show. Both queries below reach
+// `file_page_text` through `file.current_version_id`.
 
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -8,6 +13,7 @@ import { readableFilesWhere } from "@/lib/file-authz";
 import { currentTextVersion } from "@/lib/pdf-extract";
 import { pageNameForSheet, usablePageLabels } from "@/lib/pdf-page-labels";
 import { formatPageName } from "@/lib/pdf-open-params";
+import { latestVersionOf } from "@/lib/file-version";
 import { parseHeadline, type HeadlineFragment } from "./headline";
 import { bodyHeadlineSql, cleanedText, orderNewest, rankRows, snippetsFor, type TsQuery } from "./sql";
 import { remember, taggedWhere, type KindContext, type KindSearch } from "./context";
@@ -16,11 +22,11 @@ import type { PdfHit } from "./types";
 /** How many matching pages a file's hit shows (§10, item 6). */
 export const PDF_PAGES_SHOWN = 3;
 
-export type PageMatch = { fileId: string; pageIndex: number; textVersion: string; rank: number };
+export type PageMatch = { fileId: string; fileVersionId: string; pageIndex: number; textVersion: string; rank: number };
 
 /**
- * Every matching page of the given files, one row per page, grouped by file
- * and best first.
+ * Every matching page of the given files' latest versions, one row per page,
+ * grouped by file and best first.
  *
  * A page can have rows at several text versions — `storedPageText`
  * re-extracts on demand and keeps the old rows (docs/PDF.md §3) — so each
@@ -33,13 +39,15 @@ export async function matchPages(fileIds: string[], query: TsQuery): Promise<Map
   if (fileIds.length === 0) return byFile;
   const current = await currentTextVersion();
   const rows = await prisma.$queryRaw<PageMatch[]>(Prisma.sql`
-    SELECT t.file_id AS "fileId", t.page_index AS "pageIndex", t.text_version AS "textVersion",
-           ts_rank_cd(t.search_vector, q.query, 32)::float8 AS rank
-    FROM file_page_text t CROSS JOIN (SELECT ${query} AS query) AS q
-    WHERE t.file_id = ANY(${fileIds}) AND t.search_vector @@ q.query
+    SELECT f.id AS "fileId", t.file_version_id AS "fileVersionId", t.page_index AS "pageIndex",
+           t.text_version AS "textVersion", ts_rank_cd(t.search_vector, q.query, 32)::float8 AS rank
+    FROM file f
+    JOIN file_page_text t ON t.file_version_id = f.current_version_id
+    CROSS JOIN (SELECT ${query} AS query) AS q
+    WHERE f.id = ANY(${fileIds}) AND t.search_vector @@ q.query
       AND t.text_version = (
         SELECT v.text_version FROM file_page_text v
-        WHERE v.file_id = t.file_id AND v.page_index = t.page_index
+        WHERE v.file_version_id = t.file_version_id AND v.page_index = t.page_index
         ORDER BY (v.text_version = ${current}) DESC, v.text_version DESC
         LIMIT 1
       )`);
@@ -52,15 +60,39 @@ export async function matchPages(fileIds: string[], query: TsQuery): Promise<Map
   return byFile;
 }
 
+/**
+ * Every matching page of one version of a file, best first: `within` a PDF at
+ * a version's own address (docs/PDF.md §13, "Addresses"). The site's search
+ * never asks this; it ranks the latest version's pages alone (`matchPages`).
+ */
+export async function matchVersionPages(fileId: string, fileVersionId: string, query: TsQuery): Promise<PageMatch[]> {
+  const current = await currentTextVersion();
+  const rows = await prisma.$queryRaw<PageMatch[]>(Prisma.sql`
+    SELECT v.file_id AS "fileId", t.file_version_id AS "fileVersionId", t.page_index AS "pageIndex",
+           t.text_version AS "textVersion", ts_rank_cd(t.search_vector, q.query, 32)::float8 AS rank
+    FROM file_version v
+    JOIN file_page_text t ON t.file_version_id = v.id
+    CROSS JOIN (SELECT ${query} AS query) AS q
+    WHERE v.id = ${fileVersionId} AND v.file_id = ${fileId} AND t.search_vector @@ q.query
+      AND t.text_version = (
+        SELECT o.text_version FROM file_page_text o
+        WHERE o.file_version_id = t.file_version_id AND o.page_index = t.page_index
+        ORDER BY (o.text_version = ${current}) DESC, o.text_version DESC
+        LIMIT 1
+      )`);
+  return rows.sort((a, b) => b.rank - a.rank || a.pageIndex - b.pageIndex);
+}
+
 export async function pageSnippets(pages: PageMatch[], query: TsQuery): Promise<Map<string, HeadlineFragment[]>> {
   if (pages.length === 0) return new Map();
   const rows = await prisma.$queryRaw<{ fileId: string; pageIndex: number; snippet: string }[]>(Prisma.sql`
-    SELECT t.file_id AS "fileId", t.page_index AS "pageIndex",
+    SELECT k.file_id AS "fileId", t.page_index AS "pageIndex",
            ${bodyHeadlineSql(Prisma.sql`b.body`, Prisma.sql`q.query`)} AS snippet
     FROM file_page_text t
-    JOIN unnest(${pages.map((p) => p.fileId)}::text[], ${pages.map((p) => p.pageIndex)}::int[],
-                ${pages.map((p) => p.textVersion)}::text[]) AS k(file_id, page_index, text_version)
-      ON t.file_id = k.file_id AND t.page_index = k.page_index AND t.text_version = k.text_version
+    JOIN unnest(${pages.map((p) => p.fileId)}::text[], ${pages.map((p) => p.fileVersionId)}::text[],
+                ${pages.map((p) => p.pageIndex)}::int[], ${pages.map((p) => p.textVersion)}::text[])
+           AS k(file_id, file_version_id, page_index, text_version)
+      ON t.file_version_id = k.file_version_id AND t.page_index = k.page_index AND t.text_version = k.text_version
     CROSS JOIN (SELECT ${query} AS query) AS q
     CROSS JOIN LATERAL (SELECT ${cleanedText(Prisma.sql`t.text`)} AS body) AS b`);
   return new Map(rows.map((row) => [`${row.fileId}:${row.pageIndex}`, parseHeadline(row.snippet)]));
@@ -98,7 +130,7 @@ function candidates(ctx: KindContext): Promise<Map<string, Date>> {
 /**
  * A page's label as the viewer shows it, or null where it has none worth
  * showing (docs/MCP.md §8) — from the stored labels only: search never parses
- * a PDF, and a file whose labels haven't been read yet shows its numbers.
+ * a PDF, and a version whose labels haven't been read yet shows its numbers.
  * Display only, so PDF.md's "a label never enters a computation" holds.
  */
 function labelOf(file: { pageCount: number | null; pageLabels: unknown }, pageIndex: number): string | null {
@@ -150,10 +182,10 @@ export const pdfsSearch: KindSearch<PdfHit> = {
       query ? pageSnippets(shown, query) : new Map<string, HeadlineFragment[]>(),
       prisma.storedFile.findMany({
         where: { id: { in: ids } },
-        select: { id: true, slug: true, updatedAt: true, pageCount: true, pageLabels: true },
+        select: { id: true, slug: true, updatedAt: true, currentVersion: { select: { pageCount: true, pageLabels: true } } },
       }),
     ]);
-    const byId = new Map(rows.map((row) => [row.id, row]));
+    const byId = new Map(rows.map(({ currentVersion, ...row }) => [row.id, { ...row, ...latestVersionOf({ id: row.id, currentVersion }) }]));
     return ids.flatMap((id): PdfHit[] => {
       const file = byId.get(id);
       if (!file) return [];

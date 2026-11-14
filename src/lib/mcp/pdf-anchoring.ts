@@ -1,3 +1,4 @@
+import type { CaptureClaim } from "@/lib/file-version-data";
 import { readFile } from "node:fs/promises";
 import { storagePathFor } from "@/lib/file-storage";
 import { extractPageItems } from "@/lib/pdf-extract";
@@ -45,9 +46,14 @@ import type { QuoteInput } from "./annotation-writes";
 export async function anchorPdfQuote(
   file: ResolvedFile,
   quote: QuoteInput,
-): Promise<{ target: PdfTarget; quotedText: string; label: string | null }> {
+): Promise<{ target: PdfTarget; quotedText: string; fileVersionId: string; claim: CaptureClaim; label: string | null }> {
   if (file.pageCount === null) throw invalid("That file has no pages to quote: it isn't a PDF.");
-  const metadata = await pdfMetadata(file.id);
+  // Said before anything is measured; the write checks it again under the
+  // file row's lock (`assertCaptureVersion`), which is what holds.
+  if (file.versionState === "candidate") {
+    throw new ApiError("conflict", `Version ${file.versionNumber} is not yet this file's latest, and takes no notes or link parts until it is.`);
+  }
+  const metadata = await pdfMetadata(file.versionId);
   const labels = metadata ? usablePageLabels(metadata.pageLabels, file.pageCount) : null;
   const indexes =
     quote.page !== undefined
@@ -57,7 +63,7 @@ export async function anchorPdfQuote(
         : Array.from({ length: file.pageCount }, (_, i) => i);
   if (indexes.some((i) => i < 0 || i >= file.pageCount!)) throw invalid(`This PDF has ${file.pageCount} pages.`);
   if (indexes.length === 0) throw new ApiError("not_found", `No page of this PDF is labelled "${quote.label}".`);
-  const texts = await pageTexts(file.id, indexes);
+  const texts = await pageTexts(file.versionId, indexes);
 
   const passageOf = (q: QuoteInput, read: (s: string) => string): PassageText =>
     onePassage(read(q.quote ?? q.start ?? ""), {
@@ -99,7 +105,7 @@ export async function anchorPdfQuote(
   const items = await extractPageItems(await readFile(storagePathFor(file.sha256)), pageIndex);
   if (!items) throw invalid(`Page ${pageIndex + 1} isn't in this PDF.`);
   const normalised = normalisePageText(items.items);
-  const stored = await storedPageText(file.id, pageIndex, items.textVersion);
+  const stored = await storedPageText(file.versionId, pageIndex, items.textVersion);
   if (stored === null || stored !== normalised.text) {
     throw new ApiError("unavailable", "This PDF's text items don't reproduce its stored page text, so no quads can be trusted for it.");
   }
@@ -112,9 +118,17 @@ export async function anchorPdfQuote(
     position: range,
     textVersion: items.textVersion,
   };
-  const captured = await capturePdfTextAnchor({ fileId: file.id, rawTarget: raw });
+  const captured = await capturePdfTextAnchor({ fileVersionId: file.versionId, rawTarget: raw });
   if (!captured || !captured.quotedText) {
     throw new ApiError("unavailable", "The quote didn't verify against this server's own page text, so it wasn't anchored.");
   }
-  return { target: captured.target, quotedText: captured.quotedText, label: labels ? labels[pageIndex] : null };
+  return {
+    target: captured.target,
+    quotedText: captured.quotedText,
+    fileVersionId: captured.fileVersionId,
+    // The version the reference named, and how: its own address, or the
+    // bare one, which means the latest and is refused once it no longer is.
+    claim: { fileId: file.id, fileVersionId: file.versionId, address: file.versionAddressed ? "version" : "bare" },
+    label: labels ? labels[pageIndex] : null,
+  };
 }
