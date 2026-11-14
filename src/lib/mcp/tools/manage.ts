@@ -167,13 +167,13 @@ async function manageFile(ctx: McpContext, fileId: string, args: Args): Promise<
     select: {
       slug: true,
       visibility: true,
-      pageCount: true,
+      currentVersion: { select: { pageCount: true } },
       deletedAt: true,
       owners: { orderBy: { ownerOrder: "asc" }, select: { user: { select: { name: true } } } },
     },
   });
   return {
-    url: `/${file?.pageCount !== null ? "pdf" : "files"}/${file?.slug}`,
+    url: `/${file?.currentVersion?.pageCount !== null ? "pdf" : "files"}/${file?.slug}`,
     changed,
     visibility: file?.visibility,
     owners: file?.owners.map((o) => displayNameOf(o.user)).join(", "),

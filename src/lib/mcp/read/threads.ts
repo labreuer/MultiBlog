@@ -24,7 +24,7 @@ import type { ChipInputs } from "@/lib/entity-chips/types";
 import type { McpContext, ToolResult } from "../tool";
 import { clip, decodeCursor, encodeCursor, minuteOf, pageOf } from "../shape";
 import type { ReadArgs } from "./args";
-import { pdfLabels } from "./pdf-meta";
+import { latestPdfLabels } from "./pdf-meta";
 
 // docs/MCP.md §9 — annotation threads as the MCP server reads them: a
 // container's, filtered, ordered by the document and paged; every readable
@@ -404,7 +404,7 @@ export async function containerThreads(
   let placed =
     container.kind === "doc"
       ? placeInDoc(threads, container.state)
-      : placeInPdf(threads, await pdfLabels(container.fileId));
+      : placeInPdf(threads, await latestPdfLabels(container.fileId));
   if (span) {
     placed = placed.filter((p) => p.blocks && p.blocks.to >= span.from && p.blocks.from <= span.to);
   }
@@ -465,7 +465,7 @@ export async function allThreads(ctx: McpContext, args: ReadArgs): Promise<ToolR
     } else {
       const file = await prisma.storedFile.findUnique({ where: { id: c.id }, select: { slug: true, title: true } });
       if (!file) continue;
-      placed = placeInPdf(c.threads, await pdfLabels(c.id));
+      placed = placeInPdf(c.threads, await latestPdfLabels(c.id));
       head = { url: `/pdf/${file.slug}`, title: file.title };
     }
     sortPlaced(placed);
@@ -530,7 +530,7 @@ export async function oneThread(ctx: McpContext, annotationId: string, args: Rea
     }
     container = { url: `/doc/${target.doc.slug}`, title: docTitleOrFallback(target.doc.title) };
   } else {
-    placed = placeInPdf([thread], await pdfLabels(target.file!.id))[0];
+    placed = placeInPdf([thread], await latestPdfLabels(target.file!.id))[0];
     container = {
       url: `/pdf/${target.file!.slug}`,
       title: target.file!.title,

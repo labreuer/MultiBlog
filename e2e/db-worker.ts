@@ -34,6 +34,7 @@ import { postPath } from "@/lib/post-path";
 import { derivePostStatus } from "@/lib/post-status";
 import { changeDocSlug, uniqueDocSlug } from "@/lib/doc-slug";
 import { changeFileSlug, uniqueFileSlug } from "@/lib/file-slug";
+import { countVersionsHolding, createFileWithFirstVersion, latestVersionIdOf } from "@/lib/file-version-data";
 import { changeTagSlug, uniqueTagSlug } from "@/lib/tag-slug";
 import { targetFromColumns, targetToColumns, type AnchorTarget } from "@/lib/anchors";
 import { deleteBytesIfUnreferenced, storagePathFor, storeUploadStream } from "@/lib/file-storage";
@@ -575,6 +576,8 @@ export async function addTestPostAuthor(postId: string, email: string): Promise<
 
 export type TestFile = {
   id: string;
+  /** Its version 1, the latest: an id of its own, never the file's (docs/PDF.md §13). */
+  versionId: string;
   slug: string;
   title: string;
   sha256: string;
@@ -679,35 +682,34 @@ export async function createTestFile(opts: {
     if (stored.sha256 !== sha256) throw new Error(`Stored sha ${stored.sha256} differs from the computed ${sha256}.`);
     const parsed = await extractPdf(await readFile(storagePathFor(stored.sha256)));
 
-    const file = await prisma.storedFile.create({
-      data: {
-        slug: await uniqueFileSlug(title),
+    // The upload's own writer (createFileWithFirstVersion), so the file has
+    // its version 1 as an uploaded one does: with an id of its own, which no
+    // migrated file's version 1 has (docs/PDF.md §13, "Versions"). A spec
+    // that passes a file's id for a version's therefore fails here.
+    const slug = await uniqueFileSlug(title);
+    const file = await prisma.$transaction((tx) =>
+      createFileWithFirstVersion(tx, {
+        slug,
         title,
-        filename: `${title.replace(/[^\w.-]+/g, "-")}.pdf`,
-        contentType: "application/pdf",
-        byteSize: stored.byteSize,
-        sha256: stored.sha256,
-        pageCount: parsed.pageCount,
         visibility,
-        createdByUserId: owner.id,
-        updatedByUserId: owner.id,
-        owners: { create: { userId: owner.id, ownerOrder: 0 } },
-      },
-      select: { id: true, slug: true },
-    });
+        uploaderId: owner.id,
+        ownerIds: [owner.id],
+        bytes: {
+          filename: `${title.replace(/[^\w.-]+/g, "-")}.pdf`,
+          contentType: "application/pdf",
+          byteSize: stored.byteSize,
+          sha256: stored.sha256,
+          pageCount: parsed.pageCount,
+          pages: { textVersion: parsed.textVersion, texts: parsed.pages },
+        },
+      }),
+    );
     return { stored, parsed, file };
-  });
-  await prisma.filePageText.createMany({
-    data: parsed.pages.map((text, pageIndex) => ({
-      fileId: file.id,
-      pageIndex,
-      textVersion: parsed.textVersion,
-      text,
-    })),
   });
 
   return {
     id: file.id,
+    versionId: file.versionId,
     slug: file.slug,
     title,
     sha256: stored.sha256,
@@ -745,24 +747,26 @@ export async function getFileAnnotationFacts(fileId: string): Promise<FileAnnota
   const annotations = await prisma.annotation.findMany({
     where: { fileId, status: { not: "DRAFT" } },
     orderBy: { createdAt: "asc" },
-    select: { id: true, bodyText: true, quotedText: true, pdfTarget: true },
+    select: { id: true, bodyText: true, quotedText: true, pdfTarget: true, fileVersionId: true },
   });
 
   return Promise.all(
     annotations.map(async (a) => {
       const target = parsePdfTarget(a.pdfTarget);
-      const pageText = target
-        ? await prisma.filePageText.findUnique({
-            where: {
-              fileId_pageIndex_textVersion: {
-                fileId,
-                pageIndex: target.pageIndex,
-                textVersion: target.textVersion,
+      // By the version the row names: page text is a version's, never a file's.
+      const pageText =
+        target && a.fileVersionId
+          ? await prisma.filePageText.findUnique({
+              where: {
+                fileVersionId_pageIndex_textVersion: {
+                  fileVersionId: a.fileVersionId,
+                  pageIndex: target.pageIndex,
+                  textVersion: target.textVersion,
+                },
               },
-            },
-            select: { text: true },
-          })
-        : null;
+              select: { text: true },
+            })
+          : null;
 
       return {
         id: a.id,
@@ -791,7 +795,7 @@ export async function getFileCreatorEmail(fileId: string): Promise<string | null
 export async function deleteTestFile(idOrSlug: string): Promise<void> {
   const file = await prismaIncludingDeleted.storedFile.findFirst({
     where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
-    select: { id: true, title: true, sha256: true, owners: { select: { user: { select: { email: true } } } } },
+    select: { id: true, title: true, versions: { select: { sha256: true } }, owners: { select: { user: { select: { email: true } } } } },
   });
   if (!file) return;
 
@@ -810,10 +814,16 @@ export async function deleteTestFile(idOrSlug: string): Promise<void> {
   // sweep them once nothing points at them — and only under the per-sha lock
   // (withShaLock), or a create in another worker lands between the count and
   // the sweep.
-  await withShaLock(file.sha256, async () => {
+  // Every version's bytes, a file with several included. The locks are taken
+  // in sorted order, so two deletes sharing two hashes can't deadlock.
+  const hashes = [...new Set(file.versions.map((version) => version.sha256))].sort();
+  const underLocks = (remaining: string[], run: () => Promise<void>): Promise<void> =>
+    remaining.length === 0 ? run() : withShaLock(remaining[0], () => underLocks(remaining.slice(1), run));
+  await underLocks(hashes, async () => {
     await prismaIncludingDeleted.storedFile.delete({ where: { id: file.id } });
-    const remaining = await prismaIncludingDeleted.storedFile.count({ where: { sha256: file.sha256 } });
-    await deleteBytesIfUnreferenced(file.sha256, remaining);
+    for (const sha256 of hashes) {
+      await deleteBytesIfUnreferenced(sha256, await countVersionsHolding(sha256));
+    }
   });
   if (annotationIds.length > 0) {
     await prisma.ydoc.deleteMany({ where: { id: { in: annotationIds.map(ydocIdForAnnotation) } } });
@@ -1296,7 +1306,7 @@ export async function fillTestFileMetadata(fileId: string): Promise<string[] | n
   const owner = await prisma.fileOwner.findFirst({ where: { fileId }, select: { user: { select: { email: true } } } });
   if (!owner) throw new Error(`fillTestFileMetadata: no file ${fileId}.`);
   assertSafe(owner.user.email);
-  return (await pdfMetadata(fileId))?.pageLabels ?? null;
+  return (await pdfMetadata(await latestVersionIdOf(fileId)))?.pageLabels ?? null;
 }
 
 /** Ties a test reference to a file, or unties it: the state the reference pickers leave, set directly. */
@@ -2845,13 +2855,13 @@ export async function getUploadFacts(fileId: string): Promise<{ owners: string[]
     where: { id: fileId },
     select: {
       visibility: true,
-      pageLabels: true,
+      currentVersion: { select: { pageLabels: true } },
       createdBy: { select: { email: true } },
       owners: { orderBy: { ownerOrder: "asc" }, select: { user: { select: { email: true } } } },
     },
   });
   return file
-    ? { owners: file.owners.map((o) => o.user.email), creator: file.createdBy?.email ?? null, visibility: file.visibility, pageLabels: file.pageLabels }
+    ? { owners: file.owners.map((o) => o.user.email), creator: file.createdBy?.email ?? null, visibility: file.visibility, pageLabels: file.currentVersion?.pageLabels ?? null }
     : null;
 }
 

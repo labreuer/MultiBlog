@@ -1,3 +1,4 @@
+import { latestVersionOf } from "@/lib/file-version";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { gated } from "@/lib/route-access";
@@ -46,9 +47,8 @@ const loadFileForDownload = gated(async (user, slug: string) => {
     id: true,
     slug: true,
     title: true,
-    filename: true,
-    byteSize: true,
     visibility: true,
+    currentVersion: { select: { filename: true, byteSize: true } },
     deletedByUserId: true,
   });
   if (!resolved || resolved.file.deletedByUserId !== null) {
@@ -88,6 +88,7 @@ export default async function FileDownloadPage({ params }: { params: Promise<{ s
     );
   }
   const file = access.value;
+  const latest = latestVersionOf(file);
 
   // The canonical download URL rather than the byte route directly, so this
   // page holds no opinion about hashes or `?download=1` — it re-uses the one
@@ -101,9 +102,9 @@ export default async function FileDownloadPage({ params }: { params: Promise<{ s
         <h1>{file.title}</h1>
         <dl className={styles.facts}>
           <dt>Filename</dt>
-          <dd>{file.filename}</dd>
+          <dd>{latest.filename}</dd>
           <dt>Size</dt>
-          <dd>{formatBytes(file.byteSize)}</dd>
+          <dd>{formatBytes(latest.byteSize)}</dd>
         </dl>
         <p className={styles.status}>
           Your download should start automatically. If it doesn&apos;t,{" "}

@@ -7,16 +7,18 @@
 // Page text is stored at upload, stamped `${pdfjsVersion}/${NORMALISER_VERSION}`
 // (src/lib/pdf-text.ts), and every PDF anchor names the version it was measured
 // against. After either half changes, older files have text only at the old
-// version. src/lib/pdf-page-text.ts already extracts a file lazily the first
-// time a capture asks for it at the new version, so nothing *needs* this
-// script; what it adds is doing that for every file at once, and the cleanup
-// the lazy path deliberately never attempts.
+// version. src/lib/pdf-page-text.ts already extracts a file version lazily the
+// first time a capture asks for it at the new text version, so nothing *needs*
+// this script; what it adds is doing that for every one at once, and the
+// cleanup the lazy path deliberately never attempts.
 //
-// WHAT, per PDF (soft-deleted files included — a restore brings their anchors
-// back)
+// WHAT, per version of a PDF that has its bytes (docs/PDF.md §13: page text
+// and anchors are a version's, and an abandoned version has no bytes to
+// extract from; soft-deleted files included — a restore brings their anchors
+// back). "Version" alone below is the text version.
 //
-//   1. Extract the file at the current version if it has no rows there.
-//   2. Every anchor on the file at an older version — `annotation.pdf_target`,
+//   1. Extract the file version at the current version if it has no rows there.
+//   2. Every anchor on it at an older version — `annotation.pdf_target`,
 //      and the PDF_TEXT selector of `tag_anchor`, `anchored_link_anchor` and
 //      `comment_quote_anchor` — is moved to the current version when its page
 //      reads *identically* at both. Then its offsets, quote and context are
@@ -62,16 +64,18 @@ type AnchorRef = {
 
 type Tx = Prisma.TransactionClient;
 
-async function anchorsOn(fileId: string): Promise<AnchorRef[]> {
+// Every anchor with a PDF target names its version (`file_version_id`), so
+// the anchors on one are found by it.
+async function anchorsOn(fileVersionId: string): Promise<AnchorRef[]> {
   const [annotations, tags, links, quotes] = await Promise.all([
-    prisma.annotation.findMany({ where: { fileId }, select: { id: true, pdfTarget: true } }),
-    prisma.tagAnchor.findMany({ where: { fileId, selectorKind: "PDF_TEXT" }, select: { id: true, selector: true } }),
+    prisma.annotation.findMany({ where: { fileVersionId }, select: { id: true, pdfTarget: true } }),
+    prisma.tagAnchor.findMany({ where: { fileVersionId, selectorKind: "PDF_TEXT" }, select: { id: true, selector: true } }),
     prisma.anchoredLinkAnchor.findMany({
-      where: { fileId, selectorKind: "PDF_TEXT" },
+      where: { fileVersionId, selectorKind: "PDF_TEXT" },
       select: { id: true, selector: true },
     }),
     prisma.commentQuoteAnchor.findMany({
-      where: { fileId, selectorKind: "PDF_TEXT" },
+      where: { fileVersionId, selectorKind: "PDF_TEXT" },
       select: { id: true, selector: true },
     }),
   ]);
@@ -112,10 +116,10 @@ async function moveAnchor(tx: Tx, ref: AnchorRef, textVersion: string): Promise<
 
 // Straight from the database rather than from `anchorsOn`'s snapshot, so a
 // row posted at this version since the snapshot still keeps its text.
-async function referencesTo(tx: Tx, fileId: string, textVersion: string): Promise<number> {
-  const bySelector = { fileId, selectorKind: "PDF_TEXT" as const, selector: { path: ["textVersion"], equals: textVersion } };
+async function referencesTo(tx: Tx, fileVersionId: string, textVersion: string): Promise<number> {
+  const bySelector = { fileVersionId, selectorKind: "PDF_TEXT" as const, selector: { path: ["textVersion"], equals: textVersion } };
   const counts = await Promise.all([
-    tx.annotation.count({ where: { fileId, pdfTarget: { path: ["textVersion"], equals: textVersion } } }),
+    tx.annotation.count({ where: { fileVersionId, pdfTarget: { path: ["textVersion"], equals: textVersion } } }),
     tx.tagAnchor.count({ where: bySelector }),
     tx.anchoredLinkAnchor.count({ where: bySelector }),
     tx.commentQuoteAnchor.count({ where: bySelector }),
@@ -142,12 +146,26 @@ async function main(): Promise<void> {
   const apply = process.argv.includes("--apply");
   const current = await currentTextVersion();
 
-  const files = await prisma.storedFile.findMany({
-    // A null pageCount is a format with no page text (a .docx).
-    where: { pageCount: { not: null } },
-    orderBy: { createdAt: "asc" },
-    select: { id: true, filename: true, sha256: true, byteSize: true, pageCount: true, deletedAt: true },
+  const versions = await prisma.fileVersion.findMany({
+    // A null pageCount is a format with no page text (a .docx), and an
+    // abandoned version has no bytes.
+    where: { pageCount: { not: null }, abandonedAt: null },
+    orderBy: [{ file: { createdAt: "asc" } }, { number: "asc" }],
+    select: {
+      id: true,
+      number: true,
+      filename: true,
+      sha256: true,
+      byteSize: true,
+      pageCount: true,
+      file: { select: { deletedAt: true, currentVersionId: true } },
+    },
   });
+  const files = versions.map(({ file: owner, ...version }) => ({
+    ...version,
+    // A version other than the latest is named as one, as its page is.
+    name: `${version.filename}${version.id === owner.currentVersionId ? "" : `, version ${version.number}`}${owner.deletedAt ? " (deleted)" : ""}`,
+  }));
 
   const pagesTotal = files.reduce((sum, f) => sum + (f.pageCount ?? 0), 0);
   const bytesTotal = files.reduce((sum, f) => sum + f.byteSize, 0);
@@ -167,7 +185,7 @@ async function main(): Promise<void> {
 
     try {
       const rows = await prisma.filePageText.findMany({
-        where: { fileId: file.id },
+        where: { fileVersionId: file.id },
         select: { textVersion: true, pageIndex: true, text: true },
       });
       const textAt = new Map<string, Map<number, string>>();
@@ -186,7 +204,7 @@ async function main(): Promise<void> {
         }
         if (apply) {
           await prisma.filePageText.createMany({
-            data: parsed.pages.map((text, pageIndex) => ({ fileId: file.id, pageIndex, textVersion: current, text })),
+            data: parsed.pages.map((text, pageIndex) => ({ fileVersionId: file.id, pageIndex, textVersion: current, text })),
             skipDuplicates: true,
           });
         }
@@ -218,7 +236,7 @@ async function main(): Promise<void> {
             for (const ref of movable) await moveAnchor(tx, ref, current);
             for (const version of deletable) {
               if ((await referencesTo(tx, file.id, version)) > 0) continue;
-              const { count } = await tx.filePageText.deleteMany({ where: { fileId: file.id, textVersion: version } });
+              const { count } = await tx.filePageText.deleteMany({ where: { fileVersionId: file.id, textVersion: version } });
               totals.deletedRows += count;
             }
           },
@@ -243,9 +261,8 @@ async function main(): Promise<void> {
 
     pagesDone += file.pageCount ?? 0;
     bytesDone += file.byteSize;
-    const name = file.deletedAt ? `${file.filename} (deleted)` : file.filename;
     console.log(
-      `${progress(pagesDone, pagesTotal, i + 1, files.length, bytesDone, bytesTotal)} ${name} — ` +
+      `${progress(pagesDone, pagesTotal, i + 1, files.length, bytesDone, bytesTotal)} ${file.name} — ` +
         (notes.length > 0 ? notes.join("; ") : "up to date"),
     );
   }

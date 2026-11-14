@@ -51,6 +51,7 @@ import { chipInputsForBodies, chipInputsForBody } from "@/lib/entity-chips/conte
 import { chipsInJSON } from "@/lib/entity-chips/renderings";
 import type { ChipInputs } from "@/lib/entity-chips/types";
 import { setAnnotationDeleted } from "@/lib/annotation-manage";
+import { latestVersionIdOf } from "@/lib/file-version-data";
 
 /**
  * `mintAnnotationConnection`, degraded to "no bundle" on any failure.
@@ -308,7 +309,7 @@ export async function createDraftAnnotation(
   const rawPdfTarget = pdfTargetOf(anchor);
   const pdfAnchor =
     target.kind === "file" && parentId === null && rawPdfTarget !== undefined
-      ? await capturePdfTextAnchor({ fileId: target.id, rawTarget: rawPdfTarget })
+      ? await capturePdfTextAnchor({ fileVersionId: await latestVersionIdOf(target.id), rawTarget: rawPdfTarget })
       : null;
 
   const seed = seedAnnotationYdoc("");
@@ -321,7 +322,11 @@ export async function createDraftAnnotation(
       bodyText: "",
       status: "DRAFT",
       ...(pdfAnchor
-        ? { pdfTarget: pdfAnchor.target as unknown as Prisma.InputJsonValue, quotedText: pdfAnchor.quotedText }
+        ? {
+            pdfTarget: pdfAnchor.target as unknown as Prisma.InputJsonValue,
+            quotedText: pdfAnchor.quotedText,
+            fileVersionId: pdfAnchor.fileVersionId,
+          }
         : {}),
     },
   });
@@ -480,6 +485,7 @@ export async function postAnnotation(opts: {
       parentAnnotationId: true,
       status: true,
       pdfTarget: true,
+      fileVersionId: true,
       quotedText: true,
       anchorFrom: true,
     },
@@ -525,7 +531,12 @@ export async function postAnnotation(opts: {
       parentId,
       settled,
       rawTarget: opts.pdfTarget,
-      draftTarget: draftTarget ? { target: draftTarget, quotedText: annotation.quotedText } : null,
+      // The draft's own target with the version it was measured on, which a
+      // post keeps: its quads are that version's sheets'.
+      draftTarget:
+        draftTarget && annotation.fileVersionId
+          ? { target: draftTarget, quotedText: annotation.quotedText, fileVersionId: annotation.fileVersionId }
+          : null,
       raise: opts.raise === true,
       raisedBy: displayNameOf(session.user),
       authorUserId: session.user.id,
@@ -1077,7 +1088,7 @@ async function postFileAnnotation(opts: {
   settled: SettledBody;
   rawTarget: unknown;
   /** The target createDraftAnnotation captured and stored, if any: what a reopened draft posts with. */
-  draftTarget: { target: PdfTarget; quotedText: string } | null;
+  draftTarget: { target: PdfTarget; quotedText: string; fileVersionId: string } | null;
   raise: boolean;
   /** Display name for the notification email — resolved by the caller, which already has the session. */
   raisedBy: string;
@@ -1103,11 +1114,10 @@ async function postFileAnnotation(opts: {
   const captured =
     parentId === null
       ? opts.rawTarget !== undefined
-        ? await capturePdfTextAnchor({ fileId, rawTarget: opts.rawTarget })
+        ? await capturePdfTextAnchor({ fileVersionId: await latestVersionIdOf(fileId), rawTarget: opts.rawTarget })
         : opts.draftTarget
       : null;
   const quotedText = captured?.quotedText ?? "";
-  const storedTarget = captured?.target ?? null;
 
   // The parent's newest settled version — what the replier was actually
   // reading (see the doc path's own comment on this).
@@ -1145,7 +1155,15 @@ async function postFileAnnotation(opts: {
     alongside: {
       ...(raise ? { status: "RAISED" as const, raisedAt: now } : { status: "LIVE" as const }),
       postedAt: now,
-      ...(storedTarget ? { pdfTarget: storedTarget as unknown as Prisma.InputJsonValue, quotedText } : {}),
+      ...(captured
+        ? {
+            pdfTarget: captured.target as unknown as Prisma.InputJsonValue,
+            quotedText,
+            // By the relation, since this is the checked update input: it
+            // sets the pair, the version and its own file.
+            fileVersion: { connect: { id: captured.fileVersionId } },
+          }
+        : {}),
       // A reply's anchor into its parent's body, unchanged from the doc side.
       // A reply that sends none keeps whatever its draft stored, which is
       // something only for a reopened draft first opened on a selection; one

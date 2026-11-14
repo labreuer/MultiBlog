@@ -1,3 +1,4 @@
+import { latestVersionOf } from "@/lib/file-version";
 import { auth } from "@/lib/auth";
 import { canUserReadFile } from "@/lib/file-authz";
 import { resolveFileParam } from "@/lib/file-slug";
@@ -43,8 +44,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
 
   const resolved = await resolveFileParam(slug, {
     id: true,
-    sha256: true,
     visibility: true,
+    currentVersion: { select: { sha256: true } },
     deletedByUserId: true,
   });
   if (!resolved || resolved.file.deletedByUserId !== null) {
@@ -61,7 +62,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
   // `download=1` is what makes this URL honest on its own: without it the byte
   // route answers a PDF `inline`, so pasting a /download URL into the address
   // bar would open the viewer instead of saving the file.
-  return redirectTo(`/api/files/${resolved.file.id}/${resolved.file.sha256}?download=1`);
+  return redirectTo(`/api/files/${resolved.file.id}/${latestVersionOf(resolved.file).sha256}?download=1`);
 }
 
 // A relative Location, which RFC 7231 allows: it leaves scheme and host exactly

@@ -359,6 +359,7 @@ function quoteAnchorRow(anchor: CommentQuoteAnchorInput) {
     anchorTo: anchor.anchorTo,
     quotedText: anchor.quotedText,
     selector: anchor.selector as Prisma.InputJsonValue,
+    ...(anchor.fileVersionId ? { fileVersionId: anchor.fileVersionId } : {}),
     anchoredEventId: anchor.anchoredEventId,
     quotedRevisionId: anchor.quotedRevisionId,
   };

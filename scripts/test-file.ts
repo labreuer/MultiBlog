@@ -33,6 +33,7 @@ import "dotenv/config";
 import { readFile } from "node:fs/promises";
 import { prisma, prismaIncludingDeleted } from "../src/lib/prisma";
 import { uniqueFileSlug } from "../src/lib/file-slug";
+import { countVersionsHolding, createFileWithFirstVersion } from "../src/lib/file-version-data";
 import { deleteBytesIfUnreferenced, storagePathFor, storeUploadStream } from "../src/lib/file-storage";
 import { extractPdf } from "../src/lib/pdf-extract";
 import { buildTestPdf } from "./make-test-pdf";
@@ -107,30 +108,24 @@ async function create(ownerEmail: string, rest: string[]): Promise<void> {
   const parsed = await extractPdf(await readFile(storagePathFor(stored.sha256)));
 
   const slug = await uniqueFileSlug(title);
-  const file = await prisma.storedFile.create({
-    data: {
+  // The upload's own writer: the file, its version 1 and its page text.
+  const file = await prisma.$transaction((tx) =>
+    createFileWithFirstVersion(tx, {
       slug,
       title,
-      filename,
-      contentType: "application/pdf",
-      byteSize: stored.byteSize,
-      sha256: stored.sha256,
-      pageCount: parsed.pageCount,
       visibility,
-      createdByUserId: owner.id,
-      updatedByUserId: owner.id,
-      owners: { create: { userId: owner.id, ownerOrder: 0 } },
-    },
-    select: { id: true, slug: true },
-  });
-  await prisma.filePageText.createMany({
-    data: parsed.pages.map((text, pageIndex) => ({
-      fileId: file.id,
-      pageIndex,
-      textVersion: parsed.textVersion,
-      text,
-    })),
-  });
+      uploaderId: owner.id,
+      ownerIds: [owner.id],
+      bytes: {
+        filename,
+        contentType: "application/pdf",
+        byteSize: stored.byteSize,
+        sha256: stored.sha256,
+        pageCount: parsed.pageCount,
+        pages: { textVersion: parsed.textVersion, texts: parsed.pages },
+      },
+    }),
+  );
 
   console.log(`Created file ${file.id}`);
   console.log(`  title      ${title}`);
@@ -147,7 +142,7 @@ async function remove(slugOrId: string): Promise<void> {
     select: {
       id: true,
       slug: true,
-      sha256: true,
+      versions: { select: { sha256: true } },
       owners: { select: { user: { select: { email: true } } } },
     },
   });
@@ -169,13 +164,15 @@ async function remove(slugOrId: string): Promise<void> {
 
   await prismaIncludingDeleted.storedFile.delete({ where: { id: file.id } });
 
-  // Content addressing means another file may share these exact bytes. Counted
-  // after the delete, so the count reflects what survives it.
-  const remaining = await prismaIncludingDeleted.storedFile.count({ where: { sha256: file.sha256 } });
-  await deleteBytesIfUnreferenced(file.sha256, remaining);
-
+  // Content addressing means another version, of this file or another, may
+  // share these exact bytes. Counted after the delete, so the count reflects
+  // what survives it.
   console.log(`Deleted file ${file.id} (${file.slug})`);
-  console.log(remaining > 0 ? `  bytes kept — ${remaining} other file(s) share them` : "  bytes removed from storage");
+  for (const sha256 of new Set(file.versions.map((version) => version.sha256))) {
+    const remaining = await countVersionsHolding(sha256);
+    await deleteBytesIfUnreferenced(sha256, remaining);
+    console.log(remaining > 0 ? `  bytes kept — ${remaining} other version(s) share them` : "  bytes removed from storage");
+  }
 }
 
 async function list(): Promise<void> {
@@ -186,8 +183,7 @@ async function list(): Promise<void> {
       slug: true,
       title: true,
       visibility: true,
-      pageCount: true,
-      byteSize: true,
+      currentVersion: { select: { pageCount: true, byteSize: true } },
       deletedAt: true,
       owners: { select: { user: { select: { email: true } } } },
       _count: { select: { annotations: true } },
@@ -202,7 +198,7 @@ async function list(): Promise<void> {
     const flags = [file.visibility, file.deletedAt ? "DELETED" : null].filter(Boolean).join(" ");
     console.log(
       `${file.id}  ${file.slug}\n` +
-        `    "${file.title}"  ${flags}  ${file.pageCount ?? "?"}pp  ${file.byteSize}B  ` +
+        `    "${file.title}"  ${flags}  ${file.currentVersion?.pageCount ?? "?"}pp  ${file.currentVersion?.byteSize ?? "?"}B  ` +
         `${file._count.annotations} annotation(s)\n` +
         `    owners: ${owners}`,
     );

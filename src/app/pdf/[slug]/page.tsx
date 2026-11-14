@@ -1,3 +1,4 @@
+import { latestVersionOf } from "@/lib/file-version";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { canUserReadFile } from "@/lib/file-authz";
@@ -36,8 +37,8 @@ const loadFileForRead = gated(async (user, slug: string) => {
     id: true,
     slug: true,
     title: true,
-    sha256: true,
     visibility: true,
+    currentVersion: { select: { sha256: true } },
     deletedByUserId: true,
   });
   if (!resolved) {
@@ -102,7 +103,7 @@ export default async function PdfPage({
 
   // The hash is in the path, which is what makes this URL immutable and lets
   // the download route answer `immutable` — see the route's own header.
-  const fileUrl = `/api/files/${file.id}/${file.sha256}`;
+  const fileUrl = `/api/files/${file.id}/${latestVersionOf(file).sha256}`;
 
   // docs/ANCHORED_LINKS.md — the link ?sel= names, as this viewer may see
   // it, delivered as an initial prop. Initial props are the one delivery

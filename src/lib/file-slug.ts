@@ -248,8 +248,13 @@ export async function revertFileSlug(fileId: string, updatedByUserId: string): P
  */
 export async function resolveFileParam<T extends Prisma.StoredFileSelect>(
   slug: string,
-  select: T,
+  // `SelectSubset`, as Prisma's own methods take a select: a bare `T extends`
+  // lets a key the model doesn't have through the compiler, to fail only when
+  // the query runs.
+  subset: Prisma.SelectSubset<T, Prisma.StoredFileSelect>,
 ): Promise<{ file: Prisma.StoredFileGetPayload<{ select: T }>; redirectTo: string | null } | null> {
+  // The subset type is the argument's check alone; the queries take `T`.
+  const select = subset as unknown as T;
   const live = await prismaIncludingDeleted.storedFile.findFirst({
     where: { slug, deletedByUserId: null },
     select,

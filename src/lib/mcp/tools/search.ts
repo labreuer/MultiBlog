@@ -225,7 +225,7 @@ async function searchPdf(file: ResolvedFile, q: string, exact: boolean, cursorRa
   const { hits, corrected, query } = await withCorrection(q, base, exact, async (qq) => (await pagesFor(qq)).length, pagesFor);
   const cursor = decodeCursor(cursorRaw, limit);
   const page = hits.slice(cursor.offset, cursor.offset + cursor.size);
-  const [snippets, labels] = await Promise.all([pageSnippets(page, query), pdfLabels(file.id)]);
+  const [snippets, labels] = await Promise.all([pageSnippets(page, query), pdfLabels(file.versionId)]);
   return {
     kind: "pdf-pages",
     url: `/pdf/${file.slug}`,

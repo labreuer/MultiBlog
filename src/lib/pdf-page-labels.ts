@@ -226,9 +226,9 @@ export function pagesLabelled(labels: readonly string[] | null, label: string): 
 // same sheet.
 //
 // **`ownLabels` are the labels the file itself gives**, one per sheet, as
-// pdfjs's `getPageLabels()` reads them and `file.page_labels` stores them —
-// never `usablePageLabels`' copy, whose empty labels are filled with their
-// sheet's number for the page box. A filled-in number is not a label, so on a
+// pdfjs's `getPageLabels()` reads them and `file_version.page_labels` stores
+// them — never `usablePageLabels`' copy, whose empty labels are filled with
+// their sheet's number for the page box. A filled-in number is not a label, so on a
 // labelled file `p=5` never names a sheet whose own label is empty; only
 // `page=` names such a sheet.
 

@@ -24,6 +24,7 @@ import { docContentExtensions, pmDocContentSchema } from "@/lib/tiptap-schema";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
 import { ydocStore } from "../../../server/ydoc-store";
+import { latestVersionIdOf } from "@/lib/file-version-data";
 
 // docs/ANCHORED_LINKS.md — mutations on **the viewer's one open link** (a
 // draft, or a minted link reopened for editing), the mint that turns a
@@ -269,7 +270,7 @@ export async function addAnchoredLinkPart(
   let row: LinkPartRow;
 
   if (part.kind === "pdf-text") {
-    const captured = await capturePdfTextAnchor({ fileId: target.id, rawTarget: part.target });
+    const captured = await capturePdfTextAnchor({ fileVersionId: await latestVersionIdOf(target.id), rawTarget: part.target });
     if (!captured) {
       return { error: "That selection couldn't be anchored." };
     }

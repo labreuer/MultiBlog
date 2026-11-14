@@ -222,7 +222,7 @@ export async function annotateFor(ctx: McpContext, input: QuoteInput & { on: str
     passage = { text: at.shown, ...(at.chipsNow ? { chipsNow: at.chipsNow } : {}) };
   } else {
     const at = await anchorPdfQuote(container.file, input);
-    anchor = { kind: "pdf", target: at.target, quotedText: at.quotedText };
+    anchor = { kind: "pdf", target: at.target, quotedText: at.quotedText, fileVersionId: at.fileVersionId };
     passage = { text: at.quotedText, page: at.target.pageIndex + 1, ...(at.label ? { label: at.label } : {}) };
   }
 

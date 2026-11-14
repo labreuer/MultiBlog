@@ -164,6 +164,8 @@ model User {
   filesCreated           StoredFile[]             @relation("FileCreatedBy")
   fileUpdates            StoredFile[]             @relation("FileUpdatedBy")
   fileDeletions          StoredFile[]             @relation("FileDeletedBy")
+  fileVersionsUploaded   FileVersion[]            @relation("FileVersionUploadedBy")
+  fileVersionsPromoted   FileVersion[]            @relation("FileVersionPromotedBy")
   annotations            Annotation[]             @relation("AnnotationAuthor")
   annotationDeletions    Annotation[]             @relation("AnnotationDeletedBy")
   docLinks               DocLink[]
@@ -727,6 +729,10 @@ model CommentQuoteAnchor {
   docId              String? @map("doc_id")
   postId             String? @map("post_id")
   fileId             String? @map("file_id")
+  // docs/PDF.md §13 — the version whose sheets a `PDF_TEXT` selector's quads
+  // were measured on: set exactly when the row holds one, and NULL for a
+  // target that is the whole file.
+  fileVersionId      String? @map("file_version_id")
   targetAnnotationId String? @map("target_annotation_id")
   targetCommentId    String? @map("target_comment_id")
 
@@ -746,6 +752,7 @@ model CommentQuoteAnchor {
   doc              Doc?                  @relation("CommentQuoteAnchorDoc", fields: [docId], references: [id], onDelete: Cascade)
   post             Post?                 @relation("CommentQuoteAnchorPost", fields: [postId], references: [id], onDelete: Cascade)
   file             StoredFile?           @relation("CommentQuoteAnchorFile", fields: [fileId], references: [id], onDelete: Cascade)
+  fileVersion      FileVersion?          @relation(fields: [fileVersionId, fileId], references: [id, fileId], onDelete: NoAction, onUpdate: NoAction)
   targetAnnotation Annotation?           @relation("CommentQuoteAnchorAnnotation", fields: [targetAnnotationId], references: [id], onDelete: Cascade)
   targetComment    Comment?              @relation("CommentQuoteAnchorTargetComment", fields: [targetCommentId], references: [id], onDelete: Cascade)
   anchoredEvent    PostPublicationEvent? @relation("CommentQuoteAnchorEvent", fields: [anchoredEventId], references: [id], onDelete: SetNull)
@@ -755,6 +762,7 @@ model CommentQuoteAnchor {
   @@index([docId])
   @@index([postId])
   @@index([fileId])
+  @@index([fileVersionId])
   @@index([targetAnnotationId])
   @@index([targetCommentId])
   @@index([quotedRevisionId])
@@ -1131,6 +1139,12 @@ model Annotation {
   // deliberate duplication of one string, not a second source of truth: the
   // column is the display copy, this blob is the anchor.
   pdfTarget          Json?                    @map("pdf_target")
+  // docs/PDF.md §13, "Versions" — the version whose sheets `pdfTarget`'s quads
+  // were measured on: set exactly when `pdfTarget` is, with a foreign key on
+  // the pair so it is one of `fileId`'s versions. A reply has none and is on
+  // its root's version, and so has a root with no target, which is the
+  // file's: `noteVersionId` (src/lib/file-version.ts) answers for all three.
+  fileVersionId      String?                  @map("file_version_id")
   // docs/FULLTEXT.md §3 — bodyText (weight B) and quotedText (D) as a
   // tsvector, maintained by the annotation_sync_search_vector trigger; never
   // assign to it. bodyText is the last settled body (proseJson's comment), so
@@ -1139,6 +1153,7 @@ model Annotation {
 
   doc                 Doc?                 @relation(fields: [docId], references: [id], onDelete: Cascade)
   file                StoredFile?          @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  fileVersion         FileVersion?         @relation(fields: [fileVersionId, fileId], references: [id, fileId], onDelete: NoAction, onUpdate: NoAction)
   parent              Annotation?          @relation("AnnotationReplies", fields: [parentAnnotationId], references: [id])
   replies             Annotation[]         @relation("AnnotationReplies")
   user                User                 @relation("AnnotationAuthor", fields: [userId], references: [id])
@@ -1154,6 +1169,7 @@ model Annotation {
 
   @@index([docId])
   @@index([fileId])
+  @@index([fileVersionId])
   @@index([searchVector], type: Gin)
   @@map("annotation")
 }
@@ -1242,13 +1258,11 @@ model DocLinkGroup {
 // FILE_STORAGE_DIR is a second backup surface that `pg_dump` does not cover
 // (DEPLOY.md).
 //
-// **sha256 is the file's real identity** (docs/PDF.md §2's DocId), which is
-// what makes the download URL immutable and what guarantees a PDF anchor can
-// never drift: the bytes an annotation was measured against are, by
-// construction, the bytes every later reader sees. Deliberately NOT unique —
-// two people may upload the same paper under different titles, visibilities
-// and bylines, and those are different documents socially even though the
-// storage layer stores one copy.
+// **What the bytes decide is not here either**: the hash, size, type, page
+// count, labels, outline and uploaded filename are a `FileVersion`'s, and
+// `currentVersionId` names the latest (docs/PDF.md §13, "Versions"). This row
+// is what stays the same across versions: the slug, title, visibility,
+// owners, tags and references.
 //
 // **A deleted file releases its slug**, which is why `slug` carries no
 // `@unique` here: uniqueness is a *partial* index in the migrations
@@ -1262,56 +1276,48 @@ model DocLinkGroup {
 // than refused (src/app/actions/files.ts). Docs and posts deliberately do not
 // follow — PLAN.md §19.
 model StoredFile {
-  id          String        @id @default(cuid())
-  slug        String
+  id         String        @id @default(cuid())
+  slug       String
   // Shown everywhere a doc shows its title; seeded from the upload filename
   // and independently renamable afterwards.
-  title       String
-  // The name as uploaded, kept verbatim for the Content-Disposition on
-  // download and so a renamed file still says where it came from.
-  filename    String
-  contentType String        @map("content_type")
-  byteSize    Int           @map("byte_size")
-  sha256      String
-  // Null until the upload's server-side parse fills it in; also null for a
-  // non-PDF, should other types ever be allowed.
-  pageCount   Int?          @map("page_count")
+  title      String
   // Reuses docs' vocabulary rather than cloning it: PRIVATE/SHARED already
   // means one thing site-wide, and files' rule is specified as "the same as
   // docs'". The *predicates* over it are separate (canViewFiles /
   // canManageFiles, src/lib/role-checks.ts) so the two can diverge; the enum
   // is shared because a third visibility word would be a UI regression.
-  visibility  DocVisibility @default(PRIVATE)
+  visibility DocVisibility @default(PRIVATE)
 
-  createdAt       DateTime                 @default(now()) @map("created_at")
+  createdAt        DateTime                 @default(now()) @map("created_at")
   // Who uploaded it, set once and never edited — unlike `owners`, which is
   // seeded with the uploader and may drop them later (docs/PDF.md, "A file's
   // listed users are FileOwners"). Null for a row older than the column that
   // had no owner left to take it from, or for an uploader since hard-deleted.
-  createdByUserId String?                  @map("created_by_user_id")
-  updatedAt       DateTime                 @updatedAt @map("updated_at")
-  updatedByUserId String?                  @map("updated_by_user_id")
-  deletedByUserId String?                  @map("deleted_by_user_id")
-  deletedAt       DateTime?                @map("deleted_at")
+  createdByUserId  String?                  @map("created_by_user_id")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+  updatedByUserId  String?                  @map("updated_by_user_id")
+  deletedByUserId  String?                  @map("deleted_by_user_id")
+  deletedAt        DateTime?                @map("deleted_at")
   // docs/FULLTEXT.md §3 — title (A) and filename (B) as a tsvector,
   // maintained by the file_sync_search_vector trigger; never assign to it.
   // The pages' text has its own, on FilePageText.
-  searchVector    Unsupported("tsvector")? @map("search_vector")
-  // docs/MCP.md §8 — pdfjs's getPageLabels(), one string per page: NULL is
-  // "not computed", [] "the PDF defines none". A property of the bytes, so
-  // here rather than on FilePageText, whose rows are per text version.
-  // Filled lazily on first read, with raw SQL so `updatedAt` doesn't move
-  // (src/lib/pdf-metadata.ts).
-  pageLabels      Json?                    @map("page_labels")
-  // docs/MCP.md §8 — the Contents pane's outline, flattened: each entry's
-  // title, depth and 0-based page index (null where its destination doesn't
-  // resolve). NULL and [] mean what they mean on pageLabels, and it is
-  // filled the same way.
-  outline         Json?
+  searchVector     Unsupported("tsvector")? @map("search_vector")
+  // docs/PDF.md §13, "Versions" — the latest version: the one /pdf/<slug>
+  // shows, search ranks and a citation resolves on. What the bytes decide
+  // (hash, size, type, pages, labels, outline, filename) is on that row and
+  // not here. NULL only between this row's insert and its first version's,
+  // inside `recordUpload`'s transaction: the two rows name each other, so one
+  // is written before the other exists. A reader goes through
+  // `latestVersionOf` (src/lib/file-version.ts), which throws on NULL.
+  currentVersionId String?                  @map("current_version_id")
 
+  // The foreign key is on the pair, so the latest is one of this file's own
+  // versions. NO ACTION, written out: Prisma's default for an optional
+  // relation is SET NULL, which on a pair would null `id` too.
+  currentVersion      FileVersion?         @relation("FileCurrentVersion", fields: [currentVersionId, id], references: [id, fileId], onDelete: NoAction, onUpdate: NoAction)
+  versions            FileVersion[]        @relation("FileVersions")
   owners              FileOwner[]
   slugHistory         FileSlugHistory[]
-  pageTexts           FilePageText[]
   annotations         Annotation[]
   references          Reference[]
   metrics             FileMetrics?
@@ -1323,12 +1329,95 @@ model StoredFile {
   updatedBy           User?                @relation("FileUpdatedBy", fields: [updatedByUserId], references: [id])
   deletedBy           User?                @relation("FileDeletedBy", fields: [deletedByUserId], references: [id])
 
+  // What lets Prisma take the pair above as a one-to-one relation.
+  @@unique([currentVersionId, id])
   // Plain, not unique, and covering deleted rows too: `file_slug_live_key` is
   // partial, so it can't serve a lookup that has to find a deleted file.
   @@index([slug])
-  @@index([sha256])
   @@index([searchVector], type: Gin)
   @@map("file")
+}
+
+// docs/PDF.md §13, "Versions" — one row per version of a file's bytes,
+// numbered from 1 and kept for good. Every file has a version 1, a file that
+// is not a PDF included.
+//
+// A version's state is read from this row and nowhere else: a *candidate* is
+// neither promoted nor abandoned, the *latest* is the one
+// `file.current_version_id` names, and an *earlier* version is promoted and
+// not the latest. *Promoted* means `promotedAt` is set; who promoted it may
+// be NULL (a migrated version 1 of a file with no `created_by_user_id`, or a
+// deleted user).
+//
+// **A migrated version 1 has its file's id as its own**, which is what let
+// the migration re-key `file_page_text` by renaming a column. A version made
+// since has an id of its own, so one id is never passed for the other.
+//
+// A version has no visibility, owners, slug or deletion of its own: whoever
+// may read the file may read every version of it.
+model FileVersion {
+  id          String @id @default(cuid())
+  fileId      String @map("file_id")
+  // Never reused: an abandoned version keeps its row, and the next number is
+  // one more than the file's rows.
+  number      Int
+  // The name as uploaded, kept verbatim for the Content-Disposition on
+  // download and so a renamed file still says where it came from.
+  filename    String
+  contentType String @map("content_type")
+  byteSize    Int    @map("byte_size")
+  // The bytes' identity (docs/PDF.md §2's DocId), which is what makes the
+  // byte URL immutable and what guarantees an anchor on this version can
+  // never drift. Deliberately NOT unique: two files, or two versions of one,
+  // may hold the same bytes, and the storage layer stores one copy.
+  sha256      String
+  // Null for a format with no page text (a .docx).
+  pageCount   Int?   @map("page_count")
+  // docs/MCP.md §8 — pdfjs's getPageLabels(), one string per page: NULL is
+  // "not computed", [] "the PDF defines none". A property of the bytes, so
+  // here rather than on FilePageText, whose rows are per text version.
+  // Filled lazily on first read (src/lib/pdf-metadata.ts).
+  pageLabels  Json?  @map("page_labels")
+  // docs/MCP.md §8 — the Contents pane's outline, flattened: each entry's
+  // title, depth and 0-based page index (null where its destination doesn't
+  // resolve). NULL and [] mean what they mean on pageLabels, and it is
+  // filled the same way.
+  outline     Json?
+
+  uploadedAt         DateTime  @default(now()) @map("uploaded_at")
+  uploadedByUserId   String?   @map("uploaded_by_user_id")
+  promotedAt         DateTime? @map("promoted_at")
+  promotedByUserId   String?   @map("promoted_by_user_id")
+  abandonedAt        DateTime? @map("abandoned_at")
+  // The version that was the latest when this one was uploaded; NULL for a
+  // version 1. Stored, since it can't be worked out from the numbers once a
+  // version between two others has been abandoned.
+  baseVersionId      String?   @map("base_version_id")
+  // The highest `ydoc_update.id` when the row was made and when it was
+  // promoted, 0 where the log was empty: a clock for dating a link against a
+  // version (docs/PDF.md §13, "Links into the file"). Plain BigInts with no
+  // relation, as `Annotation.ydocUpdateId` is.
+  uploadedAtUpdateId BigInt    @map("uploaded_at_update_id")
+  promotedAtUpdateId BigInt?   @map("promoted_at_update_id")
+
+  file                StoredFile           @relation("FileVersions", fields: [fileId], references: [id], onDelete: Cascade)
+  currentOf           StoredFile?          @relation("FileCurrentVersion")
+  uploadedBy          User?                @relation("FileVersionUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  promotedBy          User?                @relation("FileVersionPromotedBy", fields: [promotedByUserId], references: [id], onDelete: SetNull)
+  baseVersion         FileVersion?         @relation("FileVersionBase", fields: [baseVersionId], references: [id], onDelete: SetNull)
+  basedOnThis         FileVersion[]        @relation("FileVersionBase")
+  pageTexts           FilePageText[]
+  annotations         Annotation[]
+  tagAnchors          TagAnchor[]
+  anchoredLinkAnchors AnchoredLinkAnchor[]
+  commentQuoteAnchors CommentQuoteAnchor[]
+
+  @@unique([fileId, number])
+  // The target of every pair key: `file.current_version_id` and each anchor
+  // table's `file_version_id`, so a version named is one of that file's.
+  @@unique([id, fileId])
+  @@index([sha256])
+  @@map("file_version")
 }
 
 // /files' Owner(s) and Annotations columns, as a view — the same role
@@ -1342,8 +1431,9 @@ model StoredFile {
 // annotationCount is here rather than as a Prisma `_count` because it is a
 // *filtered* count — soft-deleted annotations don't count — and `_count` has
 // no way to express that in an orderBy. Size and Pages are plain stored
-// columns on file and need neither this view nor a trigger: unlike Doc's
-// Length they are known at upload time and never recomputed.
+// columns on the file's latest version (`FileVersion`) and need neither this
+// view nor a trigger: unlike Doc's Length they are known at upload time and
+// never recomputed.
 view FileMetrics {
   fileId          String  @unique @map("file_id")
   owners          String? @map("owners")
@@ -1418,18 +1508,22 @@ model FileSlugHistory {
 // against them while new ones are written alongside. Re-anchoring across a
 // bump is lazy and per-annotation (docs/PDF.md §3), which is only possible if
 // both generations are still on disk.
+//
+// Keyed by *version* (docs/PDF.md §13): a version's bytes never change, so its
+// text at one text version never does either, and the two lazy writers write
+// under the version whose bytes they parsed.
 model FilePageText {
-  fileId       String                   @map("file_id")
-  pageIndex    Int                      @map("page_index")
-  textVersion  String                   @map("text_version")
-  text         String
+  fileVersionId String                   @map("file_version_id")
+  pageIndex     Int                      @map("page_index")
+  textVersion   String                   @map("text_version")
+  text          String
   // docs/FULLTEXT.md §3 — text as a tsvector, maintained by the
   // file_page_text_sync_search_vector trigger; never assign to it.
-  searchVector Unsupported("tsvector")? @map("search_vector")
+  searchVector  Unsupported("tsvector")? @map("search_vector")
 
-  file StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  version FileVersion @relation(fields: [fileVersionId], references: [id], onDelete: Cascade)
 
-  @@id([fileId, pageIndex, textVersion])
+  @@id([fileVersionId, pageIndex, textVersion])
   @@index([searchVector], type: Gin)
   @@map("file_page_text")
 }
@@ -1575,6 +1669,10 @@ model TagAnchor {
   docId              String? @map("doc_id")
   postId             String? @map("post_id")
   fileId             String? @map("file_id")
+  // docs/PDF.md §13 — the version whose sheets a `PDF_TEXT` selector's quads
+  // were measured on: set exactly when the row holds one, and NULL for a
+  // target that is the whole file.
+  fileVersionId      String? @map("file_version_id")
   targetAnnotationId String? @map("target_annotation_id")
   // PLAN.md §23c — the fifth arc leg, added for comment_quote_anchor and
   // landing here too because the three tables share a shape by *compiler*
@@ -1630,6 +1728,7 @@ model TagAnchor {
   doc              Doc?                  @relation("TagAnchorDoc", fields: [docId], references: [id], onDelete: Cascade)
   post             Post?                 @relation("TagAnchorPost", fields: [postId], references: [id], onDelete: Cascade)
   file             StoredFile?           @relation("TagAnchorFile", fields: [fileId], references: [id], onDelete: Cascade)
+  fileVersion      FileVersion?          @relation(fields: [fileVersionId, fileId], references: [id, fileId], onDelete: NoAction, onUpdate: NoAction)
   targetAnnotation Annotation?           @relation("TagAnchorAnnotation", fields: [targetAnnotationId], references: [id], onDelete: Cascade)
   targetComment    Comment?              @relation("TagAnchorComment", fields: [targetCommentId], references: [id], onDelete: Cascade)
   anchoredEvent    PostPublicationEvent? @relation("TagAnchorEvent", fields: [anchoredEventId], references: [id], onDelete: SetNull)
@@ -1638,6 +1737,7 @@ model TagAnchor {
   @@index([docId])
   @@index([postId])
   @@index([fileId])
+  @@index([fileVersionId])
   @@index([targetAnnotationId])
   @@index([targetCommentId])
   @@map("tag_anchor")
@@ -1755,6 +1855,10 @@ model AnchoredLinkAnchor {
   docId              String? @map("doc_id")
   postId             String? @map("post_id")
   fileId             String? @map("file_id")
+  // docs/PDF.md §13 — the version whose sheets a `PDF_TEXT` selector's quads
+  // were measured on: set exactly when the row holds one, and NULL for a
+  // target that is the whole file.
+  fileVersionId      String? @map("file_version_id")
   targetAnnotationId String? @map("target_annotation_id")
   // PLAN.md §23c — shared-shape leg, inert here (see TagAnchor's).
   targetCommentId    String? @map("target_comment_id")
@@ -1776,6 +1880,7 @@ model AnchoredLinkAnchor {
   doc              Doc?                  @relation("AnchoredLinkAnchorDoc", fields: [docId], references: [id], onDelete: Cascade)
   post             Post?                 @relation("AnchoredLinkAnchorPost", fields: [postId], references: [id], onDelete: Cascade)
   file             StoredFile?           @relation("AnchoredLinkAnchorFile", fields: [fileId], references: [id], onDelete: Cascade)
+  fileVersion      FileVersion?          @relation(fields: [fileVersionId, fileId], references: [id, fileId], onDelete: NoAction, onUpdate: NoAction)
   targetAnnotation Annotation?           @relation("AnchoredLinkAnchorAnnotation", fields: [targetAnnotationId], references: [id], onDelete: Cascade)
   targetComment    Comment?              @relation("AnchoredLinkAnchorComment", fields: [targetCommentId], references: [id], onDelete: Cascade)
   anchoredEvent    PostPublicationEvent? @relation("AnchoredLinkAnchorEvent", fields: [anchoredEventId], references: [id], onDelete: SetNull)
@@ -1784,6 +1889,7 @@ model AnchoredLinkAnchor {
   @@index([docId])
   @@index([postId])
   @@index([fileId])
+  @@index([fileVersionId])
   @@index([targetAnnotationId])
   @@index([targetCommentId])
   @@map("anchored_link_anchor")

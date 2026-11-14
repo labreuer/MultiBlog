@@ -1,3 +1,4 @@
+import { latestVersionOf } from "@/lib/file-version";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserReadFile } from "@/lib/file-authz";
@@ -59,10 +60,17 @@ export async function readableDocByParam(actor: Actor, param: string): Promise<R
   return { id: doc.id, slug: doc.slug, title: doc.title, visibility: doc.visibility, record: doc.record };
 }
 
+/**
+ * A file with the version of it being read (docs/PDF.md §13): the latest,
+ * unless the address named another. What the bytes decide (`filename` to
+ * `pageCount`) is that version's, and page text, labels and the outline are
+ * read by `versionId`, never by `id`.
+ */
 export type ResolvedFile = {
   id: string;
   slug: string;
   title: string;
+  versionId: string;
   filename: string;
   contentType: string;
   byteSize: number;
@@ -75,13 +83,9 @@ const FILE_SELECT = {
   id: true,
   slug: true,
   title: true,
-  filename: true,
-  contentType: true,
-  byteSize: true,
-  sha256: true,
-  pageCount: true,
   visibility: true,
   deletedByUserId: true,
+  currentVersion: { select: { id: true, filename: true, contentType: true, byteSize: true, sha256: true, pageCount: true } },
 } as const;
 
 /** A file by any slug it has had, or by id, readable by the actor; `not_found` otherwise. */
@@ -92,15 +96,17 @@ export async function readableFileBySlug(actor: Actor, slugOrId: string): Promis
   if (!file || file.deletedByUserId !== null || !(await canUserReadFile(actor.userId, actor.role, file))) {
     throw notFound("That file");
   }
+  const version = latestVersionOf(file);
   return {
     id: file.id,
     slug: file.slug,
     title: file.title,
-    filename: file.filename,
-    contentType: file.contentType,
-    byteSize: file.byteSize,
-    sha256: file.sha256,
-    pageCount: file.pageCount,
+    versionId: version.id,
+    filename: version.filename,
+    contentType: version.contentType,
+    byteSize: version.byteSize,
+    sha256: version.sha256,
+    pageCount: version.pageCount,
     visibility: file.visibility,
   };
 }

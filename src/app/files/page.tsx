@@ -1,3 +1,4 @@
+import { latestVersionOf } from "@/lib/file-version";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
@@ -32,7 +33,7 @@ function buildFilterWhere(filters: FilesFilters): Prisma.StoredFileWhereInput {
   if (filters.q) {
     where.OR = [
       { title: { contains: filters.q, mode: "insensitive" } },
-      { filename: { contains: filters.q, mode: "insensitive" } },
+      { currentVersion: { filename: { contains: filters.q, mode: "insensitive" } } },
     ];
   }
   Object.assign(where, ownerFilterWhere(filters.owners, filters.ownerMode) as Prisma.StoredFileWhereInput);
@@ -45,7 +46,7 @@ function buildOrderBy(sort: SortColumn<FilesSortKey>[]): Prisma.StoredFileOrderB
       case "title":
         return { title: dir };
       case "filename":
-        return { filename: dir };
+        return { currentVersion: { filename: dir } };
       case "owners":
         // Through the file_metrics view — the same string_agg the cell shows.
         return { metrics: { owners: { sort: dir, nulls: "last" } } };
@@ -62,11 +63,11 @@ function buildOrderBy(sort: SortColumn<FilesSortKey>[]): Prisma.StoredFileOrderB
       case "visibility":
         return { visibility: dir };
       case "pages":
-        return { pageCount: { sort: dir, nulls: "last" } };
+        return { currentVersion: { pageCount: { sort: dir, nulls: "last" } } };
       case "size":
         // The raw byte count, not the rounded string the cell prints — so
         // "980 KB" sorts below "1.2 MB" rather than above it.
-        return { byteSize: dir };
+        return { currentVersion: { byteSize: dir } };
       case "created":
         return { createdAt: dir };
       case "createdBy":
@@ -155,10 +156,9 @@ export default async function FilesPage({
         id: true,
         slug: true,
         title: true,
-        filename: true,
+        // What the bytes decide is the latest version's (docs/PDF.md §13).
+        currentVersion: { select: { filename: true, pageCount: true, byteSize: true } },
         visibility: true,
-        pageCount: true,
-        byteSize: true,
         createdAt: true,
         updatedAt: true,
         deletedByUserId: true,
@@ -177,6 +177,7 @@ export default async function FilesPage({
   ]);
 
   const rows = files.map((file) => {
+    const latest = latestVersionOf(file);
     const isOwner = file.owners.some((o) => o.userId === session.user.id);
     // canUserReadFile's rule inlined; only a row the override lists can fail it.
     const readable = file.visibility === "SHARED" || isOwner;
@@ -184,12 +185,12 @@ export default async function FilesPage({
       id: file.id,
       slug: file.slug,
       title: file.title,
-      filename: file.filename,
+      filename: latest.filename,
       // NULL only when the file has no owners — same empty cell either way.
       owners: file.metrics?.owners ?? "",
       visibility: file.visibility,
-      pageCount: file.pageCount,
-      byteSize: file.byteSize,
+      pageCount: latest.pageCount,
+      byteSize: latest.byteSize,
       // No view row at all means no owners and no annotations, so zero.
       annotationCount: file.metrics?.annotationCount ?? 0,
       // Null — withheld — on a PRIVATE file this viewer doesn't own, which only

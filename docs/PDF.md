@@ -1184,8 +1184,11 @@ available without rendering.
 
 ## 13. Versions of a file — plan
 
-**Not built**, and the one exception to this file's "every statement is current". When it
-lands, it is rewritten as an account of what exists. §2a, §3, §4 and CLAUDE.md's "A PDF anchor
+**Built so far: steps 1 and 2 of "Building it".** The `file_version` table exists, every
+file has its version 1, what the bytes decide is read through the latest version, and page
+text is keyed by version. No file can gain a second version yet, so nothing a reader sees has
+changed. The rest is a plan, and the one exception to this file's "every statement is
+current". When it lands, it is rewritten as an account of what exists. §2a, §3, §4 and CLAUDE.md's "A PDF anchor
 cannot drift" are then amended where they say the bytes cannot change, and so is
 PDF_FRAGMENT_LINKS.md §1. CLAUDE.md's "One anchor row shape" gains the version column,
 PDF_FRAGMENT_LINKS.md §2 gains `sheet=` and `v=`, and docs/PERMISSIONS.md gains rows for

@@ -39,7 +39,7 @@ export type PostedAnchor =
   /** Columns into a doc (a root) or into the parent's body (a reply), measured at `stamp`. */
   | { kind: "range"; stamp: bigint; from: number; to: number; quotedText: string; chips?: ChipRecord[] }
   /** A root on a PDF page: the whole target, its quote derived by this server. */
-  | { kind: "pdf"; target: PdfTarget; quotedText: string };
+  | { kind: "pdf"; target: PdfTarget; quotedText: string; fileVersionId: string };
 
 export async function createPostedAnnotation(
   actor: Actor,
@@ -87,7 +87,11 @@ export async function createPostedAnnotation(
         ...(anchor.kind === "range"
           ? { anchorFrom: anchor.from, anchorTo: anchor.to, quotedText: anchor.quotedText, anchorChips: chipRecordsColumn(anchor.chips) }
           : anchor.kind === "pdf"
-            ? { pdfTarget: anchor.target as unknown as Prisma.InputJsonValue, quotedText: anchor.quotedText }
+            ? {
+                pdfTarget: anchor.target as unknown as Prisma.InputJsonValue,
+                quotedText: anchor.quotedText,
+                fileVersion: { connect: { id: anchor.fileVersionId } },
+              }
             : {}),
       },
     });

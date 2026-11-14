@@ -12,7 +12,7 @@ import { notFound } from "@/lib/api/errors";
 import type { McpContext, ToolResult } from "../tool";
 import { clip, dayOf, decodeCursor, pageOf } from "../shape";
 import type { ReadArgs } from "./args";
-import { pdfLabels } from "./pdf-meta";
+import { latestPdfLabels } from "./pdf-meta";
 
 // docs/MCP.md §10 — reading a link, and the links into a doc or PDF.
 //
@@ -88,7 +88,7 @@ export async function readLink(ctx: McpContext, linkId: string): Promise<ToolRes
           parts: group.parts.map((part) => ({ ...numbered(part.anchorId), ...quoteOf(part), ...placeDocPart(state, part) })),
         };
       }
-      const labels = await pdfLabels(group.target.id);
+      const labels = await latestPdfLabels(group.target.id);
       const file = await prisma.storedFile.findUnique({ where: { id: group.target.id }, select: { slug: true } });
       return {
         target: file ? `/pdf/${file.slug}` : group.href,
@@ -128,7 +128,7 @@ export async function linksInto(
 ): Promise<ToolResult> {
   const parts = await linkPartsInto({ kind: target.kind, id: target.id }, viewerOf(ctx.actor));
   const page = pageOf(parts, decodeCursor(args.links?.cursor, args.links?.limit ?? 20));
-  const labels = target.kind === "file" ? await pdfLabels(target.id) : null;
+  const labels = target.kind === "file" ? await latestPdfLabels(target.id) : null;
   return {
     total: parts.length,
     parts: page.items.map((part) => {

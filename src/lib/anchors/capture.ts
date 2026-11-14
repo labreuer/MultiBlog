@@ -116,26 +116,28 @@ export async function captureAnchorInYdoc(opts: {
  * Same trust boundary as the ydoc path (§12i via §19): the client's blob is
  * parsed, never believed. The page text *this server* extracted — at the
  * same `textVersion` the client measured against, at upload or on first use
- * if the file predates that version (src/lib/pdf-page-text.ts) — is sliced at
+ * if the version predates it (src/lib/pdf-page-text.ts) — is sliced at
  * the client's offsets and kept only if it matches the client's own reading.
  * A mismatch (a stale normaliser after a deploy mid-session, say) keeps the
  * quads, which are version-independent, and drops the quote rather than
  * storing text the offsets don't describe. Null means the blob didn't parse
  * at all — there is no anchor in it to keep.
  *
- * No stamp, no re-resolution: a file's sha256 is its identity, so there is
- * no state to replay a PDF anchor against (§19, docs/PDF.md §4).
+ * No stamp, no re-resolution: a version's sha256 is its identity, so there
+ * is no state to replay a PDF anchor against (§19, docs/PDF.md §4). The
+ * caller stores `fileVersionId` beside the target it gets back.
  */
 export async function capturePdfTextAnchor(opts: {
-  fileId: string;
+  /** The version whose sheets the target was measured on (docs/PDF.md §13); never a file's id. */
+  fileVersionId: string;
   rawTarget: unknown;
-}): Promise<{ target: PdfTarget; quotedText: string } | null> {
+}): Promise<{ target: PdfTarget; quotedText: string; fileVersionId: string } | null> {
   const target = parsePdfTarget(opts.rawTarget);
   if (!target) return null;
 
   let quotedText = "";
   if (target.position) {
-    const pageText = await storedPageText(opts.fileId, target.pageIndex, target.textVersion);
+    const pageText = await storedPageText(opts.fileVersionId, target.pageIndex, target.textVersion);
     if (pageText !== null) {
       const slice = pageText.slice(target.position.start, target.position.end);
       quotedText = slice === target.quote.exact ? slice : "";
@@ -144,5 +146,7 @@ export async function capturePdfTextAnchor(opts: {
 
   // Whatever the quote came to, the stored target carries the server's answer
   // rather than the client's, so the row cannot disagree with itself.
-  return { target: { ...target, quote: { ...target.quote, exact: quotedText } }, quotedText };
+  // The version rides with the target it was verified against, so a writer
+  // stores the pair and can't stamp another version beside these quads.
+  return { target: { ...target, quote: { ...target.quote, exact: quotedText } }, quotedText, fileVersionId: opts.fileVersionId };
 }

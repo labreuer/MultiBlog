@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 import { prisma } from "@/lib/prisma";
 import { canUserReadFile } from "@/lib/file-authz";
 import { readStoredBytes, storedByteSize } from "@/lib/file-storage";
+import { latestVersionOf } from "@/lib/file-version";
 import type { Actor } from "@/lib/actor";
 
 // PLAN.md §19 — serving an uploaded file's bytes, for whoever an actor is:
@@ -32,13 +33,14 @@ export async function serveStoredFile(
   fileId: string,
   opts: { hash?: string; forceAttachment?: boolean } = {},
 ): Promise<Response> {
-  const file = await prisma.storedFile.findUnique({
+  const row = await prisma.storedFile.findUnique({
     where: { id: fileId },
-    select: { id: true, visibility: true, sha256: true, byteSize: true, contentType: true, filename: true },
+    select: { id: true, visibility: true, currentVersion: { select: { sha256: true, contentType: true, filename: true } } },
   });
-  if (!file || !(await canUserReadFile(actor.userId, actor.role, file))) {
+  if (!row || !(await canUserReadFile(actor.userId, actor.role, row))) {
     return new Response("Not found", { status: 404 });
   }
+  const file = { id: row.id, ...latestVersionOf(row) };
 
   const etag = `"${file.sha256}"`;
   // `private`, never `public`: an intermediary caching this would serve one

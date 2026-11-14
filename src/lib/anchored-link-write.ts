@@ -69,9 +69,11 @@ export function docRangePartRow(
  * offsets and stamp stay null — the shape check-tag-constraints names as
  * intended.
  */
-export function pdfPartRow(fileId: string, captured: { target: PdfTarget; quotedText: string }): LinkPartRow {
+export function pdfPartRow(fileId: string, captured: { target: PdfTarget; quotedText: string; fileVersionId: string }): LinkPartRow {
   return {
     ...targetToColumns({ kind: "file", id: fileId }),
+    // The version whose sheets the quads were measured on (docs/PDF.md §13).
+    fileVersionId: captured.fileVersionId,
     selectorKind: "PDF_TEXT",
     selector: captured.target as unknown as Prisma.InputJsonValue,
     quotedText: captured.quotedText,

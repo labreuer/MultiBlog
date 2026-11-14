@@ -7,6 +7,7 @@ import { passagePieces, withoutBrackets, type PlacedPassage } from "./pdf-passag
 import { prisma } from "./prisma";
 import { referenceByKey } from "./reference-data";
 import { parseReferenceSegment } from "./references/keys";
+import { latestVersionOf } from "./file-version";
 
 // docs/CITATIONS.md, "The link" — a citation's passage against its work's
 // PDF: where the cited-page route sends a reader who may open it, and what
@@ -96,10 +97,11 @@ export async function checkCitedHref(
     reference.fileId && !reference.deleted
       ? await prisma.storedFile.findFirst({
           where: { id: reference.fileId, deletedByUserId: null },
-          select: { id: true, slug: true, visibility: true, pageCount: true },
+          select: { id: true, slug: true, visibility: true, currentVersion: { select: { pageCount: true } } },
         })
       : null;
-  if (!file || file.pageCount === null) return { kind: "no-pdf", key: reference.key };
+  const pageCount = file ? latestVersionOf(file).pageCount : null;
+  if (!file || pageCount === null) return { kind: "no-pdf", key: reference.key };
   if (opts.canRead && !(await opts.canRead(file))) return { kind: "unreadable-pdf", key: reference.key };
 
   const query = parseCitedQuery(href.query);
@@ -113,7 +115,7 @@ export async function checkCitedHref(
 
   // The file's own labels, read from its bytes and not stored where they haven't been read yet, as the check reads them.
   const ownLabels = (await checker.pagesAt(file.id, []))?.ownLabels ?? null;
-  const { starts, placed, pages } = await placeCitedQuotation(checker, { id: file.id, pageCount: file.pageCount, ownLabels }, href.page, query.text);
+  const { starts, placed, pages } = await placeCitedQuotation(checker, { id: file.id, pageCount, ownLabels }, href.page, query.text);
   if (starts.length === 0 || !pages) return { kind: "no-such-page", key: reference.key, page: href.page };
   if (placed) {
     return {

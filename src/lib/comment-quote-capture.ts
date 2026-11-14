@@ -23,6 +23,7 @@ import { isPendingAnchorId, type PendingQuoteHint } from "./comment-quote-pendin
 import { isCommentPublic, publicCommentsWhere } from "./comment-authz";
 import { isPostPublic } from "./post-status";
 import { canQuoteTargetInto } from "./comment-quote-authz";
+import { latestVersionIdOf } from "./file-version-data";
 
 // PLAN.md §23n — the server half of the matcher: load the immutable targets
 // a comment on this page may quote (§23e's audience rule is the load itself
@@ -82,6 +83,8 @@ export type CommentQuoteAnchorInput = {
   anchorTo: number | null;
   quotedText: string;
   selector: DocRangeSelector | PdfTarget;
+  /** The version a PDF_TEXT selector was measured on (docs/PDF.md §13); absent for every other row. */
+  fileVersionId?: string;
   anchoredEventId: string | null;
   quotedRevisionId: string | null;
 };
@@ -324,7 +327,7 @@ export async function captureCommentQuotes(opts: {
     if (pendingFile?.target.kind === "file") {
       const fileId = pendingFile.target.id;
       const captured = (await canQuoteTargetInto({ kind: "file", id: fileId }, { kind: "post-comments", postId: host.postId }))
-        ? await capturePdfTextAnchor({ fileId, rawTarget: pendingFile.target.pdfTarget })
+        ? await capturePdfTextAnchor({ fileVersionId: await latestVersionIdOf(fileId), rawTarget: pendingFile.target.pdfTarget })
         : null;
       if (!captured || !captured.quotedText) {
         resolutions.push({ candidate: span, anchorId: null });
@@ -341,6 +344,7 @@ export async function captureCommentQuotes(opts: {
         anchorTo: captured.target.position?.end ?? null,
         quotedText: captured.quotedText,
         selector: captured.target,
+        fileVersionId: captured.fileVersionId,
         anchoredEventId: null,
         quotedRevisionId: null,
       });
