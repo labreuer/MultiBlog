@@ -1,6 +1,8 @@
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import { prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
+import { displayNameOf } from "@/lib/display-name";
+import { fileVersionState, type FileVersionState } from "@/lib/file-version";
 
 // docs/PDF.md §13, "Versions" — the queries over `file_version` that more
 // than one module asks. Server-only (Prisma); the vocabulary they share with
@@ -123,4 +125,94 @@ export async function createFileWithFirstVersion(
   // update would move it, and it is the date a search hit shows.
   await tx.$executeRaw`UPDATE "file" SET "current_version_id" = ${version.id} WHERE "id" = ${file.id}`;
   return { ...file, versionId: version.id };
+}
+
+/** The version a note is on, as a listing names and links it. */
+export type NoteVersion = { id: string; number: number; isLatest: boolean };
+
+/**
+ * Which version each of these notes is on: its own for a root with a PDF
+ * target, and its root's for a reply at any depth, since a reply has no
+ * target and travels with its root (docs/PDF.md §13, "Versions").
+ *
+ * **Every listing of single notes goes through this** (`/annotations`,
+ * search, a reference's cited-by, mentions, MCP's threads, the raise email),
+ * for the title it shows (`fileVersionTitle`) and the link it builds
+ * (`pdfPath`). Reading a row's own `file_version_id` instead answers nothing
+ * for a reply, which would then be linked at the bare address and land on
+ * its root's entry, not its card.
+ *
+ * A note absent from the map has no version: a doc's note, or one on a file
+ * whose root has no target, which is the file's and is listed on every
+ * version's page.
+ */
+export async function noteVersions(annotationIds: readonly string[]): Promise<Map<string, NoteVersion>> {
+  if (annotationIds.length === 0) return new Map();
+  const rows = await prismaIncludingDeleted.$queryRaw<{ id: string; versionId: string; number: number; isLatest: boolean }[]>(Prisma.sql`
+    WITH RECURSIVE up AS (
+      SELECT a.id AS start_id, a.parent_annotation_id, a.file_version_id
+      FROM annotation a WHERE a.id = ANY(${[...annotationIds]})
+      UNION ALL
+      SELECT up.start_id, p.parent_annotation_id, p.file_version_id
+      FROM up JOIN annotation p ON p.id = up.parent_annotation_id
+    )
+    SELECT up.start_id AS id, v.id AS "versionId", v.number, (f.current_version_id = v.id) AS "isLatest"
+    FROM up
+    JOIN file_version v ON v.id = up.file_version_id
+    JOIN file f ON f.id = v.file_id
+    WHERE up.parent_annotation_id IS NULL`);
+  return new Map(rows.map((row) => [row.id, { id: row.versionId, number: row.number, isLatest: row.isLatest }]));
+}
+
+/** One version of a file, as its page, its banner and the version list show it. */
+export type FileVersionSummary = {
+  id: string;
+  number: number;
+  state: FileVersionState;
+  sha256: string;
+  filename: string;
+  byteSize: number;
+  pageCount: number | null;
+  uploadedAt: string;
+  uploadedBy: string | null;
+  promotedAt: string | null;
+  promotedBy: string | null;
+  abandonedAt: string | null;
+};
+
+/** The select `summariseVersions` reads, for a file query that takes its versions along. */
+export const VERSION_SUMMARY_SELECT = {
+  id: true,
+  number: true,
+  sha256: true,
+  filename: true,
+  byteSize: true,
+  pageCount: true,
+  uploadedAt: true,
+  promotedAt: true,
+  abandonedAt: true,
+  uploadedBy: { select: { name: true } },
+  promotedBy: { select: { name: true } },
+} as const satisfies Prisma.FileVersionSelect;
+
+type VersionSummaryRow = Prisma.FileVersionGetPayload<{ select: typeof VERSION_SUMMARY_SELECT }>;
+
+/** A file's versions, in number order, each with its state. */
+export function summariseVersions(file: { currentVersionId: string | null; versions: readonly VersionSummaryRow[] }): FileVersionSummary[] {
+  return [...file.versions]
+    .sort((a, b) => a.number - b.number)
+    .map((version) => ({
+      id: version.id,
+      number: version.number,
+      state: fileVersionState(version, file.currentVersionId),
+      sha256: version.sha256,
+      filename: version.filename,
+      byteSize: version.byteSize,
+      pageCount: version.pageCount,
+      uploadedAt: version.uploadedAt.toISOString(),
+      uploadedBy: version.uploadedBy ? displayNameOf(version.uploadedBy) : null,
+      promotedAt: version.promotedAt?.toISOString() ?? null,
+      promotedBy: version.promotedBy ? displayNameOf(version.promotedBy) : null,
+      abandonedAt: version.abandonedAt?.toISOString() ?? null,
+    }));
 }

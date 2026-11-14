@@ -7,7 +7,7 @@ import { KEY_SHAPE_RE } from "@/lib/references/keys";
 import { referencesByKeys } from "@/lib/reference-data";
 import { isEmptyQuery, websearchQuery, headlineTexts, sqlConfig, type TsQuery } from "@/lib/search/sql";
 import { correctQuery } from "@/lib/search/correct";
-import { matchPages, pageSnippets } from "@/lib/search/pdfs";
+import { pageSnippets, matchVersionPages } from "@/lib/search/pdfs";
 import { searchActorOf } from "@/lib/actor";
 import { searchSections, docText } from "@/lib/doc-text";
 import { loadDocState } from "@/lib/doc-state";
@@ -221,14 +221,15 @@ async function searchDoc(doc: ResolvedDoc, q: string, exact: boolean, cursorRaw:
 async function searchPdf(file: ResolvedFile, q: string, exact: boolean, cursorRaw: string | undefined, limit: number) {
   const base = websearchQuery(q);
   if (await isEmptyQuery(base)) return { status: "stop-words", note: "Every word in q is too common to search for." };
-  const pagesFor = async (query: TsQuery) => (await matchPages([file.id], query)).get(file.id) ?? [];
+  // The pages of the version the address names: the latest for the bare one.
+  const pagesFor = (query: TsQuery) => matchVersionPages(file.id, file.versionId, query);
   const { hits, corrected, query } = await withCorrection(q, base, exact, async (qq) => (await pagesFor(qq)).length, pagesFor);
   const cursor = decodeCursor(cursorRaw, limit);
   const page = hits.slice(cursor.offset, cursor.offset + cursor.size);
   const [snippets, labels] = await Promise.all([pageSnippets(page, query), pdfLabels(file.versionId)]);
   return {
     kind: "pdf-pages",
-    url: `/pdf/${file.slug}`,
+    url: file.url,
     total: hits.length,
     ...(corrected ? { corrected: true } : {}),
     hits: page.map((p) => ({

@@ -82,6 +82,12 @@ export type OpenLinkPart = {
   from: number | null;
   to: number | null;
   selector: AnchorSelector | null;
+  /**
+   * The version of the file a PDF part was measured on; null on a doc's part.
+   * A PDF surface paints a part only where this is the version it shows
+   * (docs/PDF.md §13, "Addresses").
+   */
+  fileVersionId: string | null;
 };
 
 export type OpenLinkView = {
@@ -187,6 +193,7 @@ export async function loadMyOpenLink(): Promise<OpenLinkView | null> {
           docId: true,
           postId: true,
           fileId: true,
+          fileVersionId: true,
           targetAnnotationId: true,
           targetCommentId: true,
           quotedText: true,
@@ -228,6 +235,7 @@ export async function loadMyOpenLink(): Promise<OpenLinkView | null> {
       // exactly as `anchoredLinkForViewer` parses one. An unparseable selector
       // degrades to null: the part still lists in the tray, painted nowhere.
       selector: parseSelector(anchor.selectorKind, anchor.selector),
+      fileVersionId: anchor.fileVersionId,
     })),
   };
 }

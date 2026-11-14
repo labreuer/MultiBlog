@@ -24,7 +24,8 @@ import type { ChipInputs } from "@/lib/entity-chips/types";
 import type { McpContext, ToolResult } from "../tool";
 import { clip, decodeCursor, encodeCursor, minuteOf, pageOf } from "../shape";
 import type { ReadArgs } from "./args";
-import { latestPdfLabels } from "./pdf-meta";
+import { pdfLabels } from "./pdf-meta";
+import { pdfNoteContainer, pdfPath } from "@/lib/file-version";
 
 // docs/MCP.md §9 — annotation threads as the MCP server reads them: a
 // container's, filtered, ordered by the document and paged; every readable
@@ -59,6 +60,7 @@ const ROW_SELECT = {
   anchorChips: true,
   ydocUpdateId: true,
   pdfTarget: true,
+  fileVersionId: true,
   proseJson: true,
   bodyText: true,
   user: { select: { name: true, slug: true } },
@@ -80,6 +82,8 @@ type Row = {
   anchorChips: unknown;
   ydocUpdateId: bigint | null;
   pdfTarget: unknown;
+  /** The version a root's `pdfTarget` was measured on (docs/PDF.md §13); null for a reply and for a note with no target. */
+  fileVersionId: string | null;
   proseJson: unknown;
   bodyText: string;
   user: { name: string | null; slug: string };
@@ -280,6 +284,8 @@ type Placed = {
   group: string | null;
   page?: number;
   label?: string;
+  /** Set for a thread on a version of the PDF other than the one read: its page and label are that version's. */
+  version?: number;
   blocks?: BlockSpan;
 };
 
@@ -324,21 +330,51 @@ function placeInDoc(threads: Thread[], state: DocState): Placed[] {
 }
 
 /** Each thread placed in a PDF: by page, then by where on the page its quote starts. */
-function placeInPdf(threads: Thread[], labels: string[] | null): Placed[] {
+/**
+ * What places a PDF's threads (docs/PDF.md §13, "Addresses"): the version
+ * being read, and each version's number and labels. A thread's page is a
+ * sheet of the version it is on, so its label is that version's, and a
+ * thread on another version than the one read says which.
+ */
+type PdfPlacing = {
+  shownVersionId: string | null;
+  versions: Map<string, { number: number; isLatest: boolean; labels: string[] | null }>;
+};
+
+/** The versions these threads are on, with the labels of each; `shownVersionId` is the latest unless the read named another. */
+async function pdfPlacing(fileId: string, threads: readonly Thread[], shownVersionId?: string): Promise<PdfPlacing> {
+  const file = await prisma.storedFile.findUnique({
+    where: { id: fileId },
+    select: { currentVersionId: true, versions: { select: { id: true, number: true } } },
+  });
+  const used = new Set(threads.flatMap((thread) => (thread.root.fileVersionId ? [thread.root.fileVersionId] : [])));
+  const versions: PdfPlacing["versions"] = new Map();
+  for (const version of file?.versions ?? []) {
+    if (!used.has(version.id)) continue;
+    versions.set(version.id, { number: version.number, isLatest: version.id === file?.currentVersionId, labels: await pdfLabels(version.id) });
+  }
+  return { shownVersionId: shownVersionId ?? file?.currentVersionId ?? null, versions };
+}
+
+/** Each thread placed in a PDF: the version read first, in its sheets' order, then the other versions', newest first. */
+function placeInPdf(threads: Thread[], placing: PdfPlacing): Placed[] {
   return threads.map((thread) => {
     const target = parsePdfTarget(thread.root.pdfTarget);
     if (!target) {
       return { thread, range: null, passage: thread.root.quotedText, lost: false, order: Number.MAX_SAFE_INTEGER, group: null };
     }
+    const version = thread.root.fileVersionId ? placing.versions.get(thread.root.fileVersionId) : undefined;
+    const elsewhere = version !== undefined && thread.root.fileVersionId !== placing.shownVersionId;
     return {
       thread,
       range: null,
       passage: target.quote.exact,
       lost: false,
-      order: target.pageIndex * 1_000_000 + (target.position?.start ?? 0),
-      group: `page ${target.pageIndex + 1}`,
+      order: (elsewhere ? 1e13 + (999 - Math.min(version.number, 999)) * 1e10 : 0) + target.pageIndex * 1_000_000 + (target.position?.start ?? 0),
+      group: `${elsewhere ? `version ${version.number}, ` : ""}page ${target.pageIndex + 1}`,
       page: target.pageIndex + 1,
-      ...(labels ? { label: labels[target.pageIndex] } : {}),
+      ...(version?.labels ? { label: version.labels[target.pageIndex] } : {}),
+      ...(elsewhere ? { version: version.number } : {}),
     };
   });
 }
@@ -378,7 +414,11 @@ function grouped(placed: Placed[], format: "markdown" | "text"): Record<string, 
     if (!current || current.key !== key) {
       current = { key, threads: [] };
       const header: Record<string, unknown> =
-        p.page !== undefined ? { page: p.page, ...(p.label ? { label: p.label } : {}) } : key ? { heading: key } : { unanchored: true };
+        p.page !== undefined
+          ? { ...(p.version !== undefined ? { version: p.version } : {}), page: p.page, ...(p.label ? { label: p.label } : {}) }
+          : key
+            ? { heading: key }
+            : { unanchored: true };
       groups.push({ ...header, threads: current.threads });
     }
     current.threads.push(threadOut(p, format, false));
@@ -393,18 +433,28 @@ function grouped(placed: Placed[], format: "markdown" | "text"): Record<string, 
  */
 export async function containerThreads(
   ctx: McpContext,
-  container: { kind: "doc"; docId: string; state: DocState } | { kind: "file"; fileId: string },
+  container:
+    | { kind: "doc"; docId: string; state: DocState }
+    | { kind: "file"; fileId: string; versionId: string; versionAddressed: boolean },
   args: ReadArgs,
   span: BlockSpan | null,
 ): Promise<ToolResult> {
   const rows = await loadRows(container.kind === "doc" ? { docId: container.docId } : { fileId: container.fileId });
   const filter = await compileFilter(ctx, args, rows);
   const edited = await visibleAnnotationEditDates(rows.map((r) => r.id));
-  const threads = groupThreads(rows, edited, await rowChips(rows)).filter((thread) => passes(thread, filter));
+  let threads = groupThreads(rows, edited, await rowChips(rows)).filter((thread) => passes(thread, filter));
+  // A PDF's bare address answers the latest version's threads and then those
+  // on other versions, each naming its version, as its page does: filtered to
+  // the latest alone, a RAISED note on an earlier version would leave the
+  // reply queue. A version's own address answers that version's, with the
+  // notes that have no target, which are the file's.
+  if (container.kind === "file" && container.versionAddressed) {
+    threads = threads.filter((thread) => !parsePdfTarget(thread.root.pdfTarget) || thread.root.fileVersionId === container.versionId);
+  }
   let placed =
     container.kind === "doc"
       ? placeInDoc(threads, container.state)
-      : placeInPdf(threads, await latestPdfLabels(container.fileId));
+      : placeInPdf(threads, await pdfPlacing(container.fileId, threads, container.versionId));
   if (span) {
     placed = placed.filter((p) => p.blocks && p.blocks.to >= span.from && p.blocks.from <= span.to);
   }
@@ -465,8 +515,9 @@ export async function allThreads(ctx: McpContext, args: ReadArgs): Promise<ToolR
     } else {
       const file = await prisma.storedFile.findUnique({ where: { id: c.id }, select: { slug: true, title: true } });
       if (!file) continue;
-      placed = placeInPdf(c.threads, await latestPdfLabels(c.id));
-      head = { url: `/pdf/${file.slug}`, title: file.title };
+      // One head for the file: a thread on a version other than the latest names it in its group.
+      placed = placeInPdf(c.threads, await pdfPlacing(c.id, c.threads));
+      head = { url: pdfPath(file.slug), title: file.title };
     }
     sortPlaced(placed);
     const from = Math.max(0, cursor.offset - start);
@@ -530,10 +581,16 @@ export async function oneThread(ctx: McpContext, annotationId: string, args: Rea
     }
     container = { url: `/doc/${target.doc.slug}`, title: docTitleOrFallback(target.doc.title) };
   } else {
-    placed = placeInPdf([thread], await latestPdfLabels(target.file!.id))[0];
+    // The thread on whichever version holds it, at that version's address
+    // and named for it: a card's URL finds its note from any address of the
+    // file (docs/PDF.md §13, "Addresses").
+    const placing = await pdfPlacing(target.file!.id, [thread]);
+    const version = thread.root.fileVersionId ? placing.versions.get(thread.root.fileVersionId) : undefined;
+    placed = placeInPdf([thread], { ...placing, shownVersionId: thread.root.fileVersionId })[0];
+    const { path, title } = pdfNoteContainer(target.file!, parsePdfTarget(thread.root.pdfTarget) ? version : undefined);
     container = {
-      url: `/pdf/${target.file!.slug}`,
-      title: target.file!.title,
+      url: path,
+      title,
       ...(placed.page ? { page: placed.page, ...(placed.label ? { label: placed.label } : {}) } : {}),
     };
   }

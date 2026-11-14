@@ -1,3 +1,5 @@
+import { noteVersions } from "@/lib/file-version-data";
+import { pdfNoteContainer } from "@/lib/file-version";
 import { prisma } from "@/lib/prisma";
 import type { Actor } from "@/lib/actor";
 import { annotationAnchorName } from "@/lib/annotation-anchor-name";
@@ -103,13 +105,16 @@ export async function mentionsOf(actor: Actor, limit: number): Promise<MentionOf
     if (!row.doc) continue;
     found.push({ key: `doc:${row.doc.id}`, kind: "doc", href: `/doc/${row.doc.slug}`, title: docTitleOrFallback(row.doc.title), by: null, at: row.firstSeenAt });
   }
+  // A note on a PDF is linked at the version it is on, and names it where
+  // that is not the latest (docs/PDF.md §13, "Addresses").
+  const versionOf = await noteVersions(inNotes.flatMap((row) => (row.annotation?.file ? [row.annotation.id] : [])));
   for (const row of inNotes) {
     const note = row.annotation;
     if (!note) continue;
     const container = note.doc
       ? { path: `/doc/${note.doc.slug}`, title: docTitleOrFallback(note.doc.title) }
       : note.file
-        ? { path: `/pdf/${note.file.slug}`, title: note.file.title }
+        ? pdfNoteContainer(note.file, versionOf.get(note.id))
         : null;
     if (!container) continue;
     const writer = displayNameOf(note.user);

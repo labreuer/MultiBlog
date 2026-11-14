@@ -1143,7 +1143,7 @@ model Annotation {
   // were measured on: set exactly when `pdfTarget` is, with a foreign key on
   // the pair so it is one of `fileId`'s versions. A reply has none and is on
   // its root's version, and so has a root with no target, which is the
-  // file's: `noteVersionId` (src/lib/file-version.ts) answers for all three.
+  // file's: `noteVersions` (src/lib/file-version-data.ts) answers for all three.
   fileVersionId      String?                  @map("file_version_id")
   // docs/FULLTEXT.md §3 — bodyText (weight B) and quotedText (D) as a
   // tsvector, maintained by the annotation_sync_search_vector trigger; never

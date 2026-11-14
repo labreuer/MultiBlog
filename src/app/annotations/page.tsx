@@ -1,3 +1,5 @@
+import { noteVersions } from "@/lib/file-version-data";
+import { pdfNoteContainer } from "@/lib/file-version";
 import { markAnchoredQuote } from "@/lib/annotation-marked-quote";
 import { materializedLabels } from "@/lib/entity-chips/materialize";
 import { parseChipRecords, quoteWithChipLabels } from "@/lib/anchors";
@@ -202,11 +204,18 @@ export default async function AnnotationsPage({
   // The `where` above guarantees exactly one relation is present. Asserted
   // loudly rather than defaulted, so a disagreement between that clause and
   // this names itself instead of surfacing as an empty cell.
+  //
+  // A note on a PDF is on one version of it, a reply on its root's
+  // (`noteVersions`): the row names that version where it is not the latest,
+  // and links the note at that version's own address (docs/PDF.md §13,
+  // "Addresses").
+  const versionOf = await noteVersions(annotations.filter((a) => a.file).map((a) => a.id));
   const rowsWithContainer = annotations.map((a) => {
+    const version = versionOf.get(a.id) ?? null;
     const container = a.doc
-      ? ({ kind: "doc", id: a.doc.id, slug: a.doc.slug, title: docTitleOrFallback(a.doc.title) } as const)
+      ? ({ kind: "doc", id: a.doc.id, path: `/doc/${a.doc.slug}`, title: docTitleOrFallback(a.doc.title) } as const)
       : a.file
-        ? ({ kind: "file", id: a.file.id, slug: a.file.slug, title: a.file.title } as const)
+        ? ({ kind: "file", id: a.file.id, ...pdfNoteContainer(a.file, version) } as const)
         : null;
     if (!container) {
       throw new Error(`/annotations selected annotation ${a.id} with no container — its where clause should prevent this.`);
@@ -236,7 +245,7 @@ export default async function AnnotationsPage({
       id: a.id,
       containerKind: a.container.kind,
       docId: a.container.id,
-      docSlug: a.container.slug,
+      containerPath: a.container.path,
       docTitle: a.container.title,
       // From the name every reader sees, as the card's own id is, and not the
       // staff name beside it, which can be an email.

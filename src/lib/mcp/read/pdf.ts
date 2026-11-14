@@ -141,7 +141,7 @@ async function pagesResult(file: ResolvedFile, labels: string[] | null, indexes:
     pages.push(entry);
     size += cost;
   }
-  return { kind: "pdf-pages", url: `/pdf/${file.slug}`, pages, ...(next !== null ? { next } : {}) };
+  return { kind: "pdf-pages", url: file.url, pages, ...(next !== null ? { next } : {}) };
 }
 
 /** `1-based N` or `N-M` into 0-based page indexes, inside the file. */
@@ -187,7 +187,7 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
     const index = findEntry(entries, args.entry);
     const outline = outlineOf(entries, labels, pageCount, { depth: args.depth, within: index });
     if (args.outline) {
-      return { kind: "pdf-outline", url: `/pdf/${file.slug}`, entries: outline.entries, ...(outline.deeper ? { deeper: outline.deeper } : {}) };
+      return { kind: "pdf-outline", url: file.url, entries: outline.entries, ...(outline.deeper ? { deeper: outline.deeper } : {}) };
     }
     const span = outline.spanOf(index);
     if (!span) throw new ApiError("not_found", `The outline entry "${args.entry}" points at no page of this file.`);
@@ -223,7 +223,7 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
   return {
     kind: "pdf",
     id: file.id,
-    url: `/pdf/${file.slug}`,
+    url: file.url,
     title: file.title,
     filename: file.filename,
     visibility: file.visibility,
@@ -313,7 +313,7 @@ async function aroundQuote(file: ResolvedFile, labels: string[] | null, args: Re
   const limit = args.occurrences ?? 5;
   return {
     kind: "pdf-around",
-    url: `/pdf/${file.slug}`,
+    url: file.url,
     total: found.length,
     ...(viaMarkdown ? { matchedAs: "markdown" } : {}),
     occurrences: found.slice(0, limit).map(({ index, range }) => ({
@@ -385,5 +385,5 @@ async function fragmentPassages(
     }
     out.push({ page: found.index + 1, ...(labels ? { label: labels[found.index] } : {}), ...surroundings(found.text, found.range.start, found.range.end) });
   }
-  return { kind: "pdf-passages", url: `/pdf/${file.slug}`, passages: out };
+  return { kind: "pdf-passages", url: file.url, passages: out };
 }

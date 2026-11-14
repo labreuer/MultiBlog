@@ -60,6 +60,29 @@ export async function matchPages(fileIds: string[], query: TsQuery): Promise<Map
   return byFile;
 }
 
+/**
+ * Every matching page of one version of a file, best first: `within` a PDF at
+ * a version's own address (docs/PDF.md §13, "Addresses"). The site's search
+ * never asks this; it ranks the latest version's pages alone (`matchPages`).
+ */
+export async function matchVersionPages(fileId: string, fileVersionId: string, query: TsQuery): Promise<PageMatch[]> {
+  const current = await currentTextVersion();
+  const rows = await prisma.$queryRaw<PageMatch[]>(Prisma.sql`
+    SELECT v.file_id AS "fileId", t.file_version_id AS "fileVersionId", t.page_index AS "pageIndex",
+           t.text_version AS "textVersion", ts_rank_cd(t.search_vector, q.query, 32)::float8 AS rank
+    FROM file_version v
+    JOIN file_page_text t ON t.file_version_id = v.id
+    CROSS JOIN (SELECT ${query} AS query) AS q
+    WHERE v.id = ${fileVersionId} AND v.file_id = ${fileId} AND t.search_vector @@ q.query
+      AND t.text_version = (
+        SELECT o.text_version FROM file_page_text o
+        WHERE o.file_version_id = t.file_version_id AND o.page_index = t.page_index
+        ORDER BY (o.text_version = ${current}) DESC, o.text_version DESC
+        LIMIT 1
+      )`);
+  return rows.sort((a, b) => b.rank - a.rank || a.pageIndex - b.pageIndex);
+}
+
 export async function pageSnippets(pages: PageMatch[], query: TsQuery): Promise<Map<string, HeadlineFragment[]>> {
   if (pages.length === 0) return new Map();
   const rows = await prisma.$queryRaw<{ fileId: string; pageIndex: number; snippet: string }[]>(Prisma.sql`

@@ -35,6 +35,10 @@ import { quadsTopY, type PdfTarget } from "@/lib/pdf-anchor";
 import AnchoredLinkBanner from "@/components/anchored-link/AnchoredLinkBanner";
 import type { AnchoredLinkPart, AnchoredLinkView } from "@/lib/anchored-link-data";
 import type { OwnDraft } from "@/lib/annotation-data";
+import type { ShownVersion } from "@/lib/file-version";
+import type { FileVersionSummary } from "@/lib/file-version-data";
+import type { OtherVersionNote } from "@/lib/pdf-annotation-entries";
+import PdfVersionBanner from "./PdfVersionBanner";
 import type { RemoteReader } from "./use-pdf-presence";
 import { PDFJS_VERSION, pdfjs } from "@/lib/pdfjs-client";
 import type { PdfTextItemLike } from "@/lib/pdf-text";
@@ -72,9 +76,22 @@ const SELECTION_SETTLE_MS = 300;
 
 type Props = {
   fileId: string;
+  slug: string;
+  /**
+   * The version shown (docs/PDF.md §13, "Addresses"). **What this surface
+   * draws is this version's alone**: the notes arrive already narrowed to it,
+   * and the two lists of link parts below are narrowed here, in the browser,
+   * by each part's own version. A part drawn on another version's sheets
+   * sits over other ink with nothing to say so, and no check on the server
+   * can see a filter made here.
+   */
+  version: ShownVersion;
+  versions: FileVersionSummary[];
   fileUrl: string;
   title: string;
   entries: PdfAnnotationEntry[];
+  /** The file's notes on its other versions — refetched alongside `entries`. */
+  elsewhere: OtherVersionNote[];
   /** The viewer's own drafts — refetched alongside `entries`, see `liveEntries`. */
   ownDrafts: OwnDraft[];
   /**
@@ -94,9 +111,13 @@ type Props = {
 
 export default function PdfAnnotationSurface({
   fileId,
+  slug,
+  version,
+  versions,
   fileUrl,
   title,
   entries,
+  elsewhere,
   ownDrafts,
   anchoredLink,
   metadata,
@@ -127,6 +148,10 @@ export default function PdfAnnotationSurface({
     () => window.matchMedia(POSITIONED_MEDIA_QUERY).matches,
   );
   const [activePane, setActivePane] = useState(ANNOTATIONS_PANE);
+  const showAnnotationsPane = useCallback(() => {
+    setPanelOpen(true);
+    setActivePane(ANNOTATIONS_PANE);
+  }, []);
   const [positioned, setPositioned] = useState(false);
   // The captured selection waiting to become an annotation, plus a token that
   // changes on every capture. The token is what remounts the composer: two
@@ -210,20 +235,22 @@ export default function PdfAnnotationSurface({
     base: PdfAnnotationEntry[];
     list: PdfAnnotationEntry[];
     drafts: OwnDraft[];
+    elsewhere: OtherVersionNote[];
   } | null>(null);
   const liveEntries = refetched?.base === entries ? refetched.list : entries;
   const liveDrafts = refetched?.base === entries ? refetched.drafts : ownDrafts;
+  const liveElsewhere = refetched?.base === entries ? refetched.elsewhere : elsewhere;
 
   const reloadEntries = useCallback(() => {
     const base = entries;
-    loadPdfAnnotationEntries(fileId)
-      .then(({ entries: list, ownDrafts: drafts }) => setRefetched({ base, list, drafts }))
+    loadPdfAnnotationEntries(fileId, version.id)
+      .then(({ entries: list, ownDrafts: drafts, elsewhere: others }) => setRefetched({ base, list, drafts, elsewhere: others }))
       // Deliberately quiet, and deliberately not an empty list: the panel keeps
       // whatever it is already showing. The annotation is written either way —
       // this only decides how soon it is drawn — so the worst a failure here
       // costs is the wait this exists to remove.
       .catch(() => {});
-  }, [fileId, entries]);
+  }, [fileId, version.id, entries]);
 
   const entriesRef = useRef(liveEntries);
   useEffect(() => {
@@ -236,13 +263,17 @@ export default function PdfAnnotationSurface({
   // drawn — it still lists in the banner). Static for the life of the page
   // (initial prop, never refetched), but mirrored into a ref like the
   // entries so the layer's callbacks read it without re-attaching.
+  //
+  // Only the parts on the version shown: the link's group is the whole
+  // file's, and its parts on other versions were measured on other sheets.
+  // The banner names those, each linked at its own version.
   const linkParts = useMemo((): { part: AnchoredLinkPart; target: PdfTarget }[] => {
     const group =
       anchoredLink?.groups.find((g) => g.target.kind === "file" && g.target.id === fileId) ?? null;
     return (group?.parts ?? []).flatMap((part) =>
-      part.selector?.kind === "PDF_TEXT" ? [{ part, target: part.selector.selector }] : [],
+      part.selector?.kind === "PDF_TEXT" && part.version?.id === version.id ? [{ part, target: part.selector.selector }] : [],
     );
-  }, [anchoredLink, fileId]);
+  }, [anchoredLink, fileId, version.id]);
   const linkPartsRef = useRef(linkParts);
   useEffect(() => {
     linkPartsRef.current = linkParts;
@@ -256,13 +287,18 @@ export default function PdfAnnotationSurface({
   // **Deliberately a second list, not merged into `linkParts`**: that one
   // also decides the on-load `?sel=` jump, and an in-progress part must
   // never hijack where a followed link lands.
+  //
+  // Narrowed to the version shown, as `linkParts` is: the store holds the
+  // open link's parts in the whole file.
   const draftParts = useOpenLinkParts("file", fileId);
   const draftRegions = useMemo(
     (): { anchorId: string; target: PdfTarget }[] =>
       draftParts.flatMap((part) =>
-        part.selector?.kind === "PDF_TEXT" ? [{ anchorId: part.anchorId, target: part.selector.selector }] : [],
+        part.selector?.kind === "PDF_TEXT" && part.fileVersionId === version.id
+          ? [{ anchorId: part.anchorId, target: part.selector.selector }]
+          : [],
       ),
-    [draftParts],
+    [draftParts, version.id],
   );
   const draftRegionsRef = useRef(draftRegions);
   useEffect(() => {
@@ -289,13 +325,13 @@ export default function PdfAnnotationSurface({
     setReady(true);
   }, []);
 
-  const presence = usePdfPresence(fileId, handle);
+  const presence = usePdfPresence(fileId, version.id, handle);
 
   // docs/PDF_FRAGMENT_LINKS.md — the passages a `#page=…&text=…` fragment
   // names, found in this document on arrival and on every hashchange. Drawn
   // with a followed anchored link's outline, and mirrored into a ref for the
   // layer's callbacks like the link parts above.
-  const fragment = usePdfFragment(handle, fileId);
+  const fragment = usePdfFragment(handle, fileId, version.id);
   const fragmentRegionsRef = useRef(fragment.regions);
   useEffect(() => {
     fragmentRegionsRef.current = fragment.regions;
@@ -866,6 +902,8 @@ export default function PdfAnnotationSurface({
           fileId={fileId}
           entries={liveEntries}
           ownDrafts={liveDrafts}
+          elsewhere={liveElsewhere}
+          onArriveElsewhere={showAnnotationsPane}
           resolveTops={resolveTops}
           subscribe={subscribe}
           positioned={positioned}
@@ -877,7 +915,7 @@ export default function PdfAnnotationSurface({
         />
       </AnnotationReloadProvider>
     ),
-    [fileId, liveEntries, liveDrafts, resolveTops, subscribe, positioned, jumpTo, pending, reloadEntries, handle],
+    [fileId, liveEntries, liveDrafts, liveElsewhere, showAnnotationsPane, resolveTops, subscribe, positioned, jumpTo, pending, reloadEntries, handle],
   );
 
   const panes = useMemo<PdfPane[]>(
@@ -947,15 +985,17 @@ export default function PdfAnnotationSurface({
           }
         />
 
-        {(anchoredLink || fragment.regions.length > 0) && (
-          // One overlay for both banners: a ?sel= visit and a fragment can
-          // arrive together, and two fixed boxes at one spot would cover
-          // each other.
+        {(anchoredLink || fragment.regions.length > 0 || !version.isLatest) && (
+          // One overlay for every banner: a ?sel= visit and a fragment can
+          // arrive together, on a version that is not the latest, and fixed
+          // boxes at one spot would cover each other.
           <div className={styles.anchoredLinkOverlay}>
+            <PdfVersionBanner slug={slug} version={version} versions={versions} className={styles.overlayBanner} />
             {anchoredLink && (
               <AnchoredLinkBanner
                 link={anchoredLink}
                 currentTarget={{ kind: "file", id: fileId }}
+                shownVersionId={version.id}
                 className={styles.overlayBanner}
                 onJumpToPart={(part) => {
                   if (part.selector?.kind === "PDF_TEXT") jumpToTarget(part.selector.selector);

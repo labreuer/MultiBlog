@@ -719,6 +719,85 @@ export async function createTestFile(opts: {
   };
 }
 
+export type TestFileVersion = {
+  /** Its own id: only a migrated version 1 shares its file's. */
+  id: string;
+  number: number;
+  sha256: string;
+  /** Normalised text of each sheet, as `TestFile.pages` is. */
+  pages: string[];
+};
+
+/**
+ * A further version of a throwaway file (docs/PDF.md §13): new bytes beside
+ * the ones it has, made as an upload and a promotion will make them, and
+ * promoted unless asked otherwise. Nothing in the app can give a file a second
+ * version yet, so this is the only way the reads by version are exercised:
+ * a filter by version that is missing passes every test while each file has
+ * one, and what it draws or lists wrongly here is the proof it exists.
+ *
+ * What is on the earlier version stays there: this moves no note and no link
+ * part, as a promotion without a carry moves none.
+ */
+export async function addTestFileVersion(
+  fileId: string,
+  opts: { pages: string[][]; pageLabels?: readonly TestPageLabelRange[]; promote?: boolean },
+): Promise<TestFileVersion> {
+  const file = await prismaIncludingDeleted.storedFile.findUnique({
+    where: { id: fileId },
+    select: { id: true, title: true, currentVersionId: true, owners: { select: { userId: true, user: { select: { email: true } } } }, _count: { select: { versions: true } } },
+  });
+  if (!file || file.owners.length === 0) throw new Error(`addTestFileVersion: no file ${fileId}.`);
+  file.owners.forEach((owner) => assertSafe(owner.user.email));
+  const uploaderId = file.owners[0].userId;
+  const promote = opts.promote ?? true;
+
+  const bytes = buildTestPdf(opts.pages, { pageLabels: opts.pageLabels });
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  return withShaLock(sha256, async () => {
+    const stored = await storeUploadStream(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      }),
+    );
+    const parsed = await extractPdf(await readFile(storagePathFor(stored.sha256)));
+    const version = await prisma.$transaction(async (tx) => {
+      const tail = await tx.ydocUpdate.aggregate({ _max: { id: true } });
+      const updateId = tail._max.id ?? BigInt(0);
+      const now = new Date();
+      const created = await tx.fileVersion.create({
+        data: {
+          fileId: file.id,
+          // Never reused: one more than the file's rows, an abandoned one's included.
+          number: file._count.versions + 1,
+          filename: `${file.title.replace(/[^\w.-]+/g, "-")}-v${file._count.versions + 1}.pdf`,
+          contentType: "application/pdf",
+          byteSize: stored.byteSize,
+          sha256: stored.sha256,
+          pageCount: parsed.pageCount,
+          baseVersionId: file.currentVersionId,
+          uploadedAt: now,
+          uploadedByUserId: uploaderId,
+          uploadedAtUpdateId: updateId,
+          ...(promote ? { promotedAt: now, promotedByUserId: uploaderId, promotedAtUpdateId: updateId } : {}),
+        },
+        select: { id: true, number: true },
+      });
+      await tx.filePageText.createMany({
+        data: parsed.pages.map((text, pageIndex) => ({ fileVersionId: created.id, pageIndex, textVersion: parsed.textVersion, text })),
+      });
+      if (promote) {
+        await tx.storedFile.update({ where: { id: file.id }, data: { currentVersionId: created.id, updatedByUserId: uploaderId } });
+      }
+      return created;
+    });
+    return { id: version.id, number: version.number, sha256: stored.sha256, pages: parsed.pages };
+  });
+}
+
 /** Same @example.com containment as deleteTestDoc, plus the shared-bytes rule. */
 export type FileAnnotationFacts = {
   id: string;
@@ -743,6 +822,15 @@ export type FileAnnotationFacts = {
  * client (PLAN.md §19, §12i's "a request field only, never a column"). Nothing
  * observable in the browser can distinguish those two.
  */
+/** Which version each anchor into a file is on, by table: what a spec compares with the version it meant. */
+export async function getFileAnchorVersions(fileId: string): Promise<{ annotations: (string | null)[]; linkParts: (string | null)[] }> {
+  const [annotations, linkParts] = await Promise.all([
+    prisma.annotation.findMany({ where: { fileId, pdfTarget: { not: Prisma.DbNull } }, orderBy: { createdAt: "asc" }, select: { fileVersionId: true } }),
+    prisma.anchoredLinkAnchor.findMany({ where: { fileId }, orderBy: { id: "asc" }, select: { fileVersionId: true } }),
+  ]);
+  return { annotations: annotations.map((row) => row.fileVersionId), linkParts: linkParts.map((row) => row.fileVersionId) };
+}
+
 export async function getFileAnnotationFacts(fileId: string): Promise<FileAnnotationFacts[]> {
   const annotations = await prisma.annotation.findMany({
     where: { fileId, status: { not: "DRAFT" } },
@@ -2896,6 +2984,8 @@ const handlers = {
   deleteTestDoc,
   createTestFile,
   deleteTestFile,
+  addTestFileVersion,
+  getFileAnchorVersions,
   createTestTag,
   tagWithTestTag,
   getTagFacts,

@@ -1,0 +1,117 @@
+/* docs/PDF.md §13, "Addresses" — a file's versions as the PDF surface shows
+   them: the banner on a version that is not the latest, the list of notes on
+   other versions in the Annotations pane, and the version list in Metadata. */
+
+.banner {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.6rem 0.8rem;
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--foreground);
+}
+
+.bannerText {
+  flex: 1;
+  min-width: 0;
+}
+
+.bannerText p + p {
+  margin-top: 0.3rem;
+}
+
+.dismiss {
+  font: inherit;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.elsewhere {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  background: var(--surface-muted);
+  color: var(--foreground);
+}
+
+.heading {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.heading + .list + .heading {
+  margin-top: 8px;
+}
+
+.list {
+  list-style: none;
+}
+
+.entry {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  font-size: 0.9rem;
+  /* A card's link from another address of the file lands here: clear of the
+     viewer's toolbar when it is scrolled to. */
+  scroll-margin-top: 4rem;
+}
+
+.entry:target,
+.arrived {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.entryQuote,
+.entryMeta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.entryBody {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.versions {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+}
+
+.versions h3 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.4rem;
+}
+
+.versions ol {
+  list-style: none;
+}
+
+.versions li {
+  padding: 0.35rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.versionFacts {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.state {
+  color: var(--text-secondary);
+}

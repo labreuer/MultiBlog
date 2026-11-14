@@ -224,14 +224,15 @@ test.describe("files", () => {
       expect(partial.contentRange).toBe(`bytes 0-99/${file.byteSize}`);
       expect(partial.length).toBe(100);
 
-      // A stale hash still serves the current bytes (so cached HTML doesn't
-      // break) but must not claim immutability for a URL whose content moved.
+      // A hash no version of the file holds is 404, never the current bytes
+      // (docs/PDF.md §13, "Addresses"): a viewer reads the bytes its URL
+      // names for as long as it is open, and can't splice another version's
+      // in by range.
       const stale = await page.evaluate(async (u) => {
         const res = await fetch(u);
-        return { status: res.status, cacheControl: res.headers.get("cache-control") };
+        return { status: res.status };
       }, `/api/files/${file.id}/${"0".repeat(64)}`);
-      expect(stale.status).toBe(200);
-      expect(stale.cacheControl).toContain("must-revalidate");
+      expect(stale.status).toBe(404);
     } finally {
       await deleteTestFile(file.id);
     }

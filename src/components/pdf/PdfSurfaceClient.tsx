@@ -8,6 +8,9 @@ import { OutOfDateNotice } from "@/components/OutOfDateNotice";
 import type { PdfAnnotationEntry } from "./PdfAnnotationPanel";
 import type { AnchoredLinkView } from "@/lib/anchored-link-data";
 import type { OwnDraft } from "@/lib/annotation-data";
+import type { ShownVersion } from "@/lib/file-version";
+import type { FileVersionSummary } from "@/lib/file-version-data";
+import type { OtherVersionNote } from "@/lib/pdf-annotation-entries";
 
 // PLAN.md §19 — the `ssr: false` boundary.
 //
@@ -37,9 +40,17 @@ const PdfAnnotationSurface = dynamic(() => import("./PdfAnnotationSurface"), {
 
 export default function PdfSurfaceClient(props: {
   fileId: string;
+  slug: string;
+  /** The version this page shows, and which kind of address it was reached at. */
+  version: ShownVersion;
+  /** Every version of the file, for the banner on one that is not the latest. */
+  versions: FileVersionSummary[];
   fileUrl: string;
   title: string;
+  /** The notes on the version shown, with the file's own. */
   entries: PdfAnnotationEntry[];
+  /** The file's notes on its other versions, each listed under its version. */
+  elsewhere: OtherVersionNote[];
   /** The viewer's own drafts on this file, newest first. */
   ownDrafts: OwnDraft[];
   /** The link a ?sel= visit resolved, or null — docs/ANCHORED_LINKS.md. */

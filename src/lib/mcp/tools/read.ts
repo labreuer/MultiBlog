@@ -23,7 +23,7 @@ import { runSearch } from "./search";
 /** What `include` adds to a doc or PDF read, each list paged on its own (§9, §10). */
 async function containerExtras(
   ctx: McpContext,
-  container: { kind: "doc"; id: string; state: DocState } | { kind: "file"; id: string },
+  container: { kind: "doc"; id: string; state: DocState } | { kind: "file"; id: string; versionId: string; versionAddressed: boolean },
   args: ReadArgs,
   span: BlockSpan | null,
 ): Promise<ToolResult> {
@@ -35,7 +35,9 @@ async function containerExtras(
   if (include.includes("annotations")) {
     out.threads = await containerThreads(
       ctx,
-      container.kind === "doc" ? { kind: "doc", docId: container.id, state: container.state } : { kind: "file", fileId: container.id },
+      container.kind === "doc"
+        ? { kind: "doc", docId: container.id, state: container.state }
+        : { kind: "file", fileId: container.id, versionId: container.versionId, versionAddressed: container.versionAddressed },
       args,
       span,
     );
@@ -99,7 +101,7 @@ async function readById(ctx: McpContext, id: string, args: ReadArgs): Promise<To
   if (annotation) return oneThread(ctx, id, args);
   if (link) return readLink(ctx, id);
   if (doc) return readDocRef(ctx, id, "", args);
-  if (file) return readFileRef(ctx, id, "", args);
+  if (file) return readFileRef(ctx, id, "", args, undefined);
   if (post) return readPost(ctx, { id }, "", args);
   throw notFound("Anything with that id");
 }
@@ -114,14 +116,17 @@ async function readDocRef(ctx: McpContext, param: string, fragment: string, args
   return readDoc(ctx, doc, args, (state, span) => containerExtras(ctx, { kind: "doc", id: doc.id, state }, args, span));
 }
 
-async function readFileRef(ctx: McpContext, slug: string, fragment: string, args: ReadArgs): Promise<ToolResult> {
-  const file = await readableFileBySlug(ctx.actor, slug);
+/** A file at its bare address, or one version of it at the version's own (docs/PDF.md §13, "Addresses"). */
+async function readFileRef(ctx: McpContext, slug: string, fragment: string, args: ReadArgs, version: number | undefined): Promise<ToolResult> {
+  const file = await readableFileBySlug(ctx.actor, slug, version);
   if (fragment && !isViewerFragment(fragment)) {
     const id = await annotationByFragment({ fileId: file.id }, fragment);
     if (!id) throw notFound("An annotation with that card fragment");
     return oneThread(ctx, id, args);
   }
-  return readPdf(ctx, file, args, fragment, () => containerExtras(ctx, { kind: "file", id: file.id }, args, null));
+  return readPdf(ctx, file, args, fragment, () =>
+    containerExtras(ctx, { kind: "file", id: file.id, versionId: file.versionId, versionAddressed: file.versionAddressed }, args, null),
+  );
 }
 
 export const readTool = defineTool({
@@ -143,9 +148,9 @@ export const readTool = defineTool({
       case "doc":
         return readDocRef(ctx, parsed.param, parsed.fragment, args);
       case "pdf":
-        return readFileRef(ctx, parsed.slug, parsed.fragment, args);
+        return readFileRef(ctx, parsed.slug, parsed.fragment, args, parsed.version);
       case "file":
-        return readFileRef(ctx, parsed.slug, "", args);
+        return readFileRef(ctx, parsed.slug, "", args, parsed.version);
       case "annotations":
         return allThreads(ctx, args);
       case "link":

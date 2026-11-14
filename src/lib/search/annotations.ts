@@ -8,6 +8,8 @@
 // vector: its words find the doc instead (§10, item 9). The hit still shows
 // the passage, derived from the mark as /annotations derives it.
 
+import { noteVersions } from "@/lib/file-version-data";
+import { pdfNoteContainer } from "@/lib/file-version";
 import { markAnchoredQuote } from "@/lib/annotation-marked-quote";
 import { materializedLabels } from "@/lib/entity-chips/materialize";
 import { parseChipRecords, quoteWithChipLabels } from "@/lib/anchors";
@@ -127,13 +129,18 @@ export const annotationsSearch: KindSearch<AnnotationHit> = {
     });
     const quotes = await headlineTexts(passages, query);
 
+    // A note on a PDF is on one version of it, a reply on its root's: its hit
+    // names that version where it is not the latest, and links its card at
+    // that version's address (docs/PDF.md §13, "Addresses").
+    const versionOf = await noteVersions(rows.filter((row) => row.file !== null).map((row) => row.id));
+
     return ids.flatMap((id, index): AnnotationHit[] => {
       const row = byId.get(id);
       if (!row || !row.postedAt) return [];
       const container = row.doc
-        ? { kind: "doc" as const, slug: row.doc.slug, title: docTitleOrFallback(row.doc.title), path: "/doc" }
+        ? { kind: "doc" as const, title: docTitleOrFallback(row.doc.title), path: `/doc/${row.doc.slug}` }
         : row.file
-          ? { kind: "pdf" as const, slug: row.file.slug, title: row.file.title, path: "/pdf" }
+          ? { kind: "pdf" as const, ...pdfNoteContainer(row.file, versionOf.get(id)) }
           : null;
       if (!container) return [];
       // The name its card shows, which is also what the card's permalink id
@@ -142,8 +149,8 @@ export const annotationsSearch: KindSearch<AnnotationHit> = {
       return [
         {
           id,
-          href: `${container.path}/${container.slug}#${annotationAnchorName(writer, row.createdAt)}`,
-          container: { kind: container.kind, title: container.title, href: `${container.path}/${container.slug}` },
+          href: `${container.path}#${annotationAnchorName(writer, row.createdAt)}`,
+          container: { kind: container.kind, title: container.title, href: container.path },
           writer,
           // A nameless account's slug is made from its email (user-slug.ts),
           // so it goes out only beside a name.

@@ -21,6 +21,7 @@ import type {
   TestYdocSnapshot,
   TestDoc,
   TestFile,
+  TestFileVersion,
   TestTag,
   TagFacts,
   FileAnnotationFacts,
@@ -48,6 +49,7 @@ export type {
   TestYdocSnapshot,
   TestDoc,
   TestFile,
+  TestFileVersion,
   TestTag,
   TagFacts,
   FileAnnotationFacts,
@@ -178,6 +180,13 @@ export const createTestFile = (...args: Parameters<DbHandlers["createTestFile"]>
 
 export const deleteTestFile = (...args: Parameters<DbHandlers["deleteTestFile"]>): Promise<void> =>
   call("deleteTestFile", ...args);
+
+export const addTestFileVersion = (...args: Parameters<DbHandlers["addTestFileVersion"]>): Promise<TestFileVersion> =>
+  call("addTestFileVersion", ...args);
+
+export const getFileAnchorVersions = (
+  ...args: Parameters<DbHandlers["getFileAnchorVersions"]>
+): ReturnType<DbHandlers["getFileAnchorVersions"]> => call("getFileAnchorVersions", ...args);
 
 // PLAN.md §20 — tag fixtures. See db-worker.ts's createTestTag for why
 // containment here is by E2E_ title prefix rather than by an author email.

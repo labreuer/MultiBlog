@@ -1,4 +1,4 @@
-import { latestVersionOf } from "@/lib/file-version";
+import { fileVersionState, latestVersionOf, pdfPath, type FileVersionState } from "@/lib/file-version";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserReadFile } from "@/lib/file-authz";
@@ -71,6 +71,13 @@ export type ResolvedFile = {
   slug: string;
   title: string;
   versionId: string;
+  versionNumber: number;
+  isLatest: boolean;
+  /** The reference named the version by its own address, /pdf/<slug>/v/<n>; false for the bare address, which means the latest. */
+  versionAddressed: boolean;
+  versionState: FileVersionState;
+  /** The address read: the version's own where the reference named it, the bare one otherwise. */
+  url: string;
   filename: string;
   contentType: string;
   byteSize: number;
@@ -85,23 +92,46 @@ const FILE_SELECT = {
   title: true,
   visibility: true,
   deletedByUserId: true,
-  currentVersion: { select: { id: true, filename: true, contentType: true, byteSize: true, sha256: true, pageCount: true } },
+  currentVersionId: true,
+  versions: {
+    select: { id: true, number: true, filename: true, contentType: true, byteSize: true, sha256: true, pageCount: true, promotedAt: true, abandonedAt: true },
+  },
 } as const;
 
-/** A file by any slug it has had, or by id, readable by the actor; `not_found` otherwise. */
-export async function readableFileBySlug(actor: Actor, slugOrId: string): Promise<ResolvedFile> {
+/**
+ * A file by any slug it has had, or by id, readable by the actor; `not_found`
+ * otherwise. `versionNumber` is the version a version's own address names;
+ * without it, the latest. A number the file never had is `not_found`, and so
+ * is an abandoned version, which has no bytes or page text to read.
+ */
+export async function readableFileBySlug(actor: Actor, slugOrId: string, versionNumber?: number): Promise<ResolvedFile> {
   const resolved = await resolveFileParam(slugOrId, FILE_SELECT);
   const file =
     resolved?.file ?? (await prismaIncludingDeleted.storedFile.findUnique({ where: { id: slugOrId }, select: FILE_SELECT }));
   if (!file || file.deletedByUserId !== null || !(await canUserReadFile(actor.userId, actor.role, file))) {
     throw notFound("That file");
   }
-  const version = latestVersionOf(file);
+  const version =
+    versionNumber === undefined
+      ? latestVersionOf({ id: file.id, currentVersion: file.versions.find((candidate) => candidate.id === file.currentVersionId) ?? null })
+      : file.versions.find((candidate) => candidate.number === versionNumber);
+  if (!version) throw notFound(`Version ${versionNumber} of that file`);
+  const versionState = fileVersionState(version, file.currentVersionId);
+  if (versionState === "abandoned") {
+    throw new ApiError("not_found", `Version ${version.number} of that file was abandoned. The latest is at /pdf/${file.slug}.`);
+  }
+  const isLatest = versionState === "latest";
+  const versionAddressed = versionNumber !== undefined;
   return {
     id: file.id,
     slug: file.slug,
     title: file.title,
     versionId: version.id,
+    versionNumber: version.number,
+    isLatest,
+    versionAddressed,
+    versionState,
+    url: pdfPath(file.slug, { number: version.number, isLatest }, { own: versionAddressed }),
     filename: version.filename,
     contentType: version.contentType,
     byteSize: version.byteSize,
@@ -124,7 +154,7 @@ export async function readableContainer(actor: Actor, ref: string): Promise<Reso
       return { kind: "doc", doc: await readableDocByParam(actor, parsed.param) };
     case "pdf":
     case "file":
-      return { kind: "file", file: await readableFileBySlug(actor, parsed.slug) };
+      return { kind: "file", file: await readableFileBySlug(actor, parsed.slug, parsed.version) };
     case "id": {
       const doc = await prisma.doc.findUnique({ where: { id: parsed.id }, select: { id: true } });
       if (doc) return { kind: "doc", doc: await readableDocByParam(actor, parsed.id) };

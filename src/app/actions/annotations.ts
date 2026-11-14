@@ -26,7 +26,7 @@ import {
 import { captureAnchorInYdoc, capturePdfTextAnchor, chipRecordsColumn } from "@/lib/anchors/capture";
 import type { ChipRecord } from "@/lib/anchors";
 import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
-import { pdfAnnotationEntriesFor } from "@/lib/pdf-annotation-entries";
+import { pdfAnnotationEntriesFor, type OtherVersionNote } from "@/lib/pdf-annotation-entries";
 import { getOwnFileDraftAnnotations, type OwnDraft } from "@/lib/annotation-data";
 import type { PdfAnnotationEntry } from "@/components/pdf/PdfAnnotationPanel";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
@@ -51,7 +51,8 @@ import { chipInputsForBodies, chipInputsForBody } from "@/lib/entity-chips/conte
 import { chipsInJSON } from "@/lib/entity-chips/renderings";
 import type { ChipInputs } from "@/lib/entity-chips/types";
 import { setAnnotationDeleted } from "@/lib/annotation-manage";
-import { latestVersionIdOf } from "@/lib/file-version-data";
+import { latestVersionIdOf, noteVersions } from "@/lib/file-version-data";
+import { pdfNoteContainer } from "@/lib/file-version";
 
 /**
  * `mintAnnotationConnection`, degraded to "no bundle" on any failure.
@@ -1202,8 +1203,12 @@ async function postFileAnnotation(opts: {
       },
     });
     if (file) {
-      const subject = `${raisedBy} raised an annotation on "${file.title}"`;
-      const text = `${bodyText}\n\n${appUrl(`/pdf/${file.slug}`)}`;
+      // The note's own version's address, a reply's being its root's: the
+      // file named and linked as every listing of the note does (docs/PDF.md
+      // §13, "Addresses").
+      const container = pdfNoteContainer(file, (await noteVersions([annotationId])).get(annotationId));
+      const subject = `${raisedBy} raised an annotation on "${container.title}"`;
+      const text = `${bodyText}\n\n${appUrl(container.path)}`;
       // One message per owner, not one multi-recipient message — same
       // reasoning as the doc side's raise.
       await Promise.all(file.owners.map((o) => sendMail({ to: o.user.email, subject, text })));
@@ -1238,21 +1243,27 @@ async function postFileAnnotation(opts: {
  */
 export async function loadPdfAnnotationEntries(
   fileId: string,
-): Promise<{ entries: PdfAnnotationEntry[]; ownDrafts: OwnDraft[] }> {
+  /** The version the surface shows: what is drawn is that version's alone (docs/PDF.md §13, "Addresses"). */
+  fileVersionId: string,
+): Promise<{ entries: PdfAnnotationEntry[]; ownDrafts: OwnDraft[]; elsewhere: OtherVersionNote[] }> {
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
   }
   const file = await prisma.storedFile.findUnique({
     where: { id: fileId },
-    select: { id: true, visibility: true },
+    select: { id: true, slug: true, visibility: true, versions: { where: { id: fileVersionId }, select: { id: true } } },
   });
   if (!file || !(await canUserReadFile(session.user.id, session.user.role, file))) {
     throw new Error("You don't have permission to read this file.");
   }
-  const [entries, ownDrafts] = await Promise.all([
-    pdfAnnotationEntriesFor(fileId),
-    getOwnFileDraftAnnotations(fileId, session.user.id),
+  // A version of another file names no notes of this one.
+  if (file.versions.length === 0) {
+    throw new Error("That isn't a version of this file.");
+  }
+  const [{ entries, elsewhere }, ownDrafts] = await Promise.all([
+    pdfAnnotationEntriesFor(file, fileVersionId),
+    getOwnFileDraftAnnotations(fileId, session.user.id, { slug: file.slug, fileVersionId }),
   ]);
-  return { entries, ownDrafts };
+  return { entries, ownDrafts, elsewhere };
 }

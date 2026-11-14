@@ -52,7 +52,8 @@ export type AnnotationRow = {
   // same thing either way, so nothing downstream needs a second set of fields.
   containerKind: "doc" | "file";
   docId: string;
-  docSlug: string;
+  /** The container's reading address: a doc's, or a PDF's at the version the note is on (docs/PDF.md §13). */
+  containerPath: string;
   docTitle: string;
   // The card's own permalink fragment on that page, so the Doc / File link
   // lands on this annotation rather than the top of the container — and,
@@ -157,9 +158,7 @@ export default function AnnotationsTable({
     doc: {
       sortKey: "doc",
       cell: (row) => (
-        <Link
-          href={`${row.containerKind === "file" ? `/pdf/${row.docSlug}` : `/doc/${row.docSlug}`}#${row.cardFragment}`}
-        >
+        <Link href={`${row.containerPath}#${row.cardFragment}`}>
           {row.docTitle}
         </Link>
       ),

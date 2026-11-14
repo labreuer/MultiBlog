@@ -55,8 +55,8 @@ function missOf(value: unknown): FragmentMiss | null {
  * answers every miss with null, as one that holds none of them does, so the
  * question can't be asked of a PRIVATE file.
  */
-export async function locateFragmentMisses(fileId: string, misses: unknown): Promise<(number | null)[]> {
-  if (typeof fileId !== "string" || !Array.isArray(misses)) return [];
+export async function locateFragmentMisses(fileId: string, fileVersionId: string, misses: unknown): Promise<(number | null)[]> {
+  if (typeof fileId !== "string" || typeof fileVersionId !== "string" || !Array.isArray(misses)) return [];
   const asked = misses.slice(0, MAX_FRAGMENT_PASSAGES).map(missOf);
   const none = asked.map(() => null);
   const session = await auth();
@@ -66,6 +66,6 @@ export async function locateFragmentMisses(fileId: string, misses: unknown): Pro
 
   const checker = new FragmentChecker();
   const found: (number | null)[] = [];
-  for (const miss of asked) found.push(miss ? await checker.sheetHolding(file.id, miss.passage, miss.named) : null);
+  for (const miss of asked) found.push(miss ? await checker.sheetHolding(file.id, fileVersionId, miss.passage, miss.named) : null);
   return found;
 }

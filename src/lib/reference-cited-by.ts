@@ -15,7 +15,8 @@ import { parseCitedQuery } from "@/lib/cited-passage-query";
 import { formatPassageText } from "@/lib/pdf-fragment";
 import { FragmentChecker } from "@/lib/pdf-fragment-check";
 import { withoutBrackets } from "@/lib/pdf-passage-pieces";
-import { latestVersionOf } from "@/lib/file-version";
+import { latestVersionOf, pdfNoteContainer } from "@/lib/file-version";
+import { noteVersions } from "@/lib/file-version-data";
 
 // docs/CITATIONS.md, "Pages" — what a reference's public page can't show
 // everyone: the docs and notes citing the work, and the work's PDF, for one
@@ -125,6 +126,7 @@ export async function referenceCitedBy(actor: Actor, referenceId: string): Promi
       ? prisma.annotation.findMany({
           where: { AND: [notesWhere, cites] },
           select: {
+            id: true,
             createdAt: true,
             user: { select: { name: true, slug: true } },
             doc: { select: { slug: true, title: true } },
@@ -139,13 +141,17 @@ export async function referenceCitedBy(actor: Actor, referenceId: string): Promi
       : null,
   ]);
 
+  // A note on a PDF is linked at the version it is on, and names it where
+  // that is not the latest (docs/PDF.md §13, "Addresses").
+  const versionOf = await noteVersions(notes.flatMap((note) => (note.file ? [note.id] : [])));
   return {
     docs: docs.slice(0, CITED_BY_LIMIT).map((doc) => ({ title: docTitleOrFallback(doc.title), href: `/doc/${doc.slug}` })),
     notes: notes.slice(0, CITED_BY_LIMIT).flatMap((note) => {
+      const pdf = note.file ? pdfNoteContainer(note.file, versionOf.get(note.id)) : null;
       const container = note.doc
         ? { href: `/doc/${note.doc.slug}`, title: docTitleOrFallback(note.doc.title) }
-        : note.file
-          ? { href: `/pdf/${note.file.slug}`, title: note.file.title }
+        : pdf
+          ? { href: pdf.path, title: pdf.title }
           : null;
       if (!container) return [];
       // The name its card shows, which is what the card's permalink is built from.

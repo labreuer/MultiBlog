@@ -51,3 +51,114 @@ export function fileVersionState(
 export function fileVersionTitle(title: string, version: { number: number; isLatest: boolean }, opts: { always?: boolean } = {}): string {
   return version.isLatest && !opts.always ? title : `${title}, version ${version.number}`;
 }
+
+/**
+ * A version's number as an address or a query writes it: digits alone, from 1,
+ * with no sign, no leading zero and nothing after. Null for anything else, so
+ * `/v/01` and `/v/1x` are not second addresses of version 1.
+ */
+export function parseVersionNumber(raw: string | null | undefined): number | null {
+  if (!raw || !/^[1-9]\d{0,8}$/.test(raw)) return null;
+  return Number(raw);
+}
+
+/**
+ * A version as an address names it: its number, and whether it is the latest.
+ * Null is "the file", read at the bare address: a tag, a note with no target,
+ * a doc's link to the PDF as a whole.
+ */
+export type VersionRef = { number: number; isLatest: boolean } | null;
+
+/**
+ * The reading address of a file, or of one version of it (docs/PDF.md §13,
+ * "Addresses"): `/pdf/<slug>` for the latest, `/pdf/<slug>/v/<n>` for any
+ * other. **Every link to a note, a card or a part on a PDF is built here**,
+ * from the version that note or part is on (`noteVersions`,
+ * file-version-data.ts): one written as a bare `/pdf/${slug}` lands on the
+ * note's entry in the list of notes on other versions, and not on its card.
+ *
+ * `own` is a version's own address whatever its state, the latest's
+ * included: what its page, its banner and the version list link.
+ */
+export function pdfPath(slug: string, version?: VersionRef, opts: { own?: boolean } = {}): string {
+  return version && (opts.own || !version.isLatest) ? `/pdf/${slug}/v/${version.number}` : `/pdf/${slug}`;
+}
+
+/** A file's download page, or one version's: `/files/<slug>` and `/files/<slug>/v/<n>`. */
+export function filesPath(slug: string, version?: VersionRef, opts: { own?: boolean } = {}): string {
+  return version && (opts.own || !version.isLatest) ? `/files/${slug}/v/${version.number}` : `/files/${slug}`;
+}
+
+/**
+ * The version a PDF page shows, as the surface holds it. `address` says which
+ * of the file's two kinds of address the page is: the bare one, which means
+ * "the latest", or the version's own, which has already said which version.
+ * A capture names both, and its write checks them (docs/PDF.md §13,
+ * "Versions").
+ */
+export type ShownVersion = {
+  id: string;
+  number: number;
+  isLatest: boolean;
+  state: FileVersionState;
+  address: "bare" | "version";
+};
+
+const ELAPSED_UNITS: readonly (readonly [string, number])[] = [
+  ["year", 365.25 * 86_400_000],
+  ["month", 30.4375 * 86_400_000],
+  ["day", 86_400_000],
+  ["hour", 3_600_000],
+  ["minute", 60_000],
+  ["second", 1_000],
+];
+
+/**
+ * The time between two versions' uploads, as a banner says it: in the largest
+ * unit that fits (years, months, days, hours, minutes or seconds), rounded to
+ * the nearest. "3 months", "1 day", "40 seconds".
+ */
+export function elapsedInLargestUnit(milliseconds: number): string {
+  const span = Math.abs(milliseconds);
+  const [unit, size] = ELAPSED_UNITS.find(([, length]) => span >= length) ?? ELAPSED_UNITS[ELAPSED_UNITS.length - 1];
+  const count = Math.round(span / size);
+  return `${count} ${unit}${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * Where a link lands in a file, and what the file is called there, from the
+ * versions its parts in that file are on (docs/PDF.md §13, "Addresses"): the
+ * newest version holding a part, which is the latest wherever a part is on
+ * it. The file stays one group whichever versions its parts are on, so a
+ * link that went straight into the PDF before a promotion still does after.
+ *
+ * `title` names every version the parts are on that is not the latest, so a
+ * reader sees which bytes a passage was measured on before opening it.
+ */
+export function linkPartsVersions(
+  fileTitle: string,
+  partVersions: readonly ({ id: string; number: number } | null | undefined)[],
+  currentVersionId: string | null,
+): { landing: VersionRef; title: string } {
+  const numbered = new Map<number, string>();
+  for (const version of partVersions) if (version) numbered.set(version.number, version.id);
+  if (numbered.size === 0) return { landing: null, title: fileTitle };
+  const numbers = [...numbered.keys()].sort((a, b) => a - b);
+  const newest = numbers[numbers.length - 1];
+  const others = numbers.filter((number) => numbered.get(number) !== currentVersionId);
+  const named =
+    others.length === 0
+      ? fileTitle
+      : `${fileTitle}, version${numbers.length === 1 ? "" : "s"} ${numbers.length === 1 ? numbers[0] : `${numbers.slice(0, -1).join(", ")} and ${newest}`}`;
+  return { landing: { number: newest, isLatest: numbered.get(newest) === currentVersionId }, title: named };
+}
+
+/**
+ * A PDF as the container of one note, for a listing of single notes: where
+ * the note's card is (`path`, the note's own version's address) and what the
+ * file is called there. `version` is the note's, from `noteVersions`; absent
+ * for a note that is the file's and has none.
+ */
+export function pdfNoteContainer(file: { slug: string; title: string }, version: VersionRef | undefined): { path: string; title: string } {
+  return { path: pdfPath(file.slug, version ?? null), title: version ? fileVersionTitle(file.title, version) : file.title };
+}

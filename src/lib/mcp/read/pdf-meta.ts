@@ -17,9 +17,3 @@ export async function pdfLabels(fileVersionId: string): Promise<string[] | null>
   if (!metadata || !version?.pageCount) return null;
   return usablePageLabels(metadata.pageLabels, version.pageCount);
 }
-
-/** The labels of a file's latest version: for a caller holding a file's id and no version. */
-export async function latestPdfLabels(fileId: string): Promise<string[] | null> {
-  const file = await prisma.storedFile.findUnique({ where: { id: fileId }, select: { currentVersionId: true } });
-  return file?.currentVersionId ? pdfLabels(file.currentVersionId) : null;
-}

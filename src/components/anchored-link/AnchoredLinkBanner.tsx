@@ -34,6 +34,12 @@ type Props = {
   /** Which of the link's groups is this page, if any. */
   currentTarget: { kind: "doc" | "file"; id: string };
   /**
+   * The version a PDF page shows (docs/PDF.md §13, "Addresses"). The link's
+   * parts in this file on other versions are measured on other sheets: they
+   * are named here, each linked at its own version, and never jumped to.
+   */
+  shownVersionId?: string;
+  /**
    * The PDF surface's replacement for the DOM-query jump — quads live in a
    * canvas-positioned layer, not on elements a selector can find. Supplying
    * it also hands over on-load jumping (the surface knows when the viewer
@@ -61,7 +67,7 @@ function jumpViaDom(anchorId: string, flash: boolean): boolean {
   return true;
 }
 
-export default function AnchoredLinkBanner({ link, currentTarget, onJumpToPart, className }: Props) {
+export default function AnchoredLinkBanner({ link, currentTarget, shownVersionId, onJumpToPart, className }: Props) {
   const [dismissed, setDismissed] = useState(false);
   // The title is the link's name, or "Linked passages" (docs/ANCHORED_LINKS.md,
   // "Naming a link") — from the store while this link is the open one, so
@@ -72,7 +78,10 @@ export default function AnchoredLinkBanner({ link, currentTarget, onJumpToPart, 
     link.groups.find((group) => group.target.kind === currentTarget.kind && group.target.id === currentTarget.id) ??
     null;
   const otherGroups = link.groups.filter((group) => group !== currentGroup);
-  const firstAnchorId = currentGroup?.parts[0]?.anchorId ?? null;
+  const onThisVersion = (part: AnchoredLinkPart) => shownVersionId === undefined || part.version === null || part.version.id === shownVersionId;
+  const partsHere = currentGroup?.parts.filter(onThisVersion) ?? [];
+  const partsOnOtherVersions = currentGroup?.parts.filter((part) => !onThisVersion(part)) ?? [];
+  const firstAnchorId = partsHere[0]?.anchorId ?? null;
 
   // On-load scroll-to-first, doc mode only (the PDF surface runs its own on
   // `ready`). The read-only editor mounts after hydration, so the first
@@ -110,9 +119,9 @@ export default function AnchoredLinkBanner({ link, currentTarget, onJumpToPart, 
           ✕
         </button>
       </div>
-      {currentGroup && currentGroup.parts.length > 0 && (
+      {partsHere.length > 0 && (
         <ul className={styles.partList}>
-          {currentGroup.parts.map((part) => (
+          {partsHere.map((part) => (
             <li key={part.anchorId}>
               <button
                 type="button"
@@ -122,6 +131,17 @@ export default function AnchoredLinkBanner({ link, currentTarget, onJumpToPart, 
               >
                 <span className={styles.partQuote}>{shownQuote(part)}</span>
               </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {partsOnOtherVersions.length > 0 && (
+        <ul className={styles.partList} data-testid="anchored-link-other-versions">
+          {partsOnOtherVersions.map((part) => (
+            <li key={part.anchorId}>
+              <Link className={styles.partButton} href={part.version!.href} title={`Open this passage on version ${part.version!.number}`}>
+                <span className={styles.partQuote}>{shownQuote(part)}</span> (on version {part.version!.number})
+              </Link>
             </li>
           ))}
         </ul>

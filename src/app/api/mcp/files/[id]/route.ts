@@ -1,5 +1,6 @@
 import { authenticateByteRequest, unauthorizedResponse } from "@/lib/api/request-auth";
 import { serveStoredFile } from "@/lib/file-serve";
+import { parseVersionNumber } from "@/lib/file-version";
 
 // docs/MCP.md §5 — a file's bytes for a token, or a grant `download`
 // minted from one, with the `read` scope. The body is the session route's
@@ -14,5 +15,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const token = await authenticateByteRequest(request, `/api/mcp/files/${id}`);
   if (!token) return unauthorizedResponse();
   if (!token.scopes.includes("READ")) return new Response("This token can't read.", { status: 403 });
-  return serveStoredFile(request, { userId: token.user.id, role: token.user.role }, id, { forceAttachment: true });
+  // No hash here: the latest version's bytes, and with `?v=<n>` that
+  // version's (docs/PDF.md §13, "Addresses").
+  const query = new URL(request.url).searchParams;
+  const version = parseVersionNumber(query.get("v"));
+  if (query.has("v") && version === null) return new Response("Not found", { status: 404 });
+  return serveStoredFile(request, { userId: token.user.id, role: token.user.role }, id, {
+    forceAttachment: true,
+    ...(version !== null ? { version } : {}),
+  });
 }

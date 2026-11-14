@@ -1,13 +1,14 @@
 import { auth } from "@/lib/auth";
 import { actorFromSessionUser } from "@/lib/actor";
 import { serveStoredFile } from "@/lib/file-serve";
+import { parseVersionNumber } from "@/lib/file-version";
 
 // PLAN.md §19 — serves an uploaded file's bytes to the signed-in reader.
 //
 // The URL shape (/api/files/<id>/<hash>/…) mirrors the avatar route's, and for
 // the same reason: with the content hash in the path, the URL for a given set
 // of bytes is immutable, which is what lets this answer `immutable` and use the
-// hash as its ETag. Unlike the avatar route it is **session-gated** — an avatar
+// hash as its ETag. A hash no version of the file holds is 404. Unlike the avatar route it is **session-gated** — an avatar
 // is public content on a public page, a PDF is not. The body — the gate,
 // streaming, Range and the ETag — is src/lib/file-serve.ts's, shared with the
 // MCP server's byte route.
@@ -28,6 +29,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // `?download=1` forces the attachment form, which is how /files/<slug>/download
   // (a URL whose whole promise is that it saves the file) gets that promise out
   // of a route that would otherwise answer a PDF `inline`.
-  const forceAttachment = new URL(request.url).searchParams.get("download") === "1";
-  return serveStoredFile(request, actorFromSessionUser(session.user), id, { hash, forceAttachment });
+  const query = new URL(request.url).searchParams;
+  const forceAttachment = query.get("download") === "1";
+  // `&v=<n>` names the download after version n (docs/PDF.md §13,
+  // "Addresses"), for bytes two versions hold under two filenames.
+  const version = parseVersionNumber(query.get("v"));
+  if (query.has("v") && version === null) return new Response("Not found", { status: 404 });
+  return serveStoredFile(request, actorFromSessionUser(session.user), id, { hash, forceAttachment, ...(version !== null ? { version } : {}) });
 }

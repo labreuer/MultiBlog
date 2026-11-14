@@ -78,12 +78,14 @@ export function docIdFromYdocId(ydocId: string): string | null {
 // connection. It accrues one empty state and no updates.
 export const YDOC_PDF_PREFIX = `${YDOC_PREFIX}pdf:`;
 
-export function ydocIdForFile(fileId: string): string {
-  return `${YDOC_PDF_PREFIX}${fileId}`;
-}
-
-export function fileIdFromYdocId(ydocId: string): string | null {
-  return ydocId.startsWith(YDOC_PDF_PREFIX) ? ydocId.slice(YDOC_PDF_PREFIX.length) : null;
+//
+// **One channel per version of a file** (docs/PDF.md §13, "Addresses"), named
+// by the version's id: two readers on two versions are looking at different
+// sheets, so a viewport or a selection broadcast across them would lead a
+// follower to a sheet of other bytes. A migrated version 1 has its file's id,
+// so its channel keeps the name it had while a file had one.
+export function ydocIdForFileVersion(fileVersionId: string): string {
+  return `${YDOC_PDF_PREFIX}${fileVersionId}`;
 }
 
 /** Path the collab server's onRequest hook listens on for §12i's annotation-mark endpoint. */

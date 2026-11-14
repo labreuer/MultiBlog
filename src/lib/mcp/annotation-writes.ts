@@ -1,3 +1,5 @@
+import { noteVersions } from "@/lib/file-version-data";
+import { pdfNoteContainer } from "@/lib/file-version";
 import { chipMarkdownBetween, chipMarkdowns, chipsInJSON } from "@/lib/entity-chips/renderings";
 import { writesBack } from "@/lib/entity-chips/registry";
 import type { JSONContent } from "@tiptap/core";
@@ -52,6 +54,11 @@ import { anchorPdfQuote } from "./pdf-anchoring";
 //   parent's newest settled version, whatever its container.
 
 type Target = { container: ResolvedContainer; parent: { id: string } | null };
+
+/** Where a note on a PDF has its card: the address of the version it is on, a reply's being its root's (docs/PDF.md §13). */
+async function pdfNotePath(file: { slug: string; title: string }, annotationId: string): Promise<string> {
+  return pdfNoteContainer(file, (await noteVersions([annotationId])).get(annotationId)).path;
+}
 
 /** What `on` names: a doc or PDF to annotate, or an annotation (by id, or its card's URL) to reply to. */
 async function resolveOn(ctx: McpContext, on: string): Promise<Target> {
@@ -232,7 +239,7 @@ export async function annotateFor(ctx: McpContext, input: QuoteInput & { on: str
     body,
     anchor,
   });
-  const url = container.kind === "doc" ? `/doc/${container.doc.slug}` : `/pdf/${container.file.slug}`;
+  const url = container.kind === "doc" ? `/doc/${container.doc.slug}` : await pdfNotePath(container.file, created.id);
   return {
     id: created.id,
     card: `${url}#${annotationAnchorName(displayNameOf(ctx.token.user), created.createdAt)}`,
@@ -369,7 +376,7 @@ export async function editAnnotationFor(ctx: McpContext, input: { id: string; bo
     await cancel().catch(() => {});
     throw invalid(settled.error);
   }
-  const url = container.kind === "doc" ? `/doc/${container.doc.slug}` : `/pdf/${container.file.slug}`;
+  const url = container.kind === "doc" ? `/doc/${container.doc.slug}` : await pdfNotePath(container.file, annotation.id);
   const card = `${url}#${annotationAnchorName(displayNameOf(annotation.user), annotation.createdAt)}`;
   if (settled.unchanged) {
     await prisma.annotation.update({ where: { id: annotation.id }, data: { editingSince: null } });

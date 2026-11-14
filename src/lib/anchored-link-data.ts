@@ -1,3 +1,4 @@
+import { linkPartsVersions, pdfPath } from "@/lib/file-version";
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
@@ -37,13 +38,27 @@ export type AnchoredLinkPart = {
   from: number | null;
   to: number | null;
   selector: AnchorSelector | null;
+  /**
+   * The version of the file a PDF part's quads were measured on, with the
+   * part's own address there, `?sel=` included (docs/PDF.md §13,
+   * "Addresses"); null on a doc's part. **A surface draws a part only where
+   * `version.id` is the version it shows**: the parts reach the browser as
+   * one group per file and are narrowed there, and a part drawn on another
+   * version's sheets sits over other ink with nothing to say so.
+   */
+  version: { id: string; number: number; href: string } | null;
 };
 
 export type AnchoredLinkTargetGroup = {
   target: AnchorTarget;
-  /** The target's title, for the banner's group rows. */
+  /** The target's title, for the banner's group rows. A file's names each version its parts are on that is not the latest. */
   label: string;
-  /** Carries `?sel=` already — doc by id (rename-proof; docs have no slug history), file by slug. */
+  /**
+   * Carries `?sel=` already — doc by id (rename-proof; docs have no slug
+   * history), file by slug. A file's goes to the newest version holding one
+   * of the link's parts, the latest wherever a part is on it; the file stays
+   * one group whichever versions its parts are on.
+   */
   href: string;
   parts: AnchoredLinkPart[];
 };
@@ -104,6 +119,7 @@ export async function anchoredLinkForViewer(
           docId: true,
           postId: true,
           fileId: true,
+          fileVersion: { select: { id: true, number: true } },
           targetAnnotationId: true,
           targetCommentId: true,
         },
@@ -134,6 +150,8 @@ export async function anchoredLinkForViewer(
       // a client sent. An unparseable selector degrades to null, and the
       // part still lists in the banner (painted nowhere).
       selector: parseSelector(anchor.selectorKind, anchor.selector),
+      // The address is filled below, once the file's slug is read.
+      version: anchor.fileVersion ? { ...anchor.fileVersion, href: "" } : null,
     });
   }
 
@@ -153,10 +171,17 @@ export async function anchoredLinkForViewer(
         }
         const file = await prisma.storedFile.findUnique({
           where: { id: target.id },
-          select: { id: true, title: true, slug: true, visibility: true },
+          select: { id: true, title: true, slug: true, visibility: true, currentVersionId: true },
         });
         if (!file || !(await canUserReadFile(viewer.id, viewer.role, file))) return null;
-        return { target, label: file.title, href: `/pdf/${file.slug}${sel}`, parts };
+        const refOf = (version: { id: string; number: number }) => ({ number: version.number, isLatest: version.id === file.currentVersionId });
+        const placed = parts.map((part) => (part.version ? { ...part, version: { ...part.version, href: `${pdfPath(file.slug, refOf(part.version))}${sel}` } } : part));
+        const { landing, title } = linkPartsVersions(
+          file.title,
+          parts.map((part) => part.version),
+          file.currentVersionId,
+        );
+        return { target, label: title, href: `${pdfPath(file.slug, landing)}${sel}`, parts: placed };
       }),
     )
   ).filter((group) => group !== null);
@@ -231,6 +256,8 @@ export type LinkPartInto = {
   from: number | null;
   to: number | null;
   selector: AnchorSelector | null;
+  /** The version of the file a PDF part was measured on; null on a doc's part. */
+  fileVersion: { id: string; number: number } | null;
 };
 
 export async function linkPartsInto(
@@ -250,6 +277,7 @@ export async function linkPartsInto(
       anchorTo: true,
       selectorKind: true,
       selector: true,
+      fileVersion: { select: { id: true, number: true } },
       link: { select: { id: true, name: true, _count: { select: { anchors: true } } } },
     },
   });
@@ -262,5 +290,6 @@ export async function linkPartsInto(
     from: anchor.anchorFrom,
     to: anchor.anchorTo,
     selector: parseSelector(anchor.selectorKind, anchor.selector),
+    fileVersion: anchor.fileVersion,
   }));
 }
