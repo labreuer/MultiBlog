@@ -14,6 +14,7 @@ import { pdfPath, type ShownVersion } from "@/lib/file-version";
 import { arrivalOf, parseLinkVersions } from "@/lib/pdf-link-reading";
 import type { FileVersionSummary, VersionManage } from "@/lib/file-version-data";
 import type { OtherVersionNote } from "@/lib/pdf-annotation-entries";
+import type { WorklistItem } from "@/lib/file-note-move";
 
 // PLAN.md §19 — the `ssr: false` boundary.
 //
@@ -81,6 +82,8 @@ export default function PdfSurfaceClient(props: {
   entries: PdfAnnotationEntry[];
   /** The file's notes on its other versions, each listed under its version. */
   elsewhere: OtherVersionNote[];
+  /** The viewer's notes on earlier versions, on the latest's page (docs/PDF.md §13, "Moving a note forward"). */
+  worklist: WorklistItem[];
   /** The viewer's own drafts on this file, newest first. */
   ownDrafts: OwnDraft[];
   /** The link a ?sel= visit resolved, or null — docs/ANCHORED_LINKS.md. */

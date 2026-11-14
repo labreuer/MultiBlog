@@ -39,6 +39,8 @@ import { fileVersionState } from "@/lib/file-version";
 import { recordUpload, recordVersionUpload, stageUpload } from "@/lib/file-ingest";
 import { abandonFileVersion, promoteFileVersion } from "@/lib/file-manage";
 import { newCarryId, planCarry, writeCarry } from "@/lib/file-anchor-move";
+import { moveNote, setNoteMoveHidden, setNoteStays } from "@/lib/file-note-move";
+import { ApiError } from "@/lib/api/errors";
 import { writePageMapIfNone } from "@/lib/pdf-page-map-build";
 import { changeTagSlug, uniqueTagSlug } from "@/lib/tag-slug";
 import { targetFromColumns, targetToColumns, type AnchorTarget } from "@/lib/anchors";
@@ -1244,6 +1246,57 @@ export async function carryAcrossChanges(
     const result = await writeCarry(tx, plan, actor, carryId);
     return { carryId, moved: result.moved, skipped: result.skipped, stayed: result.stayed, storedMaps: result.storedMaps };
   });
+}
+
+/**
+ * One note's act as a named user, through the write layer the server actions
+ * wrap (src/lib/file-note-move.ts): a move to a version of the file, a
+ * "stays here" mark, or a move shown or hidden. The gate is in that layer,
+ * so this is what "the action refuses" means for a user the UI offers
+ * nothing to. A move takes the note as it stands and the target given, or
+ * the note's own target where none is: what is asked is who may, not where.
+ *
+ * Answers the refusal's code and words, or what the act did.
+ */
+export async function noteActAs(
+  actorEmail: string,
+  act:
+    | { act: "move"; kind: "annotation" | "link-part"; id: string; toVersionId: string; target?: unknown }
+    | { act: "stays"; kind: "annotation" | "link-part"; id: string; stays: boolean }
+    | { act: "show"; moveId: string; shown: boolean },
+): Promise<{ ok: true; moved?: boolean } | { ok: false; code: string; message: string }> {
+  assertSafe(actorEmail);
+  const user = await prisma.user.findUniqueOrThrow({ where: { email: actorEmail }, select: { id: true, role: true } });
+  const actor = { userId: user.id, role: user.role };
+  try {
+    if (act.act === "stays") {
+      await setNoteStays(actor, { kind: act.kind, id: act.id }, act.stays);
+      return { ok: true };
+    }
+    if (act.act === "show") {
+      await setNoteMoveHidden(actor, act.moveId, !act.shown);
+      return { ok: true };
+    }
+    const [row] =
+      act.kind === "annotation"
+        ? await prisma.$queryRaw<{ from: string; fingerprint: string; target: unknown }[]>`
+            SELECT file_version_id AS "from", md5((pdf_target - 'textVersion')::text) AS "fingerprint", pdf_target AS "target" FROM annotation WHERE id = ${act.id}`
+        : await prisma.$queryRaw<{ from: string; fingerprint: string; target: unknown }[]>`
+            SELECT file_version_id AS "from", md5((selector - 'textVersion')::text) AS "fingerprint", selector AS "target" FROM anchored_link_anchor WHERE id = ${act.id}`;
+    if (!row) throw new Error(`noteActAs: no ${act.kind} ${act.id}`);
+    const { moved } = await moveNote(actor, {
+      kind: act.kind,
+      id: act.id,
+      fromVersionId: row.from,
+      fingerprint: row.fingerprint,
+      destinationVersionId: act.toVersionId,
+      target: act.target ?? row.target,
+    });
+    return { ok: true, moved };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, code: err.code, message: err.message };
+    throw err;
+  }
 }
 
 export async function getFileAnnotationFacts(fileId: string): Promise<FileAnnotationFacts[]> {
@@ -3433,6 +3486,7 @@ const handlers = {
   getFileAnchorMoves,
   undoCarryInSql,
   carryAcrossChanges,
+  noteActAs,
   getFileVersionFacts,
   promoteTestVersion,
   abandonTestVersion,

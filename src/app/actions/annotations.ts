@@ -27,6 +27,7 @@ import { captureAnchorInYdoc, capturePdfTextAnchor, chipRecordsColumn } from "@/
 import type { ChipRecord } from "@/lib/anchors";
 import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
 import { pdfAnnotationEntriesFor, type OtherVersionNote } from "@/lib/pdf-annotation-entries";
+import type { WorklistItem } from "@/lib/file-note-move";
 import { getOwnFileDraftAnnotations, type OwnDraft } from "@/lib/annotation-data";
 import type { PdfAnnotationEntry } from "@/components/pdf/PdfAnnotationPanel";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
@@ -1309,7 +1310,7 @@ export async function loadPdfAnnotationEntries(
   fileId: string,
   /** The version the surface shows: what is drawn is that version's alone (docs/PDF.md §13, "Addresses"). */
   fileVersionId: string,
-): Promise<{ entries: PdfAnnotationEntry[]; ownDrafts: OwnDraft[]; elsewhere: OtherVersionNote[] }> {
+): Promise<{ entries: PdfAnnotationEntry[]; ownDrafts: OwnDraft[]; elsewhere: OtherVersionNote[]; worklist: WorklistItem[] }> {
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
@@ -1330,9 +1331,9 @@ export async function loadPdfAnnotationEntries(
   if (file.versions.length === 0) {
     throw new Error("That isn't a version of this file.");
   }
-  const [{ entries, elsewhere }, ownDrafts] = await Promise.all([
-    pdfAnnotationEntriesFor(file, fileVersionId),
+  const [{ entries, elsewhere, worklist }, ownDrafts] = await Promise.all([
+    pdfAnnotationEntriesFor(file, fileVersionId, session.user.id),
     getOwnFileDraftAnnotations(fileId, session.user.id, { slug: file.slug, fileVersionId }),
   ]);
-  return { entries, ownDrafts, elsewhere };
+  return { entries, ownDrafts, elsewhere, worklist };
 }

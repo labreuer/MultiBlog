@@ -655,10 +655,13 @@ test.describe("a file takes a new version", () => {
       // version 1, and neither a second draft nor a link part exists.
       expect(await getFileAnchorVersions(file.id)).toEqual({ annotations: [file.versionId], linkParts: [] });
       expect((await getFileVersionFacts(file.id)).map(({ number, state }) => `${number} ${state}`)).toEqual(["1 earlier", "2 latest"]);
-      // The draft was not posted: version 1's page lists no note of it for anyone else to see.
+      // The draft was not posted. The latest's page lists it for its writer alone, as a private
+      // note of theirs on version 1 that is still to be moved, and lists no posted note.
       await gotoOk(linking, `/pdf/${file.slug}`);
       await waitForViewer(linking);
-      await expect(linking.getByTestId("pdf-other-version-notes")).toHaveCount(0);
+      const listed = linking.getByTestId("pdf-other-version-notes");
+      await expect(listed.locator("li")).toHaveCount(1);
+      await expect(listed.getByTestId("pdf-worklist-item")).toContainText("Private note");
     } finally {
       await deleteTestFile(file.id);
     }

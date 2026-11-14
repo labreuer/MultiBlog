@@ -100,7 +100,7 @@ export default function PdfVersionList({ slug, versions, shownId, manage }: Prop
                 <PdfCarryActions versionId={version.id} number={version.number} latestNumber={latest.number} />
               )}
               {carries.map((carry) => (
-                <PdfCarryRecord key={carry.id} carryId={carry.id} hidden={carry.hidden}>
+                <PdfCarryRecord key={carry.id} carryId={carry.id} moves={carry.moves} shown={carry.shown}>
                   A carry moved {carry.moves === 1 ? "1 note or link part" : `${carry.moves} notes and link parts`} here, <LocalTime value={carry.at} />.
                 </PdfCarryRecord>
               ))}

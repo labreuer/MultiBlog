@@ -82,21 +82,26 @@ const WRITE_BATCH = 500;
 // being one of them while the placements were worked out is not moved.
 
 /**
- * A posted note that isn't marked "stays here": not a DRAFT, and not
- * deleted unless a reply of it still stands, since such a thread is still
- * listed and nobody else could move its replies.
+ * A note that is still listed: not deleted, or deleted with a reply of it
+ * still standing, since such a thread is still shown and nobody else could
+ * move its replies.
  */
-const CARRIES_NOTE = Prisma.sql`
-  a."status" <> 'DRAFT'
-  AND (a."deleted_by_user_id" IS NULL OR EXISTS (
+export const NOTE_STANDS = Prisma.sql`
+  (a."deleted_by_user_id" IS NULL OR EXISTS (
     WITH RECURSIVE below AS (
       SELECT r."id", r."status", r."deleted_by_user_id" FROM "annotation" r WHERE r."parent_annotation_id" = a."id"
       UNION ALL
       SELECT r."id", r."status", r."deleted_by_user_id" FROM "annotation" r JOIN below ON r."parent_annotation_id" = below."id"
     )
     SELECT 1 FROM below WHERE below."status" <> 'DRAFT' AND below."deleted_by_user_id" IS NULL
-  ))
-  AND NOT EXISTS (SELECT 1 FROM "file_anchor_move" k WHERE k."annotation_id" = a."id" AND k."to_version_id" IS NULL)`;
+  ))`;
+
+/** Whether a note, or a link part, carries a "stays here" mark. */
+export const NOTE_MARKED = Prisma.sql`EXISTS (SELECT 1 FROM "file_anchor_move" k WHERE k."annotation_id" = a."id" AND k."to_version_id" IS NULL)`;
+export const PART_MARKED = Prisma.sql`EXISTS (SELECT 1 FROM "file_anchor_move" k WHERE k."anchored_link_anchor_id" = p."id" AND k."to_version_id" IS NULL)`;
+
+/** A posted note that still stands and isn't marked "stays here". */
+const CARRIES_NOTE = Prisma.sql`a."status" <> 'DRAFT' AND ${NOTE_STANDS} AND NOT ${NOTE_MARKED}`;
 
 /**
  * A part of a minted link that isn't deleted, open in its creator's tray or
@@ -109,7 +114,7 @@ const CARRIES_PART = Prisma.sql`
     SELECT 1 FROM "anchored_link" l
     WHERE l."id" = p."link_id" AND l."minted_at" IS NOT NULL AND l."reopened_at" IS NULL AND l."deleted_at" IS NULL
   )
-  AND NOT EXISTS (SELECT 1 FROM "file_anchor_move" k WHERE k."anchored_link_anchor_id" = p."id" AND k."to_version_id" IS NULL)`;
+  AND NOT ${PART_MARKED}`;
 
 type AnchorRow = { id: string; versionId: string; target: unknown; quotedText: string; fingerprint: string };
 
@@ -303,7 +308,8 @@ export type CarryResult = {
   storedMaps: number[];
 };
 
-type LineVersion = PlacingVersion & { baseVersionId: string | null; promotedAt: Date | null; abandonedAt: Date | null; map: PageMap | null };
+/** A version of a file in its line of versions, with the page map it has over its base. */
+export type LineVersion = PlacingVersion & { baseVersionId: string | null; promotedAt: Date | null; abandonedAt: Date | null; map: PageMap | null };
 
 /** A carry worked out and not yet written. */
 export type CarryPlan = {
@@ -316,13 +322,28 @@ export type CarryPlan = {
   placements: AnchorPlacement[];
 };
 
-async function lineOf(fileId: string): Promise<LineVersion[]> {
+/** A file's versions, oldest first. */
+export async function lineOf(fileId: string): Promise<LineVersion[]> {
   const rows = await prisma.fileVersion.findMany({
     where: { fileId },
     orderBy: { number: "asc" },
     select: { id: true, number: true, sha256: true, pageCount: true, baseVersionId: true, promotedAt: true, abandonedAt: true, pageMap: true },
   });
   return rows.map(({ pageMap, ...version }) => ({ ...version, map: parsePageMap(pageMap) }));
+}
+
+/**
+ * What carries a sheet between these versions (`carrySheet`): each one's
+ * stored page map, or the one `worked` holds for it, worked out and not
+ * stored.
+ */
+export function mapsOfLine(versions: readonly LineVersion[], worked: ReadonlyMap<string, PageMap> = new Map()): MapVersion[] {
+  const numberOf = new Map(versions.map((version) => [version.id, version.number]));
+  return versions.map((version) => ({
+    number: version.number,
+    base: version.baseVersionId ? (numberOf.get(version.baseVersionId) ?? null) : null,
+    map: (worked.get(version.id) ?? version.map)?.sheets ?? null,
+  }));
 }
 
 /**
@@ -362,12 +383,7 @@ export async function planCarry(fileId: string, destinationId: string, startFrom
       if (!version.map) mapsToStore.push({ version, map: (await workOutPageMap(version.id)).map });
     }
   }
-  const worked = new Map(mapsToStore.map(({ version, map }) => [version.id, map]));
-  const maps: MapVersion[] = versions.map((version) => ({
-    number: version.number,
-    base: version.baseVersionId ? (byId.get(version.baseVersionId)?.number ?? null) : null,
-    map: (worked.get(version.id) ?? version.map)?.sheets ?? null,
-  }));
+  const maps = mapsOfLine(versions, new Map(mapsToStore.map(({ version, map }) => [version.id, map])));
 
   const sources = versions.filter(
     (version) =>
@@ -525,14 +541,20 @@ export type CarryRecord = {
   toVersionId: string;
   at: string;
   moves: number;
-  /** Whether its moves are hidden: all of them, since they are shown and hidden together. */
+  /**
+   * How many of its moves are shown. A manager shows and hides them
+   * together, and a note's author one of their own, so it can be some.
+   */
+  shown: number;
+  /** Whether every one of its moves is hidden, as they are when it is run. */
   hidden: boolean;
 };
 
 /** The carries that moved a note of this file, newest first. */
 export async function carriesOf(fileId: string): Promise<CarryRecord[]> {
-  const rows = await prisma.$queryRaw<{ id: string; toVersionId: string; at: Date; moves: number; hidden: boolean }[]>(Prisma.sql`
-    SELECT m."carry_id" AS "id", m."to_version_id" AS "toVersionId", min(m."moved_at") AS "at", count(*)::int AS "moves", bool_and(m."hidden") AS "hidden"
+  const rows = await prisma.$queryRaw<{ id: string; toVersionId: string; at: Date; moves: number; shown: number; hidden: boolean }[]>(Prisma.sql`
+    SELECT m."carry_id" AS "id", m."to_version_id" AS "toVersionId", min(m."moved_at") AS "at", count(*)::int AS "moves",
+           (count(*) FILTER (WHERE NOT m."hidden"))::int AS "shown", bool_and(m."hidden") AS "hidden"
     FROM "file_anchor_move" m
     JOIN "file_version" v ON v."id" = m."to_version_id"
     WHERE v."file_id" = ${fileId} AND m."carry_id" IS NOT NULL

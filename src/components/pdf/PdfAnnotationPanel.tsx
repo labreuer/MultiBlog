@@ -1,6 +1,8 @@
 "use client";
 
 import PdfOtherVersionNotes from "./PdfOtherVersionNotes";
+import PdfNoteWorklist from "./PdfNoteWorklist";
+import PdfNoteStanding from "./PdfNoteStanding";
 import type { OtherVersionNote } from "@/lib/pdf-annotation-entries";
 import { useCallback, useMemo, useState } from "react";
 import AnnotationNode, { type AnnotationNodeData } from "@/components/annotation/AnnotationNode";
@@ -12,6 +14,7 @@ import { isCollapsed, useCollapseState } from "@/lib/collapsed-annotations";
 import NewAnnotationComposer from "@/components/annotation/NewAnnotationComposer";
 import OwnDraftsList from "@/components/annotation/OwnDraftsList";
 import type { OwnDraft } from "@/lib/annotation-data";
+import type { NoteRef, NoteStanding, WorklistItem } from "@/lib/file-note-move";
 import { usePdfMarginNotes } from "./use-pdf-margin-notes";
 import type { PdfTarget } from "@/lib/pdf-anchor";
 import { quadsTopY } from "@/lib/pdf-anchor";
@@ -58,6 +61,13 @@ export type PdfAnnotationEntry = {
   color: string;
   target: PdfTarget | null;
   root: AnnotationNodeData;
+  /**
+   * Where the note stands among the file's versions, for this viewer
+   * (docs/PDF.md §13, "Moving a note forward"): its shown moves, and for its
+   * author its mark. Null for a note with no target, and on a file with one
+   * version.
+   */
+  standing: NoteStanding | null;
 };
 
 type Props = {
@@ -69,6 +79,20 @@ type Props = {
   elsewhere: OtherVersionNote[];
   /** A card's link named a note on another version: its entry here is what it lands on. */
   onArriveElsewhere: () => void;
+  /**
+   * The viewer's notes on earlier versions, on the latest's page (docs/PDF.md
+   * §13, "Moving a note forward"); empty on every other.
+   */
+  worklist: WorklistItem[];
+  /** The version shown, as a card and the worklist name it. */
+  shown: { number: number; isEarlier: boolean; latestNumber: number | null };
+  /** The worklist's note being placed by hand in the document, by its key. */
+  placing: string | null;
+  onPlace: (item: WorklistItem | null) => void;
+  /** A note of the worklist was moved or marked. */
+  onNoteChanged: (ref: NoteRef) => void;
+  /** Show a passage of the version shown in the document. */
+  onLook: (target: PdfTarget) => void;
   /** Viewport-space top edge per annotation id, for the ones on a rendered page. */
   resolveTops: () => Map<string, number>;
   /** Subscribe to "the rendering moved" — the viewer's scroll/render/scale events. */
@@ -104,6 +128,12 @@ export default function PdfAnnotationPanel({
   ownDrafts,
   elsewhere,
   onArriveElsewhere,
+  worklist,
+  shown,
+  placing,
+  onPlace,
+  onNoteChanged,
+  onLook,
   resolveTops,
   subscribe,
   positioned,
@@ -205,11 +235,27 @@ export default function PdfAnnotationPanel({
             />
           )}
           <AnnotationNode annotation={entry.root} target={{ kind: "file", id: fileId }} />
+          {entry.standing && entry.target && (
+            <PdfNoteStanding
+              noteId={entry.threadId}
+              standing={entry.standing}
+              versionNumber={shown.number}
+              canStay={shown.isEarlier}
+              latestNumber={shown.latestNumber}
+            />
+          )}
         </div>
       );
     },
-    [fileId, isAnchored, onJumpTo, railMode, pageLabels, collapseState],
+    [fileId, isAnchored, onJumpTo, railMode, pageLabels, collapseState, shown],
   );
+
+  // The viewer's own notes that are still to be decided are listed once, in
+  // their worklist, and the rest under the version each is on.
+  const listed = useMemo(() => {
+    const mine = new Set(worklist.filter((item) => item.kind === "annotation").map((item) => item.id));
+    return { mine: elsewhere.filter((note) => mine.has(note.threadId)), others: elsewhere.filter((note) => !mine.has(note.threadId)) };
+  }, [worklist, elsewhere]);
 
   // The panel's own chrome, grouped so rail mode can lift it out of the flow
   // and float it over the cards (see `.stack`). Everything here is fixed at the
@@ -253,7 +299,26 @@ export default function PdfAnnotationPanel({
           hands it to the composer above, which posts it with the target the
           row was created with. */}
       <OwnDraftsList drafts={ownDrafts} />
-      <PdfOtherVersionNotes notes={elsewhere} onArrive={onArriveElsewhere} />
+      <PdfOtherVersionNotes
+        notes={listed.others}
+        onArrive={onArriveElsewhere}
+        mine={
+          worklist.length > 0 ? (
+            <PdfNoteWorklist
+              fileId={fileId}
+              items={worklist}
+              notes={listed.mine}
+              latestNumber={shown.number}
+              pageLabels={pageLabels}
+              placing={placing}
+              onPlace={onPlace}
+              onChanged={onNoteChanged}
+              onLook={onLook}
+              onArrive={onArriveElsewhere}
+            />
+          ) : null
+        }
+      />
 
       {sorted.length === 0 && (
         <p className={styles.empty}>No annotations yet. Select text in the document to add one.</p>

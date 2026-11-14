@@ -11,8 +11,10 @@ import styles from "./PdfVersions.module.css";
 
 // docs/PDF.md §13, "Addresses" — the page of a version that is not the latest
 // says so: which version it is, when it and the latest were uploaded, the time
-// between them, and a link to the latest. A candidate's says it is not yet
-// the latest. The latest's own page has none; its title names its version.
+// between them, and a link to the latest. An earlier version's also says
+// where a note made on it is, and the two things its author can do with it
+// (§13, "Moving a note forward"). A candidate's says it is not yet the
+// latest. The latest's own page has none; its title names its version.
 // What it shows there, once, is what the carry of the promotion that led to
 // it did, to the manager who ran it (`PdfCarryOutcome`).
 //
@@ -63,7 +65,9 @@ export default function PdfVersionBanner({ slug, version, versions, manage, clas
           The latest is <Link href={pdfPath(slug)}>version {latest.number}</Link>, uploaded <LocalTime value={latest.uploadedAt} />, {between}{" "}
           {latestIsLater ? "later" : "earlier"}.
         </p>
-        {version.state === "earlier" && <p>A note made here is on version {shown.number}.</p>}
+        {version.state === "earlier" && (
+          <p>{`A note made here is on version ${shown.number}. Its author can move it to version ${latest.number} from that version's page, or mark it here as staying.`}</p>
+        )}
         {version.state === "candidate" && <p>It takes no notes and no link parts until it is.</p>}
         {version.state === "candidate" && manage && (
           <PdfCandidateActions slug={slug} versionId={shown.id} number={shown.number} latestNumber={latest.number} map={shown.map} facts={manage.candidateFacts} />

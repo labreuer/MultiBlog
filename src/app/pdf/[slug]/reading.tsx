@@ -185,7 +185,7 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
   // Shared with `loadPdfAnnotationEntries`, which the surface calls after a
   // post — see that action, and PdfAnnotationSurface's `liveEntries`. Both
   // take the version shown: what is drawn is that version's alone.
-  const { entries, elsewhere } = await pdfAnnotationEntriesFor(file, shown.id);
+  const { entries, elsewhere, worklist } = await pdfAnnotationEntriesFor(file, shown.id, user.id);
   // The viewer's own drafts — "Your private notes", the only way back into a
   // draft once its composer is gone. Their own id, never anyone else's
   // (getOwnFileDraftAnnotations).
@@ -247,6 +247,7 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
         title={shown.address === "version" && shown.isLatest ? `${readingTitle(file, shown)} (the latest)` : readingTitle(file, shown)}
         entries={entries}
         elsewhere={elsewhere}
+        worklist={worklist}
         ownDrafts={ownDrafts}
         anchoredLink={anchoredLink}
         metadata={[

@@ -339,8 +339,8 @@ export type VersionManage = {
   notesOn: Record<string, number>;
   /** How many parts of minted links are on each version, by version id. */
   partsOn: Record<string, number>;
-  /** The bulk carries that moved a note of this file, newest first, each shown or hidden as one (`carriesOf`, file-anchor-move.ts). */
-  carries: { id: string; toVersionId: string; at: string; moves: number; hidden: boolean }[];
+  /** The bulk carries that moved a note of this file, newest first, each with how many of its moves are shown (`carriesOf`, file-anchor-move.ts). */
+  carries: { id: string; toVersionId: string; at: string; moves: number; shown: number; hidden: boolean }[];
   /** What a promotion of the waiting version would do to the file's citations; null where none waits. */
   candidateFacts: { unlabelled: boolean; pagedCitations: number | null } | null;
 };

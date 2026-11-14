@@ -177,8 +177,12 @@ export function PdfCarryOutcome({ className }: { className?: string }) {
  * carry's moves are hidden when it is run: on a corrected scan a move tells
  * a reader nothing. Shown, each moved note's card says which version it was
  * moved from, and the page of the version it left lists it as moved.
+ *
+ * A note's author shows or hides a move of their own note, a carry's
+ * included, so some of a carry's moves can be shown and the rest hidden:
+ * the record then says how many, and offers both.
  */
-export function PdfCarryRecord({ carryId, hidden, children }: { carryId: string; hidden: boolean; children: React.ReactNode }) {
+export function PdfCarryRecord({ carryId, moves, shown, children }: { carryId: string; moves: number; shown: number; children: React.ReactNode }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const set = (to: boolean) => {
@@ -189,12 +193,25 @@ export function PdfCarryRecord({ carryId, hidden, children }: { carryId: string;
       else setError(answer.error);
     });
   };
+  const hidden = shown === 0;
   return (
     <div className={styles.versionFacts} data-testid="pdf-carry-record" data-carry-hidden={hidden ? "true" : "false"}>
-      {children} {hidden ? "Its moves are hidden: no card says a note was moved." : "Its moves are shown on each note's card."}{" "}
-      <button type="button" className={styles.manageButton} disabled={pending} data-testid={hidden ? "pdf-carry-show" : "pdf-carry-hide"} onClick={() => set(!hidden)}>
-        {hidden ? "Show its moves" : "Hide its moves"}
-      </button>
+      {children}{" "}
+      {hidden
+        ? "Its moves are hidden: no card says a note was moved."
+        : shown === moves
+          ? "Its moves are shown on each note's card."
+          : `${shown} of its moves ${shown === 1 ? "is" : "are"} shown on ${shown === 1 ? "its note's card" : "their notes' cards"}.`}{" "}
+      {shown < moves && (
+        <button type="button" className={styles.manageButton} disabled={pending} data-testid="pdf-carry-show" onClick={() => set(false)}>
+          {hidden ? "Show its moves" : "Show them all"}
+        </button>
+      )}
+      {shown > 0 && (
+        <button type="button" className={styles.manageButton} disabled={pending} data-testid="pdf-carry-hide" onClick={() => set(true)}>
+          {shown === moves ? "Hide its moves" : "Hide them all"}
+        </button>
+      )}
       {error && (
         <span className={styles.manageError} role="alert">
           {" "}

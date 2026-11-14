@@ -430,12 +430,21 @@ test.describe("a better copy of the same text", () => {
       // What stayed is listed under version 1.
       await expect(page.getByTestId("pdf-other-version-notes")).toContainText(`On the plate ${tag}.`);
       await expect(page.getByTestId("pdf-other-version-notes")).not.toContainText(`The word ${tag}.`);
+      // A carry's moves are hidden: no card bears a sign of one.
+      await expect(page.locator(`[data-margin-note-id="${changed}"]`)).toBeAttached();
+      await expect(page.getByTestId("pdf-note-standing")).toHaveCount(0);
+      await expect(page.getByTestId("pdf-note-moved")).toHaveCount(0);
 
       // The draft is still on version 1, and in its writer's private notes on the latest's page.
       await gotoOk(two.page, at);
       await waitForViewer(two.page);
       await expectSheetText(two.page, `Participation is the first chapter's word ${tag}`, 1);
       await expect(two.page.getByText("Your private notes").locator("..")).toContainText(`A private thought ${tag}.`, { timeout: 15_000 });
+      // Nor does a card of its own author's: two of the moved notes are this writer's.
+      await expect(two.page.locator(`[data-margin-note-id="${changed}"]`)).toBeAttached({ timeout: 30_000 });
+      await expect(two.page.getByTestId("pdf-note-standing")).toHaveCount(0);
+      // The draft is in this writer's worklist, where a carry left it for them.
+      await expect(two.page.getByTestId("pdf-worklist").locator(`[data-note-id="${draft}"]`)).toContainText("Private note");
       // The open link's part is on version 1: in its creator's tray, and not drawn on the latest's sheets.
       await gotoOk(one.page, at);
       await waitForViewer(one.page);
@@ -448,15 +457,32 @@ test.describe("a better copy of the same text", () => {
       await toSheet(one.page, 5);
       await expect(one.page.locator(".annoRectDraftLink").first()).toBeVisible({ timeout: 30_000 });
 
-      // ---- a note posted on version 1 afterwards, and a second carry ----------
+      // ---- two notes posted on version 1 afterwards, one marked "stays here", and a second carry
       const later = String((await asOne("add_note", { on: `${at}/v/1`, body: `Posted on version one afterwards ${tag}.`, quote: "collective representations" })).id);
+      const laterKept = String((await asTwo("add_note", { on: `${at}/v/1`, body: `Meant for version one ${tag}.`, quote: "the scan misread a single word" })).id);
+      // Its author marks it on its own card, on the earlier version's page, where it was posted.
+      await gotoOk(two.page, `${at}/v/1`);
+      await waitForViewer(two.page);
+      await two.page.getByRole("button", { name: /^Show all \d+$/ }).click();
+      const keptCard = two.page.locator(`[data-margin-note-id="${laterKept}"]`);
+      await keptCard.getByTestId("pdf-note-stay").click();
+      await expect(keptCard.getByTestId("pdf-note-stays")).toContainText("You marked this note as staying on version 1.", { timeout: 30_000 });
+      // On that page, the notes the first carry took are listed under version 2 as any note there is: a hidden move says nothing.
+      const movedAway = two.page.getByTestId("pdf-other-version-notes");
+      await expect(movedAway.locator(`[data-thread-id="${word}"]`)).toBeVisible();
+      await expect(movedAway.getByTestId("pdf-note-moved-to")).toHaveCount(0);
+      // Its own author alone may say that one of theirs was moved.
+      await expect(movedAway.locator(`[data-thread-id="${changed}"]`).getByTestId("pdf-note-move-show")).toBeVisible();
+      await expect(movedAway.locator(`[data-thread-id="${word}"]`).getByTestId("pdf-note-move-show")).toHaveCount(0);
+
       const beforeSecond = await getFileAnchorRows(file.id);
       expect(rowOf(beforeSecond, later).versionNumber).toBe(1);
+      expect(rowOf(beforeSecond, laterKept).versionNumber).toBe(1);
       await gotoOk(page, at);
       await waitForViewer(page);
       await page.getByRole("tab", { name: "Metadata" }).click();
       const firstVersion = page.getByTestId("pdf-version-list").locator("[data-version='1']");
-      await expect(firstVersion.getByTestId("pdf-version-notes-left")).toContainText("2 posted notes are still on this version.");
+      await expect(firstVersion.getByTestId("pdf-version-notes-left")).toContainText("3 posted notes are still on this version.");
       // It shows what it would do first, and that moves nothing.
       await firstVersion.getByTestId("pdf-carry-look").click();
       await expect(firstVersion.getByTestId("pdf-carry-preview")).toContainText("1 note would move to version 2.", { timeout: 60_000 });
@@ -469,7 +495,11 @@ test.describe("a better copy of the same text", () => {
       rows = await getFileAnchorRows(file.id);
       expect(rowOf(rows, later).versionNumber).toBe(2);
       expect(rowOf(rows, onPlate).versionNumber).toBe(1);
+      // The marked note placed itself as the other did, and the carry left it.
+      expect(rowOf(rows, laterKept)).toEqual(rowOf(beforeSecond, laterKept));
       moves = await getFileAnchorMoves(file.id);
+      expect(moves.filter((move) => move.toNumber === null)).toEqual([expect.objectContaining({ anchorId: laterKept, fromNumber: 1, movedByEmail: two.user.email })]);
+      moves = moves.filter((move) => move.toNumber !== null);
       expect(moves).toHaveLength(5);
       const secondCarry = moves[4].carryId!;
       expect(secondCarry).not.toBe(firstCarry);
@@ -482,7 +512,7 @@ test.describe("a better copy of the same text", () => {
       await expect(records.last()).toHaveAttribute("data-carry-hidden", "true");
       await records.last().getByTestId("pdf-carry-show").click();
       await expect
-        .poll(async () => (await getFileAnchorMoves(file.id)).filter((move) => !move.hidden).map((move) => move.carryId), { timeout: 30_000 })
+        .poll(async () => (await getFileAnchorMoves(file.id)).filter((move) => move.toNumber !== null && !move.hidden).map((move) => move.carryId), { timeout: 30_000 })
         .toEqual([firstCarry, firstCarry, firstCarry, firstCarry]);
       // A writer who doesn't manage the file is given no carry and may run none.
       await gotoOk(two.page, at);
@@ -491,6 +521,20 @@ test.describe("a better copy of the same text", () => {
       await expect(two.page.getByTestId("pdf-version-list")).toBeVisible();
       await expect(two.page.getByTestId("pdf-carry-record")).toHaveCount(0);
       await expect(two.page.getByTestId("pdf-carry")).toHaveCount(0);
+      // Shown, the carry's moves are on each moved note's card: which version it was moved from, and who moved it.
+      await two.page.getByRole("tab", { name: "Annotations" }).click();
+      for (const id of [word, changed, rectangle]) {
+        await expect(two.page.locator(`[data-margin-note-id="${id}"]`).getByTestId("pdf-note-moved")).toContainText("Moved from version 1 by ", { timeout: 30_000 });
+      }
+      // The second carry's are still hidden.
+      await expect(two.page.locator(`[data-margin-note-id="${later}"]`).getByTestId("pdf-note-moved")).toHaveCount(0);
+      // And on the page of the version they left, each is listed as moved.
+      await gotoOk(two.page, `${at}/v/1`);
+      await waitForViewer(two.page);
+      await expect(two.page.getByTestId("pdf-other-version-notes").locator(`[data-thread-id="${word}"]`).getByTestId("pdf-note-moved-to")).toContainText("Moved to version 2 by ", {
+        timeout: 30_000,
+      });
+      await expect(two.page.getByTestId("pdf-other-version-notes").locator(`[data-thread-id="${later}"]`).getByTestId("pdf-note-moved-to")).toHaveCount(0);
 
       // ---- each carry replayed backwards, in SQL --------------------------------
       // The history holds what an undo needs: every anchor's row is again what it was.
@@ -498,8 +542,9 @@ test.describe("a better copy of the same text", () => {
       expect(await getFileAnchorRows(file.id)).toEqual(beforeSecond);
       expect(await undoCarryInSql(firstCarry)).toEqual({ moves: 4, maps: 0 });
       const restored = await getFileAnchorRows(file.id);
-      expect(restored.filter((row) => row.id !== later)).toEqual(before);
-      expect(await getFileAnchorMoves(file.id)).toEqual([]);
+      expect(restored.filter((row) => row.id !== later && row.id !== laterKept)).toEqual(before);
+      // Nothing of either carry is left: only the mark, which no carry made.
+      expect((await getFileAnchorMoves(file.id)).map((move) => ({ anchorId: move.anchorId, toNumber: move.toNumber }))).toEqual([{ anchorId: laterKept, toNumber: null }]);
     } finally {
       await deleteTestFile(file.id);
     }

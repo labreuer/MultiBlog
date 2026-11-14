@@ -10,6 +10,7 @@ import PdfOutlinePanel from "./PdfOutlinePanel";
 import PdfCollabPanel from "./PdfCollabPanel";
 import { loadPdfAnnotationEntries } from "@/app/actions/annotations";
 import { addAnchoredLinkPart } from "@/app/actions/anchored-links";
+import { moveNoteForward } from "@/app/actions/note-moves";
 import { notifyAnchoredLinkChanged } from "@/lib/anchored-link-tray-events";
 import { useOpenLinkParts } from "@/components/anchored-link/open-link-store";
 import { AnnotationReloadProvider } from "@/components/annotation/annotation-reload-context";
@@ -40,7 +41,9 @@ import type { OwnDraft } from "@/lib/annotation-data";
 import type { ShownVersion } from "@/lib/file-version";
 import type { FileVersionSummary, VersionManage } from "@/lib/file-version-data";
 import type { OtherVersionNote } from "@/lib/pdf-annotation-entries";
+import type { NoteRef, WorklistItem } from "@/lib/file-note-move";
 import PdfVersionBanner from "./PdfVersionBanner";
+import PdfPlacingBanner from "./PdfPlacingBanner";
 import { PdfCaptureProvider } from "./pdf-capture-context";
 import type { RemoteReader } from "./use-pdf-presence";
 import { PDFJS_VERSION, pdfjs } from "@/lib/pdfjs-client";
@@ -104,6 +107,8 @@ type Props = {
   entries: PdfAnnotationEntry[];
   /** The file's notes on its other versions — refetched alongside `entries`. */
   elsewhere: OtherVersionNote[];
+  /** The viewer's notes on earlier versions, on the latest's page — refetched alongside `entries`. */
+  worklist: WorklistItem[];
   /** The viewer's own drafts — refetched alongside `entries`, see `liveEntries`. */
   ownDrafts: OwnDraft[];
   /**
@@ -132,6 +137,7 @@ export default function PdfAnnotationSurface({
   title,
   entries,
   elsewhere,
+  worklist,
   ownDrafts,
   anchoredLink,
   metadata,
@@ -177,8 +183,8 @@ export default function PdfAnnotationSurface({
   // same one re-rendered".
   const [pending, setPending] = useState<{ target: PdfTarget; key: number } | null>(null);
   const [popover, setPopover] = useState<{ left: number; top: number; target: PdfTarget } | null>(null);
-  // "Add to link" failing (docs/ANCHORED_LINKS.md) — shown inside the
-  // selection popover. Remembers *which selection* it was raised against, so
+  // "Add to link" failing (docs/ANCHORED_LINKS.md), or a note's move
+  // refused — shown inside the selection popover. Remembers *which selection* it was raised against, so
   // a new selection's popover simply doesn't render the stale error — no
   // effect resetting state. **By the selection's value, never the popover
   // object's identity**: the click on the button is itself a pointerup, which
@@ -187,6 +193,12 @@ export default function PdfAnnotationSurface({
   // newer version, a candidate: docs/PDF.md §13) is the only thing telling
   // the reader to reload, so it has to be.
   const [linkError, setLinkError] = useState<{ owner: string; message: string } | null>(null);
+  // docs/PDF.md §13, "Moving a note forward" — the note of the viewer's
+  // worklist being placed by hand: while one is, the selection popover
+  // offers to move it to the passage selected. `moving` holds the buttons
+  // while the move is being written.
+  const [placing, setPlacing] = useState<WorklistItem | null>(null);
+  const [moving, setMoving] = useState(false);
 
   // Subscribers that want to hear "the rendering moved" — the panel's layout
   // hook, today. A plain listener set rather than React state: this fires on
@@ -257,15 +269,17 @@ export default function PdfAnnotationSurface({
     list: PdfAnnotationEntry[];
     drafts: OwnDraft[];
     elsewhere: OtherVersionNote[];
+    worklist: WorklistItem[];
   } | null>(null);
   const liveEntries = refetched?.base === entries ? refetched.list : entries;
   const liveDrafts = refetched?.base === entries ? refetched.drafts : ownDrafts;
   const liveElsewhere = refetched?.base === entries ? refetched.elsewhere : elsewhere;
+  const liveWorklist = refetched?.base === entries ? refetched.worklist : worklist;
 
   const reloadEntries = useCallback(() => {
     const base = entries;
     loadPdfAnnotationEntries(fileId, version.id)
-      .then(({ entries: list, ownDrafts: drafts, elsewhere: others }) => setRefetched({ base, list, drafts, elsewhere: others }))
+      .then(({ entries: list, ownDrafts: drafts, elsewhere: others, worklist: mine }) => setRefetched({ base, list, drafts, elsewhere: others, worklist: mine }))
       // Deliberately quiet, and deliberately not an empty list: the panel keeps
       // whatever it is already showing. The annotation is written either way —
       // this only decides how soon it is drawn — so the worst a failure here
@@ -930,6 +944,34 @@ export default function PdfAnnotationSurface({
     [jumpTo],
   );
 
+  // docs/PDF.md §13, "Moving a note forward" — after a note of the worklist
+  // is moved or marked, the page loads its notes again. A moved part of the
+  // open link reloads the tray's store too: it holds its parts as it loaded
+  // them, each with its version, and this surface draws a part by that
+  // version. A part of the link this page was opened on (`?sel=`) arrived
+  // as an initial prop, which only a full reload replaces.
+  const onNoteChanged = useCallback(
+    (ref: NoteRef) => {
+      if (ref.kind === "link-part" && anchoredLink) {
+        window.location.reload();
+        return;
+      }
+      reloadEntries();
+      if (ref.kind === "link-part") notifyAnchoredLinkChanged();
+    },
+    [reloadEntries, anchoredLink],
+  );
+  const onPlace = useCallback((item: WorklistItem | null) => {
+    setPlacing(item);
+    // Where the panel lies over the document, the selection is made under it.
+    if (item && !window.matchMedia(POSITIONED_MEDIA_QUERY).matches) setPanelOpen(false);
+  }, []);
+  const shownForPanel = useMemo(
+    () => ({ number: version.number, isEarlier: version.state === "earlier", latestNumber: versions.find((candidate) => candidate.state === "latest")?.number ?? null }),
+    [version.number, version.state, versions],
+  );
+  const placingKey = placing ? `${placing.kind}:${placing.id}` : null;
+
   const panel = useMemo(
     () => (
       // Everything that can change this file's annotations renders inside
@@ -942,6 +984,12 @@ export default function PdfAnnotationSurface({
           ownDrafts={liveDrafts}
           elsewhere={liveElsewhere}
           onArriveElsewhere={showAnnotationsPane}
+          worklist={liveWorklist}
+          shown={shownForPanel}
+          placing={placingKey}
+          onPlace={onPlace}
+          onNoteChanged={onNoteChanged}
+          onLook={jumpToTarget}
           resolveTops={resolveTops}
           subscribe={subscribe}
           positioned={positioned}
@@ -953,7 +1001,26 @@ export default function PdfAnnotationSurface({
         />
       </AnnotationReloadProvider>
     ),
-    [fileId, liveEntries, liveDrafts, liveElsewhere, showAnnotationsPane, resolveTops, subscribe, positioned, jumpTo, pending, reloadEntries, handle],
+    [
+      fileId,
+      liveEntries,
+      liveDrafts,
+      liveElsewhere,
+      liveWorklist,
+      shownForPanel,
+      placingKey,
+      onPlace,
+      onNoteChanged,
+      jumpToTarget,
+      showAnnotationsPane,
+      resolveTops,
+      subscribe,
+      positioned,
+      jumpTo,
+      pending,
+      reloadEntries,
+      handle,
+    ],
   );
 
   const panes = useMemo<PdfPane[]>(
@@ -1024,7 +1091,7 @@ export default function PdfAnnotationSurface({
           }
         />
 
-        {(anchoredLink || fragment.regions.length > 0 || fragment.page !== null || !version.isLatest || manage !== null) && (
+        {(anchoredLink || fragment.regions.length > 0 || fragment.page !== null || !version.isLatest || manage !== null || placing !== null) && (
           // One overlay for every banner: a ?sel= visit and a fragment can
           // arrive together, on a version that is not the latest, and fixed
           // boxes at one spot would cover each other. A manager has it on
@@ -1032,6 +1099,7 @@ export default function PdfAnnotationSurface({
           // a promotion just did; empty, it has no height.
           <div className={styles.anchoredLinkOverlay}>
             <PdfVersionBanner slug={slug} version={version} versions={versions} manage={manage} className={styles.overlayBanner} />
+            {placing && <PdfPlacingBanner item={placing} versionNumber={version.number} onCancel={() => setPlacing(null)} className={styles.overlayBanner} />}
             {anchoredLink && (
               <AnchoredLinkBanner
                 link={anchoredLink}
@@ -1066,6 +1134,44 @@ export default function PdfAnnotationSurface({
 
         {popover && (
           <div className={styles.selectionPopover} style={{ left: popover.left, top: popover.top }}>
+            {placing && (
+              <button
+                type="button"
+                disabled={moving}
+                data-testid="pdf-place-note-here"
+                onClick={async () => {
+                  // docs/PDF.md §13, "Moving a note forward" — a note placed
+                  // by hand: the selection is sent as a capture is, and
+                  // checked on the server as a move. The destination is the
+                  // version this page loaded, the latest when it did.
+                  const owner = selectionKey(popover.target);
+                  setMoving(true);
+                  const answer = await moveNoteForward({
+                    kind: placing.kind,
+                    id: placing.id,
+                    fromVersionId: placing.versionId,
+                    fingerprint: placing.fingerprint,
+                    destinationVersionId: version.id,
+                    target: popover.target,
+                  }).catch(() => ({ ok: false as const, error: "That didn't work. Reload the page and try again." }));
+                  setMoving(false);
+                  if (!answer.ok) {
+                    setLinkError({ owner, message: answer.error });
+                    return;
+                  }
+                  onNoteChanged(placing);
+                  setPlacing(null);
+                  if (!answer.value.moved) {
+                    setLinkError({ owner, message: "This note had changed since you chose it, and was not moved. Choose it again in your list." });
+                    return;
+                  }
+                  setPopover(null);
+                  window.getSelection()?.removeAllRanges();
+                }}
+              >
+                Move the note here
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
