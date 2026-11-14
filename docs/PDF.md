@@ -42,8 +42,9 @@ it, so this list is the whole of the warning.
 - **A PDF's bytes, page text, labels and anchors are a version's, never the file's** (§13,
   "Versions"). A file's id and a version's are both strings, and a migrated version 1 has its
   file's id, so passing one for the other works on every file uploaded before versions
-  existed. Only a file whose version has an id of its own shows the mistake, and the e2e
-  fixture's is the only one (`addTestFileVersion`).
+  existed. A file uploaded since has a version with an id of its own, and shows the mistake.
+  Every e2e fixture file is one, made through the upload's own writer, so the suite catches
+  it where a look at old data does not.
 - **A link to a note, a card or a link part on a PDF is built by `pdfPath` from the version
   the note is on** (`noteVersions`; a reply's is its root's), never from a template string
   (§13, "Addresses"). One written as `/pdf/${slug}` lands on the note's entry in the list of
@@ -2333,9 +2334,19 @@ MCP's write check share one reading (PDF_FRAGMENT_LINKS.md §8).
   link.
 - **A link to a version's own address is a link into that version**:
   `/pdf/<slug>/v/<n>#sheet=…&text=…`, which is what a reader on an earlier version copies from
-  the address bar. Three parsers take only `/pdf/<slug>` today and would pass over it
-  unchecked: the integrity check's `parseFragmentLinkHref`, MCP's `parseRef`, and a
-  citation's `referentKind`, which calls it a link elsewhere.
+  the address bar. Three places take only `/pdf/<slug>` today and would pass over it
+  unchecked:
+  - `parseFragmentLinkHref` (`src/lib/pdf-fragment-findings.ts`), which the integrity check,
+    MCP's write check and the cited-passage route all read an href with;
+  - a citation's `referentKind` (`src/lib/entity-chips/kinds/citation.ts`), which calls it a
+    link elsewhere;
+  - the slug pattern `check-pdf-fragment-links.ts` writes out by hand for a `/pdf/`
+    referent.
+
+  What reads a version's address already: MCP's `parseRef`, whose `ResolvedFile` carries the
+  version's id, number and state and whether the address named it. The fragment checker
+  reads the latest version's pages alone (`pagesFor`, `pagesAt`,
+  `src/lib/pdf-fragment-check.ts`); of its functions only `sheetHolding` takes a version.
 - **A link that names a version other than the latest, and lands with its words found, is
   no fault**, and every link written before a file's second version is one. The integrity
   check lists such a link only under `--verbose`, with its form for the latest where it can
@@ -2409,8 +2420,8 @@ Rejected, with reasons:
   exists. `FILE_STORAGE_DIR` grows by a whole copy per version, and nothing shrinks it
   (Open).
 - **`scripts/upgrade-pdf-text-version.ts` works version by version**, over every version that
-  has its bytes, where it works file by file today: it extracts, restamps anchors and deletes
-  older extractions within one version. An abandoned version has no bytes to extract from and
+  has its bytes: it extracts, restamps anchors and deletes older extractions within one
+  version. An abandoned version has no bytes to extract from and
   is skipped.
   - **It locks the file row for each file's writes**, as a move does, so it can't write an
     old target back over a moved one.

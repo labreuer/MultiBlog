@@ -205,7 +205,8 @@ before changing the behavior it describes.
 - **Before changing code that takes a file's id, reads `file`, `file_version` or
   `file_page_text`, links to `/pdf/…` or writes an anchor with a PDF target, read docs/PDF.md
   §0, "Mistakes that fail no check".** Search, MCP, links and tags are such code, not only
-  the viewer. A file's id passed for a version's compiles and works on every real file.
+  the viewer. A file's id passed for a version's compiles, and works on every file uploaded
+  before versions existed.
 - **Bumping `pdfjs-dist` is never routine**, and neither is deleting the test that looks
   trivial. Pinning protects the *API* pdfjs offers, not the JavaScript runtime it assumes
   underneath, and WebKit ships those built-ins late or not at all — so a bump needs
