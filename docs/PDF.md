@@ -1290,6 +1290,11 @@ note is *moved*, a map is built or a run of sheets is answered, it describes the
 subsections "Matching the pages", "Placing each anchor" and "Moving a note forward" are
 plan throughout, and so is the carry in "Promotion" and in "Links into the file".
 
+**Three measured rules of that plan are written, with nothing calling them yet**: how alike
+two sheets are (`src/lib/pdf-sheet-alike.ts`), a range carried through the diff of two
+sheets (`src/lib/pdf-quote-carry.ts`), and the transform fitted to the words two sheets
+share (`src/lib/pdf-sheet-fit.ts`). Each is pure and has its unit tests.
+
 The rest of the section is a plan in those parts, and the one exception to this file's
 "every statement is current". Where a statement below is of something built, it names the
 function or the file that holds it. When the rest lands, the section is rewritten as an
@@ -1891,7 +1896,12 @@ rules 4 and 5. It is built in order of trust:
      the mask has decoded, and drops one that fails with a warning. So a sheet whose only ink
      is a JBIG2 mask would read as drawing nothing, and be taken for a blank one.
    - **A sheet with an image that failed to decode counts as ink**, whatever its operator
-     list holds, and the measurement below includes a scan whose sheets are JBIG2 masks.
+     list holds.
+   - **Text is not ink.** A scan's text layer is drawn in rendering mode 3, which paints
+     nothing, so `showText` is left out of the painting operators. They are the image and
+     image-mask operators, `shadingFill`, and a `constructPath` that carries a stroke or a
+     fill. Read so, with `wasmUrl`, every sheet of four scans reads as it should (How the
+     numbers were measured).
 5. **Sheets with ink but no text**, such as plates, figures and image-only scans, are placed
    between their aligned neighbours when the run between them has the same length in both
    versions. Otherwise they are left unmapped.
@@ -1961,15 +1971,31 @@ What follows holds for both:
   is. On a candidate there is nothing to carry yet, and its promotion's carry reads the map
   as answered.
 
-**How alike two sheets must be** is one measure, which rules 2 and 3 share. It and its
-threshold are settled by measurement before a map is built.
+**How alike two sheets must be** is one test, which rules 2 and 3 share (`sheetsAlike`,
+`src/lib/pdf-sheet-alike.ts`). Two sheets are alike when each holds the other's words, not
+when one holds the other's among more. So a sheet of a reflowed draft is not paired with the
+sheet that took most of its words.
 
-- **Two sheets are alike when each holds the other's words**, not when one holds the other's
-  among more. So a sheet of a reflowed draft is not paired with the sheet that took most of
-  its words.
-- **It is measured on three pairs**: a scan before and after its text layer is corrected,
-  where every sheet should pair with itself; two scans of one book; and two drafts of a paper,
-  where a sheet that reflowed should come out unmapped and one that didn't should pair.
+The test is two numbers over the two sheets' skeletons, each taken both ways round. One
+number can't do it: a page read badly in one scan and a page that lost three lines to its
+neighbours share the same amount of text with their counterparts (How the numbers were
+measured).
+
+- **Share** says whether the two sheets are the same page. Of the runs of four letters in a
+  sheet's skeleton, it is the share the other sheet holds. A run counts as often as it
+  occurs, and each of the other sheet's answers for one of this sheet's. Order plays no
+  part, so a page whose columns are read in another order keeps its share. **Each sheet
+  holds at least 0.55 of the other's.**
+- **Moved** says whether the page kept its place. It is the share of a sheet's letters that
+  lie in a run of 16 letters which the sheet before or after the other one holds, and in no
+  run of 16 which the other one holds. Words a bad reading lost are on no sheet, and words a
+  reflow moved are on the neighbour. **No more than 0.05 of either sheet's letters moved.**
+- **A sheet whose skeleton is shorter than four letters** has no run to compare. It counts
+  as a sheet without text, under rule 5.
+
+Rule 3's alignment takes two sheets as equal when they are alike. Across every pair
+measured, no sheet is alike to a sheet that is not its counterpart, but for plates whose
+captions differ by a digit.
 
 A map stays on its version's row for good, an abandoned version's included: links are resolved
 through it (Links into the file). The answers given about an abandoned candidate's runs are
@@ -2014,18 +2040,39 @@ alone, and a suggestion shows whichever came out (Moving a note forward).
   carried through a diff of the two sheets' text (`diffText` over `tokenizeFine`'s tokens,
   `src/lib/diff.ts`). The earlier sheet is read at the text version the anchor names, which its
   offsets are into and which the text-version script keeps for it. It places itself where both
-  ends of the range come through at a word boundary: each end in text the two sheets share, or
-  in a run the diff replaces word for word. The quote is then derived anew from the later
-  version's text, so "modem" becomes "modern". How much of a range may change is settled with
-  the measure above.
+  ends of the range come through at a word boundary: each end in a word the two sheets share,
+  or in a run the diff replaces word for word. The quote is then derived anew from the later
+  version's text, so "modem" becomes "modern" (`carryRange`, `src/lib/pdf-quote-carry.ts`).
+  - **A run is what stands between two shared words.** The diff also matches the space or the
+    comma between two changed words. Cut there, a run pairs "empiricafphenomenon" with
+    "empirical" and the range loses "phenomenon".
+  - **No more than a third of the quote's letters changed.** The old quote's skeleton and the
+    new one's are compared letter by letter: the letters outside the longest run, in order,
+    that both hold are at most a third of the two skeletons together. "modem" to "modern" is
+    0.27. Past a third the carried range is too often another passage, and it is a proposal
+    (How the numbers were measured).
+  - **The range goes by the words it touches.** It keeps the punctuation and space it began
+    and ended with where the later sheet has the same beside those words, and its place
+    inside a shared word it began or ended within.
 - **it has no words, and the ink has not moved.** A rectangle selection is a target whose
   `position` is null. A text selection whose quote the capture dropped
   (`capturePdfTextAnchor`, on a mismatch) has a position and an empty quote, and is carried as
   a rectangle is, written with its `position` null: its offsets were into the earlier
   version's page text. Either places itself, its quads unchanged, when the mapped sheet has
-  the same page box and rotation and a transform fitted to the text items the two sheets
-  share is the identity, within a tolerance settled with the measure above. A text layer
-  that was corrected moves its items a little and the ink not at all.
+  the same page box and rotation and a transform fitted to the words the two sheets share is
+  the identity: it moves no corner of the page box by more than 3 points (`fitSheets` and
+  `fitIsIdentity`, `src/lib/pdf-sheet-fit.ts`). A text layer that was corrected moves its
+  words a little and the ink not at all.
+  - **The transform is a shift, a turn and a scale**, fitted by least squares to the two ends
+    of each shared word's box. The words are those of three letters or more that the diff
+    above finds in both sheets, each measured as `quadsForRange` measures a range. A fit
+    with a skew in it runs wild on a sheet of a few lines, whose points are nearly on one
+    line.
+  - **The fit drops what it fits worst, twice**: every end farther from its counterpart than
+    three times the median, or than half a point where that is more. A word the diff paired
+    with the same word elsewhere on the sheet would otherwise pull it.
+  - **Words, not text items**: a correction cuts a line's items anew, and an item that was
+    cut has no counterpart to compare.
 
 The new target is measured on the later version's sheet as MCP measures one (MCP.md §8,
 `anchorPdfQuote`'s pipeline):
@@ -2044,10 +2091,11 @@ refuses today.
   both empty;
 - the quote found several times in the version, where exactly one occurrence agrees with
   them;
-- the quote's words changed, and the diff carries the range less cleanly than above. The
-  suggestion shows the old quote beside the new;
+- the quote's words changed, and the diff carries the range less cleanly than above, or more
+  than a third of its letters changed. The suggestion shows the old quote beside the new;
 - a rectangle selection whose sheet moved: its quads are carried by the fitted transform,
-  when the fit is close;
+  when the fit is close. It is close when what it leaves of the shared words' ends, as a
+  root mean square, is no more than 2.5 points;
 - a rectangle selection on a sheet with no text items, a plate or an image-only scan: its
   quads unchanged, when the page box and rotation agree. Nothing on such a sheet says whether
   the ink sits where it did.
@@ -2062,6 +2110,172 @@ switched off for one, since no reader branches on the kind of version. What diff
 no bulk carry is run, so each answer goes to the note's author, and a match of the words is
 never more than a suggestion to them. Without a page map there is no mapped sheet either, so
 a suggestion there comes from the quote being found in the whole version.
+
+### How the numbers were measured
+
+Measured with pdfjs 6.2.108, each file opened as `openPdf` opens one, on pairs of an earlier
+and a later copy of one text. None is in the repository. Each is named here by its sheets:
+
+- **two scans whose text layer was corrected** in one pass, the page images byte for byte the
+  same: 247 sheets, and 351;
+- **four books scanned or built twice**: 446 sheets, the earlier copy's OCR poor and seven of
+  its sheets plates; 225 sheets to 224; 245 to 250, where the later keeps five blank versos;
+  and a later edition with the same pagination, 232 to 246;
+- **a publisher's PDF against a scan** of the same 13 pages, where the publisher's PDF
+  gives its digits as private-use characters, which a skeleton drops;
+- **drafts**: a paper as submitted (34 sheets), as a preprint (33) and as published (23), no
+  sheet keeping its place; a working paper's two drafts, 8 and 9 sheets, converted from
+  `.docx`; an article's early-online and issue versions, 11 sheets with the same pagination;
+  and an article with and without two cover sheets, 13 and 15;
+- **a slide deck**, 13 slides to 18, for very short sheets;
+- **four scans for the blank-sheet read**, below.
+
+**How alike.** 1,760 pairs of sheets are the same page in the same place: every sheet with
+text of the scans, the editions, and the two articles that kept their pagination. 42 are a
+draft's sheet and the sheet of the next draft that holds most of it: 34 of the paper's, 8 of
+the working paper's.
+
+| | pairs | alike | lowest share | most moved |
+|---|---|---|---|---|
+| corrected scan, 247 sheets | 247 | 247 | 0.929 | 0.006 |
+| corrected scan, 351 sheets | 342 | 340 | 0.958 | 0.004 |
+| two scans, 446 sheets, less its plates | 434 | 433 | 0.650 | 0.270 |
+| two scans, 225 to 224 | 223 | 223 | 0.908 | 0.006 |
+| two builds, 245 to 250 | 245 | 245 | 0.577 | 0.033 |
+| two editions, 232 to 246 | 232 | 232 | 0.865 | 0.002 |
+| publisher's PDF and scan | 13 | 13 | 0.777 | 0.000 |
+| article, two versions | 11 | 11 | 0.947 | 0.014 |
+| article, with cover sheets | 13 | 13 | 0.981 | 0.012 |
+| paper's draft and preprint | 34 | 0 | | |
+| working paper's drafts | 8 | 0 | | |
+
+- **No one number separates them.** By share, the least alike full pages of the 446-sheet
+  scan are 0.818 and 0.822, and the draft sheet that reflowed least is 0.828. By the letters
+  two sheets have in common in order, the same sheets are 0.899 and 0.905 against 0.845,
+  which a threshold would separate by 0.027 on each side. But that measure puts a
+  two-column index whose columns were read in another order at 0.67, and a bibliography
+  sheet of the publisher's PDF at 0.837.
+- **Share: the same page or another.** Of 530,000 pairs of different pages of one text, each
+  of 50 letters or more, the most alike is 0.476, two plates, and 23 are over 0.4. Of the
+  same pages, 1,718 are 0.9 or more and 8 are under 0.8. With runs of three letters
+  different pages reach 0.63, and with five the index below falls to 0.49. Nearest the line:
+  - 0.577: a part title of 28 letters, read with four letters different;
+  - 0.598: a Scripture index, 1,703 letters, most of them digits read in another order;
+  - 0.650 and 0.702: a title page and a frontispiece's caption, 83 to 154 letters, where
+    the earlier reading missed a line;
+  - 0.777: a bibliography's last sheet, which has no digits in the publisher's PDF;
+  - 0.509, and not alike: a plate the earlier copy reads as garbage and a caption and the
+    later as the caption alone. Rule 6 proposes it;
+  - the two sheets not alike of the 351 have one letter of text each.
+- **Moved: the same place or not.** It is 0 on 1,473 of the 1,760 and 0.02 or less on 1,754.
+  Where it is not 0, a phrase that one reading garbled stands again on the next sheet. It is
+  0.033 at most, but for one sheet. Of the drafts' 28 sheets with a share of 0.55 or more,
+  the least are 0.076, 0.098 and 0.115. Nearest the line:
+  - 0.270, and so not alike: the 446-sheet scan's title page, 126 letters, whose imprint line
+    only the later reading has. The earlier has those words on the next sheet, the copyright
+    page. It is left to rule 6;
+  - 0.076: the draft sheet that reflowed least. A line went to the sheet before and a line
+    and a half to the sheet after, 176 of its 2,314 letters;
+  - 0.098: the working paper's last sheet, which took three headings, 87 letters, from the
+    sheet before. Its share is 0.90. It comes out unmapped, as a sheet that took lines from
+    its neighbour.
+- **Sheet against sheet**, every sheet of each earlier copy against every sheet of the
+  later: the only pairs alike that are not counterparts are the 446-sheet scan's plates,
+  whose captions are 16 letters and differ by a digit ("FIGURE 2. Continued"). No sheet of
+  the paper is alike to any sheet of its preprint or of the published chapter.
+- **The slides**: four of 13 are alike to a slide of the later deck, at 0.79 and over. The
+  rest are 0.64 and under.
+
+**How much of a quote may change.** These files have no notes, so the ranges are made: on
+each sheet, every run of 1, 2, 3, 5, 8, 13, 21 and 34 consecutive words, from every word of
+the corrected scans and every second word of two rebuilt ones, kept when its skeleton is no
+longer on the later sheet, which is when the rule is reached. Each is carried through
+`diffText` over `tokenizeFine`'s tokens, and judged by the ink: the range's quads on the
+earlier sheet, taken through the fitted transform below where the scan is another, against
+the carried range's quads. It is **right** when both its ends are within one text size of
+the ink's.
+
+| ranges, and the share right, by letters changed | corrected, 247 | corrected, 351 | rebuilt, 225 | rebuilt, 446 |
+|---|---|---|---|---|
+| under 0.1 | 48,477, 99.8% | 24,195, 99.8% | 21,229, 99.6% | 67,230, 99.4% |
+| 0.1 to 0.2 | 3,666, 99.1% | 770, 99.9% | 1,065, 98.9% | 4,061, 97.3% |
+| 0.2 to a third | 1,236, 98.3% | 154, 100% | 278, 98.2% | 811, 94.3% |
+| a third to 0.5 | 240, 96.2% | 24, 100% | 46, 97.8% | 199, 85.9% |
+| 0.5 to 0.75 | 181, 95.0% | 11, 100% | 29, 93.1% | 121, 72.7% |
+| 0.75 and over | 53, 96.2% | 7, 100% | 10, 100% | 40, 25.0% |
+| **placed at a third** | 99.1%, right 99.75% | 99.8%, right 99.83% | 99.6%, right 99.58% | 99.5%, right 99.19% |
+| held back, and right all the same | 474, 95.8% | 42, 100% | 85, 96.5% | 360, 74.7% |
+
+- **The table is of ranges both of whose ends come through**, in a shared word or a run
+  replaced word for word. An end is lost for 1% to 4% of the ranges of three of the pairs,
+  and for 59% of the 446-sheet scan's, whose earlier reading breaks and joins words
+  throughout. Those are proposals.
+- **Only the poor scan sets the limit.** A corrected scan's ranges are right however much of
+  them changed, since a correction changes letters and leaves the words where they were.
+  Nearest the line on the 446-sheet scan, placed and right: "UJords" to "words" (0.27),
+  "a granunar" to "a grammar" (0.29), "lJ1other" to "another" (0.33). Placed and wrong:
+  "I tain" to "cer- tain" (0.33), whose start is off the ink. Held back and wrong:
+  "th usiaSI" to "out with" (0.73).
+- **Counted in words, the same ranges give no limit**: a one-word quote that changed is
+  wholly changed, and is right 94.0% to 99.6% of the time.
+- **Runs.** With a run ended at any shared token, as the diff comes, an end in a run
+  replaced word for word is right 70.1% of the time on the 446-sheet scan and 91.6% on the
+  351-sheet one. Ended only at a shared word, 95.2% and 99.6%.
+- **An end on the first or last word of a run that is not word for word**, in 4% to 7% of
+  the ranges, is right 96.7% to 98.4% of the time, about as often as an end in a run that
+  is. The rule above leaves it a proposal.
+- **The corrections' own list**, kept for the 247-sheet scan, names its changes as its
+  Markdown extraction has them. Its old words stand on an earlier sheet, and no longer on
+  the later, in 75 places. The carried range is the list's new words in 58. Several of the
+  rest end at a character the earlier reading had as a symbol, "%" for "8", which no word
+  boundary reaches.
+
+**The transform.** The fit is made for each pair of counterpart sheets, and read as how far
+it moves the page box's corners, in points.
+
+| | sheets | same box | median | largest | smallest |
+|---|---|---|---|---|---|
+| corrected scan, 247 sheets | 246 | all | 0.000 | 0.010 | |
+| corrected scan, 351 sheets | 340 | all | 0.010 | 1.41, then 0.31, 0.14 | |
+| article, with cover sheets | 13 | all | 0.001 | 0.010 | |
+| article, two versions | 11 | all | 6.80 | 7.35 | 6.80 |
+| two scans, 446 sheets | 441 | none | 1.76 | 70.3 | 0.62 |
+| two scans, 225 to 224 | 223 | none | 5.95 | 20.6 | 1.90 |
+| two builds, 245 to 250 | 245 | none | 12.8 | 175 | 2.40 |
+| two editions, 232 to 246 | 232 | none | 41.3 | 123 | 6.01 |
+
+- **The ink has not moved in the first three**, and the fit says so within 0.31 points on
+  598 of 599 sheets. The one at 1.41 is four lines of notes, 24 shared words, whose items
+  the correction cut anew. A fit with a skew in it puts that sheet at 13.5.
+- **The far side is the article's two versions**: one page box, and its text 6.80 points to
+  the left on even sheets and to the right on odd.
+- **The page box is the first test, and it is needed.** No rebuilt book kept its box. Had
+  the 446-sheet scan kept it, 408 of its 441 sheets would pass at 3 points and 16 at 1.
+- **A correction leaves most items as they were**: 98.1% of the 247-sheet scan's and 93.7%
+  of the 351-sheet one's are in the later copy with the same string, matrix and width.
+- **How close a fit is**, for a proposal: of the 1,154 sheets of the five pairs whose ink
+  moved to another box, the fit leaves 1.94 points or less on 1,150, and a median of 0.94.
+  The other four leave 3.4, 4.6, 8.2 and 98: two title pages, a sheet of 11 shared words,
+  and an index whose columns were read in another order, so that the diff pairs names
+  across them. Where the ink did not move the most is 0.82.
+
+**The blank-sheet read.** Each scan's operator lists are compared with what its own objects
+say each sheet paints, read by MuPDF.
+
+| | sheets | what they paint | without `wasmUrl` | with it |
+|---|---|---|---|---|
+| no text layer | 1,218 | 777 a JBIG2 mask alone, 430 a JPEG and a mask, 1 a JPEG, 10 nothing | 787 draw nothing | the 10 draw nothing |
+| with text | 598 | 491 a mask alone, 75 a JPEG and a mask, 32 nothing | the 491 hold `showText` alone | the 32 draw nothing |
+| with text | 21 | 18 a mask alone, 3 a JPEG and a mask | the 18 hold `showText` alone | none draws nothing |
+| with text | 280 | each a JPEG 2000 image with a JBIG2 soft mask | none draws nothing | none draws nothing |
+
+- **A mask that fails leaves no operator**, only a warning on the console: "JBig2 failed to
+  initialize". An image that is not a mask keeps its `paintImageXObject` whether or not it
+  decodes, which is why the last scan reads right both ways.
+- **The three text layers are all in rendering mode 3.** No sheet holds `showText` and has
+  no text.
+- **Decoding costs time**: the 1,218 sheets take 11 seconds with `wasmUrl` and 3 without, and
+  the 280 JPEG 2000 sheets 14 against 1. The read is asked of sheets without text alone.
 
 ### Moving a note forward
 
@@ -2731,7 +2945,7 @@ Rejected, with reasons:
 
 ### Building it
 
-Four pull requests, each merged before the next is opened.
+Five pull requests, each merged before the next is opened.
 
 1. **Steps 1 to 4** change no behaviour while every file has one version, so the existing
    suite proves them before any file can have a second.
@@ -2740,7 +2954,11 @@ Four pull requests, each merged before the next is opened.
    text whose notes can't be moved yet: a note stays where it is, and a link opens the
    version it names. Nothing is lost by stopping here, since a carry can be run on any
    earlier version later.
-4. **Steps 10 to 13** add the page maps and the moves.
+4. **The numbers steps 10 and 11 rest on**, measured, with the three rules they belong to
+   written as pure functions that nothing calls (How the numbers were measured). It changes
+   no behaviour, and it puts the numbers where they can be read apart from what is built on
+   them.
+5. **Steps 10 to 13** add the page maps and the moves.
 
 The existing suite can't prove the reads by version, since a missing filter passes every test
 while each file has one version. So the first pull request adds a fixture to
@@ -2754,7 +2972,8 @@ promoted and not abandoned, and that a file's versions are numbered from 1 with 
 **Steps 1 to 4 are built**, as three commits: steps 1 and 2 are one, since the migration
 drops the columns and no tree compiles between the schema and the readers that follow it.
 **Step 5 is built**, as the second pull request. **Steps 6 to 9 are built**, as the third,
-with no migration: every column they write was made by step 1.
+with no migration: every column they write was made by step 1. **The measured rules are
+written**, as the fourth.
 
 **The deploy that carries the first migration takes the PDF surfaces down for the length of
 its build**, and that is accepted. `deploy/deploy.sh` migrates before it builds, so until the
@@ -2851,9 +3070,14 @@ down until one succeeds, whatever the script's message says of the live site.
     text was rebuilt and is proposed by its place, no labels, a sheet left unmapped, a
     reflowed pair left unmapped, and a run of sheets of each kind before and after it is
     accepted;
-  - the placing rules: a tie broken by `prefix` and `suffix` and one that isn't, a quote found
-    once in the version with and without them agreeing, a range carried through the diff
-    cleanly and not, and the transform fit;
+  - the placing rules: a tie broken by `prefix` and `suffix` and one that isn't, and a quote
+    found once in the version with and without them agreeing;
+  - the three measured rules, which are written (`src/lib/pdf-sheet-alike.test.ts`,
+    `pdf-quote-carry.test.ts`, `pdf-sheet-fit.test.ts`): each number at its line, words lost
+    against words moved to a neighbour, a run the diff would cut at a shared space, an end
+    inside a word that was joined, a fit pulled by words paired wrongly, and a sheet of one
+    line. The files they were measured on are not in the repository, so the tests are of
+    made text and say what each number is of, not that it is the right one;
   - a link's reading: stamped and not, by sheet and by page, from the bare address and from a
     version's own, carried through two maps, with a map missing on the way, onto a sheet with
     no counterpart with and without words, stamped with an abandoned version that kept a map
