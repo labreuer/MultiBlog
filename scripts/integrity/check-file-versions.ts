@@ -25,6 +25,32 @@
 //   - `number-gap`: the file's versions are not numbered 1 to their count. An
 //     abandoned version keeps its row, so nothing should ever leave a gap.
 //
+//   - `no-bytes`: a version that is not abandoned has no bytes on disk.
+//     Abandoning removes a blob before its transaction commits, under a lock
+//     on the hash that every upload takes (docs/PDF.md §13, "The upload"), so
+//     this is a commit that failed after the removal, a restored database
+//     without its FILE_STORAGE_DIR, or a write that skipped the lock. A
+//     second abandoning clears a candidate left this way.
+//   - `abandoned-with-text`: an abandoned version still has page text. Its
+//     bytes are gone, so nothing could have extracted it since.
+//
+// And over every anchor into a file (`annotation`, `tag_anchor`,
+// `anchored_link_anchor`, `comment_quote_anchor`):
+//
+//   - `anchor-without-version`: a row with a PDF target names no version. The
+//     tables' CHECKs refuse it; this is the same claim read back.
+//   - `anchor-on-candidate`, `anchor-on-abandoned`: a row names a version
+//     that was never promoted, or was abandoned. A capture checks its version
+//     inside the transaction that inserts it (`assertCaptureVersion`), and a
+//     candidate takes no note or link part, since abandoning it removes the
+//     sheets the anchor was measured on. Nothing else reports one that got
+//     through.
+//   - `unmoved-kind`: a `tag_anchor` or `comment_quote_anchor` row holds a
+//     `PDF_TEXT` selector on a file with more than one version. Neither has a
+//     writer of one today, and nothing would move such a row forward, so one
+//     appearing means a writer was added without its place in the move
+//     (docs/PDF.md §13, "Placing each anchor").
+//
 // The pair foreign key already guarantees the latest is one of the file's own
 // versions; scripts/integrity/check-tag-constraints.ts proves that key, the
 // one-candidate index and the anchor CHECKs reject what they should.
@@ -35,7 +61,9 @@
 // Exits non-zero on any ERROR.
 
 import "dotenv/config";
+import { Prisma } from "../../src/generated/prisma/client";
 import { prismaIncludingDeleted as prisma } from "../../src/lib/prisma";
+import { storedByteSize } from "../../src/lib/file-storage";
 
 let errors = 0;
 let verbose = false;
@@ -62,7 +90,10 @@ async function main(): Promise<void> {
       id: true,
       slug: true,
       currentVersionId: true,
-      versions: { orderBy: { number: "asc" }, select: { id: true, number: true, promotedAt: true, abandonedAt: true } },
+      versions: {
+        orderBy: { number: "asc" },
+        select: { id: true, number: true, sha256: true, promotedAt: true, abandonedAt: true, _count: { select: { pageTexts: true } } },
+      },
     },
   });
   if (fileArg && files.length === 0) throw new Error(`No file with id or slug "${fileArg}".`);
@@ -91,11 +122,68 @@ async function main(): Promise<void> {
       report(name, "number-gap", `its versions are numbered ${numbers.join(", ")}, not 1 to ${numbers.length}`);
     }
 
+    for (const version of file.versions) {
+      if (version.abandonedAt === null) {
+        if ((await bytesOf(version.sha256)) === null) {
+          report(name, "no-bytes", `version ${version.number} has no bytes on disk (${version.sha256.slice(0, 12)}…)`);
+        }
+      } else if (version._count.pageTexts > 0) {
+        report(name, "abandoned-with-text", `version ${version.number} is abandoned and still has ${version._count.pageTexts} row(s) of page text`);
+      }
+    }
+
     note(`${name}: ${file.versions.length} version(s) ✓`);
   }
 
+  await checkAnchors(fileArg ? files.map((file) => file.id) : null);
+
   console.log(`\n${files.length} file(s) checked. ${errors} error(s).`);
   if (errors > 0) process.exitCode = 1;
+}
+
+// Several versions routinely share a blob, so each hash is looked for once.
+const bytesSeen = new Map<string, Promise<number | null>>();
+function bytesOf(sha256: string): Promise<number | null> {
+  let pending = bytesSeen.get(sha256);
+  if (!pending) bytesSeen.set(sha256, (pending = storedByteSize(sha256)));
+  return pending;
+}
+
+/** The four tables whose rows can hold a PDF target, and how each says that it does. */
+const ANCHOR_TABLES = [
+  { table: "annotation", holdsPdfTarget: Prisma.sql`a.pdf_target IS NOT NULL`, mustNotOutliveOneVersion: false },
+  { table: "tag_anchor", holdsPdfTarget: Prisma.sql`a.selector_kind = 'PDF_TEXT'`, mustNotOutliveOneVersion: true },
+  { table: "anchored_link_anchor", holdsPdfTarget: Prisma.sql`a.selector_kind = 'PDF_TEXT'`, mustNotOutliveOneVersion: false },
+  { table: "comment_quote_anchor", holdsPdfTarget: Prisma.sql`a.selector_kind = 'PDF_TEXT'`, mustNotOutliveOneVersion: true },
+] as const;
+
+type AnchorFault = { id: string; fileId: string; number: number | null; promoted: boolean | null; abandoned: boolean | null; versions: number };
+
+/** Every anchor into a file, against the version it names. `fileIds` narrows it to `--file`'s. */
+async function checkAnchors(fileIds: string[] | null): Promise<void> {
+  let anchors = 0;
+  for (const { table, holdsPdfTarget, mustNotOutliveOneVersion } of ANCHOR_TABLES) {
+    const rows = await prisma.$queryRaw<AnchorFault[]>(Prisma.sql`
+      SELECT a.id::text AS id, a.file_id AS "fileId", v.number, (v.promoted_at IS NOT NULL) AS promoted, (v.abandoned_at IS NOT NULL) AS abandoned,
+             (SELECT count(*)::int FROM file_version n WHERE n.file_id = a.file_id) AS versions
+      FROM ${Prisma.raw(`"${table}"`)} a
+      LEFT JOIN file_version v ON v.id = a.file_version_id
+      WHERE ${holdsPdfTarget} ${fileIds ? Prisma.sql`AND a.file_id = ANY(${fileIds})` : Prisma.empty}`);
+    anchors += rows.length;
+    for (const row of rows) {
+      const name = `${table} ${row.id}`;
+      if (row.number === null) {
+        report(name, "anchor-without-version", `holds a PDF target into file ${row.fileId} and names no version of it`);
+        continue;
+      }
+      if (row.abandoned) report(name, "anchor-on-abandoned", `is on version ${row.number} of file ${row.fileId}, which was abandoned and has no sheets`);
+      else if (!row.promoted) report(name, "anchor-on-candidate", `is on version ${row.number} of file ${row.fileId}, which was never promoted`);
+      if (mustNotOutliveOneVersion && row.versions > 1) {
+        report(name, "unmoved-kind", `holds a PDF_TEXT selector on file ${row.fileId}, which has ${row.versions} versions, and nothing moves a row of this table forward`);
+      }
+    }
+  }
+  console.log(`\n${anchors} anchor(s) with a PDF target checked.`);
 }
 
 main()
