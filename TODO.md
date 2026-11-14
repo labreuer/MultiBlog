@@ -247,7 +247,7 @@ list's answer names the latest version, and one that differs from the version sh
 banner with a reload. A broadcast on the presence channel at promotion would tell the tab
 sooner, and reaches only tabs connected at that moment.
 
-Three races the plan closes itself, kept here because each fails silently if its step is
+Four races the plan closes itself, kept here because each fails silently if its step is
 skipped:
 
 - **A capture that commits beside a promotion.** The check of the capture's version belongs
@@ -262,6 +262,11 @@ skipped:
   the version, and at the target, the placement started from. Without it a carry overwrites a
   target its author has just placed by hand, or two tabs' moves overwrite each other, and
   the history records a target the note never left.
+- **A "stays here" mark made while a carry works out its placements.** The carry's write
+  refuses a marked row, and the mark is written with the file row locked. Without both the
+  note is moved and its mark deleted, against its author's word. The answers to a page map's
+  runs of sheets are written under the same lock, since the map is one JSON value and two
+  answers would otherwise each write the whole of it.
 - **The two lazy writers**, `extract` in `src/lib/pdf-page-text.ts` and `fill` in
   `src/lib/pdf-metadata.ts`, parse for seconds and then write. Each must write under the
   version whose bytes it read, never under "the file's latest" looked up afterwards.
