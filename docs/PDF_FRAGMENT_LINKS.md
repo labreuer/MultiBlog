@@ -38,10 +38,13 @@ kind of passage link, and replace nothing.
 | Found by | its stored quads, which never need re-finding (PDF.md §4) | its words, found again on every open (§4) |
 | Discloses to the doc's readers | an opaque id | the PDF's slug and the passage's words (§10) |
 
-**PDFs only, because their bytes never change.** A file's `sha256` is its identity, so a
-passage named by its words is always in the same place in that file. The same URL into a doc
-would need COLLAB.md's drift machinery to stay true. Passages in docs, including the section
-links in imported chats, stay anchored links.
+**PDFs only, because a version's bytes never change.** A version's `sha256` is its identity,
+so a passage named by its words is always in the same place in it. A file can be given other
+bytes, which become its next version ([PDF.md](PDF.md) §13), so a link also says which version
+it names: `v=` (§2), and a link without one names the file's first, as every link written
+before a second version existed did. The same URL into a doc would need COLLAB.md's drift
+machinery to stay true. Passages in docs, including the section links in imported chats, stay
+anchored links.
 
 **The fragment grants nothing.** The PDF route's gate runs exactly as for a bare `/pdf/<slug>`,
 the same rule as `?sel=` (ANCHORED_LINKS.md, "Following a link"), and the fragment can only
@@ -53,8 +56,9 @@ body. Comments need one change for it (§8).
 ## 2. The URL
 
 ```
-/pdf/<slug>#sheet=<n>&text=<passage>[&sheet=<n>&text=<passage>…]
-/pdf/<slug>#p=<label>&text=<passage>[&p=<label>&text=<passage>…]
+/pdf/<slug>#sheet=<n>[&v=<version>]&text=<passage>[&sheet=<n>[&v=<version>]&text=<passage>…]
+/pdf/<slug>#p=<label>[&v=<version>]&text=<passage>[&p=<label>[&v=<version>]&text=<passage>…]
+/pdf/<slug>/v/<version>#…          the same, on a version's own address
 
 passage = [<prefix>-,]<segment>*("..." <segment>)[,-<suffix>]
 segment = <start>[,<end>]
@@ -71,11 +75,26 @@ prefix, start, end, suffix = word *("+" word)
   predates `p=` ignores that (§6).
 - **`p`** is the page printed on the sheet, its label, found by the rule below. A reader of a
   book names the page printed on it, so an author quoting from a corrected copy writes the page
-  the copy cites rather than converting it to a sheet by hand, and a new copy of the file that
-  adds or removes a sheet before it doesn't move the link ([PDF.md](PDF.md) §13 plans versions
-  of a file, with a `v=` on links of either form).
+  the copy cites rather than converting it to a sheet by hand.
   `/references/<key>#p=49` uses `p` for a printed page too (CITATIONS.md, Pages). One link may
   use both forms.
+- **`v`** is the version of the file whose sheets a `sheet` counts and whose labels a `p` is
+  read on: the number in that version's address ([PDF.md](PDF.md) §13, "Links into the
+  file", which has the reasons).
+  - **It belongs to the `sheet`, `page` or `p` before it**, and a writer puts it straight
+    after that page (`formatPageName`). It stamps every `text` of its page. One before any
+    page is ignored, a page's second is ignored, and one that doesn't read (`v=0`, `v=x`) is
+    no stamp at all.
+  - **A link without one names the file's first version, always.** That holds for every link
+    written before a file's second version existed, and changes nothing while a file has
+    one. So once a file has a second version every link the app writes into it carries `v=`,
+    a link to version 1 included.
+  - **On a version's own address a link without one names that version**:
+    `/pdf/book/v/2#sheet=49` is sheet 49 of version 2. The address says which version is
+    shown, and `v=` whose sheets the link counts.
+  - **A `p=` takes one as a `sheet=` does**: a set of drafts has a page 5 each.
+  - A tab whose bundle predates `v=` ignores it, and reads the sheet on whichever version it
+    shows.
 - **`text`** is [Text Fragments](https://wicg.github.io/scroll-to-text-fragment/)' grammar, minus
   its encoding rules:
   - `start` alone is the whole passage;
@@ -167,8 +186,9 @@ to script APIs", so this viewer could never read it.
 ### Which sheet
 
 A `p` is a label as `pagesLabelled` reads one (`src/lib/pdf-page-labels.ts`): trimmed, case
-ignored, against **the labels the file itself gives** (`sheetsLabelled`). The viewer reads them
-from pdfjs (§6), and the check from the latest version's `file_version.page_labels` (§8).
+ignored, against **the labels the file itself gives**, in the version the link names
+(`sheetsLabelled`). The viewer reads them from pdfjs (§6), and the check from that version's
+`file_version.page_labels` (§8).
 
 1. **A file with usable labels**: the sheets whose own label is `p`, in order. There can be
    several, since front matter and body can each have a "1" (`pageLabelFor`).
@@ -331,6 +351,23 @@ and on every `hashchange`, and `PdfAnnotationSurface` draws what it finds. `PdfV
 `#sheet=` (or `#page=`) and `#p=` on its own (`pageFromHash`), so the viewer opens on the right
 page before the passage is found.
 
+**Each page is read by the version it names** (`readPage`, `src/lib/pdf-link-reading.ts`;
+[PDF.md](PDF.md) §13, "Links into the file"). The steps below are for a page that names the
+version shown, which on a file with one version is every page.
+
+- **From the bare address, a link that names another version goes to that version's own
+  address**, `/pdf/<slug>/v/<n>#…`, with the link as written, before the viewer mounts
+  (`PdfSurfaceClient`). No version has a page map yet, so no link is carried to the latest
+  instead.
+- **On a version's own address the viewer stays.** A passage that names another version is
+  not looked for: its row in the banner offers it at that version's address. `PdfViewer`
+  opens at no sheet for it (`opensAt`), since the sheet named is one of other bytes.
+- **A page that names an abandoned version, or one the file never had,** has no version to
+  open. Its passage is looked for by its words alone, on every sheet of the version shown,
+  and drawn where exactly one holds it once; its row says it was found that way, or that it
+  wasn't. A link without words gets a line saying which of the two it is. One that names a
+  version the file never had still opens the sheet as written.
+
 **A `p=` waits for the labels**, which pdfjs reads on load (`usablePageLabels` in
 `PdfViewer.tsx`). The handle keeps them as read (`ownPageLabels`) beside the filled-in ones it
 shows (`pageLabels`), since `p` is matched against the first (§2, "Which sheet"). NULs are
@@ -448,6 +485,12 @@ can't tell two occurrences apart, as with a short quote the page repeats. All 65
 take that form without a prefix (§3). A passage with words left out goes segment by segment
 (`segmentedWriterForm`): each whole up to eight words and otherwise by its ends, every long one
 extended alike.
+
+**Every link a writer emits carries its stamp** (`formatPageName` takes a page with one,
+`StampedPageName`, so the compiler names a writer that leaves it off): the version its writer
+read, once the file has a second version, and nothing while it has one (`pageStampFor`).
+A parser's `PageName` is a different type, where a missing stamp is a reading and not an
+omission. The check's and MCP's corrected forms are written the same way.
 
 **Which page form a writer takes** (`pageNameForSheet`, `src/lib/pdf-page-labels.ts`):
 
@@ -586,8 +629,18 @@ the same letters in the same order. The guard is `scripts/integrity/check-pdf-fr
   It checks every citation's passage too, by the link it renders or the link a post froze
   (CITATIONS.md, "Its checks").
 - **What fails it.** It exits non-zero on an ERROR: a miss, an unknown file, a page out of range,
-  a label no sheet carries, or a `text` parameter that doesn't parse. A repeated passage, a past
-  slug and a `p=` on a file without usable labels are warnings.
+  a label no sheet carries, a `text` parameter that doesn't parse, or a `v=` naming a version
+  the file never had. A repeated passage, a past slug and a `p=` on a file without usable
+  labels are warnings.
+- **It reads a link as the viewer does**: each page on the version it names, a link to a
+  version's own address included (`/pdf/<slug>/v/<n>#…`). So words the latest version lacks
+  are no fault in a link that names an earlier one, and `--verbose` lists such a link. A
+  link naming an abandoned version is a warning, since nothing can confirm it, and so is one
+  on a version's own address that names another.
+- **It warns of a link without `v=` written after its file's second version was uploaded**,
+  which only a hand can have typed and whose writer most likely meant the latest. It dates
+  the link by the update log (`src/lib/pdf-link-dating.ts`), which the viewer can't
+  ([PDF.md](PDF.md) §13, "Links into the file").
 
 When to run it:
 

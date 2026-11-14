@@ -3,7 +3,7 @@ import { authenticateByteRequest, unauthorizedResponse } from "@/lib/api/request
 import { ApiError, httpStatusOf, type ApiErrorCode } from "@/lib/api/errors";
 import { onceWithin } from "@/lib/api/idempotency";
 import { UploadError } from "@/lib/file-storage";
-import { assertMayUploadVersion, discardStagedUpload, recordUpload, recordVersionUpload, stageUpload } from "@/lib/file-ingest";
+import { assertMayUploadVersion, discardRefusedBody, discardStagedUpload, recordUpload, recordVersionUpload, stageUpload } from "@/lib/file-ingest";
 import { newObjectPeople } from "@/lib/mcp/doc-writes";
 
 // docs/MCP.md §5, §8 — an upload from a raw request body
@@ -102,6 +102,8 @@ export async function POST(request: Request) {
     console.log(JSON.stringify({ at: "mcp", token: token.prefix, user: token.user.id, tool: `POST ${ROUTE}`, outcome: "ok" }));
     return NextResponse.json(recorded, { status: "existing" in recorded ? 200 : 201 });
   } catch (err) {
+    // A body refused before anything read it is received and dropped, so the refusal arrives (`discardRefusedBody`).
+    await discardRefusedBody(request.body);
     if (err instanceof ApiError) return NextResponse.json(err.body(), { status: httpStatusOf(err) });
     if (err instanceof UploadError) {
       return NextResponse.json({ code: CODE_FOR_STATUS[err.status] ?? "internal", message: err.message }, { status: err.status });

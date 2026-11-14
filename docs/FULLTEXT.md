@@ -466,6 +466,9 @@ for the same reason `LocalTime` exists: the server's time zone isn't the reader'
   PDF_FRAGMENT_LINKS.md §2), and `#page=` is still read as it. The viewer reads either once
   the document is laid out, and again on `hashchange`, and reads `#p=`, the printed page, the
   same way.
+- **A page hit's link names the latest version**, whose pages search ranks: `&v=<n>` after its
+  page, once the file has a second version ([PDF.md](PDF.md) §13, "Links into the file"). A
+  link without one would be read as the first version's.
 - **A page hit links by its printed page** where its sheet is the first carrying its own label,
   and by its sheet otherwise, as for a sheet whose own label is empty or a file without usable
   labels: a page link is copied into bodies from the address bar, and `p=` survives a new copy

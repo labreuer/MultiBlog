@@ -448,6 +448,9 @@ travels, buys nothing over an HTTPS bearer token here and is not adopted.
     (`curl --data-binary @paper.pdf`), with the `write` scope: a PDF or a .docx, as `/files`
     takes. It is `ingestUpload` (§8) behind the token, and takes the title, and whether the
     issuer is to be the only owner, in the same request. The file is PRIVATE (§3, §12).
+    - **With `?versionOf=<file id>` the bytes become that file's next version** (§8, "A new
+      version"; [PDF.md](PDF.md) §13). `title`, `issuerOnly` and `duplicate` are a new
+      file's, and are refused beside it.
   - `GET /api/mcp/files/<id or slug>` downloads, with the `read` scope. It is the body of
     `/api/files/[id]/[hash]`, which `/files/<slug>/download` only redirects to: its gate,
     which answers 404 for a file the reader can't see, and its streaming, Range and ETag, whose
@@ -1212,11 +1215,11 @@ what surrounds it. That is the question research asks most of a citation.
 
 ## 8. PDFs
 
-A file's bytes never change, since its `sha256` is its identity. Writing a PDF therefore means
-uploading one and editing its metadata.
+A version's bytes never change, since its `sha256` is its identity. Writing a PDF therefore
+means uploading one, uploading a new version of one, and editing its metadata.
 
 **A file's bytes are its versions'** ([PDF.md](PDF.md) §13, whose "Built so far" says what
-exists; no tool gives a file a second version yet). `/pdf/<slug>` names the latest version and
+exists). `/pdf/<slug>` names the latest version and
 `/pdf/<slug>/v/<n>` version n, and `read`, `search`'s `within`, `add_note`, `create_link` and
 `download` each take either:
 
@@ -1231,6 +1234,36 @@ exists; no tool gives a file a second version yet). `/pdf/<slug>` names the late
   it: a quote from the bare address is refused with `conflict` once that version is no longer
   the latest, and a version that is not yet the latest takes none.
 - **`download` of a version's address** gives a URL with `&v=<n>`, that version's bytes.
+- **An abandoned version's address answers `not_found`**, saying the version was abandoned
+  and where the latest is.
+
+**A new version.** `upload` with `versionOf`, the file's address or id, answers the byte
+route's URL with `&versionOf=<file id>`, and the PDF sent there becomes the file's next
+version (`recordVersionUpload`, `src/lib/file-ingest.ts`, which the browser's
+`PUT /api/files/<id>` shares).
+
+- **It makes a candidate and nothing more.** The version waits at its own address,
+  `/pdf/<slug>/v/<n>`, which the upload answers with its number, and `/pdf/<slug>` shows
+  what it did. It builds no page map and promotes nothing: those are a person's acts on the
+  candidate's page, and no tool makes them.
+- **Whoever uploads may manage the file, or is a bot whose person may**
+  (`canUserUploadFileVersion`; [PERMISSIONS.md](PERMISSIONS.md), "A file's versions"). A bot
+  borrows its person's place among the file's owners for this upload alone, and never their
+  role. It can so name a PRIVATE file only its person owns, which `read` still answers
+  `not_found` for: the tool takes the file by the upload's rule, where every other tool
+  takes it by the read rule.
+- **The file's own checks come before the body is stored**, and the tool makes them first of
+  all, where a refusal costs no upload: the file exists and is the actor's to upload to, is
+  not deleted, and is a PDF. A file the actor can't read is `not_found`; one it can read and
+  not manage is `forbidden`.
+- **A candidate standing is refused with `conflict`**, naming it, until it is promoted or
+  abandoned. That check alone is left to the write, inside the idempotency key: a retry
+  must reach its key, which is the bytes' hash, to be answered `already_done` with the
+  candidate the first request made as its `result`.
+- **Bytes the latest version already holds answer `unchanged`**, and nothing is written.
+  Bytes an earlier version holds make a version as any others do.
+- **A refused body is received and dropped**, never left unread, so the refusal reaches
+  `curl` and not a reset connection.
 
 **Upload.**
 
@@ -1334,6 +1367,29 @@ characters either side, its sheet and its page, rather than the sheet. A `#p=<la
 instance average 2,500 to 3,250 characters a page, so following a summary's citations page by
 page would read mostly other text. A passage that isn't there answers `no_match` with what the
 check below reports.
+
+**A fragment is read by the version it names**, as the viewer reads a link
+([PDF.md](PDF.md) §13, "Links into the file"; `readPage`, `src/lib/pdf-link-reading.ts`).
+
+- **Its `v=` names the version** whose sheets a `sheet=` counts and whose labels a `p=` is
+  read on. Without one it names the file's first version, or on a version's own address,
+  `/pdf/<slug>/v/<n>#…`, that version.
+- **A fragment that names another version than the address is answered on the version it
+  names**, with a `note` saying so and that version's `url`: no version has a page map yet,
+  so none is carried. `read` of `/pdf/<slug>#sheet=50` on a file with three versions answers
+  version 1's sheet 50.
+- **The tool's own `sheet`, `sheets` and `page` are of the version read**, the address's.
+  The same number can so be two sheets, which is why, once a file has a second version,
+  every sheet a read answers carries `link`: its address with its stamp,
+  `/pdf/<slug>#p=49&v=3`. That is the form to write. A file with one version has none, and
+  its answers are as they were.
+- **A fragment whose version is abandoned, or was never the file's,** has no version to be
+  read on. With `text`, each passage is looked for by its words alone in the version read,
+  and answered where exactly one sheet holds it once, marked `foundBy`. Without, one that
+  names an abandoned version is `not_found`, and one that names a version the file lacks
+  reads the sheet as written, with a `note`.
+- **A fragment whose passages name different versions is refused**, to be read one version
+  at a time.
 
 **Finding text is two questions, and only the first is search.**
 
@@ -1446,6 +1502,22 @@ is checked for its page. So is a citation's passage, the link around a citation
 naming another work's PDF, are refused as `no_match` too ([CITATIONS.md](CITATIONS.md), "A
 passage in a citation", "Its checks").
 
+- **It reads a link as the viewer does**, each page on the version it names
+  ([PDF.md](PDF.md) §13, "Links into the file"). So a link to a version's own address is
+  checked on that version, and one stamped with an earlier version on that one.
+  - **A link to the bare address of a file with several versions must carry `v=`**, and one
+    without is refused as `invalid`: the viewer would read it as the first version's, and a
+    model that has just read the file means the latest.
+    - With `text`, the passage is placed by its words, on the latest and failing that on the
+      first, and the refusal gives the stamped link (`stamped`). Words neither holds are
+      `no_match`, read on the latest.
+    - Without, the refusal gives both readings, each with the sheet it would open
+      (`readings`).
+    - A link to a version's own address needs none.
+  - **A `v=` naming an abandoned version, or one the file never had, is `no_match`**, with
+    where the latest is.
+  - **A link on one version's address that names another is a warning**: a reader is shown
+    the address's version and offered the passage on the other.
 - **It reads as the operator**, so the MCP server asks `canUserReadFile` first, as the module's
   header requires.
 - **It never extracts page text.** It reads the stored text at the current version, or the
@@ -2079,7 +2151,7 @@ comment's writer and the post's moderators. So a hit never leads to `not_found`.
 | `find_tags` | read | Tag terms by name (§11) |
 | `find_refs` | read | Works in the reference library by key, title, author or year, or one by its DOI or ISBN, each with its PDF where the account may read it ([CITATIONS.md](CITATIONS.md)) |
 | `download` | read | A URL for a file's bytes or for the export, carrying a grant good for ten minutes (§5) |
-| `upload` | write | A URL for uploading a PDF or a .docx, or for creating a doc from a Markdown body, carrying a grant good for ten minutes (§5) |
+| `upload` | write | A URL for uploading a PDF or a .docx, a new version of a PDF (`versionOf`, §8), or for creating a doc from a Markdown body, carrying a grant good for ten minutes (§5) |
 | `create_doc` | write | Markdown and a title; the doc is PRIVATE, its byline the actor and then the token's issuer, or the issuer alone (§6, §12) |
 | `edit_doc` | write | Targeted edits, applied word by word, each passage named by its words or by its ends, and the title; reverting one edit, whole or in part (§6) |
 | `rename_file` | write | A file's title (§8) |

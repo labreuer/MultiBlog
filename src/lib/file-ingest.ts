@@ -6,7 +6,7 @@ import { canUserReadFile, canUserUploadFileVersion, readableFilesWhere } from "@
 import { claimFileSlug } from "@/lib/file-slug";
 import { pdfPath } from "@/lib/file-version";
 import { createFileWithFirstVersion, lockFileHash, lockFileRow } from "@/lib/file-version-data";
-import { UploadError, deleteBytesIfUnreferenced, storagePathFor, storedByteSize, storeUploadStream, type StoredBytes } from "@/lib/file-storage";
+import { UploadError, deleteBytesIfUnreferenced, maxUploadBytes, storagePathFor, storedByteSize, storeUploadStream, type StoredBytes } from "@/lib/file-storage";
 import { extractPdf, extractPdfMetadata, type PdfMetadata } from "@/lib/pdf-extract";
 import { UPLOAD_ACCEPT_LABEL, contentTypeForKind, titleFromFilename, uploadKindForFilename, type UploadKind } from "@/lib/file-format";
 import type { Actor } from "@/lib/actor";
@@ -45,6 +45,40 @@ import type { Actor } from "@/lib/actor";
 // again.
 
 export type StagedUpload = { stored: StoredBytes; kind: UploadKind; filename: string };
+
+/**
+ * Receives and drops a request body that was refused before anything read
+ * it, so the refusal reaches its sender.
+ *
+ * A response sent while the body is still arriving leaves the server with an
+ * unread request, and it closes the connection under the response: the
+ * sender gets a reset where the refusal's message should be (`ECONNRESET`
+ * from a script, a severed connection in a browser, which the uploader then
+ * blames on a proxy). Nothing is stored and nothing is parsed, so a refusal
+ * still costs no disk; what it costs is the transfer, bounded by the upload
+ * limit, past which the rest is cancelled.
+ *
+ * A no-op for a body something has begun to read: `storeUploadStream` cancels
+ * its own on a refusal mid-stream.
+ */
+export async function discardRefusedBody(body: ReadableStream<Uint8Array> | null, maxBytes = maxUploadBytes()): Promise<void> {
+  if (!body || body.locked) return;
+  const reader = body.getReader();
+  let received = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      received += value?.byteLength ?? 0;
+      if (received > maxBytes) {
+        await reader.cancel().catch(() => {});
+        return;
+      }
+    }
+  } catch {
+    // The sender went away, which is their answer.
+  }
+}
 
 export type RecordedUpload = {
   file: { id: string; slug: string; title: string };
@@ -227,9 +261,11 @@ function candidateStands(file: { slug: string }, number: number): UploadError {
 }
 
 /**
- * The file's own checks, **before the body is read**: `stageUpload` checks
- * only the uploader's role, so without these a 50MB body would be received
- * and stored for a file its sender may not touch.
+ * The file's own checks, **before the body is stored**: `stageUpload` checks
+ * only the uploader's role, so without these a 50MB body would be written to
+ * disk and parsed for a file its sender may not touch. A route that refuses
+ * here receives the body and drops it (`discardRefusedBody`), so the refusal
+ * arrives.
  *
  * - whoever uploads may manage the file, or is a bot whose person may
  *   (`canUserUploadFileVersion`). A file the actor can't even read is

@@ -291,8 +291,8 @@ each on margin notes, tags, search, entity chips, the schema version and the sha
 
 ## PDF versions: a viewer left open is not told (docs/PDF.md §13)
 
-**Status:** low priority. No file can gain a second version yet (§13's "Built so far"), so
-nothing is wrong today. It is for whoever builds the plan's promotion step.
+**Status:** low priority, and open: a file can take a new version now (§13's "Built so
+far"), and nothing tells a tab left open on it.
 
 A viewer open on a file across a promotion keeps the version it loaded: its bytes come by
 hash and its note list by version, so nothing is drawn over the wrong ink, and a capture from
@@ -303,7 +303,8 @@ banner with a reload. A broadcast on the presence channel at promotion would tel
 sooner, and reaches only tabs connected at that moment.
 
 Five races the plan closes itself, kept here because each fails silently if its step is
-skipped:
+skipped. Three are built, and `e2e/pdf-version-upload.spec.ts` makes each of those happen
+in order; the two about moves wait for the moves:
 
 - **A capture that commits beside a promotion.** The check of the capture's version belongs
   inside the transaction that inserts, with the file row locked, for each of: posting a note,
@@ -311,9 +312,9 @@ skipped:
   `/pdf/<slug>` it is checked against `file.current_version_id`, and from a version's own
   address against its being promoted. A check before the transaction lets a promotion commit
   between the two, and the note lands on an earlier version with nothing said. **Built**
-  (`assertCaptureVersion`): the capture locks the file row `FOR SHARE`. That a promotion's
-  update waits for it is Postgres's documented behaviour, and is not tested until a
-  promotion exists to race it; `e2e/pdf-versions.spec.ts` covers the refusal itself.
+  (`assertCaptureVersion`): the capture locks the file row `FOR SHARE`, and a promotion
+  locks it `FOR UPDATE` (`lockFileRow`). The spec holds a promotion open and starts a note
+  and a link part beside it: each waits for the commit and is refused.
 - **A move written from a placement that is no longer true.** Where a note goes is worked out
   before the transaction, over seconds. The write's own condition is that the row is still on
   the version, and at the target, the placement started from. Without it a carry overwrites a
@@ -334,6 +335,23 @@ skipped:
   upload in the transaction that inserts its row, where it checks the blob is still there,
   and the abandoning around its count and its removal, before it commits. Without it a
   version's row is left with no bytes, which nothing reports until the integrity check runs.
+  **Built** (`lockFileHash`, `assertBlobStored`): the spec records an upload while the lock
+  is held as an abandoning holds it, and the upload is refused once the blob is gone.
+  Removing the check from `recordUpload` turns that test red.
+
+## An upload refused before its body is read resets the connection (docs/PDF.md §2a)
+
+**Status:** low priority. `POST /api/files/upload` answers 401 and 403 without reading the
+request body, and so does MCP's byte route where it refuses before staging a new file. A
+response sent over a request nobody read closes the connection under it, and the sender can
+get a reset where the refusal should be: `ECONNRESET` from a script, a severed connection in
+a browser, which `FileUploader` then blames on a proxy. It showed in the production e2e
+build as a refused `PUT /api/files/<id>` that never delivered its 409, and the two routes
+that upload a version now receive a refused body and drop it (`discardRefusedBody`,
+`src/lib/file-ingest.ts`). The browser's route for a new file was left as it was, since its
+only refusals before the body are a missing session and a role that can't upload, which the
+uploader's own page never produces. Behind nginx none of this shows: it buffers the request
+before the app answers.
 
 ## The MCP server: what is left (docs/MCP.md)
 
