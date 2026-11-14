@@ -18,6 +18,7 @@ import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import LinksTable, { type LinkRow, type LinkRowTarget } from "@/components/LinksTable";
 import type { Role } from "@/generated/prisma/enums";
 import { staffDisplayNameOf } from "@/lib/display-name";
+import { rowsWithParents } from "@/lib/rows-with-parents";
 
 export const metadata: Metadata = { title: "Links" };
 
@@ -306,7 +307,9 @@ export default async function LinksPage({
   const docsById = new Map(docs.map((doc) => [doc.id, doc]));
   const filesById = new Map(files.map((file) => [file.id, file]));
 
-  const rows: LinkRow[] = links.map((link) => {
+  // A link hard-deleted while this loaded, along with its creator, arrives
+  // without that user.
+  const rows: LinkRow[] = rowsWithParents(links, (link) => [link.createdBy]).map((link) => {
     // Group parts by target in first-appearance order, as the landing page
     // does; hrefs carry ?sel= — doc by id (rename-proof), file by slug.
     const sel = `?sel=${encodeURIComponent(link.id)}`;

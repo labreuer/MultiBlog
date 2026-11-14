@@ -12,6 +12,7 @@ import type { SortColumn } from "@/lib/table-sort";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import TagsTable from "@/components/TagsTable";
 import { staffDisplayNameOf } from "@/lib/display-name";
+import { rowsWithParents } from "@/lib/rows-with-parents";
 
 export const metadata: Metadata = { title: "Tags" };
 
@@ -152,7 +153,9 @@ export default async function TagsPage({
     prismaIncludingDeleted.tag.count({ where }),
   ]);
 
-  const rows = tags.map((tag) => ({
+  // A tag hard-deleted while this loaded, along with its creator, arrives
+  // without that user.
+  const rows = rowsWithParents(tags, (tag) => [tag.createdBy]).map((tag) => ({
     id: tag.id,
     slug: tag.slug,
     name: tag.name,

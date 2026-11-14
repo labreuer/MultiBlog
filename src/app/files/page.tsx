@@ -15,6 +15,7 @@ import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import FilesTable from "@/components/FilesTable";
 import FileUploader from "@/components/FileUploader";
 import { staffDisplayNameOf } from "@/lib/display-name";
+import { rowsWithParents } from "@/lib/rows-with-parents";
 import { parseTagList } from "@/lib/tag-data";
 import { codeDefaultColumns } from "@/lib/admin-table-columns";
 
@@ -157,6 +158,7 @@ export default async function FilesPage({
         slug: true,
         title: true,
         // What the bytes decide is the latest version's (docs/PDF.md §13).
+        currentVersionId: true,
         currentVersion: { select: { filename: true, pageCount: true, byteSize: true } },
         visibility: true,
         createdAt: true,
@@ -176,7 +178,11 @@ export default async function FilesPage({
     prismaIncludingDeleted.storedFile.count({ where }),
   ]);
 
-  const rows = files.map((file) => {
+  // A file hard-deleted while this loaded takes its versions with it, and
+  // arrives naming a latest version that is gone. A file that names none is
+  // the fault `latestVersionOf` throws for, and still does.
+  const present = rowsWithParents(files, (file) => (file.currentVersionId ? [file.currentVersion] : []));
+  const rows = present.map((file) => {
     const latest = latestVersionOf(file);
     const isOwner = file.owners.some((o) => o.userId === session.user.id);
     // canUserReadFile's rule inlined; only a row the override lists can fail it.

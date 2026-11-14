@@ -1583,24 +1583,24 @@ it or duplicates it — and that is the actual open question, not the markup.
 
 ---
 
-## `/comments` answers 500 when a thread is deleted while it loads
+## A required relation read without `rowsWithParents` can still arrive null
 
-**Status:** low priority. Found 2026-11-14 as the one red of a full e2e run
-(`admin-table.spec.ts`, "a default saved from /site-settings is each table's own default"),
-the first failure of that test in the 37 runs whose logs were at hand.
+**Status:** low priority; not seen at any of these. docs/DATABASE.md, "A relation is loaded
+in a statement of its own", has the mechanism, and what is guarded: six admin tables and the
+two reads of a link through its part.
 
-`src/app/comments/page.tsx` loads a page of comments with `include: { thread: … }`, which
-Prisma runs as two queries. A thread deleted between them, by its post's cascade, leaves
-`comment.thread` null where the type says it can't be, and `comment.thread.post.id` throws:
-the page answers 500 (`TypeError: Cannot read properties of null (reading 'post')`). In the
-suite that is another worker's cleanup hard-deleting a throwaway post. On an instance it
-takes a post hard-deleted during a moderator's page load, and the app only soft-deletes
-posts, so nothing a reader does reaches it.
+About eighty other reads load a relation typed as required and read it unguarded: the post
+listings' bylines (`src/components/PostListing.tsx`, `a.user`), search's results, a post's
+comments, the reads under `src/lib/mcp/`, and every `findFirst` or `findUnique` with such an
+`include`. Each takes a hard delete of a user, a post, a doc, a file, a tag, a reference or a
+thread while it loads, which nothing in the app does. The e2e suite's cleanup does, so the
+ones it can reach are the listings that show every worker's rows, and of those the post
+listings are what is left.
 
-A fix: drop the rows whose thread came back null, since the comment is gone too by the same
-cascade. The test's first read of each table's headers would also be steadier for asserting
-that it found some. The same shape is in any admin table that includes a required relation
-a cascade can remove.
+The symptom is one red in a full run, gone in the next, with `TypeError: Cannot read
+properties of null` in the server's log beside a 500. The fix at a site is one call. To list
+the sites, look for an `include` or `select` naming a relation whose field in `schema.prisma`
+has no `?`.
 
 ## A dangling `updated_by_user_id` takes the whole doc cache down with it
 

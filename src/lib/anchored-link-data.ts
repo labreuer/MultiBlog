@@ -1,6 +1,7 @@
 import { linkPartsVersions, pdfPath } from "@/lib/file-version";
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
+import { rowsWithParents } from "@/lib/rows-with-parents";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserReadFile } from "@/lib/file-authz";
 import {
@@ -281,7 +282,9 @@ export async function linkPartsInto(
       link: { select: { id: true, name: true, _count: { select: { anchors: true } } } },
     },
   });
-  return anchors.map((anchor) => ({
+  // A draft discarded between this read's two statements takes its parts with
+  // it, and such a part arrives without its link.
+  return rowsWithParents(anchors, (anchor) => [anchor.link]).map((anchor) => ({
     linkId: anchor.link.id,
     linkName: anchor.link.name,
     linkParts: anchor.link._count.anchors,
