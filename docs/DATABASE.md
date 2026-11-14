@@ -59,7 +59,8 @@ is invisible to it and the diff stays clean.
 > trigger to repair.
 
 The six `search_vector` columns (`doc`, `post`, `annotation`, `comment`, `file`,
-`file_page_text`) are the same arrangement for the same reason, with one more trigger pair
+`file_page_text`) are the same arrangement for the same reason (`file`'s reads its filename
+from the file's latest version, [PDF.md](PDF.md) §13), with one more trigger pair
 per table feeding the `search_lexeme` vocabulary ([FULLTEXT.md](FULLTEXT.md) §3). Never
 assign to them either; `scripts/integrity/check-search-index.ts` is their guard, and its
 `--repair` runs the no-op `UPDATE` for every drifted row.
@@ -106,8 +107,17 @@ every trigger as the rows go in. Two things follow:
   collide with them. The cost is that every `first_seen_at` becomes the load's time. Run
   `scripts/integrity/check-mentions.ts` afterwards.
 
-A full dump restored into an empty database has neither problem: `pg_dump` creates triggers
-after the data, so none of them fires during the load.
+- **`file` and `file_version` name each other** ([PDF.md](PDF.md) §13): a file's
+  `current_version_id` is a key into `file_version`, whose `file_id` is a key into `file`.
+  It is a second pair of tables whose keys form a cycle, beside `post` and
+  `post_publication_event`, and `pg_dump` warns of both; a data-only load of them needs
+  `--disable-triggers`, or the pointer set after both tables are in. Not tried here.
+- **A file's row loaded before its versions gets a search vector without its filename**: the
+  trigger reads the filename through `current_version_id`, and the version isn't there yet.
+  `scripts/integrity/check-search-index.ts --repair` refills it.
+
+A full dump restored into an empty database has none of these problems: `pg_dump` creates
+triggers and foreign keys after the data, so none of them fires during the load.
 
 ## Keeping `schema.prisma` format-clean
 

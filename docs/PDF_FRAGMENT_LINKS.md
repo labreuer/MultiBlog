@@ -163,7 +163,7 @@ to script APIs", so this viewer could never read it.
 
 A `p` is a label as `pagesLabelled` reads one (`src/lib/pdf-page-labels.ts`): trimmed, case
 ignored, against **the labels the file itself gives** (`sheetsLabelled`). The viewer reads them
-from pdfjs (§6), and the check from `file.page_labels` (§8).
+from pdfjs (§6), and the check from the latest version's `file_version.page_labels` (§8).
 
 1. **A file with usable labels**: the sheets whose own label is `p`, in order. There can be
    several, since front matter and body can each have a "1" (`pageLabelFor`).
@@ -516,11 +516,11 @@ Three properties of the check:
   whole, and the check keeps one whole file at a time. The CLI asks for the whole file
   outright. Holding every page of every file a run touched was enough to exhaust the web
   process's heap: one doc linking into 75 books named 26,000 pages.
-- **It is read-only.** It reads `file_page_text` directly rather than through `storedPageText`,
-  which would extract a file that lacks the current version. It takes the current version where
+- **It is read-only.** It reads the latest version's `file_page_text` directly rather than
+  through `storedPageText`, which would extract a file that lacks the current version. It takes the current version where
   the file has one, and otherwise the greatest it has, as search does (FULLTEXT.md §4); a
   skeleton barely depends on the version (§4).
-- **It reads labels only for a `p`.** It reads `file.page_labels`, and a file whose labels
+- **It reads labels only for a `p`.** It reads `file_version.page_labels`, and a file whose labels
   haven't been read yet (NULL, since they are filled on first read, MCP.md §8) has them read
   from its bytes and not stored, since the check writes nothing.
 - **It reads as the operator**, since the scripts that call it hold the database's credentials.

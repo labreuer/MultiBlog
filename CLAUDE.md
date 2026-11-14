@@ -29,7 +29,7 @@ to re-derive the decision from.
 | [docs/DOCS.md](docs/DOCS.md) | Docs as built: the entity beside its ydoc, the `title`/`prose_json` caches and the live title, roles and visibility, routes, the reading view and its freeze, the editor, what is deferred. |
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, the `/admin` endpoints and the token they take, restarts, IndexedDB, and the schema-version gate that refuses a tab whose bundle predates a schema change. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
-| [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures; §13 plans versions of a file, with notes moved forward from one to the next. |
+| [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures; §13 is versions of a file, **partly built** (its "Built so far" says which parts): the `file_version` table, addresses by version and the capture check exist, and the upload of a version, page maps and moving notes forward are planned. |
 | [docs/mobile/coordinates.html](docs/mobile/coordinates.html) | Fixed popovers vs. the iOS keyboard: the two coordinate spaces, and what changed on desktop. |
 | [docs/BLOG.md](docs/BLOG.md) | The public blog as built: the landing page (the banner, the `FRONT PAGE` preamble, the latest posts, the contributor list and the dashboard panel a contributor edits it from), a post's page at its `/yyyy/mm/dd/slug` URL, why its date is UTC, and how a slug changes and redirects, the date archives, the author pages, the RSS feed, the links between a post's three pages, which posts are public (published and due, with no status column and no sweep) and the one order every listing uses, `/page/N` continuing `/` (a path, not `?page=`, so `/` keeps its cache), a post's older and newer neighbours, which public pages are cached at all, and what each change revalidates. |
 | [docs/DASHBOARD.md](docs/DASHBOARD.md) | /dashboard: the section cards, Recent docs, the Settings tiers, the Connections card, and where an author color is cached. |
@@ -106,7 +106,9 @@ before changing the behavior it describes.
   supertable. What is unified is the *envelope*, never the selector: each mechanism keeps its
   own physics, and COLLAB.md's "there is no universal anchor" is unchanged. `src/lib/anchors/`
   is split browser-safe (`index.ts`) vs. server (`capture.ts`) the way `avatar-url.ts` and
-  `avatar.ts` are — don't barrel them together. PLAN.md §20a, §20b.
+  `avatar.ts` are — don't barrel them together. A row holding a PDF target also names the
+  version it was measured on (`file_version_id`, set exactly then, by a CHECK and a key on the
+  pair). PLAN.md §20a, §20b, docs/PDF.md §13.
 - **Search ranks only inside ids a read rule chose.** Each read rule has one exported `where`
   helper beside its per-row check (`readableDocsWhere`, `readablePostWhere`,
   `readableFilesWhere`, `readableAnnotationsWhere`, `publicCommentsWhere`), and every listing
@@ -196,10 +198,20 @@ before changing the behavior it describes.
   different clientIDs (the attribution cache keys on the pair; `e2e/shared-socket.spec.ts`);
   and two providers for one document name on one socket throw, where separate sockets used to
   make the duplicate harmless. docs/YDOC.md "One socket per page".
-- **A PDF anchor cannot drift**, because a file's `sha256` is its identity — no tracking
-  plugin, no re-resolution, no version stamp. Don't reach for the doc side's drift machinery.
+- **A PDF anchor cannot drift**, because a file version's `sha256` is its identity — no tracking
+  plugin, no re-resolution, no text-version stamp to chase. Don't reach for the doc side's drift machinery.
   The one thing that *can* invalidate a stored anchor is our own normaliser, so bump
   `NORMALISER_VERSION` (`src/lib/pdf-text.ts`) on **any** behavioural change. docs/PDF.md §4.
+- **A PDF's bytes, page text, labels and anchors are a *version's*, never the file's.** A
+  file's id and a version's are both strings, and a migrated version 1 has its file's id, so
+  passing one for the other compiles and works on every old file: only a fixture's file,
+  whose version has an id of its own, fails. Three more things fail no check. A link to a
+  note, a card or a link part on a PDF goes through `pdfPath` with the note's version
+  (`noteVersions`, a reply's being its root's), or it lands on the wrong page. A surface
+  draws only the notes and link parts whose version it shows, and the parts are filtered in
+  the browser. And a capture's version is checked inside the transaction that inserts
+  (`assertCaptureVersion`), never before it. `e2e/pdf-versions.spec.ts` is the guard for all
+  four. docs/PDF.md §13, "Versions" and "Addresses".
 - **Bumping `pdfjs-dist` is never routine**, and neither is deleting the test that looks
   trivial. Pinning protects the *API* pdfjs offers, not the JavaScript runtime it assumes
   underneath, and WebKit ships those built-ins late or not at all — so a bump needs

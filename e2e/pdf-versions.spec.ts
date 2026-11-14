@@ -469,6 +469,10 @@ test.describe("a file with two versions", () => {
       await editor.click();
       await editor.pressSequentially("Made on version one's own page.");
       await page.getByRole("button", { name: "Save" }).click();
+      // The composer collapsing back to its placeholder is the signal that
+      // the post landed: the draft row has its target and version from the
+      // moment the composer opened, so neither says the note was posted.
+      await expect(page.getByRole("button", { name: "Write an annotation..." })).toBeVisible({ timeout: 15_000 });
       await expect(visibleText(page, "Made on version one's own page.")).toBeVisible({ timeout: 15_000 });
       await expect.poll(async () => (await getFileAnchorVersions(file.id)).annotations, { timeout: 15_000 }).toEqual([file.versionId]);
       expect((await getFileAnchorVersions(file.id)).linkParts).toEqual([file.versionId]);

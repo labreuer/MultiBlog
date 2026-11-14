@@ -236,8 +236,8 @@ glyphs. Not yet done:
 
 ## PDF versions: a viewer left open is not told (docs/PDF.md §13)
 
-**Status:** low priority. Nothing is built, so nothing is wrong today. It is for whoever
-builds the plan's promotion step.
+**Status:** low priority. No file can gain a second version yet (§13's "Built so far"), so
+nothing is wrong today. It is for whoever builds the plan's promotion step.
 
 A viewer open on a file across a promotion keeps the version it loaded: its bytes come by
 hash and its note list by version, so nothing is drawn over the wrong ink, and a capture from
@@ -255,8 +255,10 @@ skipped:
   opening a draft on a selection, adding a part to a link, and MCP's `anchorPdfQuote`. From
   `/pdf/<slug>` it is checked against `file.current_version_id`, and from a version's own
   address against its being promoted. A check before the transaction lets a promotion commit
-  between the two, and the note lands on an earlier version with nothing said. The lock
-  behaviour is Postgres's documented one and wasn't tested.
+  between the two, and the note lands on an earlier version with nothing said. **Built**
+  (`assertCaptureVersion`): the capture locks the file row `FOR SHARE`. That a promotion's
+  update waits for it is Postgres's documented behaviour, and is not tested until a
+  promotion exists to race it; `e2e/pdf-versions.spec.ts` covers the refusal itself.
 - **A move written from a placement that is no longer true.** Where a note goes is worked out
   before the transaction, over seconds. The write's own condition is that the row is still on
   the version, and at the target, the placement started from. Without it a carry overwrites a
@@ -269,7 +271,8 @@ skipped:
   answers would otherwise each write the whole of it.
 - **The two lazy writers**, `extract` in `src/lib/pdf-page-text.ts` and `fill` in
   `src/lib/pdf-metadata.ts`, parse for seconds and then write. Each must write under the
-  version whose bytes it read, never under "the file's latest" looked up afterwards.
+  version whose bytes it read, never under "the file's latest" looked up afterwards. **Built**:
+  each takes the version's id before it parses.
 - **An upload beside an abandoning of the same bytes.** `storeUploadStream` finds the blob on
   disk and stores nothing, and its row is written seconds later. The abandoning counts the
   rows holding the hash and removes the blob. Both take one advisory lock on the hash: the

@@ -4046,12 +4046,12 @@ nothing left for a bottom clamp to catch.
 
 #### Transport
 
-A per-file ydoc `ydoc:pdf:<fileId>` that stays **empty** and carries awareness only —
-docs/PDF.md invariant 5 taken literally. Additions:
+A ydoc per version of a file, `ydoc:pdf:<file version id>` (docs/PDF.md §13), that stays
+**empty** and carries awareness only — docs/PDF.md invariant 5 taken literally. Additions:
 
-- `src/lib/ydoc-names.ts`: `YDOC_PDF_PREFIX = "ydoc:pdf:"`, `ydocIdForFile`,
-  `fileIdFromYdocId`, and `docIdFromYdocId` excludes the new prefix the same way it already
-  excludes `ydoc:annotation:`.
+- `src/lib/ydoc-names.ts`: `YDOC_PDF_PREFIX = "ydoc:pdf:"`, `ydocIdForFileVersion`, and
+  `docIdFromYdocId` excludes the new prefix the same way it already excludes
+  `ydoc:annotation:`.
 - `src/app/api/file/[id]/token/route.ts` mirroring
   [api/doc/[id]/token/route.ts](src/app/api/doc/[id]/token/route.ts). Every token is
   `readOnly: true` — nobody ever writes content to this document, and awareness is unaffected

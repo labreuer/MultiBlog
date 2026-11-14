@@ -132,6 +132,18 @@ and the link is minted), the Edit affordance's gate, decided here beside the fil
 banner renders what it is handed. The returned view is BigInt-free by design (stamps
 omitted): it crosses into client props on both surfaces.
 
+**A PDF part names the version of the file it was measured on** ([PDF.md](PDF.md) §13,
+"Addresses"): `anchored_link_anchor.file_version_id`, set with every `PDF_TEXT` selector,
+and on the view as `part.version` with the part's own address. A file stays one group
+whichever versions its parts are on. Its `href` goes to the newest version holding a part,
+the latest wherever a part is on it, and its `label` names each version that is not the
+latest (`linkPartsVersions`, shared with `/links` and MCP). **The PDF surface draws only the
+parts whose version it shows**, a followed link's and the open link's alike
+(`OpenLinkPart.fileVersionId`): they are filtered in the browser, and a part drawn on another
+version's sheets sits over other ink. The banner names the rest, each linked at its own
+version. "Add to link" on a PDF names the version its viewer loaded, and the insert checks
+it (`assertCaptureVersion`).
+
 `anchoredLinkLandingFor(linkId, viewer)` is the landing route's read on top of it: the
 same existence rule (deleted, and someone else's draft, read as absent) answered
 *separately* from the per-target filter, so the route can tell "no such link" (404) from
@@ -546,7 +558,8 @@ hard refresh. Two stacked defects, both fixed, both load-bearing:
 1. `/doc/[slug]` didn't key `DocView` by doc identity, so the nav *reused* the reading
    editor and pushed the new doc's anchors against the old doc's text — every anchor
    detached, permanently (detachment is deliberately re-evaluated only on the next anchor
-   push). Now `key={doc.id}`, and `/pdf/[slug]` keys `PdfSurfaceClient` by `file.id` for
+   push). Now `key={doc.id}`, and the PDF page keys `PdfSurfaceClient` by the *version* it
+   shows ([PDF.md](PDF.md) §13) for
    the same class (stale viewer, stale `ready`, a once-only link jump that never re-fires).
 2. `use-live-doc-content.ts` owned its Y.Doc in a `useMemo`, and a transition render
    replay (the byline's async `TagChips` suspending is enough) legally drops the memo

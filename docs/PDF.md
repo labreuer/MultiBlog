@@ -91,10 +91,11 @@ type Quad = [number, number, number, number, number, number, number, number];
 **Resolution status is derived, never stored.** Compute `anchored | shifted | orphaned` at
 load time and hold it in client state.
 
-As built, `DocId` is `StoredFile.sha256`, and `Target` is stored verbatim in
+As built, `DocId` is a file version's hash, `FileVersion.sha256` (§13: a file's bytes are
+its versions', and every file has a version 1), and `Target` is stored verbatim in
 `Annotation.pdfTarget` — one jsonb column rather than seven (invariant 3; PLAN.md §19
 Phase 1) — on a row that is otherwise an ordinary `Annotation` with `fileId` set instead of
-`docId`. Only roots carry a target: a reply anchors into its parent's body exactly as on the
+`docId`, and `fileVersionId` naming the version whose sheets the quads were measured on. Only roots carry a target: a reply anchors into its parent's body exactly as on the
 doc side (PLAN.md §13p). The `Annotation` type above is the shape the reasoning is about,
 not the Prisma model.
 
@@ -105,6 +106,8 @@ not the Prisma model.
 An uploaded PDF is bytes on the filesystem (PLAN.md §19), content-addressed at
 `FILE_STORAGE_DIR/<sha256[0:2]>/<sha256>` and served from `/api/files/<id>/<hash>` with
 `Range` support, so PDF.js can render page 1 of a large scan without transferring all of it.
+The route serves the hash its URL names when a version of the file holds those bytes, and
+404 otherwise (§13, "Addresses").
 
 **Prisma cannot stream a `Bytes` column, which is the whole argument**: a 50MB file would
 land in Node's heap on upload *and* on every one of pdfjs's range requests. `UserAvatar`'s
@@ -114,8 +117,9 @@ Consequences worth remembering:
 
 - **`FILE_STORAGE_DIR` is a second backup surface `pg_dump` does not cover** (DEPLOY.md).
 - **Never delete a file's bytes without counting references first.** Content addressing means
-  two `StoredFile` rows can legitimately share one blob; `deleteBytesIfUnreferenced` takes the
-  surviving count as an argument for exactly that reason.
+  two `file_version` rows, of two files or of one, can legitimately share one blob;
+  `deleteBytesIfUnreferenced` takes the surviving count as an argument for exactly that
+  reason, and `countVersionsHolding` is the count.
 - The Prisma model is **`StoredFile`**, `@@map("file")`. The table is `file`; the generated TS
   type must not be `File`, which is a DOM/Node global the upload path uses.
 - Upload is a **Route Handler taking a raw body** — not a Server Action and not multipart.
@@ -471,7 +475,8 @@ as long as it existed, which made it ~33% looser than the 2% it claims.
 ### Transport
 
 - **Annotations → Postgres rows**, not a `Y.Map` in the per-file ydoc. The ydoc
-  `ydoc:pdf:<fileId>` exists and stays empty, carrying awareness only. A `Y.Map` would have
+  `ydoc:pdf:<file version id>` exists and stays empty, carrying awareness only: one channel
+  per version of a file (§13, "Addresses"). A `Y.Map` would have
   bought CRDT merge and offline creation, and lost five things specific to this codebase —
   chiefly that Hocuspocus authorizes the connection rather than the keys (every DRAFT
   readable, every entry deletable, unattributed) and that `/annotations` could not see them.
@@ -1190,18 +1195,17 @@ text is keyed by version. Every version has its own address, and what is drawn, 
 titled and linked goes by version. Every anchor into a PDF names its version, and a capture's
 write checks the version its viewer loaded. No file can gain a second version yet, so
 nothing a reader sees has changed: `e2e/pdf-versions.spec.ts` gives a fixture file a second
-version, and a candidate, to exercise it. The rest is a plan, and the one exception to this file's "every statement is
-current". When it lands, it is rewritten as an account of what exists. §2a, §3, §4 and CLAUDE.md's "A PDF anchor
-cannot drift" are then amended where they say the bytes cannot change, and so is
-PDF_FRAGMENT_LINKS.md §1. CLAUDE.md's "One anchor row shape" gains the version column,
-PDF_FRAGMENT_LINKS.md §2 gains `sheet=` and `v=`, and docs/PERMISSIONS.md gains rows for
-uploading a version, promoting or abandoning one, building a page map, answering a run of
-sheets, running the bulk carry, moving a note or marking it as staying, and showing or hiding
-a move. docs/MCP.md gains the upload of a version (§5, §8). docs/DATABASE.md's data-only load
-gains two lines. A file's row loaded before its versions gets a search vector without its
-filename, which `check-search-index.ts --repair` refills. And `file` and `file_version` name
-each other, a second pair of tables whose keys form a cycle, beside `post` and
-`post_publication_event`.
+version, and a candidate, to exercise it.
+
+The rest is a plan, and the one exception to this file's "every statement is current".
+Where a statement below is of something built, it names the function or the file that holds
+it. When the rest lands, the section is rewritten as an account of what exists. §3, §4 and
+CLAUDE.md's "A PDF anchor cannot drift" are then amended where they say a file's bytes
+cannot change, and so is PDF_FRAGMENT_LINKS.md §1: each stays true while a file has one
+version. PDF_FRAGMENT_LINKS.md §2 gains `sheet=` and `v=`, and docs/PERMISSIONS.md gains
+rows for uploading a version, promoting or abandoning one, building a page map, answering a
+run of sheets, running the bulk carry, moving a note or marking it as staying, and showing or
+hiding a move. docs/MCP.md gains the upload of a version (§5, §8).
 
 Whoever may manage a file (`canUserManageFile`) may give it new bytes, which become its next
 **version**. Versions are numbered from 1 and kept for good. Each stays readable, at an address
@@ -1262,23 +1266,26 @@ Three rules hold throughout:
   - `base_version_id`, the version that was the latest when it was uploaded, and the page
     map from that version, once one is built (Matching the pages). The base is stored, since
     it can't be worked out from the numbers once a version between two others has been
-    abandoned;
+    abandoned. The map's own column arrives with the map (Building it, step 10);
   - `uploaded_at_update_id` and `promoted_at_update_id`, the highest `ydoc_update.id` when
     the row was made and when it was promoted: a clock for dating links (Links into the
-    file);
+    file). The first is never NULL, and is 0 where the log held nothing by then. The second
+    is NULL until the version is promoted;
   - `abandoned_at`.
 
   Every file has a version 1, a file that is not a PDF included. It is made promoted, by its
   uploader at its upload, so it is never a candidate, and both its update ids come from one
-  read of the highest `ydoc_update.id` in `recordUpload`'s transaction. The migration makes
-  one for each file that exists, from the file's own `created_*` values, with both update ids
-  the highest `ydoc_update.id` whose `created_at` is no later than the file's.
-  - **A migrated version 1 takes its file's id as its own.** So `file_page_text` is re-keyed
-    by renaming its column, and an anchor's version is filled from its `file_id`, with no row
+  read of the highest `ydoc_update.id` in `recordUpload`'s transaction. The migration
+  (`file_versions`) made one for each file that existed, from the file's own `created_*`
+  values, with both update ids the highest `ydoc_update.id` whose `created_at` is no later
+  than the file's.
+  - **A migrated version 1 has its file's id as its own.** So `file_page_text` was re-keyed
+    by renaming its column, and an anchor's version was filled from its `file_id`, with no row
     of page text rewritten.
-  - **A version made after the migration has an id of its own**, and no fixture shares the
-    two. Code that passes one id for the other works on every migrated file, so the suite is
-    what catches it.
+  - **A version made since has an id of its own**, and no fixture shares the two: the e2e
+    fixture makes a file through the upload's own writer. Code that passes one id for the
+    other works on every migrated file, so the suite is what catches it. The compiler does
+    not: both are strings.
 - **`file.current_version_id` names the latest.** A version's state is read from its row: a
   *candidate* is neither promoted nor abandoned, and an *earlier* version is promoted and not
   the latest. *Promoted* means `promoted_at` is set. Who promoted it can be NULL: a migrated
@@ -1289,54 +1296,72 @@ Three rules hold throughout:
     line at its base.
 - **A file and its first version are made in one transaction, in a fixed order**: the file
   with `current_version_id` NULL, then the version, then the pointer. The two rows name each
-  other, so one of them has to be written before the other exists.
-  - **The column is nullable for that step alone.** An integrity check reports a file without
-    a latest version (Building it). Prisma types the relation as optional, so the readers go
-    through one helper that throws on such a file, and none handles NULL for itself.
+  other, so one of them has to be written before the other exists. One function writes them
+  (`createFileWithFirstVersion`, `src/lib/file-version-data.ts`), for the upload, for
+  `scripts/test-file.ts` and for the e2e fixture.
+  - **The column is nullable for that step alone.** `scripts/integrity/check-file-versions.ts`
+    reports a file without a latest version. Prisma types the relation as optional, so the
+    readers go through one helper that throws on such a file (`latestVersionOf`,
+    `src/lib/file-version.ts`), and none handles NULL for itself.
+  - **The pointer is set with raw SQL**, so the file's `updatedAt` stays the one its insert
+    stamped: a Prisma update would move it, and it is the date a search hit shows.
   - **The order is the search trigger's.** It runs before the file's insert, when the file
     has no version, so the update that sets the pointer is what puts the filename in the
     vector (below). A deferred foreign key, with the pointer filled at the insert, would
     leave the filename out and nothing would fire later.
   - **The pointer's foreign key is on the pair** `(current_version_id, id)`, as an anchor's
     is, so the latest is one of the file's own versions. Prisma takes a pair as a one-to-one
-    relation only where the pair is unique on the side that holds it, so `file` gains
-    `@@unique([currentVersionId, id])` (validated on 7.9, with one column of the pair
-    nullable and the other not).
-- **What the bytes decide leaves the `file` row.** `sha256`, `byte_size`, `content_type`,
+    relation only where the pair is unique on the side that holds it, so `file` has
+    `@@unique([currentVersionId, id])`.
+  - **Every pair key is `NO ACTION` on delete and on update**, the pointer's and each
+    anchor's. A version's row goes only with its file, whose own cascade takes the anchors.
+- **What the bytes decide is not on the `file` row.** `sha256`, `byte_size`, `content_type`,
   `page_count`, `page_labels`, `outline` and `filename` are a version's alone, and a reader
-  that means the latest selects them through `current_version_id`. About forty modules read
-  them from the file row today, and the compiler finds each once the columns go. It does not
-  find raw SQL, which breaks only when run:
+  that means the latest selects them through `current_version_id`. The compiler names a
+  reader of a column that is gone. It does not find raw SQL, which breaks only when run:
   - `scripts/integrity/check-search-index.ts` builds `file_search_vector(title, filename)`
-    over `file` and keys `file_page_text` on `file_id`, for its check and its `--repair`;
-  - search's two queries over `file_page_text` join on `file_id` (`src/lib/search/pdfs.ts`);
-  - `fill` writes `UPDATE file SET page_labels …` (`src/lib/pdf-metadata.ts`).
+    with the latest version's filename, and keys `file_page_text` on `file_version_id`, for
+    its check and its `--repair`;
+  - search's two queries over `file_page_text` reach it through `file.current_version_id`
+    (`src/lib/search/pdfs.ts`).
+  - **A select handed to a generic helper is not checked either**, unless the helper takes
+    Prisma's `SelectSubset`: `resolveFileParam` does, since a bare `T extends
+    Prisma.StoredFileSelect` let a removed column through to fail at the first query.
   - `/files` sorts by size, pages and filename through that to-one relation.
   - The file's search vector holds its filename (FULLTEXT.md §3), from a trigger on
-    `UPDATE OF title, filename`. It reads the latest version's filename, and fires on
-    `current_version_id` as well, so a promotion refreshes it, and so does the update that
-    ends a file's creation.
-  - `fill` (`src/lib/pdf-metadata.ts`) writes labels and an outline to the version it parsed.
-- **Page text is keyed by version**: `file_page_text`'s key becomes `(file_version_id,
-  page_index, text_version)`. Its functions take a version's id where they take a file's
-  today, so the compiler names every caller, and one that means the latest passes
-  `current_version_id`.
+    `UPDATE OF title, current_version_id`. It reads the latest version's filename, so a
+    promotion refreshes it, and so does the update that ends a file's creation.
+  - `fill` (`src/lib/pdf-metadata.ts`) writes labels and an outline to the version it parsed,
+    through Prisma: a `file_version` row has no `updatedAt` for the write to move.
+- **Page text is keyed by version**: `file_page_text`'s key is `(file_version_id,
+  page_index, text_version)`. Its functions take a version's id, as the labels' do
+  (`pdfMetadata`), and one that means the latest passes `current_version_id`
+  (`latestVersionIdOf`).
   - Search ranks the latest version's pages alone (`src/lib/search/pdfs.ts`), or a hit would
     come from text that `/pdf/<slug>` doesn't show.
   - The two lazy writers (`extract` in `src/lib/pdf-page-text.ts`, and `fill`) write under
     the version whose bytes they parsed, so text can't land on other bytes.
-- **An anchor names its version.** `annotation` and the anchor tables gain
+- **An anchor names its version.** `annotation` and the anchor tables have
   `file_version_id` beside `file_id`, set exactly when the row holds a PDF target (a
   `pdfTarget`, a `PDF_TEXT` selector), with a foreign key on the pair so the version is one of
   that file's. It is the version whose sheets the quads were measured on.
+  - **A CHECK on each table holds "exactly when"** (`*_file_version_check`), and that a row
+    with a version has a `file_id`: a pair key with a NULL column is not checked at all. Its
+    selector half is `IS NOT DISTINCT FROM 'PDF_TEXT'`, since a plain equality is NULL for a
+    whole-object row and a CHECK passes on NULL. `check-tag-constraints.ts` proves each, the
+    pair keys and the one-candidate index by attempting the violation.
+  - **The capture hands back the version with the target** (`capturePdfTextAnchor`), so a
+    writer stores the pair and can't stamp another version beside those quads.
+  - Each anchor table has an index on the column.
   - The column is part of the row shape the anchor tables share (`src/lib/anchors/`), beside
     the selector and outside it: a `PdfTarget` stays what the viewer measured. It is not in
     the target arc either, since a tag's target is a file and no version of it.
   - A reply has no target and so no version. It is on its root's version, is shown with its
     root, and travels with it when the root is moved. Replies nest, and `/annotations`,
     search, a reference's cited-by, mentions and a link's groups each list single rows. So
-    one helper answers which version a note is on, its own or its root's at any depth, and
-    every such listing goes through it.
+    one helper answers which version a note is on, its own or its root's at any depth
+    (`noteVersions`, `src/lib/file-version-data.ts`), and every such listing goes through
+    it.
   - **A root with no target is the file's, and has no version.** The panel's "Write an
     annotation..." makes one, and so does MCP's `add_note` without a quote. It is listed on
     every version's page, a candidate's included, and may be written from any of them, since
@@ -1381,6 +1406,26 @@ Three rules hold throughout:
       the quads and drop the quote.
     - **A target given to a note being moved is not a capture.** It takes the checks of a
       move (Moving a note forward, "Writing a move").
+    - **One function makes the check** (`assertCaptureVersion`,
+      `src/lib/file-version-data.ts`), and each writer calls it in its own transaction:
+      the draft's insert, the post's settle (`writeSettledBody`'s `before`), the tray's
+      insert, and `mintLinks` and `addLinkParts` for MCP.
+    - **The lock is `FOR SHARE`.** It conflicts with the update a promotion makes to
+      `current_version_id`, which then waits for the capture, and not with another
+      capture's, so two readers annotating one file don't queue behind each other.
+    - **The PDF surface gives its composers the origin through a context**
+      (`pdf-capture-context.tsx`), since they are the doc side's too and take no PDF props.
+      A capture that names none is refused with the reload message: a tab whose bundle
+      predates the check can't say which version it shows.
+    - **A reopened draft keeps the version it was opened on**, and is posted from that
+      version's page and no other: the post names the page's version, and one that differs
+      from the draft's is refused. "Your private notes" links such a draft to its version
+      in place of offering Edit.
+    - **MCP's claim is the address it was given**: a version's own, or the bare one, which
+      means the latest and is refused once it no longer is. A candidate is refused before
+      anything is measured, and again by the check.
+    - **A comment's quotation of a PDF stamps the latest** and makes no claim: its gate is
+      shut (`canQuoteTargetInto`), and it joins the others when it gains a writer.
 
 ### Addresses
 
@@ -1394,6 +1439,9 @@ Three rules hold throughout:
   to the latest. On an earlier version it adds that a note made there is on that version
   until it is moved forward, by its author or by a bulk carry, and that its author may mark it
   as staying. A candidate's banner says it is not yet the latest.
+  - **Until a note can be moved, an earlier version's banner says only that a note made
+    there is on that version.** The words about moving it and marking it arrive with the
+    selective move (Building it, step 12).
 - **`/files/<slug>/v/<n>`** is a version's download page, and `…/download` its download. A
   download is saved under the version's own `filename`, so two versions uploaded as
   `book.pdf` both save as `book.pdf`. The download redirects to the byte URL with `&v=<n>`,
@@ -1402,9 +1450,9 @@ Three rules hold throughout:
   the same bytes uploaded twice under two names each save under their own.
 - **The byte route serves the hash its URL names** (`/api/files/<id>/<sha256>`) when a
   version of the file that is not abandoned holds those bytes, `immutable`. Any other hash
-  answers 404, where today it gets the current bytes. So a viewer open on one version reads
-  that version's bytes for as long as it is open, never splicing another's in by range.
-- **A version has no slug.** A renamed file's old slug redirects as it does today, and the
+  answers 404, never the current bytes. So a viewer open on one version reads that version's
+  bytes for as long as it is open, never splicing another's in by range.
+- **A version has no slug.** A renamed file's old slug redirects, and the
   redirect keeps the rest of the address: `/pdf/book/v/1` goes to `/pdf/barfield/v/1`. A file
   restored as `book-2` has `/pdf/book-2/v/1`.
 - **An abandoned version's address answers with a page that says so**, to whoever may read
@@ -1416,20 +1464,28 @@ Three rules hold throughout:
     client component completes the link.
   - MCP's `read` of such an address answers the same: the version is gone, and where the
     latest is.
-- **The viewer is mounted per version.** `PdfSurfaceClient`'s `key` is the version's id, where
-  it is the file's today. A client navigation between two versions of one file (the banner's
+  - **Until a version can be abandoned, its address answers 404** in the browser (Building
+    it, step 7, brings the page). MCP's `read` already answers as above.
+- **The viewer is mounted per version.** `PdfSurfaceClient`'s `key` is the version's id. A
+  client navigation between two versions of one file (the banner's
   link to the latest, the version list, a link's parts on two versions, a link sent to the
   version it names) then mounts a new surface. Keyed on the file, the old surface would stay,
   with one version's viewer, ready flag and once-only jump on the other's page.
 - **A version that is not the latest is called `<title>, version <n>`**, on its page and
   wherever a note on it is listed: `/annotations`, search, a reference's cited-by, mentions,
   MCP's threads and a link's groups. Each links the note at `/pdf/<slug>/v/<n>`, and so does
-  the email sent when a note is raised. About twenty-five places build such a link from a
-  template string today, and the compiler finds none of them, so they move to one helper that
-  takes the version. One that is missed lands on the note's entry and not its card (below).
+  the email sent when a note is raised. The compiler finds no link built from a template string, so
+  each goes through one helper that takes the version: `pdfPath` for the address
+  (`src/lib/file-version.ts`), with `pdfNoteContainer` for a listing's title and address
+  together. One that is missed lands on the note's entry and not its card (below).
+  - **A link's group names every version its parts are on that is not the latest**:
+    "Book, versions 1 and 2". `linkPartsVersions` is the one rule for that title and for
+    where the link lands, for the landing route, `/links` and MCP.
+  - **The raise email links the version's address with no card fragment**, as it linked the
+    file's.
 - **A version's own address always names its version**, the latest's included. The page at
   `/pdf/<slug>/v/<n>` is titled `<title>, version <n>` whatever the version's state, and
-  says "the latest" beside it while it is. A tab left open there across a promotion writes
+  says "the latest" beside it, in the viewer's toolbar, while it is. A tab left open there across a promotion writes
   its notes on the version it shows (Versions), and its title has said which. The bare
   address names none, which is why a capture from it is refused instead.
 - **A `/link/<id>` landing on a PDF part goes to the part's version.** Where a link's parts in
@@ -1472,9 +1528,15 @@ Three rules hold throughout:
   - **MCP's threads on the bare address** answer the latest version's and then those on other
     versions, each naming its version, as the page does. Filtered to the latest alone, a
     RAISED note on version 1 would leave the reply queue. On a version's own address they
-    answer that version's.
-- **`PdfMetadataPanel` lists the versions**, each with its state, who uploaded it and when,
-  who promoted it and when, a download link and a link to its page. To whoever may manage the
+    answer that version's, with the notes that have no target.
+    - **The parts of links into a file are listed the same way** (`include: ["links"]`), and
+      a thread's or a part's page and label are its own version's.
+    - **`read` of `/annotations` keeps one head per file**, and a thread on a version other
+      than the latest names it in its group.
+- **`PdfMetadataPanel` lists the versions**, once a file has a second, each with its state,
+  who uploaded it and when, who promoted it and when, a download link and a link to its page
+  (`PdfVersionList`). The rest of this bullet is the list's management half (Building it,
+  step 8). To whoever may manage the
   file it also gives the upload, a candidate's promotion and abandoning, a link to each
   version's map page, and the bulk carry, with the number of posted notes still on each
   earlier version. Versions are in no listing of files, since they are not files.
@@ -1489,8 +1551,12 @@ Three rules hold throughout:
     answer says so.
   - **`add_note`, `create_link` and search's `within` take a version's address** as `read`
     does. A note or a part on a candidate is refused, as from the viewer.
-- **The presence channel is per version** (`ydocIdForFile` gains the version), so a reader
-  following a presenter is never led to a sheet of other bytes.
+- **The presence channel is per version**, so a reader following a presenter is never led to
+  a sheet of other bytes. It is named by the version's id (`ydocIdForFileVersion`:
+  `ydoc:pdf:<version id>`), so a migrated version 1 keeps the name its file's channel had,
+  and the token route takes `?v=<version id>`.
+- **A passage a fragment link misses is looked for in the version shown**
+  (`locateFragmentMisses`), whose sheets the viewer has already looked on.
 
 ### The upload
 
@@ -2412,10 +2478,15 @@ Four pull requests, each merged before the next is opened.
 
 The existing suite can't prove the reads by version, since a missing filter passes every test
 while each file has one version. So the first pull request adds a fixture to
-`e2e/db-worker.ts` that inserts a second, promoted version beside the first, with a note and a
-link part on version 1, and a spec that checks what is drawn and listed at each address, the
-titles and the links. The integrity check that every file has a latest version goes in with
-step 1, where the column becomes nullable.
+`e2e/db-worker.ts` that inserts a second, promoted version beside the first
+(`addTestFileVersion`), with a note and a link part on version 1, and a spec that checks what
+is drawn and listed at each address, the titles and the links (`e2e/pdf-versions.spec.ts`).
+The integrity check that every file has a latest version went in with step 1, where the
+column became nullable (`check-file-versions.ts`, which also checks that the latest is
+promoted and not abandoned, and that a file's versions are numbered from 1 with no gap).
+
+**Steps 1 to 4 are built**, as three commits: steps 1 and 2 are one, since the migration
+drops the columns and no tree compiles between the schema and the readers that follow it.
 
 **The deploy that carries the first migration takes the PDF surfaces down for the length of
 its build**, and that is accepted. `deploy/deploy.sh` migrates before it builds, so until the
@@ -2446,9 +2517,9 @@ down until one succeeds, whatever the script's message says of the live site.
    a card's link from any address, the `/link/<id>` landing, the presence channel, MCP's `read`,
    and a past slug's redirect keeping the rest of the address.
 4. **Anchor writes**: each stamps its version and checks it inside its transaction. A second
-   migration then repeats step 1's fill and adds the CHECK that `file_version_id` is set
-   exactly when the row holds a PDF target, which no row written between step 1 and this one
-   would pass.
+   migration (`file_version_anchor_checks`) then repeats step 1's fill and adds the CHECK
+   that `file_version_id` is set exactly when the row holds a PDF target. The fill takes a
+   row's file's version 1, since no file has a second before both have run.
 5. **`sheet=`**: `formatPageName` writes it and every reader takes it beside `page=`: the
    fragment's parser, `pageFromHash`, the check's and MCP's href parsers, and the two
    patterns that are written out by hand, `fragmentPairs`' filter (`citation.ts`) and
@@ -2463,7 +2534,10 @@ down until one succeeds, whatever the script's message says of the live site.
 7. **The upload**, through `PUT /api/files/<id>` and through MCP's route with `versionOf`,
    the lock on the hash, the candidate's page, promotion without the carry, abandoning, and
    the page of an abandoned version.
-8. **The version list's management half, and the text-version script by version.**
+8. **The version list's management half, and the text-version script's lock.** The script
+   already works version by version, since page text and anchors are keyed by version; what
+   is left is locking the file row for each file's writes, which matters once a note can be
+   moved.
 9. **Integrity checks**, beside step 1's (every file has a latest version, which is
    promoted):
    - every version that is not abandoned has its bytes on disk;
@@ -2471,8 +2545,8 @@ down until one succeeds, whatever the script's message says of the live site.
      candidate or an abandoned version;
    - no `tag_anchor` or `comment_quote_anchor` row holds a `PDF_TEXT` selector on a file
      with more than one version;
-   - every anchor's quote matches the page text of the version it names, which
-     `check-pdf-anchors` verifies today against the file's.
+   - every anchor's quote matches the page text of the version it names. `check-pdf-anchors`
+     does this already, and reports a target that names no version.
 10. **The page map**: the similarity measure, fixed against real pairs, the blank-sheet read,
     the builder (`src/lib/pdf-page-map-build.ts`), the map's page with its runs of sheets, and
     the carrying of links through maps (`src/lib/pdf-page-map.ts`), in the viewer, the
