@@ -4987,3 +4987,9 @@ built: [docs/PDF_FRAGMENT_LINKS.md](docs/PDF_FRAGMENT_LINKS.md) §2 ("Which shee
 quotation's segments"), §4, §6, §8, §9, and §12 for the departures; the viewer's gaps are
 still a plan, §13 there. A citation's passage: [docs/CITATIONS.md](docs/CITATIONS.md), "A
 passage in a citation".**
+
+## 33. Replacing a PDF's bytes
+
+Planned 2026-11-10: new bytes for a file as its next version, readable at an address of its
+own, every anchor reconciled onto its pages (by label, then by text, then by a person), and one
+promotion that makes it the latest. **Plan: [docs/PDF.md](docs/PDF.md) §13.**

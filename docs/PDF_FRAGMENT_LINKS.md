@@ -68,7 +68,8 @@ prefix, start, end, suffix = word *("+" word)
 - **`p`** is the page printed on the sheet, its label, found by the rule below. A reader of a
   book names the page printed on it, so an author quoting from a corrected copy writes the page
   the copy cites rather than converting it to a sheet by hand, and a new copy of the file that
-  adds or removes a sheet before it doesn't move the link. `/references/<key>#p=49` uses `p` for
+  adds or removes a sheet before it doesn't move the link ([PDF.md](PDF.md) §13 plans such a
+  replacement, and `v=` for the `page=` links it would move). `/references/<key>#p=49` uses `p` for
   a printed page too (CITATIONS.md, Pages). One link may use both forms.
 - **`text`** is [Text Fragments](https://wicg.github.io/scroll-to-text-fragment/)' grammar, minus
   its encoding rules:

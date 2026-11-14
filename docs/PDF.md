@@ -1173,7 +1173,1102 @@ available without rendering.
   a re-export, a copy with its embedded annotations stripped: re-anchor across editions, or
   treat as unrelated. Content-addressed storage makes the two *share* bytes when they are
   identical and stay wholly separate when they are not; nothing bridges editions today, and
-  every anchor is keyed on one edition's `sha256` by construction (§4).
+  every anchor is keyed on one edition's `sha256` by construction (§4). §13 plans new bytes for
+  a file, its anchors reconciled one by one onto pages that may have moved; whether a different
+  edition should be such a replacement stays open.
 - **The Contents pane's expansion default, and remembering what a reader opened** — TODO.md,
   "The PDF Contents pane forgets its expansion state". An item with enough design in it to
   act on, so it lives there rather than here.
+
+---
+
+## 13. Replacing a file's bytes — plan
+
+**Not built**, and the one exception to this file's "every statement is current". When it
+lands, it is rewritten as an account of what exists. §2a, §3, §4 and CLAUDE.md's "A PDF anchor
+cannot drift" are then amended where they say the bytes cannot change, and so is
+PDF_FRAGMENT_LINKS.md §1. CLAUDE.md's "One anchor row shape" gains the version column,
+PDF_FRAGMENT_LINKS.md §2 gains `v=`, and docs/PERMISSIONS.md gains rows for uploading a
+version, reviewing, promoting, abandoning and purging. docs/DATABASE.md's data-only load
+gains a line: a file's row loaded before its versions gets a search vector without its
+filename, which `check-search-index.ts --repair` refills.
+
+Whoever may manage a file (`canUserManageFile`) may give it new bytes: typically a new scan of
+the same book, or the same scan with a corrected text layer. The new bytes may have a different
+number of pages and put the same words in different places. That is not writing into a PDF,
+so §0's invariant 1 holds.
+
+A file has **versions**, numbered from 1. Every version stays readable, at an address of its
+own, by whoever may read the file. One of them is the **latest**: the one `/pdf/<slug>` shows,
+search ranks and a citation resolves on. A new note goes on whichever version its writer is
+reading, the latest or an earlier one. A replacement has three stages:
+
+1. **Upload**: the new bytes become the file's next version, a *candidate*, readable at once
+   at its own address.
+2. **Reconcile**: every anchor on the latest version is given a place on the candidate's
+   pages, mostly automatically, with the rest left to a person.
+3. **Promote**: one transaction makes the candidate the latest, and rewrites every anchor
+   that was given a place.
+
+Until the promotion `/pdf/<slug>` shows what it always did, and a link to either version
+works.
+
+### Two kinds of new version (this overrides what follows)
+
+**This subsection overrides the rest of §13 wherever the two disagree.** The subsections below
+were written for one case, a better copy of the same text, where every anchor has a place on the
+new pages and a person accounts for each one that doesn't find it. A file's versions are kept
+for good, and that serves a second case as well: a revised text, such as the drafts of a paper,
+where some notes don't apply to the next version and stay on the one they were made on. The
+subsections this one overrides are rewritten to it, and it is folded into them, before step 5 is
+built (What is rewritten, below).
+
+**Two kinds of new version, one operation.**
+
+- **A better copy** of the same text: a new scan, or the same scan with a corrected text layer.
+  Whether a note carries is a mechanical question. Where its words are found, it applies.
+- **A revised text**: a later draft. A sentence that survives doesn't mean a note on it still
+  applies, since the author may have answered it elsewhere. Moving the note asserts that it
+  does, so nothing moves without a person's judgement.
+
+Both rest on **moving a note forward**: an anchor on an earlier version is given a target on the
+latest, found by the placing rules (Placing each anchor), and the latest becomes its version. A
+better copy runs that in bulk, for everything that places itself. A revised text runs nothing,
+and each note is moved, or not, one at a time and at any later date.
+
+- **The uploader's choice decides only what runs, and nothing stores it as a mode.** No reader
+  branches on it. A reader looks at data: which version an anchor is on, and whether a page map
+  has a counterpart for a sheet. Otherwise every read path gains a second behaviour that can
+  fail with nothing to show it.
+- **A selective move is as available after a better copy** as after a revised text, for the
+  notes the bulk carry couldn't place.
+
+**Nothing holds up a promotion.** The candidate stage stays, so the uploader can open the new
+bytes at their own address and see what would carry. Promotion then makes the candidate the
+latest, whatever is undecided. An anchor nobody moved stays on the version it is on. It is drawn
+there and listed on the latest's page under that version, as The review says of a note left
+behind.
+
+**The bulk carry** moves forward everything that places itself.
+
+- **It is an action.** It is offered at the upload: the candidate's page then shows what would
+  carry, and the promotion carries it. It stays available afterwards on the file's page, for
+  what is still on an earlier version.
+- **Whoever may manage the file runs it**, and it moves everyone's posted notes and the parts of
+  everyone's minted links. Otherwise a corrected scan would leave every other author's notes
+  behind until each of them acted.
+- **It moves nothing else**: no DRAFT, its runner's own included, no soft-deleted note, and no
+  part of a link not yet minted. Each stays on its version, and its author moves it as any
+  other note.
+- **What places itself** is what Placing each anchor calls placed, and also a quote found
+  exactly once in the latest version, its `prefix` and `suffix` agreeing, on whatever sheet and
+  whether or not that sheet is mapped. That second rule is the bulk carry's alone. Everything
+  else stays where it is, for its author's worklist.
+- **It builds the page map** between the two versions (Matching the pages), with its unmapped
+  sheets and its runs of sheets. Run after the promotion, it builds the map then, and the
+  `page=` links written against the earlier version land on the latest from then on.
+  - **The question a run of sheets raises stays open.** The carry asks it, of whoever may
+    manage the file: whether the map should pair those sheets as the text does, where the
+    labels pair them otherwise. It is on the file's page, and any manager may accept or
+    decline at any time, the promotion closing nothing. Until one accepts, the sheets are
+    unmapped. Accepting writes the text's sheets into the map, and carries the notes on those
+    sheets that then place themselves, as a carry would.
+  - **A map pairs one sheet with one sheet, or with none.** A revised text that reflows puts
+    one page's words on two, and no sheet of it is the counterpart. Such a sheet is left
+    unmapped, as any sheet no rule can place. Pairing a sheet with a part of another is under
+    Open.
+- **Its moves are hidden by default** (The history of moves, below).
+
+**A selective move** is one note, moved by a person who judges that it still applies.
+
+- **Only the note's author moves it**, or, for a note a bot wrote, the person the bot works for
+  (`user.works_for_user_id`; a bot works for exactly one person, PERMISSIONS.md "Bots"). A bot
+  given to another person takes its notes to them. A manager of the file who is neither moves
+  nobody's note this way, and no role curates other people's notes.
+- **A part of an anchored link** follows the same rules, with the link's creator as its author.
+- **A reply travels with its root.**
+- **Forward only, and offered to the latest version only.** Nothing moves a note to an earlier
+  version, and a worklist offers no destination but the latest. A decision made against a
+  version that a promotion has since replaced is still written (Writing a move, below).
+- **Where a note would go is worked out when it is asked for.** The placing rules run for that
+  anchor against the latest version when its worklist is opened, starting from where the note is
+  now: a note placed by hand on one version is looked for on the next by the quote and the page
+  it was given there. Their answer is a suggestion, whether they would call it placed or
+  proposed. In a revised text a match of the
+  words is never more than that. The author accepts the suggestion, places the note by selecting
+  text or drawing a rectangle on the latest, as an annotation is captured, or marks the note as
+  staying.
+- **"Stays here" is the author's mark on their own note**: it has been looked at, and it belongs
+  on its version. Without the mark, a note kept on a first draft on purpose looks the same as
+  one nobody has looked at, and no worklist ever empties. The mark holds when a later version
+  arrives, so the note is not asked about again.
+- **Its move is shown by default.**
+
+**The worklist** is "my notes on earlier versions": the viewer's notes and link parts, and those
+of the bots that work for them, on any version but the latest, less the ones marked as staying.
+It is on the file's page, and it is a filter in `/annotations`. Nothing is emailed.
+
+**Only decisions are stored**: the moves, and the "stays here" marks. No pass stores a proposal
+for every anchor. So there is no item per anchor, nothing to rerun when an anchor or the text
+version changes, and nothing for a promotion to check under its lock. A note captured on the
+outgoing version while a carry ran stays there, and running the carry again moves it.
+
+**Writing a move** is one transaction with the file row locked, for one note or for a carry's
+hundreds. Working out where each note goes comes first and outside it, since that reads a
+version's pages and takes seconds: each version's document is opened once and each page read
+once.
+
+- **Three checks are the file's, and are made once**: the destination is a promoted version
+  later than the one the notes are on; the mover may make the move; and the destination has page
+  text at the text version the new targets name.
+- **The fourth is each note's, and is the write's own condition.** One `UPDATE` for each anchor
+  table takes the whole batch as one parameter. It sets a row's target, quote and version where
+  the row is still on the version, and at the target, its placement was worked out from, and it
+  returns the rows it changed. A difference in text version alone passes, since the text-version
+  script restamps only a page that reads the same. One `INSERT` then writes the history of the
+  rows returned. Both are raw SQL: Prisma has no update that sets different values on different
+  rows. A carry of any size is about six statements, and one of several thousand notes splits
+  its parameter inside the one transaction.
+- **A row not returned was skipped**: moved from another tab, or by a carry that got there
+  first. A bulk carry counts it, and the next carry takes it. A selective move shows a fresh
+  suggestion.
+- **The destination need not still be the latest.** A person's decision made against a version
+  that was the latest when they made it is written to that version, where a refusal would
+  discard their work. The note is then on an earlier version again, and its next suggestion
+  starts from where they put it.
+- **At a promotion, the switch and the carry's writes are one transaction**, so the latest is
+  never shown without its notes.
+- **Nothing is staged.** Each decision is written as it is made, and a placement the app worked
+  out and couldn't write is worked out again.
+
+**The history of moves.** A note has one location, the newest version it was moved to. Each move
+is a row:
+
+- the row moved: one nullable foreign key per kind, with a CHECK that exactly one is set, the
+  anchor tables' own pattern (CLAUDE.md, "One anchor row shape");
+- the version and the target it left, and the version and the target it reached;
+- who moved it, and when;
+- whether the move is hidden.
+
+A shown move appears on the note's card, which names who moved it and from which version where
+that is not its author, and in the earlier version's list, as "moved to version n". A hidden
+move appears on neither. That suits a corrected scan, where the move tells a reader nothing. The
+flag is on each move, so a carry that turns out to be mistaken can be shown. The row keeps the
+target the note left, which is what an undo would replay. Undo is not part of this plan.
+
+`scripts/upgrade-pdf-text-version.ts` doesn't read these rows. A kept target's page, quads and
+quote stay true, since a version's bytes never change. Its offsets and its text version may
+name an extraction the script has since deleted, and an undo would find them again from the
+quote.
+
+**Links.** A revised text has no page map until a carry is run, and a link written against an
+earlier version then opens that version. So does a `page=` link without words to a sheet that a
+map leaves unmapped, which Links into the file reports as unmatched and sends nowhere.
+
+- **A `p=` names a version as a `page=` does.** While a file has one version, a link of either
+  form needs no `v=`. Once it has a second, every link into it that the app writes carries
+  one, by printed page or by sheet, and a `v=` belongs to the `p=` or the `page=` before it. A
+  link of either form without one means the file's first version. On a version's own address
+  it counts that version's pages, as Links into the file has it.
+- **So a `p=` link is carried as a `page=` link is.** Its label is read on the version it
+  names, the sheet found there goes through the page maps to the version shown, and its words
+  are looked for on that sheet. Where no map reaches the version shown, it opens its own
+  version. Links into the file reads a `p=` on the latest version's labels, gives it no stamp
+  and steers linkers to it for that reason. All three go.
+- **The checks read a link against the version it names.** Words that are gone from the latest
+  version are no fault in a link that names an earlier one. The integrity check's warning for
+  a link without `v=` written after its file's second version, and MCP's refusal of one,
+  cover a `p=` too. A link that names an earlier version still lands, and every link written
+  before a file's second version is one, so the integrity check lists such a link only under
+  `--verbose`, where Links into the file has it reported as stale.
+- **A sheet is written `sheet=`.** `page=` is read as the same thing for good, so every link
+  already written keeps working, and the app writes it no more. Beside `p=`, "page" is the
+  word a reader takes for the printed page. The two words are page, for the one printed on
+  the paper, and sheet. MCP's tools use them that way: a parameter or an answer that says
+  `page` for a sheet says `sheet`. It is a pull request of its own, ahead of `v=`, and the
+  rest of §13 is rewritten to it.
+- **A citation's page is a printed page, never a sheet**: `/references/<key>/p/<page>`, read
+  on the latest version's labels. A work is one fixed text, so its file takes better copies
+  and no revisions, and its printed pages are the same in each.
+
+**Search and citations stay on the latest version.** What a set of drafts wants from them is
+under Open.
+
+**No version is purged.** A version goes only as its file does, by the soft deletion that
+exists. `purgeFileVersion`, its row in PERMISSIONS.md, its test and its half of step 10 leave
+the plan. The page of a version that is gone is needed for an abandoned candidate alone.
+`FILE_STORAGE_DIR` grows by a whole copy per version, and nothing shrinks it.
+
+**What stands:**
+
+- Versions, Addresses and The upload;
+- what is drawn and listed on which version's page;
+- `v=`, and the rest of Links into the file but for the paragraph above;
+- the placing rules, as the engine behind a move;
+- Matching the pages, for the bulk carry and for the `page=` links without words;
+- Rejected designs, and the accepted outage on the first migration's deploy;
+- steps 1 to 4 as the first pull request, with one change: `file_reconciliation_item` leaves
+  step 1's migration. Its successor is the history of moves with the "stays here" mark, and that
+  arrives with the step that builds a move.
+
+**What is rewritten:**
+
+- **The section's name and opening.** It plans versions of a file, where it says a replacement
+  in three stages. The pointers that use the old name follow: CLAUDE.md's row for this file,
+  PLAN.md §33, TODO.md's entry, and the lines in CITATIONS.md and PDF_FRAGMENT_LINKS.md. The
+  opening's list of rows for PERMISSIONS.md loses reviewing and purging, and gains running the
+  bulk carry and moving a note.
+- **The review** becomes the worklist, and the page that answers a map's runs of sheets. Its two
+  warnings (a candidate without usable labels; citations that name a sheet of a file without
+  labels) move to the candidate's page.
+- **Promotion** becomes switching the latest and, where it was asked for, the bulk carry. Its
+  refusals and its first step go.
+- **Placing each anchor** keeps its rules and loses the reconciliation item: its three outcomes
+  are what a suggestion says, or what the bulk carry acts on. The refusal over a `PDF_TEXT` row
+  in `tag_anchor` or `comment_quote_anchor` goes with the gate, since such a row simply stays on
+  its version. The integrity check for one stays.
+- **The upload** loses the items an abandonment deletes, and the pass that reruns after a
+  restore.
+- **Earlier versions** loses the purge, and what the text-version script does about items.
+- **Open** loses "Moving notes forward". It gains: a map for pages that reflow; search and
+  citations across a set of drafts; a curator who moves other people's notes; moving a note
+  back, or undoing a move; a nudge by email; the purge; decisions made against a candidate
+  before its promotion and written with it, which need a table of pending moves and a rule for
+  an abandoned candidate; and the answers given about the runs of an abandoned candidate's map,
+  which the next candidate's map asks again.
+- **Building it** from step 5 on, with its tests, and TODO.md's races, most of which the gate
+  made.
+
+**Left for the rewrite to settle**, each said plainly when it is, since none of them is decided:
+
+- what becomes of a citation's `/pdf/` referent written with `page=`, and of a cited page in a
+  file without usable labels, now that a citation names a printed page and never a sheet.
+  Proposed and not confirmed: a referent takes `p=` and a sheet is refused there, and a file
+  without usable labels keeps the reading of `p=<n>` as a sheet, with its warning;
+- whether the bulk carry moves a note its author has marked "stays here";
+- which map a carry builds when the notes are on a version that is not the latest's base, and
+  whether their sheet is found by chaining maps;
+- what a second run of the carry does to a map already built, and to the runs already answered
+  on it;
+- which rules decide that a sheet was removed, where Matching the pages names only rule 4: a
+  label no new sheet carries under rule 1, and a sheet the alignment pairs with nothing under
+  rule 3;
+- whether rule 1's sheets with a repeated label and unequal counts go on to rules 3 to 5, as its
+  sheets with an empty label do, where today they are left unmapped;
+- a sheet without text inside a stretch of shifted labels. Rule 2 checks only the pairs where
+  both sheets have text, so such a sheet keeps the labels' answer and splits the run;
+- the similarity measure on a revised text. It is fixed against better copies, and on pages that
+  reflow it could pair a sheet with the one holding most of its words;
+- whether a move row keeps the target the note reached. Nothing reads it: the note holds that
+  target, and a later move's row records it as the one left;
+- the names of MCP's parameters for a page and a sheet. `page` means a sheet in its tools today,
+  so a prompt that passes it for one changes meaning;
+- the link cases Links into the file and Placing each anchor leave unsaid: a link with words on
+  an unmapped sheet whose passage occurs on several sheets; a link carried backwards onto a
+  sheet with no counterpart in the base; a chain of maps with one missing in the middle; an
+  anchor on a removed sheet; and where "found more than once" ends and a tie broken by `prefix`
+  and `suffix` begins.
+
+**How the rewrite is checked.** Two cases are walked through the rewritten text, each from the
+upload to the last note: what the uploader sees, what each note's author sees, where every note
+and every kind of link lands, and what is stored.
+
+1. **A corrected scan**: the same pages, with the text layer corrected.
+2. **A paper's next draft**: 12 pages become 14, the text is reflowed, a section is cut and
+   three paragraphs are rewritten. There are no labels, and thirty notes.
+
+A step either case can't get through, or a sentence that still assumes every anchor is given a
+place, is a fault in the rewrite.
+
+
+### Versions
+
+- **`file_version`** has one row per version of a file. It holds:
+  - `file_id` and `number`;
+  - what the bytes decide: `sha256`, `byte_size`, `content_type`, `page_count`,
+    `page_labels`, `outline` and `filename`;
+  - who uploaded it and who promoted it, with when;
+  - `base_version_id`, the version that was the latest when it was uploaded, and the page
+    map from that version (Matching the pages). The base is stored, since it can't be worked
+    out from the numbers once a version between two others has been abandoned;
+  - `uploaded_at_update_id` and `promoted_at_update_id`, the highest `ydoc_update.id` when
+    the row was made and when it was promoted: a clock for dating links (Links into the
+    file);
+  - `abandoned_at` and `purged_at`.
+
+  Every file has a version 1, a file that is not a PDF included. It is made promoted, by its
+  uploader at its upload, so it is never a candidate, and both its update ids come from one
+  read of the highest `ydoc_update.id` in `recordUpload`'s transaction. The migration makes
+  one for each file that exists, from the file's own `created_*` values, with both update ids
+  the highest `ydoc_update.id` whose `created_at` is no later than the file's.
+  - **A migrated version 1 takes its file's id as its own.** So `file_page_text` is re-keyed
+    by renaming its column, and an anchor's version is filled from its `file_id`, with no row
+    of page text rewritten.
+  - **A version made after the migration has an id of its own**, and no fixture shares the
+    two. Code that passes one id for the other works on every migrated file, so the suite is
+    what catches it.
+- **`file.current_version_id` names the latest.** A version's state is read from its row: a
+  *candidate* is neither promoted nor abandoned, and an *earlier* version is promoted and not
+  the latest. *Promoted* means `promoted_at` is set. Who promoted it can be NULL: a migrated
+  version 1 has no uploader where its file has no `created_by_user_id`, and a deleted user's
+  id is set to NULL.
+- **A file and its first version are made in one transaction, in a fixed order**: the file
+  with `current_version_id` NULL, then the version, then the pointer. The two rows name each
+  other, so one of them has to be written before the other exists.
+  - **The column is nullable for that step alone.** An integrity check reports a file without
+    a latest version (Building it). Prisma types the relation as optional, so the readers go
+    through one helper that throws on such a file, and none handles NULL for itself.
+  - **The order is the search trigger's.** It runs before the file's insert, when the file
+    has no version, so the update that sets the pointer is what puts the filename in the
+    vector (below). A deferred foreign key, with the pointer filled at the insert, would
+    leave the filename out and nothing would fire later.
+  - **The pointer's foreign key is on the pair** `(current_version_id, id)`, as an anchor's
+    is, so the latest is one of the file's own versions.
+- **What the bytes decide leaves the `file` row.** `sha256`, `byte_size`, `content_type`,
+  `page_count`, `page_labels`, `outline` and `filename` are a version's alone, and a reader
+  that means the latest selects them through `current_version_id`. About forty modules read
+  them from the file row today, and the compiler finds each once the columns go. It does not
+  find raw SQL: `scripts/integrity/check-search-index.ts` builds `file_search_vector(title,
+  filename)` over `file` and keys `file_page_text` on `file_id`, for its check and its
+  `--repair`, and breaks only when run.
+  - `/files` sorts by size, pages and filename through that to-one relation.
+  - The file's search vector holds its filename (FULLTEXT.md §3), from a trigger on
+    `UPDATE OF title, filename`. It reads the latest version's filename, and fires on
+    `current_version_id` as well, so a promotion refreshes it, and so does the update that
+    ends a file's creation.
+  - `fill` (`src/lib/pdf-metadata.ts`) writes labels and an outline to the version it parsed.
+- **Page text is keyed by version**: `file_page_text`'s key becomes `(file_version_id,
+  page_index, text_version)`. Its functions take a version's id where they take a file's
+  today, so the compiler names every caller, and one that means the latest passes
+  `current_version_id`.
+  - Search ranks the latest version's pages alone (`src/lib/search/pdfs.ts`), or a hit would
+    come from text that `/pdf/<slug>` doesn't show.
+  - The two lazy writers (`extract` in `src/lib/pdf-page-text.ts`, and `fill`) write under
+    the version whose bytes they parsed, so text can't land on other bytes.
+- **An anchor names its version.** `annotation` and the anchor tables gain
+  `file_version_id` beside `file_id`, set exactly when the row holds a PDF target (a
+  `pdfTarget`, a `PDF_TEXT` selector), with a foreign key on the pair so the version is one of
+  that file's. It is the version whose pages the quads were measured on.
+  - The column is part of the row shape the anchor tables share (`src/lib/anchors/`), beside
+    the selector and outside it: a `PdfTarget` stays what the viewer measured. It is not in
+    the target arc either, since a tag's target is a file and no version of it.
+  - A reply has no target and so no version. It is on its root's version and is shown with
+    its root. Replies nest, and `/annotations`, search, a reference's cited-by, mentions and a
+    link's groups each list single rows. So one helper answers which version a note is on,
+    its own or its root's at any depth, and every such listing goes through it.
+  - **A root with no target is the file's, and has no version.** The panel's "Write an
+    annotation..." makes one, and so does MCP's `add_note` without a quote. It is listed on
+    every version's page, a candidate's included, and may be written from any of them, since
+    no page of it was measured. The reconciliation and the purge ignore it. A stored target
+    that no longer parses is listed the same way.
+  - A tag is on the whole file and has none.
+  - A reference has none. It names the work, and a citation's page is resolved on the
+    latest version's labels and text at every click (Links into the file).
+- **A number is never reused.** An abandoned or purged version keeps its row, without its
+  bytes or its page text. The next number is one more than the file's rows. So version 3 of
+  a file never comes to mean other bytes. An address is only as lasting as its slug: a
+  deleted file's slug is free, and whatever takes it answers at `/pdf/<slug>/v/1` too.
+- **One candidate per file**, held by a partial unique index on `file_id` where the row is
+  neither promoted nor abandoned. An upload while one stands is refused, naming it, until it
+  is promoted or abandoned. A soft-deleted file takes none, and neither does a file that is
+  not a PDF.
+- **Whoever may read the file may read every version of it**: the candidate, the latest and
+  the earlier ones. A version has no visibility, owners or deletion of its own, so there is
+  no second read rule to keep in step with the file's. Uploading a version, reviewing,
+  promoting and abandoning take `canUserManageFile`.
+- **A new note or link part goes on the version it was made on**: the latest, or an earlier
+  version from its own address.
+  - **A candidate takes none**, since abandoning it removes the pages the anchor was
+    measured on. Only the reconciliation records anything against it.
+  - **A note on an earlier version stays there.** A reconciliation reads the latest version's
+    anchors alone, so it is never carried forward. It is drawn at its version's address and
+    listed wherever a note is (Addresses), and the latest version's page lists it (The
+    review). Moving notes forward is a later feature (Open).
+  - **A capture names the version its viewer loaded and the address it loaded it from**, and
+    the write checks them inside the transaction that inserts, with the file row locked: a
+    posted note, a draft opened on a selection, a part added to a link, and MCP's
+    `anchorPdfQuote`.
+    - **From `/pdf/<slug>`, the version must still be `current_version_id`.** A viewer left
+      open there across a promotion still shows the old bytes and isn't told, and its writer
+      means the latest. Its capture is refused with a reload message, as the schema gate
+      refuses a stale tab, rather than landing on an earlier version unseen.
+    - **From `/pdf/<slug>/v/<n>`, the version must be promoted and not purged.** Its page
+      has said which version it is. A candidate isn't promoted, and neither is an abandoned
+      one, so a tab left open on a candidate across its abandoning is refused too. Its page
+      text is gone, and the capture would otherwise keep the quads and drop the quote.
+
+### Addresses
+
+- **`/pdf/<slug>` shows the latest version. `/pdf/<slug>/v/<n>` shows version n, whatever
+  its state**: a candidate, the latest or an earlier one. It never redirects to the bare
+  address, so a link to version 2 still shows version 2 after version 3 is promoted.
+  `/pdf/<slug>/v<n>` redirects to it.
+- **The page of a version that is not the latest says so in a banner**: which version it is,
+  when it and the latest were uploaded, and the time between them in the largest unit that
+  fits (years, months, days, hours, minutes or seconds), rounded to the nearest, with a link
+  to the latest. On an earlier version it adds that a note made there stays on that version.
+- **`/files/<slug>/v/<n>`** is a version's download page, and `…/download` its download. A
+  download is saved under the version's own `filename`, so two versions uploaded as
+  `book.pdf` both save as `book.pdf`. The download redirects to the byte URL with `&v=<n>`,
+  and the route takes the filename from that version once it has checked that the version
+  holds the hash. Without `v`, the newest version holding the hash names the download. So
+  the same bytes uploaded twice under two names each save under their own.
+- **The byte route serves the hash its URL names** (`/api/files/<id>/<sha256>`) when a
+  version of the file that is neither abandoned nor purged holds those bytes, `immutable`.
+  Such a row keeps its `sha256` without the bytes. Any other hash answers 404, where
+  today it gets the current bytes. So a viewer open on one version reads that version's bytes
+  for as long as it is open, never splicing another's in by range.
+- **A version has no slug.** A renamed file's old slug redirects as it does today, and the
+  redirect keeps the rest of the address: `/pdf/book/v/1` goes to `/pdf/barfield/v/1`. A file
+  restored as `book-2` has `/pdf/book-2/v/1`.
+- **An abandoned or purged version's address answers with a page that says so**, to whoever
+  may read the file: which version it was, that it was abandoned or purged and when, and a
+  link to the latest. A number the file never had answers 404.
+  - **The link carries the fragment over.** The version's row and page map are kept so that a
+    link written against it still finds its page, and that has to hold for a link to its own
+    address too. `/pdf/book/v/2#page=49` offers `/pdf/book#page=49&v=2`, which the latest's
+    viewer resolves through the page maps (Links into the file). The server never sees a
+    fragment, so a client component completes the link.
+  - **It lists the notes still on that version**: those restored after a purge, which have no
+    page to be drawn on. So a note's link in a listing never leads to a 404.
+  - MCP's `read` of such an address answers the same: the version is gone, and where the
+    latest is.
+- **The viewer is mounted per version.** `PdfSurfaceClient`'s `key` is the version's id, where
+  it is the file's today. A client navigation between two versions of one file (the banner's
+  link to the latest, the version list, a link's parts on two versions) then mounts a new
+  surface. Keyed on the file, the old surface would stay, with one version's viewer, ready
+  flag and once-only jump on the other's page.
+- **A card's link on the bare address still finds a note on another version.**
+  `/pdf/<slug>#<card>` is what `/annotations`, MCP's answers and every body written before a
+  replacement hold. The latest version's page lists the notes on earlier versions (The
+  review), and each entry there carries its card's fragment id. So the link lands on the
+  entry, which links the note at its own version (`/pdf/<slug>/v/<n>#<card>`). MCP's `read`
+  of a card's URL answers the thread on whichever version holds it, and names that version.
+- **A version that is not the latest is called `<title>, version <n>`**, on its page and
+  wherever a note on it is listed: `/annotations`, search, a reference's cited-by, mentions,
+  MCP's threads and a link's groups. Each links the note at `/pdf/<slug>/v/<n>`, and so does
+  the email sent when a note is raised.
+- **A `/link/<id>` landing on a PDF part goes to the part's version.** Where a link's parts in
+  one file are on several versions, it goes to the newest of those, the latest wherever a
+  part is on it, and the viewer's banner names the parts on the others, each linked at its
+  own version (`/pdf/<slug>/v/<n>?sel=`). The file stays one group, so a link that went
+  straight into the PDF before a promotion still does after it.
+- **What is drawn on a page is one version's.** Three sources of stored targets are drawn,
+  and each is narrowed to the version shown:
+  - **the notes**, which reach the surface by two paths (the page's `pdfAnnotationEntriesFor`
+    and the `loadPdfAnnotationEntries` action), both through one query that takes the
+    version;
+  - **a followed link's parts**, which the surface picks out of the link by file id, in the
+    browser;
+  - **the open link's parts**, from the client store, picked the same way.
+
+  The last two are another table's rows, filtered in the browser, so `AnchoredLinkPart` and
+  `OpenLinkPart` carry `fileVersionId` and the surface compares it with the version it shows.
+  This is the read where a missed filter fails silently, drawing a note or a part over other
+  ink. No integrity check can see a filter in the browser, so the e2e covers each of the
+  three (Building it).
+- **What is listed is the file's.** The viewer's own drafts ("Your private notes") are listed
+  on every version's page, each naming the version it is on and linking there, so a draft
+  left behind is on the page its author opens. MCP's threads on the bare address answer the
+  latest version's and then those on other versions, each naming its version, as the page
+  does. Filtered to the latest alone, a RAISED note left on version 1 would leave the reply
+  queue. On a version's own address they answer that version's. An entry for a note on
+  another version carries its replies' card ids as well as its root's.
+- **`PdfMetadataPanel` lists the versions**, each with its state, who uploaded it and when,
+  who promoted it and when, a download link and a link to its page. Versions are in no
+  listing of files, since they are not files.
+- **MCP's `read` takes `/pdf/<slug>/v/<n>`**, and the latest without it. Its byte route
+  (`/api/mcp/files/<id>`) takes no hash and serves the latest version's bytes.
+  - **A fragment in the URL is read by the viewer's rules** (Links into the file): an
+    unstamped `#page=50` on the bare address is the first version's sheet, carried to the
+    latest. The tool's own `page` argument is a sheet of the version read. The two can be
+    the same number and different pages, so the answer names the page it read in its
+    stamped form.
+  - **`add_note`, `create_link` and search's `within` take a version's address** as `read`
+    does. A note or a part on a candidate is refused, as from the viewer.
+- **The presence channel is per version** (`ydocIdForFile` gains the version), so a reader
+  following a presenter is never led to a page of other bytes.
+
+### The upload
+
+`PUT /api/files/<id>?filename=…`, a Route Handler for the upload's reasons (§2a), sent through
+`FileUploader`'s streaming with its 413 and severed-connection messages. It runs
+`stageUpload`, extracts as any upload does, and makes the version row with its page text. It
+refuses anything but a PDF.
+
+- **Bytes identical to the latest version's** answer "unchanged" and write nothing.
+- **Bytes identical to an earlier version's, or to another file's,** make a version as any
+  others do, sharing the blob on disk. Going back to an earlier scan is therefore an ordinary
+  replacement, reconciled like one.
+- **MCP's upload of bytes a readable file already holds** (`recordUpload`'s `reuseReadable`)
+  answers with that file only where its latest version holds them. Bytes that only an earlier
+  version holds make a new file, since the file found would show other bytes.
+- **Whether bytes are still referenced** is counted over `file_version` rows that hold them,
+  where `discardStagedUpload` and `deleteBytesIfUnreferenced`'s other callers count `file`
+  rows today.
+- **Abandoning** a candidate marks its row, and deletes its page text, its reconciliation
+  items and its bytes, unless another row holds them. The row keeps its page map, so a link
+  written against it still finds its page (Links into the file), and its address says where
+  the latest is (Addresses).
+- **A candidate waits with its file.** Deleting the file leaves the candidate as it is.
+  Reviewing, promoting and abandoning are refused while the file is deleted, and after a
+  restore the pass reruns and the review resumes.
+
+### Matching the pages
+
+A **page map** gives each sheet of the latest version a sheet in the candidate, or none: the
+sheet was removed, or no rule could place it. It is built in order of trust:
+
+1. **By label**, where both versions have usable labels (`usablePageLabels`). Each sheet maps
+   to the sheet with the same label, each version's own labels read as a `p=` reads them
+   (`sheetsLabelled`). A label on several sheets maps the k-th sheet carrying it in the old
+   version to the k-th in the new, when both have the same number of sheets with that label.
+   Otherwise those sheets are left unmapped. A sheet whose own label is empty has none to match
+   by, as for `p=` (PDF_FRAGMENT_LINKS.md §2, "Which sheet"), and is placed by rules 3 to 5.
+2. **Checked by text.** Where both sheets have text, a label's answer stands only if the two
+   pages' skeletons (PDF_FRAGMENT_LINKS.md §4) largely agree. Where they disagree neither
+   answer is taken, since the replacement may exist to correct the labels: the sheet is left
+   unmapped, and rule 3's alignment proposes its sheet for a person to accept (A run of
+   sheets, below).
+3. **By text**, where labels can't decide: a version without them, or with them on one side
+   only. The two sequences of pages are aligned as a diff aligns lines, on the similarity of
+   their skeletons.
+4. **Blank pages** have no text and draw nothing, so a blank page added is a known insertion
+   and a blank page removed a known deletion. "Draws nothing" is read from pdfjs's operator
+   list, which holds no painting operator for such a page. Nothing on the server asks for one
+   today, so `src/lib/pdf-extract.ts` gains that read. A blank sheet in a scan usually still
+   paints the scan's image, so it is a page with ink and no text, under rule 5.
+   - **The read opens the document with `wasmUrl`**, which the server's `openPdf` doesn't pass
+     today. Without it JBIG2 and JPEG 2000 images fail to decode on the server ("JBig2 failed
+     to initialize", measured on two scans). pdfjs adds an image *mask*'s operator only once
+     the mask has decoded, and drops one that fails with a warning. So a page whose only ink
+     is a JBIG2 mask would read as drawing nothing, and be taken for a blank page.
+   - **A page with an image that failed to decode counts as ink**, whatever its operator
+     list holds, and step 6's measurement includes a scan whose pages are JBIG2 masks.
+5. **Pages with ink but no text**, such as plates, figures and image-only scans, are placed
+   between their aligned neighbours when the run between them has the same length in both
+   versions. Otherwise they are left unmapped.
+
+**A sheet no rule can place is left unmapped**, and a promotion doesn't wait for it. The map
+records which of the two a sheet without a counterpart is: removed, which a rule decided, or
+unmapped, which none could. An unmapped sheet costs two things:
+
+- a `page=` link to it that has no words is not carried, and is reported as one whose sheet
+  couldn't be matched (Links into the file);
+- no anchor on it is placed automatically (Placing each anchor).
+
+Nothing pairs such a sheet by hand (Open).
+
+**A run of sheets** is what the review is asked about, never one sheet. Consecutive sheets
+whose labels and text disagree under rule 2 are one run. Whenever rule 2 finds a disagreement,
+rule 3's alignment is made over the whole of both versions, and it gives each sheet of the run
+the sheet proposed for it. The review shows the run once, with the sheets the labels give
+beside those the alignment gives, and the reviewer accepts the alignment's for the whole run
+or declines it.
+
+- **For example**, a scan whose labels start one sheet late has printed page 1 on sheet 11
+  and the label `1` on sheet 12. Its replacement is the same 311 sheets with the labels
+  corrected. By label, sheet 12 goes to sheet 11 and every numbered sheet after it goes back
+  one, and each pair's text disagrees. The alignment pairs every sheet with itself. Sheets 12
+  to 311 are one run, accepted in one act where sheet by sheet would take three hundred.
+- **Accepting writes the alignment's sheets into the map**, and the pass is rerun over the
+  anchors on them. Where the alignment gives a sheet of the run no counterpart, that sheet
+  stays unmapped.
+- **Declined or unanswered, the run stays unmapped.** The proposal is kept in the map beside
+  each sheet, marked as not accepted, and the map's readers treat such a sheet as unmapped.
+- **A run is answered before the promotion.** After it the review is closed, and the run
+  stays as it was (Open).
+
+**How alike two pages must be** is one measure, which rules 2 and 3 share. It and its threshold
+are settled by measurement before the pass is written: on a scan before and after its text
+layer is corrected, where every page should pair with itself, and on two scans of one book.
+
+The page map stays on the candidate's row for good: `page=` links are resolved through it
+(Links into the file).
+
+### Placing each anchor
+
+Two kinds of row point into a file with a `PdfTarget` today:
+
+- an annotation's `pdfTarget`, with its `quotedText`;
+- an `anchored_link_anchor`'s `PDF_TEXT` selector, with its `quoted_text`.
+
+`tag_anchor` and `comment_quote_anchor` have the same row shape and no such row. A tag is on a
+whole file (TAGS.md), by the file's id, and needs nothing. A comment's quotation of a file is
+refused (`canQuoteTargetInto`). Each joins the reconciliation when it gains a writer. Until
+then, promotion refuses a file on which either table holds a `PDF_TEXT` row, and the integrity
+check reports one (Building it), so a writer added later can't leave anchors the reconciliation
+never saw. `scripts/upgrade-pdf-text-version.ts` already reads all four tables.
+
+Each such row on the latest version gets one **reconciliation item**, whose outcome is one of
+three. **Every row gets one, whatever its state**: a soft-deleted annotation, a link not yet
+minted and a deleted link too, since a restore or a mint would draw it. Those follow the rule
+for a DRAFT (The review, below).
+
+**Placed** automatically when the quote is found once by skeleton on the mapped sheet, with its
+`prefix` and `suffix` breaking a tie. The new target is measured on the candidate's page as MCP
+measures one (MCP.md §8, `anchorPdfQuote`'s pipeline):
+
+- quads from `quadsForRange` over the candidate's text items;
+- `position` and quote derived by `capturePdfTextAnchor`;
+- `textVersion` the current one.
+
+A rectangle selection is a target whose `position` is null. A text selection whose quote the
+capture dropped (`capturePdfTextAnchor`, on a mismatch) has a position and an empty quote. It
+has no words to find, so it is carried as a rectangle is, and written with its `position`
+null: its offsets were into the old version's page text. Either is placed automatically, its
+quads unchanged, when the mapped page has the same page box and rotation and its text items
+sit where they did.
+
+**Proposed**, for a person to confirm:
+
+- the quote found once in the candidate, on a sheet other than the mapped one, or from a
+  sheet that is unmapped;
+- the quote's words changed ("modem" to "modern"). The old range is mapped through a diff of
+  the two pages' text (`diffText` over `tokenizeFine`'s tokens, `src/lib/diff.ts`), and the
+  review shows the old quote beside the new;
+- a rectangle selection whose page moved: its quads are carried by a transform fitted to the
+  text items the two pages share, when the fit is close;
+- a rectangle selection on a page with no text items, a plate or an image-only scan: its
+  quads unchanged, when the page box and rotation agree. Nothing on such a page says whether
+  the ink sits where it did.
+
+**Needs a person**: the quote isn't found, is found more than once, or now crosses a page break,
+which one target can't hold; or a rectangle's sheet is unmapped, its transform doesn't fit, or
+its page has no text and a different box.
+
+### The review
+
+A page under the candidate (`/pdf/<slug>/v/<n>/review`), open to whoever may manage the file,
+lists the runs of sheets the page map asks about, to accept or decline (Matching the pages),
+and then the proposed items and those needing a person. The runs come first, since accepting
+one places anchors that would otherwise be listed. Each item shows the passage on the latest
+version beside the candidate. The reviewer either:
+
+- **accepts** the proposal;
+- **places** the anchor by selecting text or drawing a rectangle on the candidate, as an
+  annotation is captured; or
+- **leaves it behind**, so it stays on the version it is on.
+
+**Left behind** means the promotion doesn't touch the anchor. It keeps its target and its
+version, and is drawn on that version's pages, where its quads are still right. An anchor that
+can't be carried across is therefore never drawn over the wrong ink. That matters most for a
+rectangle selection, which the viewer can never report as orphaned (§4: it has no quote to
+check). The latest version's page lists the notes on earlier versions, under the version each
+is on: those left behind and those made there since.
+
+**A reviewer is never shown someone else's DRAFT.** A draft is its author's alone, and showing
+it would show a private choice of passage to someone else. It is placed automatically like
+everything else, and one that can't be is left behind for its author to find, and to post
+where it stands or discard. The same holds for the other rows a reviewer isn't shown: a
+soft-deleted annotation, a link not yet minted, and a deleted link. A deleted root that still
+has a reply that is not deleted is shown, since its thread is still listed.
+
+### Promotion
+
+`promoteFileVersion(actor, fileId)` in `src/lib/file-manage.ts`, so an MCP front door, if one
+is wanted, is a wrapper (CLAUDE.md, "A write the UI and the MCP server share"). It is refused
+while any item is proposed or needs a person. An unmapped sheet doesn't refuse it, and neither
+does a run of sheets left unanswered. Anchors written on the latest version since the
+review began are placed automatically first. One that can't be goes to the review and
+refuses the promotion, if the reviewer is shown it. One they aren't shown, someone else's
+draft or a part of a link not yet minted, is left behind, as in the review.
+
+One transaction, the file row locked:
+
+1. **Every anchor on the latest version is checked against its item.** Each row with a PDF
+   target there must have an item that is placed or left behind, and whose recorded old
+   target is the row's target still. If one doesn't, the transaction writes nothing, the pass
+   places those rows, and the promotion is tried again. A row that can't be placed refuses
+   it or is left behind, as above.
+2. **`current_version_id` becomes the candidate.**
+3. **Every placed anchor's new target is written**, with its quote and its version. An anchor
+   left behind is not touched.
+4. **The candidate's row records who promoted it and when**, and `promoted_at_update_id`, the
+   highest `ydoc_update.id` at that moment.
+5. `updatedAt`, and `updatedByUserId` set to the promoter.
+
+Step 1 is there because placing can't be done under the lock: it reads the candidate's bytes
+and takes seconds. A capture can therefore commit between the last pass and the lock, and its
+own check passes, since its version is still the latest. Without the step that anchor would
+stay on the outgoing version with no item, left behind by nobody's choice. The same step
+catches a row whose target was rewritten after its item was made.
+
+Each item keeps its anchor's old target, which is what an undo would replay. Undo itself is
+not part of this plan.
+
+Nothing else changes. The file's id, slug, title, visibility, owners, tags, references and
+slug history are as they were, every version's address answers as it did, and only
+`/pdf/<slug>` shows other bytes.
+
+**After it:**
+
+- **The promoter's page reloads in full.** `router.refresh()` is not enough, since the viewer is
+  behind `ssr: false` (CLAUDE.md).
+- **A viewer left open keeps the version it loaded.** Its bytes come by hash and its note list
+  by version, so it shows what stayed on that version, and the notes that were carried leave
+  its view. Nothing tells it to reload, and a capture from it is refused with a message that
+  does.
+
+### Links into the file
+
+Links are href text in other people's bodies, and a promotion rewrites none of them.
+
+- **A `p=` link with text needs nothing** (PDF_FRAGMENT_LINKS.md §2, "Which sheet"). Its page
+  is found by label and its passage by its words. Where the labels were corrected, the miss
+  finds the passage elsewhere in the file (§6 there, step 3).
+- **A citation needs nothing, unless its referent is a `/pdf/` URL written with `page=`.** Its
+  link is the cited-page route's, `/references/<key>/p/<page>?…` (CITATIONS.md, "A passage in
+  a citation"). The route reads the latest version's labels and page text at every click, for
+  a post's frozen href as for a doc's.
+  - **A `quote:*` passage is found by its words**, on the sheets carrying the cited page
+    (`placeCitedQuotation`), and by the viewer's miss when it isn't there.
+  - **A `/pdf/` referent carries pages of its own**, which ride in the route's query as the
+    referent wrote them (`fragmentPairs`). Written with `p=`, they need nothing either, and
+    the conversion of the hand-written citations writes `p=` wherever the file has usable
+    labels. Written with `page=`, each names a sheet of one version, as a `page=` link does
+    (below). So `v=` is kept from a referent (`fragmentPairs`, whose filter drops every
+    parameter but `page`, `p` and `text` today) and in the route's query
+    (`parseCitedQuery`), and `citedPageTarget` resolves the sheet through the page maps on the
+    server and redirects to the latest one.
+  - **A file without usable labels** takes a citation's page as a sheet number of the latest
+    version (`sheetsLabelled`). So a replacement that moves its sheets misdirects the
+    citations of it that name a page and no passage. The review warns of that, counting those
+    in bodies the reviewer may read. They are not carried through the page maps as an
+    unstamped `page=` link is. A `page=` is a sheet by definition, and the maps carry it
+    exactly. A locator is a printed page, read as a sheet only for want of labels, so the maps
+    would carry a guess forward. Labels on the candidate are what fix it.
+- **A `page=` link names a sheet of one version**, and is carried to the version shown
+  through the page maps between the two. A link written against a page that has since gone is
+  reported as such, not sent to a neighbour. One written against a sheet a map leaves unmapped
+  is reported as unmatched, in its own words, and likewise sent nowhere.
+  - **Each version's map is from its base**, the version that was the latest when it was
+    uploaded. A link is carried along those maps in either direction: forwards to a later
+    version, and backwards to an earlier one or off an abandoned one. A link stamped `v=4`,
+    where version 4 was abandoned over version 3, is carried from 4 to 3 and on to the
+    latest.
+  - **A `v=` that names no version of the file** opens the sheet as written, with a banner
+    saying the file has no such version. A passage is still looked for by its words. This is
+    what `v=2` gets on another file that has taken a deleted file's slug.
+  - **The map comes first, then the words.** The passage is looked for on the mapped sheet, and
+    the miss (PDF_FRAGMENT_LINKS.md §6, step 3) still finds one that isn't there. The miss
+    alone already carries a passage that occurs once in the file. The map is what carries a
+    page link, which has no words, and a passage the unmapped sheet also holds, which would be
+    drawn there with nothing to say it is the wrong one.
+  - **The viewer holds the page maps**, among its props: `PdfViewer` applies `#page=` on its
+    own, before any passage is found (`pageFromHash`).
+
+**Which version a `page=` link was written against** is carried in the link:
+
+- **`v=<n>`**, the version's number: the one in its address, which a person can read, type
+  and check.
+  - **A `v=` belongs to the `page=` before it**, and is written straight after it:
+    `#page=50&v=2&text=…`. Parameters are read left to right (PDF_FRAGMENT_LINKS.md §2,
+    "Pairing"), so a `v=` before any page, or after a `p=`, is ignored.
+  - **A link with several passages stamps each `page=` of its own.** The app writes one
+    version on all of them. A hand-written link whose stamps differ has each passage read by
+    its own stamp.
+- **A `page=` link without `v=` means the file's first version, always.** That holds for
+  every link that exists before a file's second version does.
+- **Once a file has a second version, every `page=` URL the app writes for it carries `v=`**,
+  a candidate counting as one, and a link to version 1 included. Each is written by
+  `formatPageName` (`src/lib/pdf-open-params.ts`), so the stamp is a field of `PageName`'s
+  sheet arm, and the compiler names every writer:
+  - search's page links (`src/lib/search/pdfs.ts`) and the cited-page links (`pdfPageHref`),
+    wherever `pageNameForSheet` or `pageNameForLabel` answers a sheet: a file without usable
+    labels, a sheet whose own label is empty, a label an earlier sheet carries
+    (PDF_FRAGMENT_LINKS.md §8, "Which page form a writer takes"). A `p=` needs no stamp;
+  - every passage written through `formatFragmentPassages`: the cited-page route's redirect
+    (`placedFragment`), the one-quote CLI's, and the corrected hrefs this plan has the check
+    and MCP's refusals give (below).
+- **The address says which version is shown, and `v=` whose sheets the link counts.**
+  `/pdf/book#page=50&v=1` shows the latest version, at the sheet that version 1's sheet 50
+  became. `/pdf/book/v/1#page=50&v=1` shows version 1 itself.
+- **On a version's own address, a `page=` without `v=` counts that version's sheets**: the
+  address has already named it. `/pdf/book/v/2#page=49` is sheet 49 of version 2. This is the
+  one place an unstamped link is not read as the first version, and only a hand-typed one
+  reaches it.
+- **A hand-typed link without `v=`, to the bare address of a file with several versions,** is
+  the case this reading gets wrong. The viewer's banner says how it read the link ("read as
+  version 1: its page 50 is page 49 now") and offers the other reading.
+
+**The integrity check can date a link, which the viewer can't.** `ydoc_update.id` is one
+sequence across every doc and every annotation body, and an id is never given twice, so the
+two ids on a version's row are a clock. Rows are deleted only with their whole body, a
+discarded annotation's, which takes its links with it.
+
+- A body whose last update is below a mark was written wholly before it, and one whose first
+  is above it wholly after. Neither needs a replay.
+- A body edited on both sides is replayed once to the mark, as MCP's `since` replays a doc,
+  for the hrefs it held then.
+- A post holds the hrefs its doc held at the snapshot it was published from
+  (`ydoc_snapshot.last_ydoc_update_id`), which is only the latest that any of them can have
+  been written. A post published before a mark was written wholly before it. For one
+  published after it, the doc is replayed to the mark, and a link the doc held then is dated
+  before it. An event that has lost its snapshot is dated by its time, as a comment is.
+- A comment's link is dated by the earliest of its revisions that holds the href: that
+  revision's time, against the times the version was uploaded and promoted.
+- An update whose transaction was open when a mark was read can carry an id below the mark
+  and commit after it. The check only warns, so that is accepted.
+
+The check warns of a `page=` link without `v=` written after its file's second version was
+uploaded, which only a hand can have typed. The viewer has only the URL, so it reads by the
+rules above. A link pasted from an older body is dated at its paste.
+
+**Linkers are pushed toward `p=`.** A `page=` link into a file with several versions can't
+drop its `v=`, since without one it means the first. `p=` is the form that needs none.
+
+- **The integrity check reports a link stamped with a version other than the latest as
+  stale**, not wrong, since it still lands. It gives the link's `p=` form where the file has
+  usable labels, and its `page=` form for the latest version otherwise.
+- **MCP refuses a `page=` link without `v=` into a file with several versions**, and gives
+  the same two forms. Its `read` of a page of such a file names the page in its stamped form,
+  so a model has it before it writes.
+  - **A link with `text` is placed by its words**, and the corrected form names the page they
+    were found on.
+  - **A page link has nothing to say which reading was meant**: the first version's sheet, by
+    the rule, or the latest's, which a model that has just read the file means. The refusal
+    gives both, each with the page it would open.
+- **A link to a version's own address is a link into that version**:
+  `/pdf/<slug>/v/<n>#page=…&text=…`, which is what a reader on an earlier version copies from
+  the address bar. Three parsers take only `/pdf/<slug>` today and would pass over it
+  unchecked: the integrity check's `parseFragmentLinkHref`, MCP's `parseRef`, and a
+  citation's `referentKind`, which calls it a link elsewhere.
+  - The check and MCP read it against version n's text and labels, and don't call it stale:
+    its writer named the version.
+  - As a citation's referent it is a `/pdf/` referent whose pages are version n's. They ride
+    in the route's query with `v=<n>`, and the route redirects to the latest as for any
+    other.
+- **Both cover a page link too**, `#page=5` with no `text`, which the check already reads
+  (PDF_FRAGMENT_LINKS.md §8).
+- **The viewer's banner**, on a link it read through a page map, offers the current form to
+  copy.
+- **The review warns when the candidate has no usable labels**: every `page=` link written into
+  the file from then on carries a `v=`, and every citation of it takes its page as a sheet
+  number. A scan from a pipeline that can write `/PageLabels` is better given them before it
+  is uploaded.
+
+**A version's number and an update id are one instance's own.** A doc copied to another
+instance carries links whose `v=`, and whose dating, mean nothing there. That is left for the
+work that makes docs portable between instances, which update ids need as well.
+
+Rejected, with reasons:
+
+- **Rewriting the page numbers in other people's bodies at promotion.** Nothing edits a body's
+  text but its own writers: a renamed slug redirects rather than rewriting hrefs, and a chip's
+  refreshed label is a cache beside the text. Docs, comments, annotation bodies and posts each
+  have their own write path and history. And links from outside the site can't be rewritten at
+  all. A batch a person runs over the bodies they may edit is a different thing (Open).
+- **Reading a link without `v=` as the latest version.** A link typed by hand would then be
+  right, and every older link nobody rewrote would land on the wrong page with nothing to say
+  so: the viewer can't tell when a URL was written. Which bytes a link means matters most
+  when a replacement exists to correct them.
+- **A hash for `v=`**, the first digits of the bytes' `sha256`. It can't be read, typed or
+  compared by eye, it is a second name beside the number in the address, and the same bytes
+  uploaded twice give two versions one stamp. What it adds is noticing bytes other than the
+  ones a link was written against, which matters only between instances (above).
+
+### Earlier versions
+
+- **An earlier version stays readable** at its address, with its bytes, its page text at
+  every version it was extracted at, and the anchors on it.
+- **`FILE_STORAGE_DIR` grows by a whole copy per version**, and a purge is the only thing that
+  shrinks it.
+- **Purging** a version deletes its bytes, unless another row holds them, and its page text.
+  `purgeFileVersion(actor, fileId, versionId)` in `src/lib/file-manage.ts`.
+  - **Its row stays**, with its number and its page map. So a `page=` link written against a
+    purged version, stamped or not, still resolves through the page maps, and the byte route
+    answers its hash 404, unless another version of the file holds those bytes.
+  - ADMIN only, and only on a file they may manage, so a PRIVATE file is still its owners'
+    alone.
+  - **Refused while anything live is on that version**: a posted note that is not deleted, a
+    DRAFT, or a part of a link that is not deleted, minted or not. A deleted root with a
+    reply that is not deleted counts as a posted note. The refusal counts them by kind. A
+    draft left behind because it couldn't be placed blocks the purge until its author
+    discards it. The count is taken with the file row locked, as a capture checks its
+    version, so a note made on the version can't commit beside the purge.
+  - **What is soft-deleted on it stays in its table.** The version's row is still there, so
+    nothing cascades. A note restored afterwards is listed with its quote and has no page to
+    be drawn on.
+  - Refused for the latest version and for a candidate, which is abandoned instead.
+- **`scripts/upgrade-pdf-text-version.ts` works version by version**, over every version that
+  has its bytes, where it works file by file today: it extracts, moves anchors and deletes
+  older extractions within one version. An abandoned or purged version has no bytes to
+  extract from and is skipped. A soft-deleted anchor on a purged version keeps the text
+  version it names, with no page text behind it.
+  - **It knows the reconciliation's items.** An item's old target is restamped with its
+    anchor's, and a target proposed or placed on the candidate counts as naming its
+    extraction and is moved like an anchor. Otherwise the script would delete the text a
+    promotion is about to write targets against.
+  - **It locks the file row for each file's writes**, as a promotion does, so it can't write
+    an old target back over a promoted one.
+- **Restoring an earlier version** is uploading its bytes again: an ordinary replacement.
+
+### Rejected designs
+
+- **A version as a row of the `file` table**, with what the bytes decide swapped between the
+  two rows at promotion. Everything that reads a file then reads a version unchanged. But the
+  row is a file in the table and nowhere else, and each place that means "a file" needs a
+  rule for it: a slug of its own, renamed with its file's; visibility, owners and deletion
+  taken from its file; a clause to leave it out of every listing of files and another to keep
+  its notes in every listing of notes; a refusal in every manage operation; a title that is
+  never shown. The swap needs `file_page_text`'s rows parked at negative page indexes to get
+  past their own key. And a note left behind moves to another file's id.
+- **A slug per version** (`book-v1`). It has to be claimed, can be taken by a real file,
+  follows a rename only if every version is renamed with it, and outlives a purge only if the
+  name is held for good.
+- **New bytes in place on the same row, with the outgoing text moved to a side table as a
+  `text[]`.** The text would need a second, unindexed home, and the new bytes couldn't be
+  opened, measured or searched before they were the file's.
+- **Notes on a candidate.** A reader who spots a fault in a new scan could say so on it. But
+  abandoning the candidate would then either delete readers' notes or be refused while one
+  stands, which lets any reader block it.
+- **A candidate only its managers can read.** It needs a read rule of its own at the page,
+  the download, the byte route and MCP, and a reader who knows the hash must be kept from the
+  bytes. The file's list of versions marks a candidate as one, which is all a reader needs.
+- **A copy of the latest version's hash, page count, labels, outline and filename on the
+  `file` row**, so that the modules reading them today stay as they are. Seven columns stored
+  twice, kept in step by two writers and a check, and a write that skips the rule fails
+  silently until the check runs.
+- **A candidate as an ordinary PRIVATE file owned by the replacer.** It appears in that
+  person's `/files` and search until promotion, and it takes annotations and links like any
+  file.
+- **No new notes on an earlier version.** It kept every note where a reconciliation would read
+  it, but it refused a reader who had chosen an older scan, and left a draft that couldn't be
+  placed no way out but discarding it.
+
+### Open
+
+- **Moving notes forward**: carrying a note on an earlier version, left behind or made there,
+  to the latest, placed as a reconciliation places an anchor. It is a later feature. Until
+  it exists, such a note is drawn only on its own version, and listed on the latest's page.
+- **A batch that rewrites the links in bodies its runner may edit**: `page=` to `p=`, a
+  stale stamp to the latest version, or a link to a citation. It is not designed here. The
+  clock above is what would let it date a link, and nothing in this plan depends on it.
+- **A viewer left open across a promotion is not told.** It shows the version it loaded,
+  correctly, until it is reloaded (TODO.md, "Replacing a PDF's bytes").
+- **Pairing a sheet by hand, or after the promotion.** An unmapped sheet stays unmapped, and
+  so does a run of sheets not accepted before the promotion. A map is read whenever a link is,
+  so a later pairing would mend the `page=` links to that sheet at once. It is built when a
+  file needs it.
+- **A new edition rather than a new copy** (§12). Reconciliation could carry anchors into one,
+  but whether an edition should replace its predecessor or stand beside it as a file of its own
+  is a separate question.
+
+### Building it
+
+Steps 1 to 4 change no behaviour while every file has one version, so they are a pull request
+of their own, which the existing suite proves before anything can be replaced. Steps 5 to 11
+are a second.
+
+The existing suite can't prove the reads by version, since a missing filter passes every test
+while each file has one version. So the first pull request adds a fixture to
+`e2e/db-worker.ts` that inserts a second, promoted version beside the first, with a note and a
+link part on version 1, and a spec that checks what is drawn and listed at each address, the
+titles and the links. The integrity check that every file has a latest version goes in with
+step 1, where the column becomes nullable.
+
+**The deploy that carries the first migration takes the PDF surfaces down for the length of
+its build**, and that is accepted. `deploy/deploy.sh` migrates before it builds, so until the
+new build is swapped in, the running one reads `file` and `file_page_text` by columns the
+migration has moved. Its writes to a changed table fail there, on a missing column or on step
+4's CHECK, so none lands wrong. A build that fails after the migration leaves those surfaces
+down until one succeeds, whatever the script's message says of the live site.
+
+1. **The schema and its migration**:
+   - `file_version`, with a row numbered 1 for every file, and `file.current_version_id`
+     with its foreign key on the pair;
+   - the columns the bytes decide moved from `file` to that row, with the file's search
+     trigger reading the filename from it;
+   - `file_page_text` keyed by version, by renaming its column: a migrated version 1 has its
+     file's id (Versions);
+   - `file_version_id` on `annotation` and the anchor tables, filled for every row with a PDF
+     target, with the foreign key on the pair. Each pair key is `ON DELETE NO ACTION`, written
+     out: Prisma's default for an optional relation is `SET NULL`, which on a pair would
+     null `file_id` too. A version's row goes only with its file, whose cascade takes the
+     anchors;
+   - the partial unique index that allows a file one candidate;
+   - `file_reconciliation_item`, on the candidate's row: one nullable foreign key per kind of
+     row placed, two today, with a CHECK that exactly one is set, the anchor tables' own
+     pattern (CLAUDE.md, "One anchor row shape"), the anchor's old target, its outcome and
+     the target proposed or placed. An item goes with its row, by cascade: a draft discarded
+     after the pass.
+2. **Reads by version**: every reader of the moved columns selecting them through the
+   latest version, page text's functions, the two lazy writers, search's filter, and the
+   count of rows holding a blob.
+3. **Addresses by version**: the `/v/<n>` pages with their banner and the `/v<n>` redirect,
+   the viewer's `key`, the byte route and the download's `v`, the note loaders' shared query,
+   the listings' titles and links, a card's link on the bare address, the `/link/<id>`
+   landing, the presence channel, MCP's `read`, and a past slug's redirect keeping the rest
+   of the address.
+4. **Anchor writes**: each stamps its version and checks it inside its transaction. A second
+   migration then repeats step 1's fill and adds the CHECK that `file_version_id` is set
+   exactly when the row holds a PDF target, which no row written between step 1 and this one
+   would pass.
+5. **The upload** (`PUT /api/files/<id>`) and abandoning a candidate.
+6. **The page-similarity measure**, fixed against real pairs, and then the reconciliation
+   pass, `src/lib/file-reconcile.ts`, rerun on demand and before promotion.
+   - **A rerun keeps what a person decided.** An item accepted, placed by hand or left
+     behind is changed only when its row's target has changed otherwise than in its text
+     version, which the text-version script restamps. An item's row is unique per candidate,
+     so two passes at once can't make two. A run of sheets that was accepted stays accepted.
+   - **The pass opens each version's document once.** `extractPageItems` opens it on every
+     call, so the pass takes a form that reads many pages from one open document.
+7. **The review page**, with its runs of sheets.
+8. **Promotion**, with its check under the lock.
+9. **`v=`**: the writers, the viewer's resolution through the page maps, the cited-page
+   route's, the banner, and the integrity check with its dating.
+10. **The version list, purge, the page of a version that is gone, and the text-version
+    script by version.**
+11. **Integrity checks**, beside step 1's (every file has a latest version, which is
+    promoted):
+    - every version that is neither abandoned nor purged has its bytes on disk;
+    - every anchor with a PDF target names a version of its file, and none names a
+      candidate or an abandoned version. A live anchor on a purged version is not a fault: a
+      note restored after a purge is one;
+    - no `tag_anchor` or `comment_quote_anchor` row holds a `PDF_TEXT` selector on a file
+      with more than one version;
+    - every anchor's quote matches the page text of the version it names, where that
+      version is not purged, which `check-pdf-anchors` verifies today against the file's.
+
+**Tests.**
+
+- **Unit**, for the pure parts: the page map (a first page removed, blank pages added, a label
+  on two sheets, labels corrected, no labels, a sheet left unmapped, a run of sheets before and
+  after it is accepted), the transform fit, the diff mapping of a range,
+  and a `page=` link resolved through two promotions, stamped and not, from the bare address
+  and from a version's own, stamped with an abandoned version, and with one the file lacks.
+- **A fixture with ink and no text.** `scripts/make-test-pdf.ts` writes text operators only,
+  so it gains a page that draws a filled rectangle, for rule 5 and for a rectangle selection
+  on a page without text items.
+- **e2e**: two fixtures from `scripts/make-test-pdf.ts`, with the same text but the second
+  having its first page removed, a blank page added and one word changed. On the first, a word
+  is annotated, a passage given an anchored link, a rectangle annotated and replied to, and a
+  `page=` link and a `p=` link written. Then the second is uploaded as a version, one manual
+  item is placed in the review, the rectangle is left behind, and the version is promoted. The
+  spec checks:
+  - before the promotion, `/pdf/<slug>` and `/pdf/<slug>/v/1` showing the first bytes and
+    `/pdf/<slug>/v/2` the second, to a reader who can't manage the file;
+  - an annotation refused on the candidate, and a note with no target written there and
+    listed on every version's page;
+  - a draft part of the open link on version 1, not drawn on the latest after the promotion;
+  - a draft left behind, listed in its author's private notes on the latest's page;
+  - after it, the highlights on `/pdf/<slug>`, and where both links land;
+  - the rectangle and its reply on `/pdf/<slug>/v/1` and not on the latest, and listed in
+    `/annotations` as on version 1;
+  - a viewer opened before the promotion still reading the first bytes, and its capture
+    refused;
+  - a note posted on the latest between the review and the promotion, carried with the rest;
+  - the banner's link from `/pdf/<slug>/v/1` to the latest, followed without a reload,
+    showing the second bytes;
+  - the rectangle's card link on the bare address landing on its entry under version 1;
+  - a note made on `/pdf/<slug>/v/1` after the promotion, drawn there and not on the latest,
+    and listed on the latest's page under version 1;
+  - a search hit coming from the latest version's text alone;
+  - the addresses following a rename of the file;
+  - `/pdf/<slug>/v2` redirecting to `/pdf/<slug>/v/2`, and each version's download saved
+    under its own filename;
+  - a second candidate abandoned, and the next taking a new number;
+  - the purge refused while the rectangle stays on version 1, and going through once it is
+    deleted, with `/pdf/<slug>/v/1` then saying the version was purged, its link carrying
+    `#page=` to the latest, and a `page=` link stamped `v=1` still landing.

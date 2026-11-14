@@ -234,6 +234,38 @@ glyphs. Not yet done:
   browser it measures Arial against a Calibri selection. Passing the family through the same
   map is a one-line fix (docs/PDF_QUADS.md §5).
 
+## Replacing a PDF's bytes: a viewer left open is not told (docs/PDF.md §13)
+
+**Status:** low priority. Nothing is built, so nothing is wrong today. It is for whoever
+builds the plan's promotion step.
+
+A viewer open on a file across a promotion keeps the version it loaded: its bytes come by
+hash and its note list by version, so nothing is drawn over the wrong ink, and a capture from
+it is refused with a reload message. But until someone tries to write, nothing says the file
+has a newer version, and the notes carried to it have left the tab's view. A fix: the note
+list's answer names the latest version, and one that differs from the version shown becomes a
+banner with a reload. A broadcast on the presence channel at promotion would tell the tab
+sooner, and reaches only tabs connected at that moment.
+
+Three races the plan closes itself, kept here because each fails silently if its step is
+skipped:
+
+- **A capture that commits beside a promotion or a purge.** The check of the capture's
+  version belongs inside the transaction that inserts, with the file row locked, for each of:
+  posting a note, opening a draft on a selection, adding a part to a link, and MCP's
+  `anchorPdfQuote`. From `/pdf/<slug>` it is checked against `file.current_version_id`, and
+  from a version's own address against its being promoted and not purged; the purge counts
+  live rows under the same lock. A check before the transaction lets a promotion or a purge
+  commit between the two. The lock behaviour is Postgres's documented one and wasn't tested.
+- **A capture that commits between the last pass and the promotion's lock.** Its own check
+  passes, since its version is still the latest, and it has no reconciliation item. The
+  promotion's first step, under the lock, checks every anchor on the latest against its item
+  and reruns the pass when one has none. Without it the anchor stays on the outgoing version
+  and nothing says so.
+- **The two lazy writers**, `extract` in `src/lib/pdf-page-text.ts` and `fill` in
+  `src/lib/pdf-metadata.ts`, parse for seconds and then write. Each must write under the
+  version whose bytes it read, never under "the file's latest" looked up afterwards.
+
 ## The MCP server: what is left (docs/MCP.md)
 
 **Status:** built through MCP.md §18's phase 5, and merged in stages: tokens and every read,
