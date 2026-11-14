@@ -21,7 +21,7 @@ import { anchorPdfQuote } from "./pdf-anchoring";
 // docs/MCP.md §10 — create_link, extend_link and edit_link, over
 // src/lib/anchored-link-write.ts. A part is named the way an annotation's
 // passage is: the doc or PDF, and a quote in it — on a doc at the version
-// read, on a PDF narrowed by page or label. Every part is captured before
+// read, on a PDF narrowed by sheet or page. Every part is captured before
 // anything is written, and one refusal refuses the call, naming the link and
 // part it was.
 
@@ -35,7 +35,7 @@ async function capturePart(ctx: McpContext, part: PartInput, where: Record<strin
     const target = container.kind === "doc" ? { kind: "doc" as const, id: container.doc.id } : { kind: "file" as const, id: container.file.id };
     if (!(await canUserLinkTarget(ctx.actor, target))) throw forbidden("You can't link into that.");
     if (container.kind === "doc") {
-      if (part.page !== undefined || part.label !== undefined) throw invalid("page and label narrow a quote on a PDF.");
+      if (part.sheet !== undefined || part.page !== undefined) throw invalid("sheet and page narrow a quote on a PDF.");
       const at = await anchorInDoc(container.doc.id, part);
       return docRangePartRow(container.doc.id, at, at.stamp);
     }

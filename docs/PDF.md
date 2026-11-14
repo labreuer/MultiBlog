@@ -1218,20 +1218,21 @@ available without rendering.
 
 ## 13. Versions of a file — plan
 
-**Built so far: steps 1 to 4 of "Building it".** The `file_version` table exists, every
+**Built so far: steps 1 to 5 of "Building it".** The `file_version` table exists, every
 file has its version 1, what the bytes decide is read through the latest version, and page
 text is keyed by version. Every version has its own address, and what is drawn, listed,
 titled and linked goes by version. Every anchor into a PDF names its version, and a capture's
 write checks the version its viewer loaded. No file can gain a second version yet, so
 nothing a reader sees has changed: `e2e/pdf-versions.spec.ts` gives a fixture file a second
-version, and a candidate, to exercise it.
+version, and a candidate, to exercise it. A link names a sheet with `sheet=`, which every
+reader takes beside `page=`, and MCP's tools say `sheet` and `page` (Links into the file).
 
 The rest is a plan, and the one exception to this file's "every statement is current".
 Where a statement below is of something built, it names the function or the file that holds
 it. When the rest lands, the section is rewritten as an account of what exists. §3, §4 and
 CLAUDE.md's "A PDF anchor cannot drift" are then amended where they say a file's bytes
 cannot change, and so is PDF_FRAGMENT_LINKS.md §1: each stays true while a file has one
-version. PDF_FRAGMENT_LINKS.md §2 gains `sheet=` and `v=`, and docs/PERMISSIONS.md gains
+version. PDF_FRAGMENT_LINKS.md §2 gains `v=`, and docs/PERMISSIONS.md gains
 rows for uploading a version, promoting or abandoning one, building a page map, answering a
 run of sheets, running the bulk carry, moving a note or marking it as staying, and showing or
 hiding a move. docs/MCP.md gains the upload of a version (§5, §8).
@@ -2156,15 +2157,18 @@ does a move.
 
 **A link names a sheet or a page, and a version.**
 
-- **A sheet is written `sheet=`.** `page=` is read as the same thing for good, so every link
-  already written keeps working, and the app writes it no more. Beside `p=`, "page" is the
-  word a reader takes for the printed page.
+- **A sheet is written `sheet=`** (`formatPageName`). `page=` is read as the same thing for
+  good (`pageNameOf`), so every link already written keeps working, and the app writes it no
+  more. Beside `p=`, "page" is the word a reader takes for the printed page.
   - **MCP's tools use the two words that way.** A sheet is `sheet`, a range of them `sheets`,
-    and the printed page is `page`, where they are `page`, `pages` and `label` today. An
-    answer says "sheet" and "page" in the same senses, and names both. A prompt written for
-    today's tools that passes `page` for a sheet then asks for a printed page, and nothing
-    refuses it. That is accepted: the prompts and skills that call the tools are few, and are
-    changed with the rename.
+    and the printed page is `page` (MCP.md §8). An answer says "sheet" and "page" in the same
+    senses, and names both: `{ "sheet": 53, "page": "49" }`.
+  - **A call written for the tools before the rename is refused, not misread.** Its `page`
+    was a sheet's number, and `page` is now a printed page's label, a string, so a number
+    there fails the schema; `label` and `pages` are no longer parameters, and the schemas
+    are strict. A prompt that passes `page: "12"` as a string still asks for a printed page.
+    The prompts and skills that call the tools are few, and are changed with the rename's
+    deploy.
   - **A tab whose bundle predates `sheet=`** ignores it: it opens such a link at the first
     sheet and draws nothing, as one that predates `p=` does with that
     (PDF_FRAGMENT_LINKS.md §6).
@@ -2293,11 +2297,15 @@ revisions, and its printed pages are the same in each.
   (`placeCitedQuotation`), and by the viewer's miss when it isn't there.
 - **A `/pdf/` referent is a link into the work's file, read as one.** Its pages ride in the
   route's query as the referent wrote them, by sheet or by page, each with its `v=`. So `v=`
-  is kept from a referent (`fragmentPairs`, whose filter drops every parameter but `page`,
-  `p` and `text` today) and in the query (`parseCitedQuery`).
+  is kept from a referent (`fragmentPairs`, whose filter drops every parameter but `sheet`,
+  `page`, `p` and `text` today) and in the query (`parseCitedQuery`).
   - **The route carries each on the server**, as the viewer carries a link on the bare
     address, and redirects to the latest with what it found, stamped. One it can't carry
     redirects to the version it names.
+  - **The redirect is written by `formatPageName`**, as every other writer's is, so a
+    referent's `page=` leaves the route as `sheet=`. Until step 6 the route hands a
+    referent's pairs on as the referent wrote them, `page=` included, since the stamp is what
+    makes it rewrite them and step 6 is where the redirect gains it.
   - **A referent on a version's own address**, `/pdf/<slug>/v/<n>#…`, names version n's
     sheets and pages. They ride with `v=<n>`.
   - **The conversion of the hand-written citations** keeps the version each link names. An
@@ -2533,6 +2541,7 @@ promoted and not abandoned, and that a file's versions are numbered from 1 with 
 
 **Steps 1 to 4 are built**, as three commits: steps 1 and 2 are one, since the migration
 drops the columns and no tree compiles between the schema and the readers that follow it.
+**Step 5 is built**, as the second pull request.
 
 **The deploy that carries the first migration takes the PDF surfaces down for the length of
 its build**, and that is accepted. `deploy/deploy.sh` migrates before it builds, so until the
@@ -2571,11 +2580,14 @@ down until one succeeds, whatever the script's message says of the live site.
    patterns that are written out by hand, `fragmentPairs`' filter (`citation.ts`) and
    `PAGE_PARAM` (`src/lib/cited-passage-query.ts`). A referent written with `sheet=` that
    either one misses loses its sheet, and its words are then read as a quotation with no
-   error. MCP's parameters and answers take the two words. PDF_FRAGMENT_LINKS.md,
+   error. A third was found in the build: `add_note`'s test of whether an `on` URL's fragment
+   is a card's name, which now asks `isViewerFragment` (`src/lib/mcp/url.ts`) as the other
+   MCP tools do. MCP's parameters and answers take the two words. PDF_FRAGMENT_LINKS.md,
    CITATIONS.md and MCP.md are rewritten to it.
 6. **`v=`**: the stamped type `formatPageName` takes and its writers, the three parsers that
    read a version's own address, the viewer's reading of the version a link names and its
-   going there, the cited-page route's, the banners, MCP's refusal, and the integrity check
+   going there, the cited-page route's (whose redirect then writes a referent's pairs
+   through `formatPageName`, `page=` becoming `sheet=`), the banners, MCP's refusal, and the integrity check
    with its dating. No map exists yet, so no link is carried.
 7. **The upload**, through `PUT /api/files/<id>` and through MCP's route with `versionOf`,
    the lock on the hash, the candidate's page, promotion without the carry, abandoning, and

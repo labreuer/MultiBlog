@@ -19,7 +19,7 @@ import { appOrigin } from "./resolve";
 // checked before anything is written: create_doc's body, edit_doc's
 // replacements and appends, and the bodies add_note and edit_note write. An
 // agent fixes the quote in the same turn, where otherwise a broken link shows
-// only when someone follows it. A page link (`#page=<n>` or `#p=<label>` and
+// only when someone follows it. A page link (`#sheet=<n>` or `#p=<label>` and
 // no `text`) is checked for its page.
 //
 // The check is the integrity script's and the one-quote CLI's
@@ -31,15 +31,15 @@ import { appOrigin } from "./resolve";
 
 /** A page as an answer names it. */
 function pageText(page: PageName): string {
-  return "sheet" in page ? `page ${page.sheet}` : `the page labelled ${page.label}`;
+  return "sheet" in page ? `sheet ${page.sheet}` : `page ${page.label}`;
 }
 
-const NO_SUCH_LABEL = "which no page of the PDF carries (a page with no label of its own is named by page=, never p=)";
+const NO_SUCH_LABEL = "which no sheet of the PDF carries (a sheet with no label of its own is named by sheet=, never p=)";
 
 /** The warning for a `p=` on a file without usable labels, where it is the sheet number it names. */
 function unlabelled(href: string, page: PageName, sheet: number, usableLabels: boolean | null): string[] {
   return "label" in page && usableLabels === false
-    ? [`${href}: this PDF has no page labels, so p=${page.label} is a sheet number; write page=${sheet}.`]
+    ? [`${href}: this PDF has no page labels, so p=${page.label} is a sheet number; write sheet=${sheet}.`]
     : [];
 }
 
@@ -71,7 +71,7 @@ export async function checkFragmentLinks(actor: Actor, bodies: unknown[]): Promi
     }
     if (finding.page && link.page) {
       if (finding.page.kind === "page-out-of-range") {
-        throw new ApiError("no_match", `The page link ${href} names ${pageText(link.page)}, past the PDF's ${finding.page.pageCount}.`, { link: href });
+        throw new ApiError("no_match", `The page link ${href} names ${pageText(link.page)}, past the PDF's ${finding.page.pageCount} sheets.`, { link: href });
       }
       if (finding.page.kind === "no-such-label") {
         throw new ApiError("no_match", `The page link ${href} names the label ${"label" in link.page ? link.page.label : ""}, ${NO_SUCH_LABEL}.`, { link: href });
@@ -80,9 +80,9 @@ export async function checkFragmentLinks(actor: Actor, bodies: unknown[]): Promi
     }
     for (const passage of finding.passages) {
       const page = passage.passage.page;
-      const named = { ...("sheet" in page ? { page: page.sheet } : { label: page.label }), ...passageWords(passage.passage) };
+      const named = { ...("sheet" in page ? { sheet: page.sheet } : { page: page.label }), ...passageWords(passage.passage) };
       if (passage.kind === "page-out-of-range") {
-        throw new ApiError("no_match", `The fragment link ${href} names ${pageText(page)}, past the PDF's ${passage.pageCount}.`, {
+        throw new ApiError("no_match", `The fragment link ${href} names ${pageText(page)}, past the PDF's ${passage.pageCount} sheets.`, {
           link: href,
           passage: named,
         });
@@ -91,7 +91,7 @@ export async function checkFragmentLinks(actor: Actor, bodies: unknown[]): Promi
         throw new ApiError("no_match", `The fragment link ${href} names the label ${"label" in page ? page.label : ""}, ${NO_SUCH_LABEL}.`, {
           link: href,
           passage: named,
-          ...(passage.foundOnPage !== null ? { foundOnPage: passage.foundOnPage } : {}),
+          ...(passage.foundOnPage !== null ? { foundOnSheet: passage.foundOnPage } : {}),
         });
       }
       if (passage.kind === "no-match") {
@@ -100,11 +100,11 @@ export async function checkFragmentLinks(actor: Actor, bodies: unknown[]): Promi
           passage: named,
           matchedUpTo: passage.matchedUpTo,
           pageHasThere: passage.pageHasThere,
-          ...(passage.foundOnPage !== null ? { foundOnPage: passage.foundOnPage } : {}),
+          ...(passage.foundOnPage !== null ? { foundOnSheet: passage.foundOnPage } : {}),
         });
       }
       if (passage.occurrences > 1) {
-        warnings.push(`${href}: its passage occurs ${passage.occurrences} times on page ${passage.sheet}; the link points at the first.`);
+        warnings.push(`${href}: its passage occurs ${passage.occurrences} times on sheet ${passage.sheet}; the link points at the first.`);
       }
       warnings.push(...unlabelled(href, page, passage.sheet, finding.usableLabels));
     }

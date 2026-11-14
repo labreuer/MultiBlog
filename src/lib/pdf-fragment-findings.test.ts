@@ -19,6 +19,7 @@ test("an href with text is a fragment link, and one with a page or a p and no te
     unread: 0,
   });
   assert.deepEqual(parseFragmentLinkHref("/pdf/book#page=5", null), { slug: "book", passages: [], page: { sheet: 5 }, unread: 0 });
+  assert.deepEqual(parseFragmentLinkHref("/pdf/book#sheet=5", null), { slug: "book", passages: [], page: { sheet: 5 }, unread: 0 });
   assert.deepEqual(parseFragmentLinkHref("/pdf/book#p=xii", null), { slug: "book", passages: [], page: { label: "xii" }, unread: 0 });
   assert.deepEqual(parseFragmentLinkHref(`${ORIGIN}/pdf/book#zoom=2&p=3`, ORIGIN)?.page, { label: "3" });
   // Neither: no page that reads, an annotation's permalink, no fragment at all, another site.

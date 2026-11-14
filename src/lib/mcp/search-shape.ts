@@ -42,14 +42,14 @@ export function shapeSection(section: SearchSection): Record<string, unknown>[] 
         updated: dayOf(hit.updatedAt),
         ...(hit.pages.length > 0
           ? {
-              pages: hit.pages.map((page) => ({
-                page: page.page,
-                ...(page.label ? { label: page.label } : {}),
+              sheets: hit.pages.map((page) => ({
+                sheet: page.page,
+                ...(page.label ? { page: page.label } : {}),
                 snippet: markedSnippet(page.snippet),
               })),
             }
           : {}),
-        ...(hit.morePages > 0 ? { morePages: hit.morePages } : {}),
+        ...(hit.morePages > 0 ? { moreSheets: hit.morePages } : {}),
       }));
     case "annotations":
       return section.hits.map((hit) => {

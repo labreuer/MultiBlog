@@ -167,7 +167,7 @@ export async function readDoc(
   const ranged = args.section !== undefined || args.from !== undefined || args.to !== undefined;
   const modes = [args.since !== undefined, args.around !== undefined, ranged].filter(Boolean).length;
   if (modes > 1) throw invalid("Ask for one of since, around, or a range (section, from/to) per read.");
-  for (const pdfOnly of ["page", "pages", "label", "entry"] as const) {
+  for (const pdfOnly of ["sheet", "sheets", "page", "entry"] as const) {
     if (args[pdfOnly] !== undefined) throw invalid(`${pdfOnly} is for a PDF; a doc reads by section or by blocks.`);
   }
 

@@ -14,7 +14,7 @@ export type ParsedRef =
   /** /doc/<slug or id>, with or without /edit. */
   | { kind: "doc"; param: string; fragment: string }
   /**
-   * /pdf/<slug>, with its fragment: #page=…, a fragment link's text=…, or an
+   * /pdf/<slug>, with its fragment: #sheet=… (or #page=…), a fragment link's text=…, or an
    * annotation card's name. `version` is set for a version's own address,
    * /pdf/<slug>/v/<n> (docs/PDF.md §13, "Addresses"); without it, the latest.
    */
@@ -139,5 +139,5 @@ export function fragmentParams(fragment: string): [string, string][] {
 
 /** Whether a PDF fragment is a viewer fragment (page, text, zoom…) rather than an annotation card's name. */
 export function isViewerFragment(fragment: string): boolean {
-  return fragmentParams(fragment).some(([key]) => ["page", "p", "text", "zoom", "nameddest", "search"].includes(key));
+  return fragmentParams(fragment).some(([key]) => ["sheet", "page", "p", "text", "zoom", "nameddest", "search"].includes(key));
 }

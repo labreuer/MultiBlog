@@ -20,7 +20,7 @@ import styles from "@/components/anchored-link/AnchoredLinkBanner.module.css";
 // names both pages.
 //
 // **Every page is named by its label**, as the rest of the viewer names it
-// (`pageLabelFor`), whichever form the link used: a `page=53` miss reads "Not
+// (`pageLabelFor`), whichever form the link used: a `sheet=53` miss reads "Not
 // found on page 49" where sheet 53 is labelled 49. The one exception is a
 // `p=` whose label no sheet carries, named as the link wrote it.
 

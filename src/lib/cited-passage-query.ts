@@ -19,12 +19,12 @@ export type CitedQuery =
   /** A `text` that doesn't parse. */
   | { kind: "unreadable" };
 
-const PAGE_PARAM = /^(?:page|p)=/;
+const PAGE_PARAM = /^(?:sheet|page|p)=/;
 
 /**
  * A citation's query, as it arrived (still percent-encoded, no `?`), as the
  * fragment grammar reads it (docs/PDF_FRAGMENT_LINKS.md §2): with a page, the
- * `page`, `p` and `text` parameters in order, the fragment a `/pdf/` referent
+ * `sheet`, `page`, `p` and `text` parameters in order, the fragment a `/pdf/` referent
  * gave; with a `text` alone, the quotation, read before decoding as a
  * fragment's is.
  *

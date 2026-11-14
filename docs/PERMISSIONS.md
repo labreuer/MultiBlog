@@ -579,7 +579,7 @@ no link, a deleted link, or someone else's unminted draft is a 404, the existenc
 redirects; like `?sel=`, it grants nothing.
 
 **A PDF fragment link's fragment grants nothing either**
-([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)). `/pdf/<slug>#page=<n>&text=<words>`, or
+([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)). `/pdf/<slug>#sheet=<n>&text=<words>`, or
 `#p=<label>&…`, meets the PDF route's own gate exactly as a bare `/pdf/<slug>` does, and can
 only name passages inside the file that gate allowed. What it does not have is a landing page:
 its href carries the file's slug and the passage's words to everyone who can read the text

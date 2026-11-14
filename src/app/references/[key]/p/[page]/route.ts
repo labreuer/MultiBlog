@@ -15,7 +15,7 @@ import { citedPageTarget } from "@/lib/reference-cited-by";
 // A route handler rather than a page, since the query is read raw, in order
 // and still percent-encoded, as a fragment is read (docs/PDF_FRAGMENT_LINKS.md
 // §2): a page's `searchParams` arrive decoded, and lose the order of a `p=`
-// and a `page=` between their `text`s. It reads the session; the reference's
+// and a `sheet=` between their `text`s. It reads the session; the reference's
 // page beside it reads none, and never gets the query.
 
 export async function GET(request: Request, { params }: { params: Promise<{ key: string; page: string }> }) {

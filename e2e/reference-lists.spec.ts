@@ -129,7 +129,7 @@ test("a list's page offers each work's PDF at the page its place in #p= names, a
     const offered = async () => {
       const first = page.getByRole("region", { name: titleA });
       const second = page.getByRole("region", { name: titleB });
-      await expect(second.getByRole("link", { name: fileB.title })).toHaveAttribute("href", `/pdf/${fileB.slug}#page=2`);
+      await expect(second.getByRole("link", { name: fileB.title })).toHaveAttribute("href", `/pdf/${fileB.slug}#sheet=2`);
       await expect(second).toContainText(", at p. 2");
       await expect(first.getByRole("link", { name: fileA.title })).toHaveAttribute("href", `/pdf/${fileA.slug}`);
       await expect(first).not.toContainText(", at p.");

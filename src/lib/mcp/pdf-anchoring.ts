@@ -56,13 +56,13 @@ export async function anchorPdfQuote(
   const metadata = await pdfMetadata(file.versionId);
   const labels = metadata ? usablePageLabels(metadata.pageLabels, file.pageCount) : null;
   const indexes =
-    quote.page !== undefined
-      ? [quote.page - 1]
-      : quote.label !== undefined
-        ? pagesLabelled(labels, quote.label)
+    quote.sheet !== undefined
+      ? [quote.sheet - 1]
+      : quote.page !== undefined
+        ? pagesLabelled(labels, quote.page)
         : Array.from({ length: file.pageCount }, (_, i) => i);
-  if (indexes.some((i) => i < 0 || i >= file.pageCount!)) throw invalid(`This PDF has ${file.pageCount} pages.`);
-  if (indexes.length === 0) throw new ApiError("not_found", `No page of this PDF is labelled "${quote.label}".`);
+  if (indexes.some((i) => i < 0 || i >= file.pageCount!)) throw invalid(`This PDF has ${file.pageCount} sheets.`);
+  if (indexes.length === 0) throw new ApiError("not_found", `No sheet of this PDF has the printed page "${quote.page}".`);
   const texts = await pageTexts(file.versionId, indexes);
 
   const passageOf = (q: QuoteInput, read: (s: string) => string): PassageText =>
@@ -79,12 +79,12 @@ export async function anchorPdfQuote(
   let found = find(passageOf(quote, (s) => s));
   if (found.length === 0) found = find(passageOf(quote, markdownToText));
 
-  const labelOf = (index: number) => (labels ? { label: labels[index] } : {});
+  const labelOf = (index: number) => (labels ? { page: labels[index] } : {});
   if (found.length === 0) {
     const misses = indexes.flatMap((index) =>
       overlapWindows(texts.get(index) ?? "", quote.quote ?? quote.start ?? "", 3).map((w) => ({
         score: w.score,
-        miss: { page: index + 1, ...labelOf(index), text: (texts.get(index) ?? "").slice(w.start, w.end) },
+        miss: { sheet: index + 1, ...labelOf(index), text: (texts.get(index) ?? "").slice(w.start, w.end) },
       })),
     );
     throw new ApiError("no_match", "That quote isn't in this PDF as written.", {
@@ -92,10 +92,10 @@ export async function anchorPdfQuote(
     });
   }
   if (found.length > 1) {
-    throw new ApiError("ambiguous", "That quote occurs more than once; add a prefix, a suffix or a page.", {
+    throw new ApiError("ambiguous", "That quote occurs more than once; add a prefix, a suffix, a sheet or a page.", {
       occurrences: found.slice(0, ERROR_LIST_CAP).map(({ index, range }) => {
         const text = texts.get(index) ?? "";
-        return { page: index + 1, ...labelOf(index), context: `…${text.slice(Math.max(0, range.start - 40), range.end + 40)}…` };
+        return { sheet: index + 1, ...labelOf(index), context: `…${text.slice(Math.max(0, range.start - 40), range.end + 40)}…` };
       }),
       total: found.length,
     });
@@ -103,7 +103,7 @@ export async function anchorPdfQuote(
 
   const { index: pageIndex, range } = found[0];
   const items = await extractPageItems(await readFile(storagePathFor(file.sha256)), pageIndex);
-  if (!items) throw invalid(`Page ${pageIndex + 1} isn't in this PDF.`);
+  if (!items) throw invalid(`Sheet ${pageIndex + 1} isn't in this PDF.`);
   const normalised = normalisePageText(items.items);
   const stored = await storedPageText(file.versionId, pageIndex, items.textVersion);
   if (stored === null || stored !== normalised.text) {

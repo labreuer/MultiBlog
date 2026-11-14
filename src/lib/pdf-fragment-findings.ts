@@ -82,7 +82,7 @@ export type PassageFinding =
   | {
       kind: "no-match";
       passage: FragmentPassage;
-      /** The 1-based sheets its page names, in order: one for `page=`, any number for a repeated label. */
+      /** The 1-based sheets its page names, in order: one for `sheet=`, any number for a repeated label. */
       sheets: number[];
       /** The longest stretch of the passage the first of them holds, and what that page has right after it. */
       matchedUpTo: string | null;
@@ -119,7 +119,7 @@ export type FragmentLinkFinding =
        * Whether the file has usable labels, for a link with a `p=`, and null
        * for one without, whose answer needs no labels. A `p=` on a file
        * without them is a sheet number, and would turn into a printed page
-       * the day the file gained labels: the warning gives its `page=` form.
+       * the day the file gained labels: the warning gives its `sheet=` form.
        */
       usableLabels: boolean | null;
       unread: number;

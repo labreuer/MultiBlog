@@ -10,7 +10,7 @@ import { prisma } from "@/lib/prisma";
 // doesn't find it on the sheets its link names: the one sheet in the file
 // that holds it once, by the rule the check uses for "the page the passage
 // is on" (`foundOnPage`, §8). This is what carries a `p=` link through
-// labels that were corrected, and a `page=` link through a sheet added or
+// labels that were corrected, and a `sheet=` link through a sheet added or
 // removed before it.
 //
 // It searches the stored page text (`FragmentChecker.sheetHolding`), so the

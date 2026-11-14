@@ -391,20 +391,20 @@ test.describe("a file with two versions", () => {
         return answer.result;
       };
       // The bare address is the latest; a version's own is that version.
-      expect(JSON.stringify(await read({ url: `/pdf/${file.slug}`, page: 1 }))).toContain("second version speaks");
-      const first = await read({ url: `/pdf/${file.slug}/v/1`, page: 1 });
+      expect(JSON.stringify(await read({ url: `/pdf/${file.slug}`, sheet: 1 }))).toContain("second version speaks");
+      const first = await read({ url: `/pdf/${file.slug}/v/1`, sheet: 1 });
       expect(JSON.stringify(first)).toContain("first version speaks");
       expect(first.url).toBe(`/pdf/${file.slug}/v/1`);
       expect((await agent.call("read", { url: `/pdf/${file.slug}/v/3` })).error.code).toBe("not_found");
 
       // Threads on the bare address: the latest's, then those on other
       // versions, each naming its version; the file's own note among them.
-      type Group = { version?: number; page?: number; unanchored?: true; threads: { id: string }[] };
+      type Group = { version?: number; sheet?: number; unanchored?: true; threads: { id: string }[] };
       const groupsOf = async (url: string) => ((await read({ url, include: ["annotations"] })).threads as { groups: Group[] }).groups;
       const bare = await groupsOf(`/pdf/${file.slug}`);
       const idsIn = (groups: Group[]) => groups.flatMap((group) => group.threads.map((thread) => thread.id));
       expect(idsIn(bare)).toEqual([v2Note.id, v1Note.id, fileNote.id]);
-      expect(bare.find((group) => group.threads[0].id === v1Note.id)).toMatchObject({ version: 1, page: 1 });
+      expect(bare.find((group) => group.threads[0].id === v1Note.id)).toMatchObject({ version: 1, sheet: 1 });
       expect(bare.find((group) => group.threads[0].id === v2Note.id)?.version).toBeUndefined();
       // A version's own address answers that version's, with the file's own.
       expect(idsIn(await groupsOf(`/pdf/${file.slug}/v/1`))).toEqual([v1Note.id, fileNote.id]);
@@ -414,7 +414,7 @@ test.describe("a file with two versions", () => {
       // version that holds it, and names that version. A reply's does too.
       for (const card of [v1Note.card, v1Reply.card]) {
         const thread = await read({ url: card });
-        expect(thread.container).toMatchObject({ url: `/pdf/${file.slug}/v/1`, title: `${file.title}, version 1`, page: 1 });
+        expect(thread.container).toMatchObject({ url: `/pdf/${file.slug}/v/1`, title: `${file.title}, version 1`, sheet: 1 });
         expect(String(thread.card)).toBe(`/pdf/${file.slug}/v/1#${fragmentOf(v1Note.card)}`);
       }
       expect((await read({ url: v2Note.card })).container).toMatchObject({ url: `/pdf/${file.slug}`, title: file.title });

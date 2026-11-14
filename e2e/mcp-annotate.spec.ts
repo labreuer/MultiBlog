@@ -105,9 +105,9 @@ test("add_note a PDF: the quote is cut from the server's own page text, with qua
     const twice = await agent.call("add_note", { on: `/pdf/${file.slug}`, body: "x", quote: "speaks of participation" });
     expect(twice.error.code).toBe("ambiguous");
 
-    const posted = await agent.call("add_note", { on: `/pdf/${file.slug}`, body: "Barfield's word.", quote: "speaks of participation", page: 2 });
+    const posted = await agent.call("add_note", { on: `/pdf/${file.slug}`, body: "Barfield's word.", quote: "speaks of participation", sheet: 2 });
     expect(posted.isError, JSON.stringify(posted.error)).toBe(false);
-    expect(posted.result.passage).toMatchObject({ text: "speaks of participation", page: 2 });
+    expect(posted.result.passage).toMatchObject({ text: "speaks of participation", sheet: 2 });
 
     const [facts] = await getFileAnnotationFacts(file.id);
     expect(facts.pageIndex).toBe(1);
@@ -115,7 +115,7 @@ test("add_note a PDF: the quote is cut from the server's own page text, with qua
     expect(facts.quotedText).toBe("speaks of participation");
     expect(facts.pageTextAtTarget!.slice(facts.position!.start, facts.position!.end)).toBe(facts.quotedText);
 
-    const wrongPage = await agent.call("add_note", { on: `/pdf/${file.slug}`, body: "x", quote: "original participation", page: 1 });
+    const wrongPage = await agent.call("add_note", { on: `/pdf/${file.slug}`, body: "x", quote: "original participation", sheet: 1 });
     expect(wrongPage.error.code).toBe("no_match");
   } finally {
     await deleteTestFile(file.id);

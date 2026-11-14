@@ -53,7 +53,7 @@ test("create_link mints several links in one call, each part captured by quote; 
         {
           parts: [
             { on: `/doc/${doc.slug}`, quote: "Original participation came first", version },
-            { on: `/pdf/${file.slug}`, quote: "Final participation", page: 2 },
+            { on: `/pdf/${file.slug}`, quote: "Final participation", sheet: 2 },
           ],
         },
       ],
@@ -67,7 +67,7 @@ test("create_link mints several links in one call, each part captured by quote; 
     const read = (await agent.call("read", { url: pair.url })).result as LinkRead;
     expect(read.groups.map((g) => g.kind)).toEqual(["doc", "pdf"]);
     expect(read.groups[0].parts[0]).toMatchObject({ n: 1, quote: "Original participation came first", blocks: "2" });
-    expect(read.groups[1].parts[0]).toMatchObject({ n: 2, quote: "Final participation", page: 2 });
+    expect(read.groups[1].parts[0]).toMatchObject({ n: 2, quote: "Final participation", sheet: 2 });
     // Only the creator is shown part numbers.
     const theirs = (await reader.call("read", { url: pair.url })).result as LinkRead;
     expect(theirs.groups[0].parts[0].n).toBeUndefined();
@@ -79,7 +79,7 @@ test("create_link mints several links in one call, each part captured by quote; 
       links: [{ name: "The theme", parts: [{ on: `/doc/${doc.slug}`, quote: "Participation is the theme", version }] }, {
         parts: [
           { on: `/doc/${doc.slug}`, quote: "Original participation came first", version },
-          { on: `/pdf/${file.slug}`, quote: "Final participation", page: 2 },
+          { on: `/pdf/${file.slug}`, quote: "Final participation", sheet: 2 },
         ],
       }],
     });

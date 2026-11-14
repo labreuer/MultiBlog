@@ -193,7 +193,7 @@ distinct works.
   renders nothing (`src/app/references/[key]/p/[page]/page.tsx`, `citedPageTarget` in
   `src/lib/reference-cited-by.ts`). A reader who may open the work's PDF, under the files' read
   rule, is sent to `/pdf/<slug>#p=<label>` on a file with usable labels, and to
-  `#page=<sheet>`, the page taken as the sheet itself, on one without (`pdfPageHref`). The sheet
+  `#sheet=<sheet>`, the page taken as the sheet itself, on one without (`pdfPageHref`). The sheet
   is found by the rule a `p=` link's is ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md) §2,
   "Which sheet"), against the file's own `pageLabels`, read and stored first where they haven't
   been yet. Anyone else, and a page no sheet carries, goes to `/references/<key>#p=49`, where
@@ -1280,20 +1280,21 @@ fragment.
     cost: 170 of the 5,662 links measured name more than one page (3.0%).
   - **No page break is in the query.** The route finds each one from the stored page text.
 - **For a `/pdf/` referent, the query is the fragment's own page and `text` pairs**, already in
-  the grammar, each page a `p` or a `page` as the referent wrote it (`fragmentPairs`).
+  the grammar, each page a `p`, a `sheet` or a `page` as the referent wrote it
+  (`fragmentPairs`). The route hands them on as written, so a referent's `page=` stays one.
 - **A query string, not a fragment.** The route answers with a redirect whose `Location` has a
-  fragment of its own (`#page=…`), and a `Location` with a fragment replaces the one the browser
+  fragment of its own (`#sheet=…`), and a `Location` with a fragment replaces the one the browser
   had (RFC 9110 §10.2.2), so a passage in the fragment would be lost. The route already reads
   the session, so reading the query costs it no cache. The reference's page, which is cached,
   never gets the query.
 - **The route is a route handler** (`src/app/references/[key]/p/[page]/route.ts`), since it reads
   the query raw, in order and still percent-encoded, as a fragment is read
   (`parseCitedQuery`, `src/lib/cited-passage-query.ts`). A page's `searchParams` arrive decoded,
-  and lose the order of a `p=` and a `page=` between their `text`s. **A comma in the query is
+  and lose the order of a `p=` and a `sheet=` between their `text`s. **A comma in the query is
   syntax, encoded or not**, unlike in a fragment: the server hands a route its commas encoded
   (`%2C`), and writers never encode one. A key nothing has is an empty 404.
 - **A reader who may open the PDF** is sent to `/pdf/<slug>#p=<label>&text=…`, or to
-  `#page=<sheet>&text=…` on a file without usable labels (PDF_FRAGMENT_LINKS.md §8, "Which page
+  `#sheet=<sheet>&text=…` on a file without usable labels (PDF_FRAGMENT_LINKS.md §8, "Which page
   form a writer takes"), by `citedPageTarget` (`src/lib/reference-cited-by.ts`).
   - **A quotation is placed from the stored page text** (`placeCitedQuotation`,
     `src/lib/cited-passage.ts`): on the first sheet carrying the cited page that holds it, and,
@@ -1463,7 +1464,8 @@ refuse every open tab to close that gap, so there is none.
     2026-11-10, and growing.
   - Each becomes a citation, one position where it was several, with a referent: `quote:prev`
     where the quotation before it holds all the link's words, and the link's own URL otherwise,
-    with `p=` for its `page=` where the file has usable labels, by the writers' rule
+    with `p=` for its `page=` where the file has usable labels and `sheet=` where it has none,
+    by the writers' rule
     (PDF_FRAGMENT_LINKS.md §8, "Which page form a writer takes"). So a converted citation
     carries a sheet number only into a file without labels, or onto a sheet `p=` can't name.
     Once the file has a second version, a referent of either form carries `v=` (PDF.md §13,

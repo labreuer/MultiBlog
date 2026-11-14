@@ -346,15 +346,15 @@ test("a citation's link at a page sends a reader who may open the work's PDF to 
     expect(await follow(`${home}/p/2`)).toBe(`${home}#p=2`);
     // A shared PDF, at the page cited; a page it doesn't have, and a locator that is no page, go to the reference.
     await setTestReferenceFile(key, shared.id);
-    expect(await follow(`${home}/p/2`)).toBe(`/pdf/${shared.slug}#page=2`);
+    expect(await follow(`${home}/p/2`)).toBe(`/pdf/${shared.slug}#sheet=2`);
     // Still, once the PDF has been read and its labels stored: none, for a PDF without them, and a page is still the sheet.
     expect(await fillTestFileMetadata(shared.id)).toEqual([]);
-    expect(await follow(`${home}/p/2`)).toBe(`/pdf/${shared.slug}#page=2`);
+    expect(await follow(`${home}/p/2`)).toBe(`/pdf/${shared.slug}#sheet=2`);
     expect(await follow(`${home}/p/3`)).toBe(`${home}#p=3`);
     expect(await follow(`${home}/p/${encodeURIComponent("ch. 3")}`)).toBe(home);
     // A private PDF reaches its owner from the same link, and nobody else.
     await setTestReferenceFile(key, mine.id);
-    expect(await follow(`${home}/p/2`)).toBe(`/pdf/${mine.slug}#page=2`);
+    expect(await follow(`${home}/p/2`)).toBe(`/pdf/${mine.slug}#sheet=2`);
     await setTestReferenceFile(key, theirs.id);
     expect(await follow(`${home}/p/2`)).toBe(`${home}#p=2`);
     // Signed out, a shared PDF is still not readable: the reference's page, as for no PDF at all.
@@ -410,7 +410,7 @@ test("a PDF's Metadata pane ties it to a reference, and a citation of the work a
     const chip = page.locator("a.entity-chip").filter({ visible: true });
     await expect(chip).toHaveAttribute("href", `/references/${key}/p/2`);
     await page.goto(`/references/${key}/p/2`);
-    await expect(page).toHaveURL(`/pdf/${file.slug}#page=2`);
+    await expect(page).toHaveURL(`/pdf/${file.slug}#sheet=2`);
 
     // Removing it unties it, and the list says so.
     await page.getByRole("tab", { name: "Metadata" }).click();

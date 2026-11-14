@@ -140,7 +140,7 @@ function labelOf(file: { pageCount: number | null; pageLabels: unknown }, pageIn
 
 /**
  * A page hit's link: `#p=<label>` where the sheet is the first carrying its
- * own label, and `#page=<n>` otherwise, as for a sheet whose own label is
+ * own label, and `#sheet=<n>` otherwise, as for a sheet whose own label is
  * empty or a file without usable labels (docs/PDF_FRAGMENT_LINKS.md §8). It
  * is a page link nobody chooses the form of, and is copied into bodies from
  * the address bar, so it takes the form that survives a new copy of the file.

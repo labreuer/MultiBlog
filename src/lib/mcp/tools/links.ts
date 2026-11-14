@@ -10,8 +10,8 @@ const part = z.strictObject({
   on: objectRef.describe("The doc or PDF the passage is in."),
   ...quoteFields,
   version: versionString.optional().describe("On a doc: the version you read the quote at."),
-  page: z.number().int().min(1).optional().describe("On a PDF: the 1-based sheet the quote is on."),
-  label: z.string().min(1).max(50).optional().describe("On a PDF: the printed label of the page the quote is on."),
+  sheet: z.number().int().min(1).optional().describe("On a PDF: the 1-based sheet the quote is on."),
+  page: z.string().min(1).max(50).optional().describe("On a PDF: the printed page the quote is on, its label."),
 });
 
 const name = z.string().max(LINK_NAME_MAX_LENGTH);

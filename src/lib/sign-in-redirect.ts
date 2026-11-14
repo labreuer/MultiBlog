@@ -159,8 +159,8 @@ export function pathWithQuery(
  * A fragment never reaches a server, so no gate can put one in its
  * `callbackUrl`. The browser carries it across the gate's redirect onto
  * `/sign-in`'s own URL instead (RFC 9110 §10.2.2), and this hands it on. Without
- * it a link to a PDF passage (`#page=…&text=…`, docs/PDF_FRAGMENT_LINKS.md
- * §7), a search hit's `#page=` and an annotation's permalink all land on
+ * it a link to a PDF passage (`#sheet=…&text=…`, docs/PDF_FRAGMENT_LINKS.md
+ * §7), a search hit's `#sheet=` and an annotation's permalink all land on
  * their page with their place lost. A fragment can't change where a URL
  * points, so this needs no validation of its own.
  */

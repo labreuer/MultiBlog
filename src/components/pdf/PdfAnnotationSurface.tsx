@@ -340,7 +340,7 @@ export default function PdfAnnotationSurface({
 
   const presence = usePdfPresence(fileId, version.id, handle);
 
-  // docs/PDF_FRAGMENT_LINKS.md — the passages a `#page=…&text=…` fragment
+  // docs/PDF_FRAGMENT_LINKS.md — the passages a `#sheet=…&text=…` fragment
   // names, found in this document on arrival and on every hashchange. Drawn
   // with a followed anchored link's outline, and mirrored into a ref for the
   // layer's callbacks like the link parts above.
@@ -845,7 +845,7 @@ export default function PdfAnnotationSurface({
 
   // docs/PDF_FRAGMENT_LINKS.md §6 — a fragment's jump, once per resolution:
   // on arrival, and again when a hashchange names new passages. PdfViewer has
-  // already opened at the first `#page=`; this lands the first passage found
+  // already opened at the first `#sheet=`; this lands the first passage found
   // the way any jump lands a passage. On arrival a followed ?sel= link keeps
   // its own jump, and both are drawn.
   const fragmentJumpedRef = useRef(0);

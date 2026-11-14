@@ -116,6 +116,10 @@ test("the link: a /pdf/ passage goes through the route as its pairs, and a link 
   assert.deepEqual(hrefs(doc(para(cite("a", "/pdf/saving-the-appearances#zoom=200&p=49&text=a+b...c&page=54&text=d")))), [
     "/references/barfield1957/p/49?p=49&text=a+b...c&page=54&text=d",
   ]);
+  // sheet=, the written form of page=, rides along as page= does.
+  assert.deepEqual(hrefs(doc(para(cite("a", "/pdf/saving-the-appearances#p=49&text=a&sheet=54&text=d")))), [
+    "/references/barfield1957/p/49?p=49&text=a&sheet=54&text=d",
+  ]);
   assert.deepEqual(hrefs(doc(para(cite("a", "/pdf/saving-the-appearances")))), ["/references/barfield1957/p/49"]);
   assert.deepEqual(hrefs(doc(para(cite("a", "/link/abc123"), text(" "), cite("b", "https://example.com/x")))), ["/link/abc123", "https://example.com/x"]);
   // The post's link is the doc's.

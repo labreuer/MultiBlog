@@ -101,7 +101,7 @@ test.describe("a passage in a citation", () => {
       const words = quotation.replaceAll(" ", "+");
       await expect(link).toHaveAttribute("href", `/references/${key}/p/2?text=${words}`);
       await link.click();
-      await expect(page).toHaveURL(`/pdf/${file.slug}#page=2&text=${words}`);
+      await expect(page).toHaveURL(`/pdf/${file.slug}#sheet=2&text=${words}`);
       // The banner shows the PDF's words, never the URL's.
       await expect(banner(page)).toContainText("The law of participation governs the earlier mind", { timeout: 20_000 });
     } finally {
@@ -164,9 +164,10 @@ test.describe("a passage in a citation", () => {
         const url = new URL(page.url());
         return `${url.pathname}${url.hash}`;
       };
-      expect(await follow(hrefs[0])).toBe(`/pdf/${file.slug}#page=3&text=It+may+also,within+but+it&page=4&text=is+detected+primarily+without`);
+      expect(await follow(hrefs[0])).toBe(`/pdf/${file.slug}#sheet=3&text=It+may+also,within+but+it&sheet=4&text=is+detected+primarily+without`);
       await expect(banner(page)).toContainText("is detected primarily without", { timeout: 20_000 });
-      expect(await follow(hrefs[1])).toBe(`/pdf/${file.slug}#page=2&text=The+law+of+participation...fades+from+view`);
+      expect(await follow(hrefs[1])).toBe(`/pdf/${file.slug}#sheet=2&text=The+law+of+participation...fades+from+view`);
+      // A /pdf/ referent's pairs go through as its writer wrote them, page= included.
       expect(await follow(hrefs[2])).toBe(`/pdf/${file.slug}#page=2&text=a+direction...beatific+consummation`);
 
       // Signed out, the PDF isn't theirs to open: the reference's page, without the words.
