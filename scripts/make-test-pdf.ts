@@ -28,9 +28,15 @@
 //     roman-numbered front matter, a body restarting at 1, and the 1…N set
 //     `usablePageLabels` has to reject. PLAN.md §19c.
 //
-// Still no images, in either case: the content streams are text operators and
-// nothing else, so no fixture built here exercises a pdfjs image decoder
-// (CLAUDE.md, and e2e/pdf-assets.spec.ts is the guard that stands in for it).
+//   - **a filled rectangle** (`inked`), for a sheet with ink and no text: a
+//     plate, or a sheet of an image-only scan. A page map places such a sheet
+//     by its neighbours and tells it from a blank one by its ink, and a
+//     rectangle selection on one has no words to be found by (docs/PDF.md
+//     §13, "Matching the pages" and "Placing each anchor").
+//
+// Still no images, in any case: the content streams are text operators and a
+// path, so no fixture built here exercises a pdfjs image decoder (CLAUDE.md,
+// and e2e/pdf-assets.spec.ts is the guard that stands in for it).
 //
 // Usage: `npx tsx scripts/make-test-pdf.ts out.pdf` writes the three-page
 // sample; the e2e fixtures import buildTestPdf directly.
@@ -50,14 +56,19 @@ function escapePdfString(text: string): string {
   return text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
-function contentStreamFor(lines: readonly string[]): string {
+/** The rectangle an inked sheet draws, in PDF user space: `[x, y, width, height]`. A spec draws its own selection over it. */
+export const INKED_RECT = [144, 300, 324, 216] as const;
+
+function contentStreamFor(lines: readonly string[], inked: boolean): string {
   const shown = lines
     .map((line, index) => {
       const y = TOP_BASELINE - index * LINE_HEIGHT;
       return `BT /F1 ${FONT_SIZE} Tf ${MARGIN_LEFT} ${y} Td (${escapePdfString(line)}) Tj ET`;
     })
     .join("\n");
-  return `${shown}\n`;
+  // A grey box, filled: a path that paints, which is what tells a sheet with ink from a blank one.
+  const ink = inked ? `0.8 g ${INKED_RECT.join(" ")} re f\n` : "";
+  return `${ink}${shown}\n`;
 }
 
 /** One entry of a test document's outline. */
@@ -108,7 +119,12 @@ export type TestPageLabelRange = {
  */
 export function buildTestPdf(
   pages: readonly (readonly string[])[],
-  options: { outline?: readonly TestOutlineItem[]; pageLabels?: readonly TestPageLabelRange[] } = {},
+  options: {
+    outline?: readonly TestOutlineItem[];
+    pageLabels?: readonly TestPageLabelRange[];
+    /** The pages (1-based) that draw a filled rectangle. One with no lines beside is a sheet with ink and no text; one with neither is blank. */
+    inked?: readonly number[];
+  } = {},
 ): Uint8Array {
   if (pages.length === 0) throw new Error("buildTestPdf needs at least one page.");
 
@@ -134,7 +150,7 @@ export function buildTestPdf(
       `<< /Type /Page /Parent ${PAGES} 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] ` +
         `/Resources << /Font << /F1 ${FONT} 0 R >> >> /Contents ${contentObjNumber(i)} 0 R >>`,
     );
-    const stream = contentStreamFor(lines);
+    const stream = contentStreamFor(lines, options.inked?.includes(i + 1) ?? false);
     objects.set(
       contentObjNumber(i),
       `<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}endstream`,

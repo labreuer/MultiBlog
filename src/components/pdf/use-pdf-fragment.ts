@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { PdfViewerHandle } from "./PdfViewer";
 import { locateFragmentMisses } from "@/app/actions/pdf-fragment";
 import { parseFragmentPassages, resolvePassage, type FragmentPassage } from "@/lib/pdf-fragment";
-import { readByWordsAlone, readPage, type LinkAddress, type LinkVersion, type PageReading } from "@/lib/pdf-link-reading";
+import { carriedElsewhere, readByWordsAlone, readPage, type LinkAddress, type LinkVersion, type PageReading } from "@/lib/pdf-link-reading";
 import { pageFromHash, type PageName } from "@/lib/pdf-open-params";
 import { sheetsNamed } from "@/lib/pdf-page-labels";
 import { normalisePageText, textVersionFor, type NormalisedPage } from "@/lib/pdf-text";
@@ -30,13 +30,20 @@ import { PDFJS_VERSION } from "@/lib/pdfjs-client";
 //
 // **Each passage is read by the version it names** (docs/PDF.md §13, "Links
 // into the file"; src/lib/pdf-link-reading.ts): its `v=`, or without one the
-// file's first version, or on a version's own address that version. One that
-// names the version shown is found as above. One that names another version
-// is not looked for here at all: no page map joins the two, so its sheet and
-// its words are another version's, and the banner offers it there. One that
-// names an abandoned version, or a version the file never had, has no version
-// to open instead, and is looked for by its words alone: drawn where exactly
-// one sheet of the version shown holds it, once.
+// file's first version, or on a version's own address that version.
+//
+// - One that names the version shown is found as above.
+// - One that names another version which page maps join to this one is
+//   **carried**: looked for on the sheets its own are here, and by the miss
+//   when it isn't there. A miss then also asks whether the version the link
+//   names holds the words, and the banner offers the passage there.
+// - One that names another version with a map missing on the way is not
+//   looked for here at all: its sheet and its words are another version's,
+//   and the banner offers it there.
+// - One that names an abandoned version no map carries it off, or a version
+//   the file never had, has no version to open instead, and is looked for by
+//   its words alone: drawn where exactly one sheet of the version shown
+//   holds it, once.
 
 /** One passage of the fragment, and where it is: `target` is null when no page holds it. */
 export type FragmentRegion = {
@@ -49,6 +56,8 @@ export type FragmentRegion = {
   elsewhere: boolean;
   /** How the passage's page was read against the file's versions. */
   reading: PageReading;
+  /** For a carried passage that wasn't found: whether the version its link names holds it. */
+  heldByNamed: boolean;
 };
 
 /** The link's context: the address this page is, and the file's versions. */
@@ -58,8 +67,9 @@ export type PdfFragment = {
   regions: FragmentRegion[];
   /**
    * A link without words, when its page is not one of the version shown: the
-   * page and how it was read, for the banner to say so. Null for a link with
-   * passages, and for a page of the version shown, which simply opens.
+   * page and how it was read, for the banner to say so where that changed
+   * what it opens. Null for a link with passages, and for a page of the
+   * version shown, which simply opens.
    */
   page: { page: PageName; reading: PageReading } | null;
   /** Bumps on every resolution, so the surface can jump once per fragment rather than once per render. */
@@ -87,35 +97,51 @@ export function usePdfFragment(handle: PdfViewerHandle | null, fileId: string, f
       const regions = await Promise.all(
         passages.map(async (passage, index): Promise<FragmentRegion> => {
           const reading = readPage(passage.page, link.address, link.versions);
-          // Only a page of the version shown names sheets of this document.
-          const named = reading.kind === "here" ? sheetsNamed(passage.page, handle.ownPageLabels, handle.pdf.numPages) : [];
+          // A page of the version shown names sheets of this document, and a
+          // carried one the sheets its own are here. Any other names none.
+          const named = reading.kind === "here" ? sheetsNamed(passage.page, handle.ownPageLabels, handle.pdf.numPages) : reading.kind === "carried" ? reading.sheets : [];
           let target: PdfTarget | null = null;
           for (const pageIndex of named) {
             target = await targetFor(handle, pages, pageIndex, passage, measure);
             if (target) break;
           }
-          return { id: `fragment-${index}`, passage, named, target, elsewhere: false, reading };
+          return { id: `fragment-${index}`, passage, named, target, elsewhere: false, reading, heldByNamed: false };
         }),
       );
       const wordless = passages.length === 0 ? pageFromHash(window.location.hash) : null;
       const wordlessReading = wordless ? readPage(wordless, link.address, link.versions) : null;
-      const page = wordless && wordlessReading && wordlessReading.kind !== "here" ? { page: wordless, reading: wordlessReading } : null;
+      // A page carried to the sheet it would open anyway opens as it always did, and nothing is said of it.
+      const silent =
+        wordless !== null &&
+        wordlessReading?.kind === "carried" &&
+        wordlessReading.sheets.length > 0 &&
+        !carriedElsewhere(wordless, wordlessReading.sheets[0], handle.ownPageLabels, handle.pdf.numPages);
+      const page = wordless && wordlessReading && wordlessReading.kind !== "here" && !silent ? { page: wordless, reading: wordlessReading } : null;
       // One question for every miss, and only the pages answered are read. A
       // passage of another version that can be opened is not a miss: it is
       // offered there. One with no version to open is asked of every sheet.
-      const misses = regions.filter((region) => region.target === null && (region.reading.kind === "here" || readByWordsAlone(region.reading)));
+      const misses = regions.filter(
+        (region) => region.target === null && (region.reading.kind === "here" || region.reading.kind === "carried" || readByWordsAlone(region.reading)),
+      );
       if (misses.length > 0) {
         const answers = await locateFragmentMisses(
           fileId,
           fileVersionId,
-          misses.map(({ passage: { prefix, segments, suffix }, named }) => ({ passage: { prefix, segments, suffix }, named })),
+          misses.map(({ passage: { prefix, segments, suffix }, named, reading }) => ({
+            passage: { prefix, segments, suffix },
+            named,
+            ...(reading.kind === "carried" && reading.state !== "abandoned" ? { from: { version: reading.version, named: reading.named } } : {}),
+          })),
         ).catch((error: unknown) => {
           console.warn("[pdf] couldn't ask where a linked passage is instead:", error);
           return [];
         });
         await Promise.all(
           misses.map(async (region, n) => {
-            const sheet = answers[n];
+            const answer = answers[n];
+            if (!answer) return;
+            region.heldByNamed = answer.heldByNamed;
+            const sheet = answer.sheet;
             if (typeof sheet !== "number" || sheet < 1 || sheet > handle.pdf.numPages) return;
             region.target = await targetFor(handle, pages, sheet - 1, region.passage, measure);
             region.elsewhere = region.target !== null;

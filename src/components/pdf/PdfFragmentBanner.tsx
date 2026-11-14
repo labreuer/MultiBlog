@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { pdfPath } from "@/lib/file-version";
+import { pageStampFor, pdfPath } from "@/lib/file-version";
 import { formatFragmentPassages } from "@/lib/pdf-fragment";
-import { stampOfRead, type LinkAddress, type PageReading } from "@/lib/pdf-link-reading";
+import { carriedElsewhere, stampOfRead, type LinkAddress, type PageReading } from "@/lib/pdf-link-reading";
 import { formatPageName, type PageName } from "@/lib/pdf-open-params";
-import { pageLabelFor } from "@/lib/pdf-page-labels";
+import { pageLabelFor, pageNameForSheet } from "@/lib/pdf-page-labels";
 import type { PdfTarget } from "@/lib/pdf-anchor";
 import type { FragmentRegion, PdfFragment } from "./use-pdf-fragment";
 import styles from "@/components/anchored-link/AnchoredLinkBanner.module.css";
@@ -37,6 +37,16 @@ import styles from "@/components/anchored-link/AnchoredLinkBanner.module.css";
 // found that way, or that it wasn't found. A link without words gets one
 // line saying the same of its page.
 //
+// **A passage that was carried here says so only where that changed what it
+// opens**: how it was read ("read as version 1: its sheet 50 is sheet 49
+// here"), with the link as it is now, to copy. One carried to the sheet it
+// would open anyway says nothing, which after a corrected scan is nearly
+// every link into the file. A link without `v=` on the bare address is the
+// one the reading can get wrong, since a hand that typed it meant the
+// latest: its row also offers that reading. Words that aren't where the link
+// was carried are reported as any miss is, and where the version the link
+// names holds them, the row offers the passage there.
+//
 // **The offer is a plain `<a>`, never a `<Link>`**: a client navigation that
 // carries a fragment leaves it on the path it reached, for every later client
 // navigation there (PdfSurfaceClient's header has the mechanism), and this
@@ -53,6 +63,9 @@ type Props = {
   /** How many versions the file has, for the stamp a link offered elsewhere carries. */
   versionCount: number;
   pageLabels: string[] | null;
+  /** The labels the document itself gives, and its sheets: what says whether a carried page opens another sheet than it would have. */
+  ownPageLabels: string[] | null;
+  pageCount: number;
   onJumpToTarget: (target: PdfTarget) => void;
   onJumpToPage: (pageIndex: number) => void;
   className?: string;
@@ -83,11 +96,46 @@ function versionPath(slug: string, version: number): string {
 
 const quiet = { color: "var(--text-secondary)" } as const;
 
-export default function PdfFragmentBanner({ regions, page, slug, shownVersion, address, versionCount, pageLabels, onJumpToTarget, onJumpToPage, className }: Props) {
+/** A page as its link wrote it: "sheet 50", or "page 49" for a printed one. */
+function writtenPage(page: PageName): string {
+  return "sheet" in page ? `sheet ${page.sheet}` : `page ${page.label}`;
+}
+
+export default function PdfFragmentBanner({
+  regions,
+  page,
+  slug,
+  shownVersion,
+  address,
+  versionCount,
+  pageLabels,
+  ownPageLabels,
+  pageCount,
+  onJumpToTarget,
+  onJumpToPage,
+  className,
+}: Props) {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed || (regions.length === 0 && page === null)) return null;
 
   const stamped = (named: PageName) => ({ ...named, stamp: stampOfRead(named, address, versionCount) });
+  // This page's own address, which a link written now names.
+  const here = address.own ? versionPath(slug, shownVersion) : pdfPath(slug);
+  const shownStamp = pageStampFor(shownVersion, versionCount);
+  /** The sheet a carried link landed on, as a link written now names it. */
+  const landedName = (sheetIndex: number) => ({ ...pageNameForSheet(ownPageLabels, pageCount, sheetIndex), stamp: shownStamp });
+  /** A hand-typed link without `v=` on the bare address most likely meant the latest: that reading, offered beside the rule's. */
+  const otherReading = (named: PageName, href: string) =>
+    named.v === undefined && !address.own ? (
+      <>
+        {" "}
+        If it was written for version {shownVersion},{" "}
+        <a href={href} data-testid="pdf-fragment-other-reading">
+          read its {writtenPage(named)} as version {shownVersion}&apos;s
+        </a>
+        .
+      </>
+    ) : null;
 
   return (
     <aside className={`${styles.banner} ${className ?? ""}`} data-testid="pdf-fragment-banner">
@@ -109,6 +157,21 @@ export default function PdfFragmentBanner({ regions, page, slug, shownVersion, a
               This link names version {page.reading.version}, and couldn&apos;t be brought to version {shownVersion}.{" "}
               <a href={`${versionPath(slug, page.reading.version)}#${formatPageName(stamped(page.page))}`}>Open it on version {page.reading.version}</a>
             </>
+          ) : page.reading.kind === "carried" && page.reading.sheets.length > 0 ? (
+            <span data-testid="pdf-fragment-carried">
+              This link was read as version {page.reading.version}: its {writtenPage(page.page)} is sheet {page.reading.sheets[0] + 1} here.{" "}
+              <a href={`${here}#${formatPageName(landedName(page.reading.sheets[0]))}`} data-testid="pdf-fragment-current-form">
+                The link as it is now
+              </a>
+              .{otherReading(page.page, `${here}#${formatPageName({ ...page.page, stamp: shownStamp })}`)}
+            </span>
+          ) : page.reading.kind === "carried" ? (
+            <>
+              This link names {writtenPage(page.page)} of version {page.reading.version}, which has no counterpart on version {shownVersion}.{" "}
+              {page.reading.state !== "abandoned" && (
+                <a href={`${versionPath(slug, page.reading.version)}#${formatPageName(stamped(page.page))}`}>Open it on version {page.reading.version}</a>
+              )}
+            </>
           ) : page.reading.kind === "abandoned" ? (
             <>{goneVersion(page.reading)}, so this link opens no sheet.</>
           ) : (
@@ -129,6 +192,68 @@ export default function PdfFragmentBanner({ regions, page, slug, shownVersion, a
                 <a href={`${versionPath(slug, reading.version)}#${formatFragmentPassages([{ ...region.passage, page: stamped(region.passage.page) }])}`}>
                   Open it on version {reading.version}
                 </a>
+              </li>
+            );
+          }
+          if (reading.kind === "carried") {
+            const offerThere = region.heldByNamed && reading.state !== "abandoned" && (
+              <>
+                {" "}
+                <a
+                  href={`${versionPath(slug, reading.version)}#${formatFragmentPassages([{ ...region.passage, page: stamped(region.passage.page) }])}`}
+                  data-testid="pdf-fragment-on-named"
+                >
+                  Open it on version {reading.version}
+                </a>
+              </>
+            );
+            if (!region.target) {
+              // The first sheet of this version the link was carried to, where it was looked for.
+              const carriedTo = region.named[0] ?? null;
+              return (
+                <li key={region.id}>
+                  {carriedTo !== null ? (
+                    <button type="button" className={styles.partButton} onClick={() => onJumpToPage(carriedTo)} title="Go to the page this passage was carried to" data-testid="pdf-fragment-miss">
+                      <span style={quiet}>Not found on page {pageLabelFor(pageLabels, carriedTo)}</span>
+                    </button>
+                  ) : (
+                    <span data-testid="pdf-fragment-miss" style={{ display: "block", padding: "0.1rem 0", ...quiet }}>
+                      Version {reading.version}&apos;s {writtenPage(region.passage.page)} has no counterpart here, and its words aren&apos;t on exactly one page
+                    </span>
+                  )}
+                  {offerThere}
+                </li>
+              );
+            }
+            const landed = region.target.pageIndex;
+            const changed = carriedElsewhere(region.passage.page, landed, ownPageLabels, pageCount);
+            // The page maps brought it here, or its words did: found on another
+            // sheet than the one its own became, or its sheet has no counterpart.
+            const written = writtenPage(region.passage.page);
+            const how = region.named.includes(landed)
+              ? `its ${written} is sheet ${landed + 1} here`
+              : region.named.length > 0
+                ? `its ${written} is sheet ${region.named[0] + 1} here, and its words were found on sheet ${landed + 1}`
+                : `its ${written} has no counterpart here, and its words were found on sheet ${landed + 1}`;
+            return (
+              <li key={region.id}>
+                <button type="button" className={styles.partButton} onClick={() => onJumpToTarget(region.target!)} title="Jump to this passage">
+                  {changed && (
+                    <span data-testid="pdf-fragment-carried">
+                      Read as version {reading.version}: {how}:{" "}
+                    </span>
+                  )}
+                  <span className={styles.partQuote}>{region.target.quote.exact}</span>
+                </button>
+                {changed && (
+                  <span style={{ display: "block", padding: "0.1rem 0", ...quiet }}>
+                    <a href={`${here}#${formatFragmentPassages([{ ...region.passage, page: landedName(landed) }])}`} data-testid="pdf-fragment-current-form">
+                      The link as it is now
+                    </a>
+                    .
+                    {otherReading(region.passage.page, `${here}#${formatFragmentPassages([{ ...region.passage, page: { ...region.passage.page, stamp: shownStamp } }])}`)}
+                  </span>
+                )}
               </li>
             );
           }

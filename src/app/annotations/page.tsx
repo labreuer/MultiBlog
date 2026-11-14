@@ -27,8 +27,22 @@ export const metadata: Metadata = { title: "Annotations" };
 // Deep-link-only filters (no dedicated dropdown yet, same convention as
 // comments-query.ts's parseDeepLinkWhere): ?doc=<docId>, ?author=<userId>
 // (a doc byline author), ?user=<userId> (who wrote the annotation).
-function parseDeepLinkWhere(searchParams: URLSearchParams): Prisma.AnnotationWhereInput {
+//
+// `?earlier=mine` is the viewer's worklist as a table (docs/PDF.md §13,
+// "Moving a note forward"): their notes, and those of the bots that work
+// for them, on a version of a PDF that is no longer its latest, less the
+// ones they have marked as staying. A reply travels with its root, and a
+// draft is in no row of this page, so the PDF's own page lists those. The
+// same rule as `worklistFor` (src/lib/file-note-move.ts), over what this
+// page may list.
+function parseDeepLinkWhere(searchParams: URLSearchParams, viewerId: string): Prisma.AnnotationWhereInput {
   const where: Prisma.AnnotationWhereInput = {};
+  if (searchParams.get("earlier") === "mine") {
+    where.parentAnnotationId = null;
+    where.OR = [{ userId: viewerId }, { user: { worksForUserId: viewerId } }];
+    where.fileVersion = { is: { currentOf: { is: null } } };
+    where.moves = { none: { toVersionId: null } };
+  }
   const doc = searchParams.get("doc");
   const author = searchParams.get("author");
   const user = searchParams.get("user");
@@ -166,7 +180,7 @@ export default async function AnnotationsPage({
   // Prisma versions and nothing in others, so say "nothing" explicitly.
   const readable = readableAnnotationsWhere(session.user.id, session.user.role, { includeDeletedContainers: true });
   const baseWhere: Prisma.AnnotationWhereInput = {
-    AND: [readable ?? { id: { in: [] } }, parseDeepLinkWhere(urlSearchParams)],
+    AND: [readable ?? { id: { in: [] } }, parseDeepLinkWhere(urlSearchParams, session.user.id)],
   };
   const where: Prisma.AnnotationWhereInput = { AND: [baseWhere, buildFilterWhere(filters, session.user.role === "ADMIN")] };
   const orderBy = buildOrderBy(filters.sort);

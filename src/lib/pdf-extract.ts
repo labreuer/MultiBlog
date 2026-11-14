@@ -108,6 +108,19 @@ function standardFontDataUrl(): string {
   return standardFontDir;
 }
 
+// Directory pdfjs loads its image decoders from (JBIG2, JPEG 2000), with a
+// trailing slash: a plain filesystem path, as the fonts' is, since Node's
+// binary-data factory reads it from disk.
+let wasmDir: string | null = null;
+
+function wasmUrl(): string {
+  if (wasmDir === null) {
+    const packageJson = nodeRequire.resolve(`${PDFJS_PACKAGE}/package.json`);
+    wasmDir = packageJson.replace(/package\.json$/, "wasm/");
+  }
+  return wasmDir;
+}
+
 /** The `textVersion` an `extractPdf` on this server stamps, without parsing anything. */
 export async function currentTextVersion(): Promise<string> {
   return textVersionFor((await loadPdfjs()).version);
@@ -126,7 +139,7 @@ export type ExtractedPdf = {
  * option that changed the extracted text would change every offset an anchor
  * stores against it.
  */
-async function openPdf(bytes: Uint8Array) {
+async function openPdf(bytes: Uint8Array, opts: { forInk?: { stopAtErrors: boolean } } = {}) {
   const pdfjs = await loadPdfjs();
   const task = pdfjs.getDocument({
     // A copy, because pdfjs transfers ownership of the buffer it is given and
@@ -150,6 +163,10 @@ async function openPdf(bytes: Uint8Array) {
     // parameter is provided."* and falls back to a guess. A `file://` URL with
     // a trailing slash — pdfjs concatenates a filename onto it directly.
     standardFontDataUrl: standardFontDataUrl(),
+    // The blank-sheet read alone (`readSheetsInk`): the image decoders, and
+    // its choice of what pdfjs does with an error. Neither is given to a
+    // parse for text, whose output every stored offset is into.
+    ...(opts.forInk ? { wasmUrl: wasmUrl(), stopAtErrors: opts.forInk.stopAtErrors } : {}),
   });
   return { task, textVersion: textVersionFor(pdfjs.version) };
 }
@@ -196,6 +213,47 @@ export type PageItems = {
   items: QuadSourceItem[];
 };
 
+/** One sheet as a target is measured on it: its text items, its page box and its rotation. */
+export type SheetItems = {
+  items: QuadSourceItem[];
+  /** The page box in PDF user space, `[x0, y0, x1, y1]`: pdfjs's `view`, the crop box within the media box. */
+  box: [number, number, number, number];
+  /** The page's rotation in degrees, a multiple of 90. */
+  rotation: number;
+};
+
+/**
+ * Many sheets' text items from **one open document**, each sheet read once
+ * (docs/PDF.md §13, "Moving a note forward"): the same items, in the same
+ * order, that each sheet's stored text was normalised from, with the page
+ * box and rotation a rectangle is placed by. A sheet out of range is left
+ * out of the answer. Throws, as `extractPdf` does, on a file pdfjs can't
+ * open.
+ *
+ * Opening a document costs far more than reading a sheet of it, so whatever
+ * measures more than one sheet of a version asks for them together.
+ */
+export async function extractSheetsItems(bytes: Uint8Array, sheetIndexes: readonly number[]): Promise<{ textVersion: string; sheets: Map<number, SheetItems> }> {
+  const sheets = new Map<number, SheetItems>();
+  const { task, textVersion } = await openPdf(bytes);
+  const pdf = await task.promise;
+  try {
+    for (const index of new Set(sheetIndexes)) {
+      if (!Number.isInteger(index) || index < 0 || index >= pdf.numPages) continue;
+      const page = await pdf.getPage(index + 1);
+      try {
+        const [x0, y0, x1, y1] = page.view;
+        sheets.set(index, { items: quadSourceItems(await page.getTextContent()), box: [x0, y0, x1, y1], rotation: page.rotate });
+      } finally {
+        page.cleanup();
+      }
+    }
+    return { textVersion, sheets };
+  } finally {
+    await task.destroy();
+  }
+}
+
 /**
  * One page's text items, for computing quads on the server
  * (docs/PDF_QUADS.md §3): the same items, in the same order, that the page's
@@ -203,19 +261,113 @@ export type PageItems = {
  * as `extractPdf` does, on a file pdfjs can't open.
  */
 export async function extractPageItems(bytes: Uint8Array, pageIndex: number): Promise<PageItems | null> {
-  const { task, textVersion } = await openPdf(bytes);
-  const pdf = await task.promise;
-  try {
-    if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= pdf.numPages) return null;
-    const page = await pdf.getPage(pageIndex + 1);
+  const { textVersion, sheets } = await extractSheetsItems(bytes, [pageIndex]);
+  const sheet = sheets.get(pageIndex);
+  return sheet ? { textVersion, items: sheet.items } : null;
+}
+
+/**
+ * Whether each of these sheets (0-based) draws anything: the blank-sheet read
+ * of a page map (docs/PDF.md §13, "Matching the pages", rule 4). A sheet that
+ * has no text and draws nothing is blank, and a blank sheet added or removed
+ * is a known insertion or deletion. The map asks this of sheets without text
+ * alone, since decoding images takes time.
+ *
+ * **Read from pdfjs's operator list**, which holds no painting operator for
+ * a sheet that draws nothing. The painting operators are the image and
+ * image-mask operators, `shadingFill`, and a path that is stroked or filled.
+ * **Text is not ink**: a scan's text layer is drawn in rendering mode 3,
+ * which paints nothing, so `showText` is left out.
+ *
+ * **The document is opened with `wasmUrl`**, without which JBIG2 and JPEG
+ * 2000 images fail to decode on a server. pdfjs adds an image mask's
+ * operator only once the mask has decoded, so a sheet whose only ink is a
+ * JBIG2 mask would otherwise read as drawing nothing.
+ *
+ * **A sheet whose list was cut short by an error counts as ink**, so no
+ * failure reads as a blank sheet. pdfjs says nothing of one in its answer:
+ * by default it drops a mask that fails to decode with a warning on the
+ * console, and under `stopAtErrors` it answers with the operators it had
+ * sent before the error, as though the list were whole. So a sheet that
+ * shows no ink under `stopAtErrors` is read a second time without it, and
+ * one whose second list is the longer was cut short. An image that is not a
+ * mask keeps its operator whether or not it decodes.
+ *
+ * A sheet out of range is left out of the answer. Throws on a file pdfjs
+ * can't open.
+ */
+export async function readSheetsInk(bytes: Uint8Array, sheetIndexes: readonly number[]): Promise<Map<number, boolean>> {
+  const ink = new Map<number, boolean>();
+  if (sheetIndexes.length === 0) return ink;
+  const { OPS } = await loadPdfjs();
+  const paints = new Set<number>([
+    OPS.paintImageXObject,
+    OPS.paintInlineImageXObject,
+    OPS.paintInlineImageXObjectGroup,
+    OPS.paintImageXObjectRepeat,
+    OPS.paintImageMaskXObject,
+    OPS.paintImageMaskXObjectGroup,
+    OPS.paintImageMaskXObjectRepeat,
+    OPS.paintSolidColorImageMask,
+    OPS.shadingFill,
+    OPS.rawFillPath,
+  ]);
+  // `constructPath` carries the operator that ends its path: one of these
+  // paints it, and `endPath` (a clip's `n`) does not.
+  const pathPaints = new Set<number>([
+    OPS.stroke,
+    OPS.closeStroke,
+    OPS.fill,
+    OPS.eoFill,
+    OPS.fillStroke,
+    OPS.eoFillStroke,
+    OPS.closeFillStroke,
+    OPS.closeEOFillStroke,
+  ]);
+  type Operators = { fnArray: number[]; argsArray: unknown[] };
+  const painted = ({ fnArray, argsArray }: Operators) =>
+    fnArray.some((fn, at) => {
+      if (paints.has(fn)) return true;
+      if (fn !== OPS.constructPath) return false;
+      const args = argsArray[at] as [number, [Float32Array | null], unknown] | null;
+      return !!args && pathPaints.has(args[0]) && args[1]?.[0] != null;
+    });
+  /** Each sheet's operators from one open document; null for a sheet whose list couldn't be read at all. */
+  const read = async (indexes: readonly number[], stopAtErrors: boolean): Promise<Map<number, Operators | null>> => {
+    const lists = new Map<number, Operators | null>();
+    const { task } = await openPdf(bytes, { forInk: { stopAtErrors } });
+    const pdf = await task.promise;
     try {
-      return { textVersion, items: quadSourceItems(await page.getTextContent()) };
+      for (const index of indexes) {
+        if (!Number.isInteger(index) || index < 0 || index >= pdf.numPages) continue;
+        const page = await pdf.getPage(index + 1);
+        try {
+          lists.set(index, (await page.getOperatorList()) as Operators);
+        } catch {
+          lists.set(index, null);
+        } finally {
+          page.cleanup();
+        }
+      }
+      return lists;
     } finally {
-      page.cleanup();
+      await task.destroy();
     }
-  } finally {
-    await task.destroy();
+  };
+
+  const strict = await read([...new Set(sheetIndexes)], true);
+  const unsure: number[] = [];
+  for (const [index, list] of strict) {
+    if (list === null || painted(list)) ink.set(index, true);
+    else unsure.push(index);
   }
+  if (unsure.length === 0) return ink;
+  const lenient = await read(unsure, false);
+  for (const index of unsure) {
+    const whole = lenient.get(index);
+    ink.set(index, !whole || painted(whole) || whole.fnArray.length > strict.get(index)!.fnArray.length);
+  }
+  return ink;
 }
 
 /** One outline entry, flattened depth-first: what `file.outline` stores (docs/MCP.md §8). */

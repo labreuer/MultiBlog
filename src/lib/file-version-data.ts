@@ -3,6 +3,9 @@ import type { DocVisibility } from "@/generated/prisma/enums";
 import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
 import { displayNameOf } from "@/lib/display-name";
 import { CAPTURE_RELOAD_MESSAGE, fileVersionState, type CaptureOrigin, type FileVersionState } from "@/lib/file-version";
+import type { LinkVersion } from "@/lib/pdf-link-reading";
+import { pdfMetadata } from "@/lib/pdf-metadata";
+import { pageMapNumbers, parsePageMap, type PageMapNumbers } from "@/lib/pdf-page-map";
 
 // docs/PDF.md §13, "Versions" — the queries over `file_version` that more
 // than one module asks. Server-only (Prisma); the vocabulary they share with
@@ -230,6 +233,10 @@ export type FileVersionSummary = {
   promotedAt: string | null;
   promotedBy: string | null;
   abandonedAt: string | null;
+  /** The number of the version it was uploaded over; null for a first version. */
+  baseNumber: number | null;
+  /** Its page map from that version, in numbers; null where it has none (docs/PDF.md §13, "Matching the pages"). */
+  map: PageMapNumbers | null;
 };
 
 /** The select `summariseVersions` reads, for a file query that takes its versions along. */
@@ -243,6 +250,9 @@ export const VERSION_SUMMARY_SELECT = {
   uploadedAt: true,
   promotedAt: true,
   abandonedAt: true,
+  baseVersionId: true,
+  pageMap: true,
+  pageLabels: true,
   uploadedBy: { select: { name: true } },
   promotedBy: { select: { name: true } },
 } as const satisfies Prisma.FileVersionSelect;
@@ -266,7 +276,55 @@ export function summariseVersions(file: { currentVersionId: string | null; versi
       promotedAt: version.promotedAt?.toISOString() ?? null,
       promotedBy: version.promotedBy ? displayNameOf(version.promotedBy) : null,
       abandonedAt: version.abandonedAt?.toISOString() ?? null,
+      baseNumber: file.versions.find((other) => other.id === version.baseVersionId)?.number ?? null,
+      map: mapNumbersOf(version.pageMap),
     }));
+}
+
+function mapNumbersOf(stored: unknown): PageMapNumbers | null {
+  const map = parsePageMap(stored);
+  return map ? pageMapNumbers(map) : null;
+}
+
+/** A file's versions as a link's reading takes them, with what carrying reads. */
+type LinkVersionRow = {
+  id: string;
+  number: number;
+  pageCount: number | null;
+  promotedAt: Date | null;
+  abandonedAt: Date | null;
+  baseVersionId: string | null;
+  pageMap: unknown;
+  pageLabels: unknown;
+};
+
+/**
+ * A file's versions as every reader of a link takes them
+ * (`src/lib/pdf-link-reading.ts`): each with its state, the version it was
+ * uploaded over, the pairing of its page map, its sheets and its own labels.
+ *
+ * **A file with one version gets its number and state alone**: nothing can
+ * be carried there, and its labels would only be weight on the page. A
+ * version whose labels haven't been read yet has them read and stored now,
+ * as every reader of them does (`pdfMetadata`), so a `p=` that names it
+ * finds its sheets.
+ */
+export async function linkVersionsOf(file: { currentVersionId: string | null; versions: readonly LinkVersionRow[] }): Promise<LinkVersion[]> {
+  const versions = [...file.versions].sort((a, b) => a.number - b.number);
+  if (versions.length < 2) return versions.map((version) => ({ number: version.number, state: fileVersionState(version, file.currentVersionId) }));
+  return Promise.all(
+    versions.map(async (version): Promise<LinkVersion> => {
+      const stored = Array.isArray(version.pageLabels) ? (version.pageLabels as unknown[]) : ((await pdfMetadata(version.id))?.pageLabels ?? null);
+      return {
+        number: version.number,
+        state: fileVersionState(version, file.currentVersionId),
+        base: versions.find((other) => other.id === version.baseVersionId)?.number ?? null,
+        map: parsePageMap(version.pageMap)?.sheets ?? null,
+        pageCount: version.pageCount,
+        labels: stored ? stored.map((label) => (typeof label === "string" ? label : "")) : null,
+      };
+    }),
+  );
 }
 
 /**
@@ -277,8 +335,12 @@ export type VersionManage = {
   fileId: string;
   /** Whether the file takes a new version at all: a PDF does, a .docx doesn't. */
   takesVersions: boolean;
-  /** How many posted notes are on each version, by version id: what is still on an earlier one, which nothing moves yet. */
+  /** How many posted notes are on each version, by version id: what is still on an earlier one until a carry or its author moves it. */
   notesOn: Record<string, number>;
+  /** How many parts of minted links are on each version, by version id. */
+  partsOn: Record<string, number>;
+  /** The bulk carries that moved a note of this file, newest first, each with how many of its moves are shown (`carriesOf`, file-anchor-move.ts). */
+  carries: { id: string; toVersionId: string; at: string; moves: number; shown: number; hidden: boolean }[];
   /** What a promotion of the waiting version would do to the file's citations; null where none waits. */
   candidateFacts: { unlabelled: boolean; pagedCitations: number | null } | null;
 };
@@ -297,13 +359,28 @@ export async function postedNotesByVersion(fileId: string): Promise<Record<strin
   return Object.fromEntries(rows.flatMap((row) => (row.fileVersionId ? [[row.fileVersionId, row._count._all]] : [])));
 }
 
+/**
+ * How many parts of minted links are on each of a file's versions, by
+ * version id: the parts of a link that is deleted, or not yet minted, left
+ * out. A part of a link reopened for editing is counted, as the link is
+ * still followed while it is open.
+ */
+export async function mintedPartsByVersion(fileId: string): Promise<Record<string, number>> {
+  const rows = await prisma.anchoredLinkAnchor.groupBy({
+    by: ["fileVersionId"],
+    where: { fileId, fileVersionId: { not: null }, link: { mintedAt: { not: null }, deletedAt: null } },
+    _count: { _all: true },
+  });
+  return Object.fromEntries(rows.flatMap((row) => (row.fileVersionId ? [[row.fileVersionId, row._count._all]] : [])));
+}
+
 /** A capture's origin with the file it is into: what its write checks. */
 export type CaptureClaim = CaptureOrigin & { fileId: string };
 
 /** A capture refused for the version it names. The message is for whoever made it. */
 export class CaptureRefused extends Error {
   constructor(
-    readonly reason: "reload" | "candidate" | "abandoned" | "not-this-file",
+    readonly reason: "reload" | "candidate" | "abandoned" | "not-this-file" | "moved",
     message: string,
   ) {
     super(message);
@@ -356,4 +433,30 @@ export async function assertCaptureVersion(tx: TransactionClient, claim: Capture
   if (version.promotedAt === null) {
     throw new CaptureRefused("candidate", `Version ${version.number} is not yet this file's latest, and takes no notes or link parts until it is.`);
   }
+}
+
+/**
+ * Checks that a draft with a target is still on the version its post names,
+ * **in the transaction that posts it, after `assertCaptureVersion` has locked
+ * the file row** (docs/PDF.md §13, "Writing a move"). Throws `CaptureRefused`.
+ *
+ * A post writes the draft's target and version with its body. A draft is in
+ * its author's worklist, so it can be moved to a later version from another
+ * tab while its composer stands open on the page of the version it was made
+ * on. Posted from there unchecked, the row would go back to the target and
+ * version it left, with its history saying it had reached another: an anchor
+ * put on a version by something other than a move, which nothing could undo.
+ *
+ * A move locks the file row `FOR UPDATE`, so behind the capture's `FOR SHARE`
+ * the row read here is as the move left it, or the move has yet to begin and
+ * finds the note posted where it was.
+ */
+export async function assertDraftOnVersion(tx: TransactionClient, annotationId: string, fileVersionId: string): Promise<void> {
+  const row = await tx.annotation.findUnique({ where: { id: annotationId }, select: { fileVersionId: true, fileVersion: { select: { number: true } } } });
+  // A draft with no target is on no version, and takes the one its post gives it.
+  if (!row || row.fileVersionId === null || row.fileVersionId === fileVersionId) return;
+  throw new CaptureRefused(
+    "moved",
+    `This note is now on version ${row.fileVersion?.number ?? "another"} of the file: it was moved there while it was open here. Open it on that version's page to post it.`,
+  );
 }

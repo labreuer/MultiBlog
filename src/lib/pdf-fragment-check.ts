@@ -5,19 +5,25 @@ import { resolveFileParam } from "./file-slug";
 import { storagePathFor } from "./file-storage";
 import { currentTextVersion, extractPdfMetadata } from "./pdf-extract";
 import { sheetsNamed, usablePageLabels } from "./pdf-page-labels";
-import { skeletonOf, type PassageText } from "./pdf-fragment";
+import { resolvePassage, skeletonOf, type FragmentPassage, type PassageText } from "./pdf-fragment";
 import {
   checkPage,
   checkPassage,
+  checkPassageAt,
   passageElsewhere,
-  versionNamedBy,
+  readPageLink,
+  readPassage,
   type FilePages,
   type FragmentLinkFinding,
   type FragmentLinkHref,
   type PageLinkFinding,
   type PassageFinding,
+  type PassageSource,
   type VersionFault,
 } from "./pdf-fragment-findings";
+import { namedVersion, readPage, type LinkAddress, type LinkVersion, type PageReading } from "./pdf-link-reading";
+import type { PageName } from "./pdf-open-params";
+import { parsePageMap } from "./pdf-page-map";
 
 // docs/PDF_FRAGMENT_LINKS.md §8 — the check every confirmation of a fragment
 // link shares: the integrity script, run over everything or one doc, the
@@ -36,14 +42,16 @@ import {
 //
 // **A link is read as the viewer reads it** (docs/PDF.md §13, "Links into
 // the file"): each page on the version it names, by that version's labels
-// and page text. Its `v=` names the version, or without one the version the
-// link's own address names, or the file's first. No version has a page map
-// yet, so no link is carried, and the version a link names is the one it
-// opens. A page that names an abandoned version, or one the file never had,
-// has nothing to be read on, and its finding says which. What means "the
-// file" with no link in hand (`pagesFor` and `pagesAt` without a version, a
-// citation's quotation) reads the latest. Every read of page text below is by
-// a version's id.
+// and page text, and then wherever the viewer would take it. Its `v=` names
+// the version, or without one the version the link's own address names, or
+// the file's first. Where page maps join that version to the one its address
+// shows, the link is carried, and checked where it lands. One that can't be
+// carried is checked on the version it names, which is the one it opens. A
+// page that names a version the file never had, or an abandoned one it can't
+// be carried off, has nothing to be read on, and its finding says which.
+// What means "the file" with no link in hand (`pagesFor` and `pagesAt`
+// without a version, a citation's quotation) reads the latest. Every read of
+// page text below is by a version's id.
 //
 // **Read-only.** `storedPageText` extracts a version lazily when its text is
 // missing at the current text version; this doesn't, so a check never writes.
@@ -75,6 +83,9 @@ type FileEntry = {
     state: FileVersionState;
     uploadedAt: Date;
     uploadedAtUpdateId: bigint;
+    /** The number of the version it was uploaded over, and the pairing of its page map from that version. */
+    base: number | null;
+    map: readonly number[] | null;
   }[];
 };
 
@@ -84,7 +95,19 @@ const FILE_SELECT = {
   deletedByUserId: true,
   currentVersionId: true,
   versions: {
-    select: { id: true, number: true, sha256: true, pageCount: true, pageLabels: true, promotedAt: true, abandonedAt: true, uploadedAt: true, uploadedAtUpdateId: true },
+    select: {
+      id: true,
+      number: true,
+      sha256: true,
+      pageCount: true,
+      pageLabels: true,
+      promotedAt: true,
+      abandonedAt: true,
+      uploadedAt: true,
+      uploadedAtUpdateId: true,
+      baseVersionId: true,
+      pageMap: true,
+    },
   },
 } as const;
 
@@ -103,6 +126,8 @@ type FileRow = {
     abandonedAt: Date | null;
     uploadedAt: Date;
     uploadedAtUpdateId: bigint;
+    baseVersionId: string | null;
+    pageMap: unknown;
   }[];
 };
 
@@ -177,6 +202,17 @@ export class FragmentChecker {
     const file = await this.fileVersionById(fileId, fileVersionId);
     if (!file) return null;
     return passageElsewhere({ pages: await this.wholeFile(file) }, passage, named);
+  }
+
+  /**
+   * Whether any of `sheets` (0-based) of the version numbered `versionNumber`
+   * holds `passage`: what the viewer asks of the version a carried link
+   * names, when the words aren't where the link landed (docs/PDF.md §13,
+   * "Links into the file"). False for a version with no text to read.
+   */
+  async heldOn(fileId: string, versionNumber: number, passage: PassageText, sheets: readonly number[]): Promise<boolean> {
+    const entry = await this.fileById(fileId);
+    return entry ? this.sourceFor(entry).held(versionNumber, passage, sheets) : false;
   }
 
   /**
@@ -324,11 +360,7 @@ export class FragmentChecker {
   /** A page link's page on the version numbered `versionNumber`, as `checkPassageOn` reads a passage. */
   async checkPageOn(slug: string, versionNumber: number, page: NonNullable<FragmentLinkHref["page"]>): Promise<PageLinkFinding | null> {
     const entry = await this.fileFor(slug);
-    if (!entry) return null;
-    const file = await this.versionOf(entry, versionNumber);
-    if (!file) return null;
-    if ("kind" in file) return file;
-    return checkPage(file, "label" in page ? await this.labelsOf(file) : null, page);
+    return entry ? this.pageOn(entry, versionNumber, page) : null;
   }
 
   private async passageOn(entry: FileEntry, versionNumber: number, passage: FragmentLinkHref["passages"][number]): Promise<PassageFinding | null> {
@@ -344,6 +376,84 @@ export class FragmentChecker {
     return finding.kind === "no-match" || finding.kind === "no-such-label" ? checkPassage({ ...named, pages: await this.wholeFile(file) }, passage) : finding;
   }
 
+  /** A version's own labels, for a reading that turns a `p=` into its sheets: as stored, an abandoned version's included, or read from its bytes. */
+  private async ownLabelsOf(entry: FileEntry, versionNumber: number): Promise<readonly string[] | null> {
+    const version = entry.versions.find((candidate) => candidate.number === versionNumber);
+    if (!version) return null;
+    if (Array.isArray(version.pageLabels)) return version.pageLabels.map((label) => (typeof label === "string" ? label : ""));
+    const file = await this.versionOf(entry, versionNumber);
+    return file && !("kind" in file) ? this.labelsOf(file) : null;
+  }
+
+  /**
+   * How one page of a link is read against the file's versions
+   * (`readPage`), on the address the link's own path names. The labels of
+   * the version it names are read only for a `p=`, which is all that needs
+   * them.
+   */
+  private async readingOf(entry: FileEntry, page: PageName, address: LinkAddress): Promise<PageReading> {
+    const named = namedVersion(page, address);
+    const labels = "label" in page ? await this.ownLabelsOf(entry, named) : null;
+    const versions: LinkVersion[] = entry.versions.map((version) => ({
+      number: version.number,
+      state: version.state,
+      base: version.base,
+      map: version.map,
+      pageCount: version.pageCount,
+      labels: version.number === named ? labels : null,
+    }));
+    return readPage(page, address, versions);
+  }
+
+  /** The file's versions as the pure reading reads them (`PassageSource`). */
+  private sourceFor(entry: FileEntry): PassageSource {
+    return {
+      onVersion: (version, passage) => this.passageOn(entry, version, passage),
+      onSheets: async (version, passage, sheets) => {
+        const file = await this.versionOf(entry, version);
+        if (!file || "kind" in file) return null;
+        await this.readInto(file, sheets);
+        const named: FilePages = { ...file, ownLabels: null, pages: this.citedOf(file) };
+        const finding = checkPassageAt(named, passage, sheets);
+        // Only the sheets asked for are held, so a miss is asked again of the whole version.
+        return finding.kind === "no-match" ? checkPassageAt({ ...named, pages: await this.wholeFile(file) }, passage, sheets) : finding;
+      },
+      held: async (version, passage, sheets) => {
+        const file = await this.versionOf(entry, version);
+        if (!file || "kind" in file) return false;
+        await this.readInto(file, sheets);
+        const cited = this.citedOf(file);
+        return sheets.some((index) => {
+          const page = cited.get(index);
+          return page !== undefined && resolvePassage(page.text, passage, page.skeleton) !== null;
+        });
+      },
+      pageOnVersion: (version, page) => this.pageOn(entry, version, page),
+    };
+  }
+
+  private async pageOn(entry: FileEntry, versionNumber: number, page: PageName): Promise<PageLinkFinding | null> {
+    const file = await this.versionOf(entry, versionNumber);
+    if (!file) return null;
+    if ("kind" in file) return file;
+    return checkPage(file, "label" in page ? await this.labelsOf(file) : null, page);
+  }
+
+  /**
+   * The address a link is read on, from its own path: the bare one, which
+   * shows the latest, or a version's own. An abandoned version's address
+   * shows a page that offers the link on the latest, stamped with that
+   * version (docs/PDF.md §13, "Addresses"), so such a link is read there:
+   * `stamped` gives each page that stamp where it has none.
+   */
+  private addressOf(entry: FileEntry, link: Pick<FragmentLinkHref, "version">, latest: number): { address: LinkAddress; stamped: <P extends PageName>(page: P) => P } {
+    const onAbandoned = link.version !== null && entry.versions.find((version) => version.number === link.version)?.state === "abandoned";
+    if (link.version === null || onAbandoned) {
+      return { address: { shown: latest, own: false }, stamped: (page) => (onAbandoned && page.v === undefined ? { ...page, v: link.version! } : page) };
+    }
+    return { address: { shown: link.version, own: true }, stamped: (page) => page };
+  }
+
   async check(link: FragmentLinkHref): Promise<FragmentLinkFinding> {
     const entry = await this.fileFor(link.slug);
     const latest = entry?.versions.find((version) => version.id === entry.currentVersionId);
@@ -357,6 +467,8 @@ export class FragmentChecker {
       latestVersion: latest.number,
       addressVersion: link.version,
     };
+    const { address, stamped } = this.addressOf(entry, link, latest.number);
+    const source = this.sourceFor(entry);
 
     // Whether each version a `p=` is read on has usable labels: false if any lacks them.
     const labelled: boolean[] = [];
@@ -368,18 +480,20 @@ export class FragmentChecker {
     const usableLabels = () => (labelled.length === 0 ? null : labelled.every(Boolean));
 
     if (link.page) {
-      const version = versionNamedBy(link, link.page);
-      await usableOn(version, link.page);
-      const page = await this.checkPageOn(link.slug, version, link.page);
-      if (!page) return { kind: "unknown-file", slug: link.slug };
-      return { ...checked, passages: [], page, usableLabels: usableLabels(), unread: 0 };
+      const page = stamped(link.page);
+      const reading = await this.readingOf(entry, page, address);
+      await usableOn(reading.version, page);
+      const finding = await readPageLink(page, reading, address.shown, source);
+      if (!finding) return { kind: "unknown-file", slug: link.slug };
+      return { ...checked, passages: [], page: finding, usableLabels: usableLabels(), unread: 0 };
     }
 
     const passages: PassageFinding[] = [];
     for (const passage of link.passages) {
-      const version = versionNamedBy(link, passage.page);
-      await usableOn(version, passage.page);
-      const finding = await this.passageOn(entry, version, passage);
+      const page = stamped(passage.page);
+      const reading = await this.readingOf(entry, page, address);
+      await usableOn(reading.version, page);
+      const finding = await readPassage({ ...passage, page } as FragmentPassage, reading, address.shown, source);
       if (!finding) return { kind: "unknown-file", slug: link.slug };
       passages.push(finding);
     }
@@ -404,6 +518,8 @@ function entryFor(file: FileRow): FileEntry | null {
         state: fileVersionState(version, file.currentVersionId),
         uploadedAt: version.uploadedAt,
         uploadedAtUpdateId: version.uploadedAtUpdateId,
+        base: file.versions.find((other) => other.id === version.baseVersionId)?.number ?? null,
+        map: parsePageMap(version.pageMap)?.sheets ?? null,
       }))
       .sort((a, b) => a.number - b.number),
   };

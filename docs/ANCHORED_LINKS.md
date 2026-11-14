@@ -144,6 +144,16 @@ version's sheets sits over other ink. The banner names the rest, each linked at 
 version. "Add to link" on a PDF names the version its viewer loaded, and the insert checks
 it (`assertCaptureVersion`).
 
+**A part is moved to a later version as a note is** (PDF.md §13, "Moving a note forward"):
+by a bulk carry, where the link is minted and the part places itself, or one at a time by
+the link's creator, from their worklist on the latest version's page. A move rewrites the
+part's selector, quote and version and nothing else on the link.
+
+- **A carry takes no part of a link that is open in its creator's tray**, not yet minted or
+  reopened for editing: the tray holds its parts as it loaded them, each with its version.
+  Its creator moves such a part from the worklist, and the tray's store then loads again.
+- **Nothing shows that a part was moved** (PDF.md §13, "Open").
+
 `anchoredLinkLandingFor(linkId, viewer)` is the landing route's read on top of it: the
 same existence rule (deleted, and someone else's draft, read as absent) answered
 *separately* from the per-target filter, so the route can tell "no such link" (404) from

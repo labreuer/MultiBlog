@@ -353,20 +353,32 @@ page before the passage is found.
 
 **Each page is read by the version it names** (`readPage`, `src/lib/pdf-link-reading.ts`;
 [PDF.md](PDF.md) §13, "Links into the file"). The steps below are for a page that names the
-version shown, which on a file with one version is every page.
+version shown, which on a file with one version is every page, and for a page carried to
+it.
 
-- **From the bare address, a link that names another version goes to that version's own
-  address**, `/pdf/<slug>/v/<n>#…`, with the link as written, before the viewer mounts
-  (`PdfSurfaceClient`). No version has a page map yet, so no link is carried to the latest
-  instead.
-- **On a version's own address the viewer stays.** A passage that names another version is
-  not looked for: its row in the banner offers it at that version's address. `PdfViewer`
-  opens at no sheet for it (`opensAt`), since the sheet named is one of other bytes.
-- **A page that names an abandoned version, or one the file never had,** has no version to
-  open. Its passage is looked for by its words alone, on every sheet of the version shown,
-  and drawn where exactly one holds it once; its row says it was found that way, or that it
-  wasn't. A link without words gets a line saying which of the two it is. One that names a
-  version the file never had still opens the sheet as written.
+- **A link that names another version is carried to the version shown**, where page maps
+  join the two (PDF.md §13, "Matching the pages"): each sheet its page names goes through
+  the maps (`carrySheet`), and step 2 looks for its passage on the sheets they reach.
+  `PdfViewer` opens at the first of those (`opensAt`). The banner says how the link was
+  read where that changed what it opens, and offers its form for the version shown.
+  - **A sheet with no counterpart is carried only by its words**, where they occur exactly
+    once in the version shown. On the bare address the surface asks the server that before
+    the viewer mounts, and otherwise opens the version the link names.
+  - **Words not found where a link was carried** are a miss as any other is (step 3), and
+    its row offers the passage on the version the link names where that version holds it.
+- **From the bare address, a link that can't be carried goes to the own address of the
+  version it names**, `/pdf/<slug>/v/<n>#…`, with the link as written, before the viewer
+  mounts (`PdfSurfaceClient`, from `arrivalOf`): a page map on the way is missing.
+- **On a version's own address the viewer stays.** A passage that names another version and
+  can't be carried here is not looked for: its row in the banner offers it at that
+  version's address. `PdfViewer` opens at no sheet for it, since the sheet named is one of
+  other bytes.
+- **A page that names an abandoned version that kept no page map, or a version the file
+  never had,** has no version to open. Its passage is looked for by its words alone, on
+  every sheet of the version shown, and drawn where exactly one holds it once; its row says
+  it was found that way, or that it wasn't. A link without words gets a line saying which
+  of the two it is. One that names a version the file never had still opens the sheet as
+  written. An abandoned version that kept its map is carried off it, as above.
 
 **A `p=` waits for the labels**, which pdfjs reads on load (`usablePageLabels` in
 `PdfViewer.tsx`). The handle keeps them as read (`ownPageLabels`) beside the filled-in ones it
@@ -390,6 +402,8 @@ name the same sheets.
      sheets named, by the rule the check uses for "the page the passage is on" (§8,
      `passageElsewhere`), and nothing otherwise. The viewer reads that one page and draws the
      passage there.
+   - **For a carried link it also says whether the version the link names holds the
+     passage** (`heldByNamed`), which is what lets the row offer it there.
    - **The request is gated by `canUserReadFile`**, as the bytes are, and an unreadable file
      answers every miss as a file that holds none of them does (§8, "It reads as the
      operator"). It searches the stored page text (`FragmentChecker.sheetHolding`), so the
@@ -632,11 +646,18 @@ the same letters in the same order. The guard is `scripts/integrity/check-pdf-fr
   a label no sheet carries, a `text` parameter that doesn't parse, or a `v=` naming a version
   the file never had. A repeated passage, a past slug and a `p=` on a file without usable
   labels are warnings.
-- **It reads a link as the viewer does**: each page on the version it names, a link to a
-  version's own address included (`/pdf/<slug>/v/<n>#…`). So words the latest version lacks
-  are no fault in a link that names an earlier one, and `--verbose` lists such a link. A
-  link naming an abandoned version is a warning, since nothing can confirm it, and so is one
-  on a version's own address that names another.
+- **It reads a link as the viewer does**: carried through the page maps to the version its
+  address shows and checked where it lands, or, where it can't be carried, on the version
+  it names, a link to a version's own address included (`/pdf/<slug>/v/<n>#…`).
+  - **A link carried to a sheet that doesn't hold its words is a warning** (`carried-miss`),
+    naming the sheet it lands on: a better copy corrected the words, and every reader of the
+    link is told "Not found".
+  - **Words the latest version lacks are no fault in a link that can't be carried there**: a
+    revised text stands between, and the link opens the version it names. `--verbose` lists
+    such a link, and a carried one with its form for the version it was carried to.
+  - **A link naming an abandoned version that kept no map is a warning**, since nothing can
+    confirm it, and so is one on a version's own address that names another and can't be
+    carried there.
 - **It warns of a link without `v=` written after its file's second version was uploaded**,
   which only a hand can have typed and whose writer most likely meant the latest. It dates
   the link by the update log (`src/lib/pdf-link-dating.ts`), which the viewer can't

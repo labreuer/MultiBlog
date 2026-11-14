@@ -27,6 +27,7 @@ import { captureAnchorInYdoc, capturePdfTextAnchor, chipRecordsColumn } from "@/
 import type { ChipRecord } from "@/lib/anchors";
 import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
 import { pdfAnnotationEntriesFor, type OtherVersionNote } from "@/lib/pdf-annotation-entries";
+import type { WorklistItem } from "@/lib/file-note-move";
 import { getOwnFileDraftAnnotations, type OwnDraft } from "@/lib/annotation-data";
 import type { PdfAnnotationEntry } from "@/components/pdf/PdfAnnotationPanel";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
@@ -51,7 +52,7 @@ import { chipInputsForBodies, chipInputsForBody } from "@/lib/entity-chips/conte
 import { chipsInJSON } from "@/lib/entity-chips/renderings";
 import type { ChipInputs } from "@/lib/entity-chips/types";
 import { setAnnotationDeleted } from "@/lib/annotation-manage";
-import { CaptureRefused, assertCaptureVersion, noteVersions } from "@/lib/file-version-data";
+import { CaptureRefused, assertCaptureVersion, assertDraftOnVersion, noteVersions } from "@/lib/file-version-data";
 import { CAPTURE_RELOAD_MESSAGE, parseCaptureOrigin, pdfNoteContainer, type CaptureOrigin } from "@/lib/file-version";
 
 /**
@@ -1206,7 +1207,17 @@ async function postFileAnnotation(opts: {
     settled,
     userId: opts.authorUserId,
     at: now,
-    ...(claim ? { before: (tx) => assertCaptureVersion(tx, claim) } : {}),
+    // The version the post names, and then that the draft is still on it: a
+    // draft moved from another tab since this composer opened is not written
+    // back to the target and version it left.
+    ...(claim && captured
+      ? {
+          before: async (tx) => {
+            await assertCaptureVersion(tx, claim);
+            await assertDraftOnVersion(tx, annotationId, captured.fileVersionId);
+          },
+        }
+      : {}),
     alongside: {
       ...(raise ? { status: "RAISED" as const, raisedAt: now } : { status: "LIVE" as const }),
       postedAt: now,
@@ -1309,7 +1320,7 @@ export async function loadPdfAnnotationEntries(
   fileId: string,
   /** The version the surface shows: what is drawn is that version's alone (docs/PDF.md §13, "Addresses"). */
   fileVersionId: string,
-): Promise<{ entries: PdfAnnotationEntry[]; ownDrafts: OwnDraft[]; elsewhere: OtherVersionNote[] }> {
+): Promise<{ entries: PdfAnnotationEntry[]; ownDrafts: OwnDraft[]; elsewhere: OtherVersionNote[]; worklist: WorklistItem[] }> {
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
@@ -1330,9 +1341,9 @@ export async function loadPdfAnnotationEntries(
   if (file.versions.length === 0) {
     throw new Error("That isn't a version of this file.");
   }
-  const [{ entries, elsewhere }, ownDrafts] = await Promise.all([
-    pdfAnnotationEntriesFor(file, fileVersionId),
+  const [{ entries, elsewhere, worklist }, ownDrafts] = await Promise.all([
+    pdfAnnotationEntriesFor(file, fileVersionId, session.user.id),
     getOwnFileDraftAnnotations(fileId, session.user.id, { slug: file.slug, fileVersionId }),
   ]);
-  return { entries, ownDrafts, elsewhere };
+  return { entries, ownDrafts, elsewhere, worklist };
 }

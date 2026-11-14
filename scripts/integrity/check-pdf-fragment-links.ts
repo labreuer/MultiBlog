@@ -12,10 +12,12 @@
 //
 // **A link is read as the viewer reads it** (docs/PDF.md §13, "Links into the
 // file"): each page on the version it names, its `v=`, or without one the
-// version its own address names (`/pdf/<slug>/v/<n>`), or the file's first.
-// No version has a page map yet, so no link is carried, and the version a
-// link names is the one it opens: words that are gone from the latest
-// version are no fault in a link that names an earlier one.
+// version its own address names (`/pdf/<slug>/v/<n>`), or the file's first,
+// and then wherever the viewer would take it. Where page maps join the
+// version a link names to the one its address shows, the link is carried
+// and checked where it lands. One the viewer can't carry is checked on the
+// version it names, which is the one it opens: words that are gone from the
+// latest version are no fault in it, since a revised text stands between.
 //
 // What it reads: link marks in docs' `proseJson`, posts' `proseJson`, comment
 // bodies and annotation bodies, none of them deleted. `Doc.proseJson` lags the
@@ -42,17 +44,21 @@
 //          first), a link naming a file's past slug (it still works, through
 //          the slug-history redirect), a `p=` on a file without usable
 //          page labels, where it is a sheet number (with its `sheet=` form),
-//          a link naming an abandoned version (nothing can confirm it), a
-//          link on a version's own address that names another version (the
-//          viewer stays, and offers the passage on the version named), and
+//          a link naming an abandoned version that it can't be carried
+//          off (nothing can confirm it), a link on a version's own address
+//          that names another version and can't be carried there (the
+//          viewer stays, and offers the passage on the version named), **a
+//          link carried to a sheet that doesn't hold its words** (a better
+//          copy corrected them, and every reader is told "Not found"), and
 //          **a link without `v=` written after its file's second version was
 //          uploaded**, which only a hand can have typed and whose writer
 //          most likely meant the latest. The check dates a link by the
 //          update log (src/lib/pdf-link-dating.ts), which the viewer can't.
 //
-// A link that names a version other than the latest, and finds its words
-// there, is no fault: every link written before a file's second version is
-// one. `--verbose` lists it.
+// A link that names a version other than the latest, and lands with its
+// words found, is no fault: every link written before a file's second
+// version is one. `--verbose` lists it, with its form for the version it
+// was carried to.
 //
 // And for a citation's passage:
 //   ERROR  a quotation the cited page doesn't hold, a cited page no sheet
@@ -73,7 +79,7 @@ import "dotenv/config";
 import { prisma } from "../../src/lib/prisma";
 import { FragmentChecker } from "../../src/lib/pdf-fragment-check";
 import { linkHrefsIn, parseFragmentLinkHref, type FragmentLinkFinding, type VersionFault } from "../../src/lib/pdf-fragment-findings";
-import { formatPassageText, type FragmentPassage } from "../../src/lib/pdf-fragment";
+import { formatFragmentPassages, formatPassageText, type FragmentPassage } from "../../src/lib/pdf-fragment";
 import { formatPageName, type PageName } from "../../src/lib/pdf-open-params";
 import { LinkDater, pdfHrefsIn, type LinkHolder } from "../../src/lib/pdf-link-dating";
 import { checkCitedHref } from "../../src/lib/cited-passage";
@@ -149,14 +155,21 @@ type Checked = Extract<FragmentLinkFinding, { kind: "checked" }>;
 /** What a page that names a version with nothing to read is reported as: a warning for an abandoned one, since nothing can confirm the link, and an error for one the file never had. */
 function reportVersionFault(where: string, label: string, fault: VersionFault, finding: Checked, href: string): void {
   if (fault.kind === "abandoned-version") {
-    report("warn", where, "abandoned-version", `${label} names version ${fault.version}, which was abandoned and kept no page map, so nothing can confirm the link: ${href}`);
+    const why = fault.mapped ? "was abandoned, and its sheet has no counterpart where the link lands" : "was abandoned, and no page maps carry the link off it";
+    report("warn", where, "abandoned-version", `${label} names version ${fault.version}, which ${why}, so nothing can confirm the link: ${href}`);
   } else {
     report("error", where, "no-such-version", `${label} names version ${fault.version}, and the file has ${finding.versionCount}: ${href}`);
   }
 }
 
-/** What follows from the version a page was read on: a warning where the link's own address shows another, and a verbose line where it isn't the latest. */
-function reportVersionRead(where: string, label: string, version: number, finding: Checked): void {
+/**
+ * What follows from the version a page was read on: a warning where the
+ * link's own address shows another, and a verbose line where it isn't the
+ * latest. A link carried to the version it was read on has a line of its own
+ * saying so, and gets neither.
+ */
+function reportVersionRead(where: string, label: string, version: number, finding: Checked, carried: boolean): void {
+  if (carried) return;
   if (finding.addressVersion !== null && version !== finding.addressVersion) {
     report(
       "warn",
@@ -165,7 +178,7 @@ function reportVersionRead(where: string, label: string, version: number, findin
       `${label} names version ${version} on the address of version ${finding.addressVersion}: the viewer stays on version ${finding.addressVersion} and offers the passage on version ${version}`,
     );
   } else if (version !== finding.latestVersion) {
-    note(`    ${label} names version ${version}; the latest is version ${finding.latestVersion}, and no page map joins them`);
+    note(`    ${label} is read on version ${version}; the latest is version ${finding.latestVersion}, and it isn't carried there`);
   }
 }
 
@@ -187,8 +200,13 @@ function reportFinding(where: string, href: string, page: PageName | null, findi
       reportVersionFault(where, label, finding.page, finding, href);
       return;
     }
-    reportVersionRead(where, label, finding.page.version, finding);
-    if (finding.page.kind === "ok") {
+    reportVersionRead(where, label, finding.page.version, finding, finding.page.kind === "ok" && finding.page.carried !== undefined);
+    if (finding.page.kind === "ok" && finding.page.carried) {
+      const stamp = finding.versionCount > 1 ? finding.page.version : ("sole" as const);
+      note(
+        `ok  ${label}: names version ${finding.page.carried.from}, carried to sheet ${finding.page.sheet} of version ${finding.page.version}; there it is ${formatPageName({ sheet: finding.page.sheet, stamp })}`,
+      );
+    } else if (finding.page.kind === "ok") {
       unlabelled(where, page, finding.page.sheet, finding.usableLabels);
       note(`ok  ${label}: a page link to page ${finding.page.sheet}`);
     } else if (finding.page.kind === "page-out-of-range") {
@@ -203,13 +221,32 @@ function reportFinding(where: string, href: string, page: PageName | null, findi
       reportVersionFault(where, label, passage, finding, href);
       continue;
     }
-    reportVersionRead(where, label, passage.version, finding);
+    reportVersionRead(where, label, passage.version, finding, "carried" in passage && passage.carried !== undefined);
     if (passage.kind === "ok") {
       if (passage.occurrences > 1) {
         report("warn", where, "repeats", `${label} occurs ${passage.occurrences} times on its page; the link points at the first`);
       }
-      unlabelled(where, passage.passage.page, passage.sheet, finding.usableLabels);
-      note(`ok  ${label}: "${passage.text}"`);
+      if (passage.carried) {
+        const stamp = finding.versionCount > 1 ? passage.version : ("sole" as const);
+        const there = formatFragmentPassages([{ ...passage.passage, page: { sheet: passage.sheet, stamp } }]);
+        note(
+          `ok  ${label}: names version ${passage.carried.from}, ${passage.carried.byWords ? "found by its words" : "carried"} on sheet ${passage.sheet} of version ${passage.version}; there it is #${there}: "${passage.text}"`,
+        );
+      } else {
+        unlabelled(where, passage.passage.page, passage.sheet, finding.usableLabels);
+        note(`ok  ${label}: "${passage.text}"`);
+      }
+    } else if (passage.kind === "no-match" && passage.carried) {
+      // Every reader of the link is told "Not found on page n". A warning,
+      // since the link was right when it was written: the bytes changed under it.
+      const held = passage.carried.namedHolds ? ` Version ${passage.carried.from} holds them, so a better copy changed the words.` : "";
+      const instead = passage.foundOnPage !== null ? ` They are on page ${passage.foundOnPage} of version ${passage.version}.` : "";
+      report(
+        "warn",
+        where,
+        "carried-miss",
+        `${label} names version ${passage.carried.from} and is carried to sheet ${passage.sheets.join(", ")} of version ${passage.version}, which doesn't hold its words.${held}${instead}`,
+      );
     } else if (passage.kind === "page-out-of-range") {
       report("error", where, "page-out-of-range", `${label}: the file has ${passage.pageCount} pages`);
     } else if (passage.kind === "no-such-label") {

@@ -86,6 +86,76 @@
   white-space: nowrap;
 }
 
+/* "Moving a note forward": the viewer's worklist on the latest's page, what
+   an entry and a card say of a move, and the "stays here" mark. */
+.partHeading {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+/* The second part of the list, under the viewer's own. */
+* + .partHeading {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.worklistItem {
+  gap: 2px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+
+.worklistQuote {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  /* A passage is read here to be compared with another, so it wraps. */
+  overflow-wrap: anywhere;
+}
+
+.worklistLink {
+  font-size: 0.8rem;
+  align-self: center;
+}
+
+.suggestion {
+  display: flex;
+  flex-direction: column;
+  margin: 2px 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--link);
+}
+
+.linkButton {
+  font: inherit;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--link);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.linkButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.entryStanding {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.standing {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
 .versions {
   margin-top: 1rem;
   font-size: 0.85rem;

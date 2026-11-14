@@ -84,6 +84,15 @@ export function pdfPath(slug: string, version?: VersionRef, opts: { own?: boolea
   return version && (opts.own || !version.isLatest) ? `/pdf/${slug}/v/${version.number}` : `/pdf/${slug}`;
 }
 
+/**
+ * A version's map page, `/pdf/<slug>/v/<n>/map` (docs/PDF.md §13, "Matching
+ * the pages"): its page map with the questions its runs of sheets raise, or
+ * the offer to build one. Open to whoever may manage the file.
+ */
+export function pdfMapPath(slug: string, versionNumber: number): string {
+  return `/pdf/${slug}/v/${versionNumber}/map`;
+}
+
 /** A file's download page, or one version's: `/files/<slug>` and `/files/<slug>/v/<n>`. */
 export function filesPath(slug: string, version?: VersionRef, opts: { own?: boolean } = {}): string {
   return version && (opts.own || !version.isLatest) ? `/files/${slug}/v/${version.number}` : `/files/${slug}`;

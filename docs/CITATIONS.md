@@ -1288,11 +1288,16 @@ fragment.
     pages. The query has no address to say so, so each of its pages rides with `v=<n>`
     unless it has a stamp of its own (`pdfReferentPath`).
   - **The route reads the pairs as the viewer reads a link on the file's bare address**
-    (`referentTarget`, `src/lib/reference-cited-by.ts`) and writes them anew, so a
+    (`referentTarget`, `src/lib/pdf-link-reading.ts`) and writes them anew, so a
     referent's `page=` leaves as `sheet=` and each page carries its stamp once the file has
-    a second version. Pairs that name the latest version open there. Pairs that name
-    another can't be carried, no version having a page map yet, and open the version they
-    name.
+    a second version. Pairs that name the latest version open there.
+    - **Pairs that name another version are carried to the latest on the server**, where
+      page maps join the two (PDF.md §13, "Matching the pages"), and the redirect is
+      written for it: the sheet each passage landed on, stamped with the latest. A passage
+      whose words aren't found where it landed is left as the referent wrote it, so the
+      viewer reports the miss and offers the passage on the version it names.
+    - **Pairs that can't be carried open the version they name**: a page map on the way is
+      missing, or the sheet has no counterpart and the words don't say where it went.
   - **A quotation and a bare page are found on the latest version**, by its labels and page
     text at every click, and their link is stamped with it.
 - **A query string, not a fragment.** The route answers with a redirect whose `Location` has a

@@ -17,7 +17,17 @@ import { referencesOfFile } from "@/lib/reference-files";
 import { canWriteReferences } from "@/lib/role-checks";
 import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
 import { fileVersionTitle, pdfPath, type ShownVersion } from "@/lib/file-version";
-import { VERSION_SUMMARY_SELECT, postedNotesByVersion, summariseVersions, type FileVersionSummary, type VersionManage } from "@/lib/file-version-data";
+import { carriesOf } from "@/lib/file-anchor-move";
+import {
+  VERSION_SUMMARY_SELECT,
+  linkVersionsOf,
+  mintedPartsByVersion,
+  postedNotesByVersion,
+  summariseVersions,
+  type FileVersionSummary,
+  type VersionManage,
+} from "@/lib/file-version-data";
+import { linkVersionsJson } from "@/lib/pdf-link-reading";
 import styles from "./page.module.css";
 
 // PLAN.md §19, docs/PDF.md §13 "Addresses" — the PDF reading view, for both
@@ -52,6 +62,8 @@ type FileVersionForRead = {
   shown: ShownVersion;
   /** The hash of the version shown, which its byte URL names. */
   sha256: string;
+  /** The file's versions as a link's reading takes them, as one string (`linkVersionsJson`). */
+  linkVersions: string;
 };
 
 export const loadFileVersionForRead = gated(async (user, slug: string, versionNumber: number | null): Promise<FileVersionForRead | AccessRejection> => {
@@ -97,7 +109,8 @@ export const loadFileVersionForRead = gated(async (user, slug: string, versionNu
     state: found.state,
     address: versionNumber === null ? "bare" : "version",
   };
-  return { file, versions, shown, sha256: found.sha256 };
+  const linkVersions = linkVersionsJson(await linkVersionsOf({ currentVersionId: file.currentVersionId, versions: rows }));
+  return { file, versions, shown, sha256: found.sha256, linkVersions };
 });
 
 /** The page's title: the file's on the bare address, and `<title>, version <n>` on a version's own, the latest's included. */
@@ -132,7 +145,7 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
     );
   }
   const {
-    value: { file, versions, shown, sha256 },
+    value: { file, versions, shown, sha256, linkVersions },
     user,
   } = access;
 
@@ -172,7 +185,7 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
   // Shared with `loadPdfAnnotationEntries`, which the surface calls after a
   // post — see that action, and PdfAnnotationSurface's `liveEntries`. Both
   // take the version shown: what is drawn is that version's alone.
-  const { entries, elsewhere } = await pdfAnnotationEntriesFor(file, shown.id);
+  const { entries, elsewhere, worklist } = await pdfAnnotationEntriesFor(file, shown.id, user.id);
   // The viewer's own drafts — "Your private notes", the only way back into a
   // draft once its composer is gone. Their own id, never anyone else's
   // (getOwnFileDraftAnnotations).
@@ -191,9 +204,16 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
         fileId: file.id,
         takesVersions: latest !== undefined && latest.pageCount !== null,
         notesOn: versions.length > 1 ? await postedNotesByVersion(file.id) : {},
+        partsOn: versions.length > 1 ? await mintedPartsByVersion(file.id) : {},
+        carries: versions.length > 1 ? await carriesOf(file.id) : [],
         candidateFacts: waiting && latest ? await candidateFactsFor(actorFromSessionUser(user), file.id, waiting, latest) : null,
       }
     : null;
+  // A page map's numbers and the version it is from belong to that half too.
+  // The map itself reaches every reader's viewer, which carries links with it
+  // (`linkVersions`); what it found, in numbers, is its managers' to read.
+  const sent = (version: FileVersionSummary): FileVersionSummary => (manage ? version : { ...version, baseNumber: null, map: null });
+  const listed = versions.map(sent);
 
   // PLAN.md §20d — the tag chips, handed to the viewer as its Metadata
   // pane.
@@ -224,13 +244,15 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
         fileId={file.id}
         slug={file.slug}
         version={shown}
-        versions={versions}
+        versions={listed}
+        linkVersions={linkVersions}
         manage={manage}
         fileUrl={fileUrl}
         // A version's own page says "the latest" beside its title while it is.
         title={shown.address === "version" && shown.isLatest ? `${readingTitle(file, shown)} (the latest)` : readingTitle(file, shown)}
         entries={entries}
         elsewhere={elsewhere}
+        worklist={worklist}
         ownDrafts={ownDrafts}
         anchoredLink={anchoredLink}
         metadata={[
@@ -246,7 +268,7 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
           // Listed once a file has a second version: its only version needs no
           // list. A manager has it from the first, since it holds the upload.
           (versions.length > 1 || manage?.takesVersions) && (
-            <PdfVersionList key="versions" slug={file.slug} versions={versions} shownId={shown.id} manage={manage} />
+            <PdfVersionList key="versions" slug={file.slug} versions={listed} shownId={shown.id} manage={manage} />
           ),
         ]}
       />

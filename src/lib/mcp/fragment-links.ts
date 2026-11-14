@@ -31,7 +31,10 @@ import { appOrigin } from "./resolve";
 // stored is the one sent.
 //
 // **A link is read as the viewer reads it** (docs/PDF.md §13, "Links into the
-// file"): each page on the version it names. Once a file has a second
+// file"): each page on the version it names, and where page maps join that
+// version to the one its address shows, on the sheet it is carried to. Words
+// the version named holds and the landing doesn't are refused as any miss
+// is: every reader of the link would be told they aren't found. Once a file has a second
 // version, a link to its bare address must say which version it names with
 // `v=`: one without is refused with its stamped forms, since the viewer
 // would read it as the first version's and a model that has just read the
@@ -57,7 +60,8 @@ type Checked = Extract<FragmentLinkFinding, { kind: "checked" }>;
 function refuseVersionFault(href: string, fault: VersionFault, finding: Checked): never {
   const latest = `The latest is version ${finding.latestVersion}, at ${pdfPath(finding.currentSlug)}.`;
   if (fault.kind === "abandoned-version") {
-    throw new ApiError("no_match", `The link ${href} names version ${fault.version} of the PDF, which was abandoned, so nothing can confirm it. ${latest}`, { link: href });
+    const why = fault.mapped ? ", and its sheet has no counterpart on the version shown" : "";
+    throw new ApiError("no_match", `The link ${href} names version ${fault.version} of the PDF, which was abandoned${why}, so nothing can confirm it. ${latest}`, { link: href });
   }
   throw new ApiError("no_match", `The link ${href} names version ${fault.version} of the PDF, which has ${finding.versionCount}. ${latest}`, { link: href });
 }
@@ -153,7 +157,13 @@ function refusePassage(href: string, passage: CheckedPassage, finding: Checked, 
       ...(passage.foundOnPage !== null ? { foundOnSheet: passage.foundOnPage } : {}),
     });
   }
-  throw new ApiError("no_match", `The fragment link ${href} doesn't find its passage on ${pageText(page)}${on}.${also}`, {
+  // A carried link is read where it lands: the sheet named is the landing's, and the page as written is another version's.
+  const where = passage.carried
+    ? `sheet ${passage.sheets[0]} of version ${passage.version}, where the page maps carry version ${passage.carried.from}'s ${pageText(page)}${
+        passage.carried.namedHolds ? `; version ${passage.carried.from} holds it, so the words were changed since` : ""
+      }`
+    : `${pageText(page)}${on}`;
+  throw new ApiError("no_match", `The fragment link ${href} doesn't find its passage on ${where}.${also}`, {
     link: href,
     passage: named,
     matchedUpTo: passage.matchedUpTo,
@@ -199,7 +209,8 @@ export async function checkFragmentLinks(actor: Actor, bodies: unknown[]): Promi
         throw new ApiError("no_match", `The page link ${href} names the label ${"label" in link.page ? link.page.label : ""}, ${NO_SUCH_LABEL}.`, { link: href });
       }
       warnings.push(...anotherVersion(href, finding.page.version, finding));
-      warnings.push(...unlabelled(href, link.page, finding.page.sheet, finding.usableLabels));
+      // A carried page's sheet is the landing's, of another version than its `p=` was read on.
+      if (!finding.page.carried) warnings.push(...unlabelled(href, link.page, finding.page.sheet, finding.usableLabels));
     }
     for (const passage of finding.passages) {
       refusePassage(href, passage, finding);
@@ -208,7 +219,7 @@ export async function checkFragmentLinks(actor: Actor, bodies: unknown[]): Promi
       if (passage.occurrences > 1) {
         warnings.push(`${href}: its passage occurs ${passage.occurrences} times on sheet ${passage.sheet}; the link points at the first.`);
       }
-      warnings.push(...unlabelled(href, passage.passage.page, passage.sheet, finding.usableLabels));
+      if (!passage.carried) warnings.push(...unlabelled(href, passage.passage.page, passage.sheet, finding.usableLabels));
     }
   }
   warnings.push(...(await checkCitations(actor, checker, citations)));

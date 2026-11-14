@@ -166,6 +166,8 @@ model User {
   fileDeletions          StoredFile[]             @relation("FileDeletedBy")
   fileVersionsUploaded   FileVersion[]            @relation("FileVersionUploadedBy")
   fileVersionsPromoted   FileVersion[]            @relation("FileVersionPromotedBy")
+  pageMapsStored         FileVersion[]            @relation("FileVersionPageMapStoredBy")
+  anchorMoves            FileAnchorMove[]         @relation("FileAnchorMoveBy")
   annotations            Annotation[]             @relation("AnnotationAuthor")
   annotationDeletions    Annotation[]             @relation("AnnotationDeletedBy")
   docLinks               DocLink[]
@@ -1164,6 +1166,7 @@ model Annotation {
   tagAnchors          TagAnchor[]          @relation("TagAnchorAnnotation")
   anchoredLinkAnchors AnchoredLinkAnchor[] @relation("AnchoredLinkAnchorAnnotation")
   commentQuoteAnchors CommentQuoteAnchor[] @relation("CommentQuoteAnchorAnnotation")
+  moves               FileAnchorMove[]
   mentions            Mention[]
   citations           Citation[]
 
@@ -1384,26 +1387,42 @@ model FileVersion {
   // filled the same way.
   outline     Json?
 
-  uploadedAt         DateTime  @default(now()) @map("uploaded_at")
-  uploadedByUserId   String?   @map("uploaded_by_user_id")
-  promotedAt         DateTime? @map("promoted_at")
-  promotedByUserId   String?   @map("promoted_by_user_id")
-  abandonedAt        DateTime? @map("abandoned_at")
+  uploadedAt            DateTime  @default(now()) @map("uploaded_at")
+  uploadedByUserId      String?   @map("uploaded_by_user_id")
+  promotedAt            DateTime? @map("promoted_at")
+  promotedByUserId      String?   @map("promoted_by_user_id")
+  abandonedAt           DateTime? @map("abandoned_at")
   // The version that was the latest when this one was uploaded; NULL for a
   // version 1. Stored, since it can't be worked out from the numbers once a
   // version between two others has been abandoned.
-  baseVersionId      String?   @map("base_version_id")
+  baseVersionId         String?   @map("base_version_id")
   // The highest `ydoc_update.id` when the row was made and when it was
   // promoted, 0 where the log was empty: a clock for dating a link against a
   // version (docs/PDF.md §13, "Links into the file"). Plain BigInts with no
   // relation, as `Annotation.ydocUpdateId` is.
-  uploadedAtUpdateId BigInt    @map("uploaded_at_update_id")
-  promotedAtUpdateId BigInt?   @map("promoted_at_update_id")
+  uploadedAtUpdateId    BigInt    @map("uploaded_at_update_id")
+  promotedAtUpdateId    BigInt?   @map("promoted_at_update_id")
+  // docs/PDF.md §13, "Matching the pages" — the page map between this version
+  // and its base: for each sheet of the base, a sheet of this version or
+  // none, with the questions its runs of sheets raise and their answers. One
+  // JSON value, read through `parsePageMap` (src/lib/pdf-page-map.ts), never
+  // a cast. NULL until a deliberate act stores one, which happens once: it
+  // says the two versions hold the same text, and links are carried through
+  // it from then on. An answer to a run rewrites the value under the file
+  // row's lock; nothing else does, and nothing takes a map away.
+  pageMap               Json?     @map("page_map")
+  // Who stored the map and when, and the bulk carry that did, where one did
+  // (`file_anchor_move.carry_id`): what undoing that carry from the database
+  // would take away with its moves.
+  pageMapStoredAt       DateTime? @map("page_map_stored_at")
+  pageMapStoredByUserId String?   @map("page_map_stored_by_user_id")
+  pageMapCarryId        String?   @map("page_map_carry_id")
 
   file                StoredFile           @relation("FileVersions", fields: [fileId], references: [id], onDelete: Cascade)
   currentOf           StoredFile?          @relation("FileCurrentVersion")
   uploadedBy          User?                @relation("FileVersionUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
   promotedBy          User?                @relation("FileVersionPromotedBy", fields: [promotedByUserId], references: [id], onDelete: SetNull)
+  pageMapStoredBy     User?                @relation("FileVersionPageMapStoredBy", fields: [pageMapStoredByUserId], references: [id], onDelete: SetNull)
   baseVersion         FileVersion?         @relation("FileVersionBase", fields: [baseVersionId], references: [id], onDelete: SetNull)
   basedOnThis         FileVersion[]        @relation("FileVersionBase")
   pageTexts           FilePageText[]
@@ -1411,6 +1430,8 @@ model FileVersion {
   tagAnchors          TagAnchor[]
   anchoredLinkAnchors AnchoredLinkAnchor[]
   commentQuoteAnchors CommentQuoteAnchor[]
+  movesFrom           FileAnchorMove[]     @relation("FileAnchorMoveFrom")
+  movesTo             FileAnchorMove[]     @relation("FileAnchorMoveTo")
 
   @@unique([fileId, number])
   // The target of every pair key: `file.current_version_id` and each anchor
@@ -1418,6 +1439,75 @@ model FileVersion {
   @@unique([id, fileId])
   @@index([sha256])
   @@map("file_version")
+}
+
+// docs/PDF.md §13, "Moving a note forward" — the history of moves, and the
+// "stays here" marks.
+//
+// **A move** gave an anchor on one version of a file a target on a later
+// one. It changed three things on the anchor, its target, its quote and its
+// version, and this row keeps all three as they were: that is what undoing a
+// move from the database needs, since nothing in the app undoes one. The
+// target it reached is not kept: the anchor holds it, and a later move's row
+// records it as the one left.
+//
+// **A "stays here" mark** is a row that reaches no version (`toVersionId`
+// NULL): the anchor, the version it stays on, who marked it and when. It is
+// there while the mark holds, so no anchor table has a column for it.
+//
+// "An anchor's newest move" is by `id`, which is from a sequence, never by
+// `movedAt`.
+//
+// The row moved is one nullable foreign key per kind of anchor that holds a
+// PDF target with a writer, two today, with a hand-written CHECK that exactly
+// one is set: the anchor tables' own pattern, so a new kind costs this table
+// one column. Also hand-written (Prisma has no DSL for either): the CHECKs
+// that a mark keeps no target and belongs to no carry, and the two partial
+// unique indexes that allow an anchor one mark.
+model FileAnchorMove {
+  id                   BigInt   @id @default(autoincrement())
+  annotationId         String?  @map("annotation_id")
+  anchoredLinkAnchorId String?  @map("anchored_link_anchor_id")
+  // The version left, or for a mark the version the anchor stays on.
+  fromVersionId        String   @map("from_version_id")
+  // The target the anchor had on the version it left (`annotation.pdf_target`,
+  // or a link part's `selector`) and its quote; NULL and "" for a mark. True
+  // as it stands in its sheet, quads and quote, since a version's bytes never
+  // change. Its offsets and text version may name an extraction that
+  // `scripts/upgrade-pdf-text-version.ts` has deleted since.
+  fromTarget           Json?    @map("from_target")
+  fromQuotedText       String   @default("") @map("from_quoted_text")
+  // The version reached; NULL makes the row a "stays here" mark.
+  toVersionId          String?  @map("to_version_id")
+  // Who moved or marked it. A deleted user's id is set to NULL, and the row stays.
+  movedByUserId        String?  @map("moved_by_user_id")
+  movedAt              DateTime @default(now()) @map("moved_at")
+  // The bulk carry the move was part of, an id its rows share and a page map
+  // it stored carries too (`file_version.page_map_carry_id`); NULL for a
+  // move one person made of one note.
+  carryId              String?  @map("carry_id")
+  // Whether the anchor was marked "stays here" when it was moved, which only
+  // a move of one note can find: a carry's write refuses a marked row.
+  wasMarked            Boolean  @default(false) @map("was_marked")
+  // A hidden move shows on no card and in no list. A carry's are hidden
+  // until a manager shows them; one note's move is shown.
+  hidden               Boolean  @default(false)
+
+  // Every relation cascades but the mover's. `toVersion` says so in full:
+  // Prisma's default for an optional relation is SET NULL, which would turn
+  // a move into a mark.
+  annotation         Annotation?         @relation(fields: [annotationId], references: [id], onDelete: Cascade)
+  anchoredLinkAnchor AnchoredLinkAnchor? @relation(fields: [anchoredLinkAnchorId], references: [id], onDelete: Cascade)
+  fromVersion        FileVersion         @relation("FileAnchorMoveFrom", fields: [fromVersionId], references: [id], onDelete: Cascade)
+  toVersion          FileVersion?        @relation("FileAnchorMoveTo", fields: [toVersionId], references: [id], onDelete: Cascade)
+  movedBy            User?               @relation("FileAnchorMoveBy", fields: [movedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([annotationId])
+  @@index([anchoredLinkAnchorId])
+  @@index([fromVersionId])
+  @@index([toVersionId])
+  @@index([carryId])
+  @@map("file_anchor_move")
 }
 
 // /files' Owner(s) and Annotations columns, as a view — the same role
@@ -1884,6 +1974,7 @@ model AnchoredLinkAnchor {
   targetAnnotation Annotation?           @relation("AnchoredLinkAnchorAnnotation", fields: [targetAnnotationId], references: [id], onDelete: Cascade)
   targetComment    Comment?              @relation("AnchoredLinkAnchorComment", fields: [targetCommentId], references: [id], onDelete: Cascade)
   anchoredEvent    PostPublicationEvent? @relation("AnchoredLinkAnchorEvent", fields: [anchoredEventId], references: [id], onDelete: SetNull)
+  moves            FileAnchorMove[]
 
   @@index([linkId])
   @@index([docId])

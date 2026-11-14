@@ -504,6 +504,41 @@ the admin account.
   `abandonTestVersion`, which call the operation both front doors share:
   `e2e/pdf-version-upload.spec.ts`. `getFileVersionFacts` is what each left
   in the rows and on disk.
+  - **The uploader has a button for each kind of version**
+    (`pdf-upload-better-copy`, `pdf-upload-revised-text`), and the one clicked
+    decides whether a page map is asked for. Setting the hidden input
+    (`pdf-version-file`) with no click is a revised text: nothing is matched.
+  - **`inked: [n]` gives a sheet a filled rectangle**, on a fixture file or a
+    version: with no lines beside, a sheet with ink and no text, which a page
+    map places by its neighbours. A sheet with neither is blank.
+- **A note on a rectangle is made by a fixture**, `createTestAnnotation({
+  pdfRect })`: the viewer draws no rectangle selection, and a carry has rules
+  of its own for a target with no words.
+- **What a move did is read from the rows.** `getFileAnchorRows` is every
+  anchor into a file as it stands (its version, target and quote), and
+  `getFileAnchorMoves` its history and its "stays here" marks.
+  `pdf-better-copy.spec.ts` takes the first before a carry, undoes the carry
+  with `undoCarryInSql`, and compares: that fixture is the SQL of
+  docs/PDF.md §13's recipe, so a change to either is a change to both.
+- **A carry's write is raced by `carryAcrossChanges`**, which works a carry
+  out, changes what it is told to in between (marks a note, gives one another
+  target, restamps one's text version, moves one away, or has the page map
+  stored by another request) and then runs the carry's own transaction
+  (`runPlannedCarry`). What the write skipped, or the words it was refused
+  with, is the test. `previewCarryAs` is the look a manager takes first, which
+  must leave no page map behind.
+- **`getFileVersionFacts` answers a stored page map's blank sheets** beside its
+  pairing. They are the one place the blank-sheet read's answer shows: a
+  better copy's map pairs the same whatever that read says.
+- **A user the UI offers nothing is tested through the write layer.**
+  `noteActAs(email, act)` calls `moveNote`, `setNoteStays` or
+  `setNoteMoveHidden` as that user and answers the refusal. A server action
+  can't be reached from a spec but through the UI, and the gate is in the
+  layer the action wraps.
+- **The two long PDF specs share `e2e/pdf-version-helpers.ts`**: `token` for
+  bytes of a test's own, `waitForViewer`, `expectSheetText`, `selectPhrase`,
+  `expectAddress` (an exact address, which is what shows a fragment written
+  twice) and `checkFileVersions`.
 - **A test that uploads bytes gives them a token of its own.** The store is
   content-addressed, so two tests uploading the same lines share one blob, and
   abandoning a version in one counts the other's row. `pdf-version-upload.spec.ts`
@@ -519,6 +554,26 @@ the admin account.
   (`TestFile.versionId`), as an uploaded file's does and a migrated one's
   does not: code that passes a file's id for a version's fails on a fixture
   and nowhere in old data.
+- **A fragment changed while a page hydrates is written back over.** A
+  `page.goto` to the path the page is already on, with another fragment, is a
+  same-document navigation: no load, only a `hashchange`. Next's router
+  (16.2.11) takes the address, fragment included, when hydration starts, and
+  writes it back with `history.replaceState` at its first commit
+  (`HistoryUpdater`), so a fragment that changed in between is undone and the
+  page shows the link it first had. On a PDF that window opens whenever the
+  viewer has just sent the reader on with `location.replace`: the address
+  already matches, so an assertion on it passes while the new page is still
+  hydrating. Open the next link from another page (`pdf-better-copy.spec.ts`'s
+  `follow`), or wait for the viewer first. It fails on the dev target, where
+  hydration is slow, and reads like a link that was not carried.
+- **An integrity script is run from a spec with `execFile`**, and exits
+  non-zero on any error, which rejects with what it printed:
+  `checkFileVersions(fileId)` (`e2e/pdf-version-helpers.ts`) answers both. What
+  a check exists to report is something no write layer produces, so a spec
+  writes it by hand: `makeVersionFault` puts one thing wrong into a page map,
+  the move history or a note's version, and
+  `pdf-better-copy.spec.ts`'s last test reads the script for the line that
+  names each.
 - **Two notes by one writer in one second have the same card name.** A card's
   fragment is its writer and the second it was made in, so a fixture that has
   one bot write several notes spaces them a second apart

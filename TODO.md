@@ -291,53 +291,58 @@ each on margin notes, tags, search, entity chips, the schema version and the sha
 
 ## PDF versions: a viewer left open is not told (docs/PDF.md §13)
 
-**Status:** low priority, and open: a file can take a new version now (§13's "Built so
-far"), and nothing tells a tab left open on it.
+**Status:** low priority, and open. A file takes new versions (docs/PDF.md §13), and nothing
+tells a tab left open on it.
 
 A viewer open on a file across a promotion keeps the version it loaded: its bytes come by
-hash and its note list by version, so nothing is drawn over the wrong ink, and a capture from
-it is refused with a reload message. But until someone tries to write, nothing says the file
-has a newer version, and the notes moved to it have left the tab's view. A fix: the note
-list's answer names the latest version, and one that differs from the version shown becomes a
-banner with a reload. A broadcast on the presence channel at promotion would tell the tab
-sooner, and reaches only tabs connected at that moment.
+hash and its note list by version, so nothing is drawn over the wrong ink. But nothing says
+the file has a newer version. What a reader in that tab meets:
 
-Five races the plan closes itself, kept here because each fails silently if its step is
-skipped. Three are built, and `e2e/pdf-version-upload.spec.ts` makes each of those happen
-in order; the two about moves wait for the moves:
+- **On the bare address**, the old bytes under an address that now means the new ones. A
+  capture from it is refused with the reload message (`assertCaptureVersion`), which is the
+  first they hear of it, after they have written the note.
+- **On a version's own address**, a toolbar that goes on saying "the latest" beside the
+  title, and no banner saying it is an earlier version now.
+- **On either**, the notes a carry moved to the new version gone from the tab's list at its
+  next refetch, with nothing to say where they went.
 
-- **A capture that commits beside a promotion.** The check of the capture's version belongs
-  inside the transaction that inserts, with the file row locked, for each of: posting a note,
-  opening a draft on a selection, adding a part to a link, and MCP's `anchorPdfQuote`. From
-  `/pdf/<slug>` it is checked against `file.current_version_id`, and from a version's own
-  address against its being promoted. A check before the transaction lets a promotion commit
-  between the two, and the note lands on an earlier version with nothing said. **Built**
-  (`assertCaptureVersion`): the capture locks the file row `FOR SHARE`, and a promotion
-  locks it `FOR UPDATE` (`lockFileRow`). The spec holds a promotion open and starts a note
-  and a link part beside it: each waits for the commit and is refused.
-- **A move written from a placement that is no longer true.** Where a note goes is worked out
-  before the transaction, over seconds. The write's own condition is that the row is still on
-  the version, and at the target, the placement started from. Without it a carry overwrites a
-  target its author has just placed by hand, or two tabs' moves overwrite each other, and
-  the history records a target the note never left.
-- **A "stays here" mark made while a carry works out its placements.** The carry's write
-  refuses a marked row, and the mark is written with the file row locked. Without both the
-  note is moved and its mark deleted, against its author's word. The answers to a page map's
-  runs of sheets are written under the same lock, since the map is one JSON value and two
-  answers would otherwise each write the whole of it.
-- **The two lazy writers**, `extract` in `src/lib/pdf-page-text.ts` and `fill` in
-  `src/lib/pdf-metadata.ts`, parse for seconds and then write. Each must write under the
-  version whose bytes it read, never under "the file's latest" looked up afterwards. **Built**:
-  each takes the version's id before it parses.
-- **An upload beside an abandoning of the same bytes.** `storeUploadStream` finds the blob on
-  disk and stores nothing, and its row is written seconds later. The abandoning counts the
-  rows holding the hash and removes the blob. Both take one advisory lock on the hash: the
-  upload in the transaction that inserts its row, where it checks the blob is still there,
-  and the abandoning around its count and its removal, before it commits. Without it a
-  version's row is left with no bytes, which nothing reports until the integrity check runs.
-  **Built** (`lockFileHash`, `assertBlobStored`): the spec records an upload while the lock
-  is held as an abandoning holds it, and the upload is refused once the blob is gone.
-  Removing the check from `recordUpload` turns that test red.
+**A fix, in two parts, the first enough by itself:**
+
+1. **The note list's answer names the latest version.** `pdfAnnotationEntriesFor`
+   (`src/lib/pdf-annotation-entries.ts`) already reads `file.current_version_id` to decide
+   the worklist, so it can answer that version's id and number, and
+   `loadPdfAnnotationEntries` hands them on. `PdfAnnotationSurface` knows what it was
+   rendered against (`version.isLatest`, `version.address`): where the answer names
+   another latest, it shows a banner, "Version n is now the latest", with a reload. The
+   surface refetches its list only after a write made from it, so to be told without
+   writing it would also refetch when the tab comes back into view (`visibilitychange`).
+2. **A broadcast at the promotion**, for a tab that stays in view. `promoteFileVersion`
+   (`src/lib/file-manage.ts`) would ask the collab server to send a stateless message on
+   the outgoing version's presence channel (`ydoc:pdf:<version id>`,
+   `ydocIdForFileVersion`), through an `/admin` endpoint beside the others in
+   `server/ydoc-hooks.ts`, and the surface would refetch on it. It reaches only tabs
+   connected at that moment, which is why it comes second.
+
+**Its test** belongs in `e2e/pdf-version-upload.spec.ts`, which already keeps a viewer open
+across a promotion and checks that its capture is refused: the banner should be there once
+the tab is brought to the front, before anything is written.
+
+**This is not one of the races**, which are closed, each by a step that fails silently if
+it is skipped: a capture that commits beside a promotion, a move written from a placement
+that is no longer true, a "stays here" mark made while a carry works, a lazy writer that
+writes under another version than it parsed, and an upload beside an abandoning of the same
+bytes. docs/PDF.md §0 and §13's "Writing a move" hold each, and
+`e2e/pdf-version-upload.spec.ts` and `e2e/pdf-better-copy.spec.ts` make each happen in order.
+
+**What else versions leave open** is §13's "Open". The ones a reader would meet first:
+
+- **A link part's shown move is said nowhere.** A note's is on its card; a part has none.
+- **A hidden move leaves no sign for its author**, who shows it again only from the page of
+  the version the note left.
+- **The viewer draws no rectangle**, so a rectangle note moved by hand becomes a note on
+  text.
+- **Nothing in the app undoes a move or a carry.** §13 has the SQL that does, by a carry's
+  id.
 
 ## A client navigation with a fragment leaves it on the path (Next 16.2.11)
 
@@ -1577,6 +1582,25 @@ currently reach without opening anything, so it is worth deciding whether the pa
 it or duplicates it — and that is the actual open question, not the markup.
 
 ---
+
+## `/comments` answers 500 when a thread is deleted while it loads
+
+**Status:** low priority. Found 2026-11-14 as the one red of a full e2e run
+(`admin-table.spec.ts`, "a default saved from /site-settings is each table's own default"),
+the first failure of that test in the 37 runs whose logs were at hand.
+
+`src/app/comments/page.tsx` loads a page of comments with `include: { thread: … }`, which
+Prisma runs as two queries. A thread deleted between them, by its post's cascade, leaves
+`comment.thread` null where the type says it can't be, and `comment.thread.post.id` throws:
+the page answers 500 (`TypeError: Cannot read properties of null (reading 'post')`). In the
+suite that is another worker's cleanup hard-deleting a throwaway post. On an instance it
+takes a post hard-deleted during a moderator's page load, and the app only soft-deletes
+posts, so nothing a reader does reaches it.
+
+A fix: drop the rows whose thread came back null, since the comment is gone too by the same
+cascade. The test's first read of each table's headers would also be steadier for asserting
+that it found some. The same shape is in any admin table that includes a required relation
+a cascade can remove.
 
 ## A dangling `updated_by_user_id` takes the whole doc cache down with it
 

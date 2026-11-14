@@ -1,5 +1,6 @@
 import { getFileAnnotationsAsThreads } from "@/lib/annotation-data";
 import { annotationAnchorName } from "@/lib/annotation-anchor-name";
+import { noteStandings, worklistFor, type NoteMoveShown, type NoteStanding, type WorklistItem } from "@/lib/file-note-move";
 import { pdfPath } from "@/lib/file-version";
 import { prisma } from "@/lib/prisma";
 import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
@@ -29,13 +30,21 @@ import type { PdfAnnotationEntry } from "@/components/pdf/PdfAnnotationPanel";
 //   address of the file finds its note from any other. A thread with nothing
 //   left to show is in neither list.
 //
+// **Where each note stands among the versions is the viewer's own answer**
+// (§13, "Moving a note forward"; `noteStandings`): a shown move is told to
+// everyone, on the note's card and on its entry on the page of the version
+// it left, and a hidden one and a "stays here" mark only to whoever may
+// change them. `worklist` is that viewer's notes on earlier versions, on the
+// latest's page alone. None of it is read for a file with one version.
+//
 // The thread → entry transform is identical for both containers; only the PDF
 // target is extra, joined back on **by thread id** rather than by position so
 // it cannot depend on buildAnnotationEntries' ordering.
 //
 // No permission check of its own — it takes a resolved file id, and each
 // caller has already run the gate (`canUserReadFile`). Same arrangement, and
-// the same reason, as tagsForTarget.
+// the same reason, as tagsForTarget. `viewerId` narrows what is told, and
+// opens nothing.
 
 /** A thread on a version of the file other than the one shown. */
 export type OtherVersionNote = {
@@ -52,14 +61,40 @@ export type OtherVersionNote = {
   createdAt: string;
   bodyText: string;
   replies: number;
+  /** Whether the viewer may move it and mark it: its author, or the person its author works for. */
+  mine: boolean;
+  /** To such a viewer, whether it is marked "stays here". */
+  stays: boolean;
+  /** The move that took it off the version shown: a shown one, or a hidden one to whoever may show it. */
+  left: NoteMoveShown | null;
 };
 
-export type PdfAnnotations = { entries: PdfAnnotationEntry[]; elsewhere: OtherVersionNote[] };
+export type PdfAnnotations = {
+  entries: PdfAnnotationEntry[];
+  elsewhere: OtherVersionNote[];
+  /** The viewer's notes on earlier versions, on the latest's page; empty on every other. */
+  worklist: WorklistItem[];
+};
 
-export async function pdfAnnotationEntriesFor(file: { id: string; slug: string }, fileVersionId: string): Promise<PdfAnnotations> {
+export async function pdfAnnotationEntriesFor(file: { id: string; slug: string }, fileVersionId: string, viewerId: string): Promise<PdfAnnotations> {
   const threads = await getFileAnnotationsAsThreads(file.id);
   const here = threads.filter((thread) => thread.fileVersionId === null || thread.fileVersionId === fileVersionId);
   const others = threads.filter((thread) => thread.fileVersionId !== null && thread.fileVersionId !== fileVersionId);
+
+  const row = await prisma.storedFile.findUnique({
+    where: { id: file.id },
+    select: { currentVersionId: true, versions: { select: { id: true, number: true } } },
+  });
+  // A file with one version has no move, no mark and no worklist to read.
+  const versioned = (row?.versions.length ?? 0) > 1;
+  const authorOf = (thread: (typeof threads)[number]) => thread.comments.find((comment) => comment.id === thread.id)?.commenterUserId ?? null;
+  const standings: Map<string, NoteStanding> = versioned
+    ? await noteStandings(
+        viewerId,
+        threads.filter((thread) => thread.fileVersionId !== null).map((thread) => ({ id: thread.id, authorId: authorOf(thread) })),
+      )
+    : new Map();
+  const worklist = versioned && row?.currentVersionId === fileVersionId ? await worklistFor(viewerId, { id: file.id, slug: file.slug, currentVersionId: row.currentVersionId }) : [];
 
   const targets = new Map(here.map((thread) => [thread.id, thread.pdfTarget]));
   const entries = (await buildAnnotationEntries(here)).map((entry) => ({
@@ -68,14 +103,12 @@ export async function pdfAnnotationEntriesFor(file: { id: string; slug: string }
     color: entry.color,
     target: targets.get(entry.threadId) ?? null,
     root: entry.root,
+    standing: standings.get(entry.threadId) ?? null,
   }));
 
-  if (others.length === 0) return { entries, elsewhere: [] };
-  const row = await prisma.storedFile.findUnique({
-    where: { id: file.id },
-    select: { currentVersionId: true, versions: { select: { id: true, number: true } } },
-  });
+  if (others.length === 0) return { entries, elsewhere: [], worklist };
   const numberOf = new Map((row?.versions ?? []).map((version) => [version.id, version.number]));
+  const shownNumber = numberOf.get(fileVersionId);
   const elsewhere = others
     .flatMap((thread): OtherVersionNote[] => {
       const number = numberOf.get(thread.fileVersionId!);
@@ -101,10 +134,14 @@ export async function pdfAnnotationEntriesFor(file: { id: string; slug: string }
           createdAt: root.createdAt,
           bodyText: root.deletedByUserId ? "" : root.bodyText,
           replies: liveReplies.length,
+          mine: standings.get(thread.id)?.mine ?? false,
+          stays: standings.get(thread.id)?.stays ?? false,
+          // The newest move that left the version shown.
+          left: standings.get(thread.id)?.moves.findLast((move) => move.fromNumber === shownNumber) ?? null,
         },
       ];
     })
     // Newest version first, and within one by sheet, as the cards are.
     .sort((a, b) => b.versionNumber - a.versionNumber || (a.pageIndex ?? Infinity) - (b.pageIndex ?? Infinity) || a.createdAt.localeCompare(b.createdAt));
-  return { entries, elsewhere };
+  return { entries, elsewhere, worklist };
 }

@@ -310,6 +310,10 @@ export default function AnnotationsTable({
           deepLinkEntry("doc", "A doc id; shows only that doc's annotations."),
           deepLinkEntry("author", "A user id; shows only annotations on docs that user is credited as an author of."),
           deepLinkEntry("user", "A user id; shows only annotations written by that person."),
+          deepLinkEntry(
+            "earlier",
+            "“mine” shows your notes on earlier versions of a PDF that you have neither moved to its latest version nor marked as staying, with those of bots that work for you.",
+          ),
         ]}
         notes={
           <p style={{ marginTop: 8 }}>

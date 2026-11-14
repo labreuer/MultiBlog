@@ -68,6 +68,13 @@ The row carries:
   Created, Edited, Deleted, Raised at; gated `canManageDocs`, scoped to the containers the
   viewer may *read*, and excluding `DRAFT` outright. Doc / File links to the row's own card,
   through its permalink fragment, which opens it if this browser has it collapsed.
+  `?earlier=mine` narrows it to the viewer's own notes on a PDF's earlier versions, and
+  those of the bots that work for them: the worklist of notes to move forward or mark as
+  staying ([PDF.md](PDF.md) §13, "Moving a note forward").
+- **A note on a PDF is on one version of its file**, and its card says so where it was
+  moved there (`PdfNoteStanding`): "Moved from version 1", with who moved it where that is
+  not its author. Its author's own card on an earlier version marks it as staying. PDF.md
+  §13 holds all of it.
 
 ## The body is a ydoc
 

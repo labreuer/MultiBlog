@@ -320,8 +320,15 @@ to be the latest, or abandoned.
 | Read any version of a file: the latest, an earlier one, a candidate, or the page an abandoned one's address answers with | Whoever may read the file (`canUserReadFile`) | `/pdf/[slug]/v/[n]`, `/files/[slug]/v/[n]`, the bytes route, MCP's `read` |
 | Upload a new version | Whoever may manage the file (`canUserManageFile`), **and a bot whose person may** (`canUserUploadFileVersion`) | `assertMayUploadVersion` in `src/lib/file-ingest.ts`, for `PUT /api/files/[id]` and `POST /api/mcp/files?versionOf=` |
 | Promote a candidate, or abandon one | Whoever may manage the file (`canUserManageFile`), and no bot by its person's place | `promoteFileVersion` / `abandonFileVersion` in `src/lib/file-manage.ts` |
-| See the version list's management half: the upload, a candidate's two acts and what a promotion would do, the notes still on each earlier version | Whoever may manage the file | `src/app/pdf/[slug]/reading.tsx` sends it to no one else |
+| See the version list's management half: the upload, a candidate's two acts and what a promotion would do, the notes and link parts still on each earlier version, and each carry that was run | Whoever may manage the file | `src/app/pdf/[slug]/reading.tsx` sends it to no one else |
 | Write a note or a link part on a version | Whoever may annotate the file, on the latest or an earlier version, never on a candidate or an abandoned one | `assertCaptureVersion` in `src/lib/file-version-data.ts` |
+| Build a version's page map, which says it holds the same text as the version before it, and open the map's page | Whoever may manage the file. The page shows Forbidden to a reader who may not | `buildFileVersionMap` in `src/lib/file-manage.ts`; `/pdf/[slug]/v/[n]/map` |
+| Answer a run of sheets on a page map: accept it or decline it | Whoever may manage the file, while the version is a candidate and after its promotion | `answerFileVersionMapRun` in `src/lib/file-manage.ts` |
+| Run the bulk carry, at a promotion or afterwards, and see what it would move | Whoever may manage the file. It moves **everyone's** posted notes and minted link parts that place themselves | `promoteFileVersion`'s `carry`; `previewCarryAtPromotion`, `previewCarryFromVersion` and `carryFromVersion` in `src/lib/file-anchor-move.ts` |
+| Show or hide the moves of one carry together | Whoever may manage the file | `setCarryHidden` in `src/lib/file-anchor-move.ts` |
+| Move one note or link part forward, by a suggestion or by hand | **Its author, or the person a bot author works for**, who can read the file. No manager and no ADMIN by that role | `requireOwnNote` in `src/lib/file-note-move.ts`, for `moveNote` |
+| Mark a note as staying on its version, or take the mark off | The same, and only while the note is on a version that is not the latest | `requireOwnNote`, for `setNoteStays` |
+| Show or hide one move of a note, a carry's included | The same | `requireOwnNote`, for `setNoteMoveHidden` |
 
 - **A version has no visibility, owners or deletion of its own**, so there is no second read
   rule to keep in step with the file's. A candidate is readable by everyone who may read the
@@ -333,7 +340,23 @@ to be the latest, or abandoned.
   that corrected its text. It can so upload to a PRIVATE file it can't read; it still can't
   read it, or promote what it uploaded.
 - **Promoting and abandoning are refused while the file is deleted**, and so is an upload. A
-  candidate waits with its file.
+  candidate waits with its file. So do building a map, answering a run of sheets and a
+  carry.
+- **Moving one note is its author's alone, whatever the mover's role.** A manager of the
+  file moves everyone's notes at once, by a carry of what places itself, and nobody's one at
+  a time: whether a note still applies to a revised text is its author's to say. An ADMIN
+  is no exception, since no role curates other people's notes.
+  - **A bot's notes are its person's to move** (`user.works_for_user_id`), and a bot given
+    to another person takes its notes to them. A bot's DRAFT, and a part of a link the bot
+    has open, stay the bot's alone, as a DRAFT is its writer's (ANNOTATIONS.md).
+  - **Whoever moves a note must be able to read the file.** A note whose author is gone or
+    can no longer read the file is moved by a carry or not at all.
+  - **A "stays here" mark is told only to whoever may take it off.** Other readers see the
+    note listed as any note on that version is.
+  - **A deleted note, and a part of a deleted link, are moved once restored**, and a move of
+    one is refused until then.
+- **A carry moves no DRAFT, no deleted note, no part of an open or deleted link and no note
+  marked as staying.** Each waits for its author.
 - **A file the uploader can't read answers 404** to an upload, and one they can read and not
   manage 403, as the bytes route keeps a PRIVATE file's existence from its non-owners.
 
@@ -765,6 +788,8 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Doc mutations (visibility, byline, slug, record, delete) | `src/lib/doc-manage.ts`, wrapped by `src/app/actions/docs.ts` |
 | File mutations (visibility, title, slug, owners, delete), a version's promotion and abandoning, and the upload of a file or of a version | `src/lib/file-manage.ts`, `src/lib/file-ingest.ts` |
 | Who may upload a new version of a file (its managers, and a bot whose person manages it) | `canUserUploadFileVersion` in `src/lib/file-authz.ts` |
+| A version's page map (building one, answering a run of sheets) and the bulk carry (running one, showing or hiding its moves) | `src/lib/file-manage.ts`, `src/lib/file-anchor-move.ts`, wrapped by `src/app/actions/files.ts` |
+| One note's move, its "stays here" mark and whether a move of it is shown (its author, or the person a bot author works for) | `requireOwnNote` in `src/lib/file-note-move.ts`, wrapped by `src/app/actions/note-moves.ts` |
 | Annotation create / delete / restore | `src/app/actions/annotations.ts`; delete and restore in `src/lib/annotation-manage.ts` |
 | Doc links | `src/app/actions/doc-links.ts` |
 | Tag role floors (`canApplyTags`, `canCurateTags`) | `src/lib/role-checks.ts` |

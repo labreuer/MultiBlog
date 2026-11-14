@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { buildVersionMap } from "@/app/actions/files";
 import { FILE_LIMITS_PATH, contentTypeForKind, formatBytes, uploadKindForFilename, type FileLimits } from "@/lib/file-format";
 import { sendFile, uploadFailureMessage } from "@/lib/upload-client";
 import styles from "./PdfVersions.module.css";
@@ -15,9 +16,30 @@ import styles from "./PdfVersions.module.css";
 // A full load because the viewer is behind `ssr: false`, where a
 // `router.refresh()` alone is lost (CLAUDE.md), and the page it reaches is
 // another version's anyway.
+//
+// **The uploader says which kind of new version it is** (§13, "The
+// upload"), by which of two buttons opens the file picker:
+//
+// - **a better copy** of the same text, a new scan or a corrected text
+//   layer. As soon as the upload has answered, this asks for the page map
+//   between it and the latest (`buildVersionMap`), so the candidate's page
+//   can show what would carry. The map is a request of its own, since
+//   building one can take longer than an upload should wait;
+// - **a revised text**, a later draft. Nothing more runs.
+//
+// **The answer is not stored**, and no reader branches on it. What is there
+// afterwards is a candidate with a page map or one without, and a manager
+// may ask for the map later, on the version's map page. A map that fails to
+// build here leaves a candidate without one, which that page offers again.
+
+/** Which kind of new version the uploader said it is. It decides only whether a page map is asked for. */
+type VersionKind = "better-copy" | "revised-text";
 
 export default function PdfVersionUploader({ fileId }: { fileId: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  // Set by the button that opens the picker. A revised text is the kind that runs nothing.
+  const kindRef = useRef<VersionKind>("revised-text");
+  const [matching, setMatching] = useState(false);
   const [limits, setLimits] = useState<FileLimits | null>(null);
   const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -62,23 +84,48 @@ export default function PdfVersionUploader({ fileId }: { fileId: string }) {
         if (message) setError(message);
         return;
       }
-      const answer = (outcome.body ?? {}) as { unchanged?: unknown; url?: unknown };
+      const answer = (outcome.body ?? {}) as { unchanged?: unknown; url?: unknown; versionId?: unknown };
       if (answer.unchanged === true || typeof answer.url !== "string") {
         setProgress(null);
         setNote("Those are this file's latest bytes already, so nothing was uploaded.");
         return;
       }
+      const url = answer.url;
       // The candidate's own page. Progress stays up until the load replaces this one.
-      window.location.assign(answer.url);
+      if (kindRef.current !== "better-copy" || typeof answer.versionId !== "string") {
+        window.location.assign(url);
+        return;
+      }
+      // A better copy: its pages are matched with the latest's before its page opens.
+      // The candidate's page offers the map again where this fails.
+      setMatching(true);
+      void buildVersionMap(answer.versionId)
+        .catch(() => null)
+        .then(() => window.location.assign(url));
     });
   };
 
   const busy = progress !== null;
+  const pick = (kind: VersionKind) => {
+    kindRef.current = kind;
+    inputRef.current?.click();
+  };
   return (
     <div className={styles.manage} data-testid="pdf-version-uploader">
-      <button type="button" className={styles.manageButton} disabled={busy} onClick={() => inputRef.current?.click()}>
-        {busy ? `Uploading… ${progress.total ? Math.round((progress.sent / progress.total) * 100) : 0}%` : "Upload a new version"}
-      </button>
+      {busy ? (
+        <button type="button" className={styles.manageButton} disabled>
+          {matching ? "Matching its pages…" : `Uploading… ${progress.total ? Math.round((progress.sent / progress.total) * 100) : 0}%`}
+        </button>
+      ) : (
+        <div className={styles.manageRow}>
+          <button type="button" className={styles.manageButton} data-testid="pdf-upload-better-copy" onClick={() => pick("better-copy")}>
+            Upload a better copy
+          </button>
+          <button type="button" className={styles.manageButton} data-testid="pdf-upload-revised-text" onClick={() => pick("revised-text")}>
+            Upload a revised text
+          </button>
+        </div>
+      )}
       <input
         ref={inputRef}
         type="file"
@@ -92,7 +139,9 @@ export default function PdfVersionUploader({ fileId }: { fileId: string }) {
         }}
       />
       <p className={styles.versionFacts}>
-        A corrected scan, or a later draft. It waits at its own address until it is promoted, and this address shows what it does now until then.
+        A better copy holds the same text: a new scan, or the same scan with its text corrected. Its pages are matched with this version&apos;s, so that notes
+        and links can be carried to it. A revised text is a later draft: nothing is matched, and each note is moved by its author, or stays. Either waits at
+        its own address until it is promoted, and this address shows what it does now until then.
       </p>
       {error && (
         <p className={styles.manageError} role="alert">
