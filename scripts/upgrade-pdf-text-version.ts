@@ -36,6 +36,13 @@
 // version, and the deletes are re-checked inside their transaction for that
 // reason — but run it after the deploy has settled, not during it.
 //
+// **Each file's writes are made with its row locked** (`lockFile`), as a
+// version's upload, promotion and abandoning are, and as a note's move will
+// be (docs/PDF.md §13, "Earlier versions"). What an anchor holds is read
+// before the transaction, so a write also names the version the anchor was
+// on then: one that has left it since is not written back over. The page
+// text of a version abandoned while the script ran is not written either.
+//
 // Usage:
 //   npx tsx scripts/upgrade-pdf-text-version.ts            # dry run
 //   npx tsx scripts/upgrade-pdf-text-version.ts --apply
@@ -95,23 +102,36 @@ async function anchorsOn(fileVersionId: string): Promise<AnchorRef[]> {
   return refs;
 }
 
-async function moveAnchor(tx: Tx, ref: AnchorRef, textVersion: string): Promise<void> {
+/**
+ * Restamps one anchor, **where it is still on the version it was read on**:
+ * `ref.raw` is what the row held before the transaction, and an anchor that
+ * has been given another version's target since must not have this one
+ * written back over it. Answers whether it wrote.
+ */
+async function moveAnchor(tx: Tx, ref: AnchorRef, fileVersionId: string, textVersion: string): Promise<boolean> {
   const blob = { ...ref.raw, textVersion } as Prisma.InputJsonValue;
-  const where = { id: ref.id };
+  const where = { id: ref.id, fileVersionId };
   switch (ref.table) {
     case "annotation":
-      await tx.annotation.update({ where, data: { pdfTarget: blob } });
-      return;
+      return (await tx.annotation.updateMany({ where, data: { pdfTarget: blob } })).count > 0;
     case "tag_anchor":
-      await tx.tagAnchor.update({ where, data: { selector: blob } });
-      return;
+      return (await tx.tagAnchor.updateMany({ where, data: { selector: blob } })).count > 0;
     case "anchored_link_anchor":
-      await tx.anchoredLinkAnchor.update({ where, data: { selector: blob } });
-      return;
+      return (await tx.anchoredLinkAnchor.updateMany({ where, data: { selector: blob } })).count > 0;
     case "comment_quote_anchor":
-      await tx.commentQuoteAnchor.update({ where, data: { selector: blob } });
-      return;
+      return (await tx.commentQuoteAnchor.updateMany({ where, data: { selector: blob } })).count > 0;
   }
+}
+
+/**
+ * Locks a file's row for the rest of `tx`, and answers whether the version
+ * still has its bytes: one abandoned since the run began has none, and takes
+ * no page text.
+ */
+async function lockFile(tx: Tx, fileId: string, fileVersionId: string): Promise<boolean> {
+  await tx.$queryRaw`SELECT 1 FROM "file" WHERE "id" = ${fileId} FOR UPDATE`;
+  const version = await tx.fileVersion.findUnique({ where: { id: fileVersionId }, select: { abandonedAt: true } });
+  return version !== null && version.abandonedAt === null;
 }
 
 // Straight from the database rather than from `anchorsOn`'s snapshot, so a
@@ -153,6 +173,7 @@ async function main(): Promise<void> {
     orderBy: [{ file: { createdAt: "asc" } }, { number: "asc" }],
     select: {
       id: true,
+      fileId: true,
       number: true,
       filename: true,
       sha256: true,
@@ -203,10 +224,16 @@ async function main(): Promise<void> {
           throw new Error(`extraction stamped ${parsed.textVersion}, expected ${current}`);
         }
         if (apply) {
-          await prisma.filePageText.createMany({
-            data: parsed.pages.map((text, pageIndex) => ({ fileVersionId: file.id, pageIndex, textVersion: current, text })),
-            skipDuplicates: true,
-          });
+          await prisma.$transaction(
+            async (tx) => {
+              if (!(await lockFile(tx, file.fileId, file.id))) throw new Error("abandoned while this ran; it has no bytes to extract from");
+              await tx.filePageText.createMany({
+                data: parsed.pages.map((text, pageIndex) => ({ fileVersionId: file.id, pageIndex, textVersion: current, text })),
+                skipDuplicates: true,
+              });
+            },
+            { timeout: 60_000 },
+          );
         }
         currentPages = new Map(parsed.pages.map((text, pageIndex) => [pageIndex, text]));
         totals.extracted++;
@@ -233,7 +260,8 @@ async function main(): Promise<void> {
       if (apply && (movable.length > 0 || deletable.length > 0)) {
         await prisma.$transaction(
           async (tx) => {
-            for (const ref of movable) await moveAnchor(tx, ref, current);
+            await lockFile(tx, file.fileId, file.id);
+            for (const ref of movable) await moveAnchor(tx, ref, file.id, current);
             for (const version of deletable) {
               if ((await referencesTo(tx, file.id, version)) > 0) continue;
               const { count } = await tx.filePageText.deleteMany({ where: { fileVersionId: file.id, textVersion: version } });
