@@ -1558,6 +1558,25 @@ it or duplicates it — and that is the actual open question, not the markup.
 
 ---
 
+## `/comments` answers 500 when a thread is deleted while it loads
+
+**Status:** low priority. Found 2026-11-14 as the one red of a full e2e run
+(`admin-table.spec.ts`, "a default saved from /site-settings is each table's own default"),
+the first failure of that test in the 37 runs whose logs were at hand.
+
+`src/app/comments/page.tsx` loads a page of comments with `include: { thread: … }`, which
+Prisma runs as two queries. A thread deleted between them, by its post's cascade, leaves
+`comment.thread` null where the type says it can't be, and `comment.thread.post.id` throws:
+the page answers 500 (`TypeError: Cannot read properties of null (reading 'post')`). In the
+suite that is another worker's cleanup hard-deleting a throwaway post. On an instance it
+takes a post hard-deleted during a moderator's page load, and the app only soft-deletes
+posts, so nothing a reader does reaches it.
+
+A fix: drop the rows whose thread came back null, since the comment is gone too by the same
+cascade. The test's first read of each table's headers would also be steadier for asserting
+that it found some. The same shape is in any admin table that includes a required relation
+a cascade can remove.
+
 ## A dangling `updated_by_user_id` takes the whole doc cache down with it
 
 **Status:** observed once in a full `npm run e2e` run on 2026-08-25 (166 tests, 1 occurrence).
