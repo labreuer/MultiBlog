@@ -1,3 +1,4 @@
+import type { CaptureClaim } from "@/lib/file-version-data";
 import { readFile } from "node:fs/promises";
 import { storagePathFor } from "@/lib/file-storage";
 import { extractPageItems } from "@/lib/pdf-extract";
@@ -45,8 +46,13 @@ import type { QuoteInput } from "./annotation-writes";
 export async function anchorPdfQuote(
   file: ResolvedFile,
   quote: QuoteInput,
-): Promise<{ target: PdfTarget; quotedText: string; fileVersionId: string; label: string | null }> {
+): Promise<{ target: PdfTarget; quotedText: string; fileVersionId: string; claim: CaptureClaim; label: string | null }> {
   if (file.pageCount === null) throw invalid("That file has no pages to quote: it isn't a PDF.");
+  // Said before anything is measured; the write checks it again under the
+  // file row's lock (`assertCaptureVersion`), which is what holds.
+  if (file.versionState === "candidate") {
+    throw new ApiError("conflict", `Version ${file.versionNumber} is not yet this file's latest, and takes no notes or link parts until it is.`);
+  }
   const metadata = await pdfMetadata(file.versionId);
   const labels = metadata ? usablePageLabels(metadata.pageLabels, file.pageCount) : null;
   const indexes =
@@ -120,6 +126,9 @@ export async function anchorPdfQuote(
     target: captured.target,
     quotedText: captured.quotedText,
     fileVersionId: captured.fileVersionId,
+    // The version the reference named, and how: its own address, or the
+    // bare one, which means the latest and is refused once it no longer is.
+    claim: { fileId: file.id, fileVersionId: file.versionId, address: file.versionAddressed ? "version" : "bare" },
     label: labels ? labels[pageIndex] : null,
   };
 }

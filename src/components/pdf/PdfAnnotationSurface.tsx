@@ -39,6 +39,7 @@ import type { ShownVersion } from "@/lib/file-version";
 import type { FileVersionSummary } from "@/lib/file-version-data";
 import type { OtherVersionNote } from "@/lib/pdf-annotation-entries";
 import PdfVersionBanner from "./PdfVersionBanner";
+import { PdfCaptureProvider } from "./pdf-capture-context";
 import type { RemoteReader } from "./use-pdf-presence";
 import { PDFJS_VERSION, pdfjs } from "@/lib/pdfjs-client";
 import type { PdfTextItemLike } from "@/lib/pdf-text";
@@ -73,6 +74,11 @@ const COLLAB_PANE = "collab";
 // a selection update per pixel, and each capture behind this one is a pdfjs
 // worker round trip.
 const SELECTION_SETTLE_MS = 300;
+
+/** One selection, by value: its sheet and its quads. */
+function selectionKey(target: PdfTarget): string {
+  return JSON.stringify([target.pageIndex, target.quads]);
+}
 
 type Props = {
   fileId: string;
@@ -148,6 +154,9 @@ export default function PdfAnnotationSurface({
     () => window.matchMedia(POSITIONED_MEDIA_QUERY).matches,
   );
   const [activePane, setActivePane] = useState(ANNOTATIONS_PANE);
+  // What every capture made here names: this version, and whether the page is
+  // the bare address or the version's own (docs/PDF.md §13, "Versions").
+  const captureOrigin = useMemo(() => ({ fileVersionId: version.id, address: version.address }), [version.id, version.address]);
   const showAnnotationsPane = useCallback(() => {
     setPanelOpen(true);
     setActivePane(ANNOTATIONS_PANE);
@@ -161,11 +170,15 @@ export default function PdfAnnotationSurface({
   const [pending, setPending] = useState<{ target: PdfTarget; key: number } | null>(null);
   const [popover, setPopover] = useState<{ left: number; top: number; target: PdfTarget } | null>(null);
   // "Add to link" failing (docs/ANCHORED_LINKS.md) — shown inside the
-  // selection popover. Remembers *which* popover it was raised against
-  // (the `refetched` identity pattern below): a new selection makes a new
-  // popover object, the identities stop matching, and the stale error
-  // simply isn't rendered — no effect resetting state.
-  const [linkError, setLinkError] = useState<{ owner: object; message: string } | null>(null);
+  // selection popover. Remembers *which selection* it was raised against, so
+  // a new selection's popover simply doesn't render the stale error — no
+  // effect resetting state. **By the selection's value, never the popover
+  // object's identity**: the click on the button is itself a pointerup, which
+  // settles the same selection into a new popover object, and an error keyed
+  // on the object was never shown at all. A refused capture's message (a
+  // newer version, a candidate: docs/PDF.md §13) is the only thing telling
+  // the reader to reload, so it has to be.
+  const [linkError, setLinkError] = useState<{ owner: string; message: string } | null>(null);
 
   // Subscribers that want to hear "the rendering moved" — the panel's layout
   // hook, today. A plain listener set rather than React state: this fires on
@@ -947,7 +960,7 @@ export default function PdfAnnotationSurface({
     // read a context its own component renders. Its awareness stays null
     // here — the presence hook never publishes it — which the composer
     // already handles.
-    <>
+    <PdfCaptureProvider value={captureOrigin}>
       <AnnotationMoveProvider>
         <PdfViewer
           fileUrl={fileUrl}
@@ -1046,9 +1059,10 @@ export default function PdfAnnotationSurface({
                 const result = await addAnchoredLinkPart("file", fileId, {
                   kind: "pdf-text",
                   target: popover.target,
+                  origin: captureOrigin,
                 });
                 if (result.error) {
-                  setLinkError({ owner: popover, message: result.error });
+                  setLinkError({ owner: selectionKey(popover.target), message: result.error });
                   return;
                 }
                 setPopover(null);
@@ -1058,7 +1072,7 @@ export default function PdfAnnotationSurface({
             >
               Add to link
             </button>
-            {linkError?.owner === popover && (
+            {linkError?.owner === selectionKey(popover.target) && (
               <span style={{ color: "var(--error)", fontSize: "0.75rem", alignSelf: "center" }}>
                 {linkError.message}
               </span>
@@ -1066,7 +1080,7 @@ export default function PdfAnnotationSurface({
           </div>
         )}
       </AnnotationMoveProvider>
-    </>
+    </PdfCaptureProvider>
   );
 }
 

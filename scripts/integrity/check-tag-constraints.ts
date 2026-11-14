@@ -1,5 +1,6 @@
 // Proves the hand-written DDL in add_tags — and, since
-// docs/ANCHORED_LINKS.md, in add_anchored_links — actually enforces what its
+// docs/ANCHORED_LINKS.md, in add_anchored_links, and since docs/PDF.md §13 in
+// file_versions and file_version_anchor_checks — actually enforces what its
 // comments claim (PLAN.md §20b/§20c).
 //
 // Everything else in this folder verifies *stored data*. This one verifies the
@@ -64,6 +65,11 @@ type Fixtures = {
   /** A comment with one revision, for comment_quote_anchor's rows (PLAN.md §23c). */
   commentId: string;
   commentRevisionId: string;
+  /** Two files made in the probe transaction, each with its version 1 as its latest (docs/PDF.md §13). */
+  fileId: string;
+  fileVersionId: string;
+  otherFileId: string;
+  otherFileVersionId: string;
 };
 
 type Probe = {
@@ -260,6 +266,92 @@ MUST_REJECT.push(
   },
 );
 
+// docs/PDF.md §13, "Versions" — a file's versions and the anchors that name
+// one. Every constraint here is hand-written or a pair key Prisma can't be
+// asked to prove, and each failure it prevents is silent: a note drawn on
+// another file's sheets, or a file whose latest version is someone else's.
+MUST_REJECT.push(
+  {
+    name: "a second candidate version of one file",
+    constraint: "file_version_one_candidate_key",
+    why: "a file has one candidate at a time, which is what makes the promoted versions a line and 'the candidate' a definite article",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO file_version (id, file_id, number, filename, content_type, byte_size, sha256, uploaded_at_update_id)
+        VALUES ('probe-candidate-2', ${f.fileId}, 2, 'p.pdf', 'application/pdf', 1, 'probe', 0),
+               ('probe-candidate-3', ${f.fileId}, 3, 'p.pdf', 'application/pdf', 1, 'probe', 0)`,
+  },
+  {
+    name: "a file whose latest version is another file's",
+    constraint: "file_current_version_id_id_fkey",
+    why: "the pointer's key is on the pair, so the latest is one of the file's own versions",
+    attempt: (tx, f) => tx.$executeRaw`UPDATE file SET current_version_id = ${f.otherFileVersionId} WHERE id = ${f.fileId}`,
+  },
+  {
+    name: "an annotation on one file naming a version of another",
+    constraint: "annotation_file_version_id_file_id_fkey",
+    why: "an anchor's version is one of its own file's, or its quads are other sheets'",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO annotation (id, user_id, file_id, pdf_target, file_version_id)
+        VALUES ('probe-note-foreign', ${f.userId}, ${f.fileId}, '{}'::jsonb, ${f.otherFileVersionId})`,
+  },
+  {
+    name: "an annotation with a PDF target and no version",
+    constraint: "annotation_file_version_check",
+    why: "a target names the version whose sheets its quads were measured on, or nothing says where it may be drawn",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO annotation (id, user_id, file_id, pdf_target)
+        VALUES ('probe-note-unversioned', ${f.userId}, ${f.fileId}, '{}'::jsonb)`,
+  },
+  {
+    name: "an annotation with a version and no PDF target",
+    constraint: "annotation_file_version_check",
+    why: "a note with no target is the file's, listed on every version's page; a version on it would hide it from the others",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO annotation (id, user_id, file_id, file_version_id)
+        VALUES ('probe-note-versioned', ${f.userId}, ${f.fileId}, ${f.fileVersionId})`,
+  },
+  {
+    name: "a PDF_TEXT link part with no version",
+    constraint: "anchored_link_anchor_file_version_check",
+    why: "a link part into a PDF is drawn on one version's sheets, as a note is",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link_anchor (id, link_id, file_id, selector_kind, selector)
+        VALUES ('probe-link-unversioned', ${f.linkId}, ${f.fileId}, 'PDF_TEXT', '{}'::jsonb)`,
+  },
+  {
+    name: "a PDF_TEXT link part naming a version of another file",
+    constraint: "anchored_link_anchor_file_version_id_file_id_fkey",
+    why: "the pair key, as on an annotation",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link_anchor (id, link_id, file_id, file_version_id, selector_kind, selector)
+        VALUES ('probe-link-foreign', ${f.linkId}, ${f.fileId}, ${f.otherFileVersionId}, 'PDF_TEXT', '{}'::jsonb)`,
+  },
+  {
+    name: "a whole-file tag_anchor naming a version",
+    constraint: "tag_anchor_file_version_check",
+    why: "a tag is on the whole file and no version of it; `selector_kind = 'PDF_TEXT'` is NULL here, which a plain equality would let through",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO tag_anchor (id, assignment_id, file_id, file_version_id)
+        VALUES ('probe-tag-versioned', ${f.assignmentId}, ${f.fileId}, ${f.fileVersionId})`,
+  },
+  {
+    name: "a PDF_TEXT comment_quote_anchor with no version",
+    constraint: "comment_quote_anchor_file_version_check",
+    why: "the shared row shape: the fourth anchor table takes the rule before it takes a writer",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO comment_quote_anchor (id, comment_id, file_id, selector_kind, selector)
+        VALUES ('probe-quote-unversioned', ${f.commentId}, ${f.fileId}, 'PDF_TEXT', '{}'::jsonb)`,
+  },
+);
+
 // A constraint set that rejects everything is not a passing test. These are
 // what tell the two apart — the shapes the design says are *legal*, which have
 // to go in.
@@ -369,6 +461,45 @@ const KNOWN_RESIDUALS = [
     "where the per-kind rule belongs.",
 ];
 
+MUST_ACCEPT.push(
+  {
+    name: "an annotation with a PDF target on a version of its own file",
+    constraint: "",
+    why: "the shape every PDF capture writes (docs/PDF.md §13)",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO annotation (id, user_id, file_id, pdf_target, file_version_id)
+        VALUES ('probe-note-ok', ${f.userId}, ${f.fileId}, '{}'::jsonb, ${f.fileVersionId})`,
+  },
+  {
+    name: "a PDF_TEXT link part on a version of its own file",
+    constraint: "",
+    why: "pdfPartRow's shape",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO anchored_link_anchor (id, link_id, file_id, file_version_id, selector_kind, selector)
+        VALUES ('probe-link-pdf-ok', ${f.linkId}, ${f.fileId}, ${f.fileVersionId}, 'PDF_TEXT', '{}'::jsonb)`,
+  },
+  {
+    name: "a whole-file tag_anchor with no version",
+    constraint: "",
+    why: "a tag on a file, as tagObject writes it",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO tag_anchor (id, assignment_id, file_id)
+        VALUES ('probe-tag-file-ok', ${f.assignmentId}, ${f.fileId})`,
+  },
+  {
+    name: "one candidate beside a file's promoted versions",
+    constraint: "",
+    why: "an upload's row, neither promoted nor abandoned",
+    attempt: (tx, f) =>
+      tx.$executeRaw`
+        INSERT INTO file_version (id, file_id, number, filename, content_type, byte_size, sha256, uploaded_at_update_id)
+        VALUES ('probe-candidate-ok', ${f.fileId}, 2, 'p.pdf', 'application/pdf', 1, 'probe', 0)`,
+  },
+);
+
 /** Aborts the probe transaction without being mistaken for a real failure. */
 class RollbackSignal extends Error {}
 
@@ -474,7 +605,25 @@ async function main() {
         },
         select: { id: true, revisions: { select: { id: true } } },
       });
+      // Two files, each with its version 1, written in the order the upload
+      // writes them: the file, the version, then the pointer.
+      const probeFile = async (suffix: string) => {
+        const fileId = `probe-file-${suffix}-${Date.now()}`;
+        const versionId = `probe-version-${suffix}-${Date.now()}`;
+        await tx.$executeRaw`INSERT INTO file (id, slug, title, updated_at) VALUES (${fileId}, ${fileId}, 'Probe file', now())`;
+        await tx.$executeRaw`
+          INSERT INTO file_version (id, file_id, number, filename, content_type, byte_size, sha256, promoted_at, uploaded_at_update_id, promoted_at_update_id)
+          VALUES (${versionId}, ${fileId}, 1, 'probe.pdf', 'application/pdf', 1, 'probe', now(), 0, 0)`;
+        await tx.$executeRaw`UPDATE file SET current_version_id = ${versionId} WHERE id = ${fileId}`;
+        return { fileId, versionId };
+      };
+      const fileA = await probeFile("a");
+      const fileB = await probeFile("b");
       const fixtures: Fixtures = {
+        fileId: fileA.fileId,
+        fileVersionId: fileA.versionId,
+        otherFileId: fileB.fileId,
+        otherFileVersionId: fileB.versionId,
         userId: user.id,
         assignmentId: assignment.id,
         docId: doc.id,

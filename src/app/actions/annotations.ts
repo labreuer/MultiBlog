@@ -51,8 +51,8 @@ import { chipInputsForBodies, chipInputsForBody } from "@/lib/entity-chips/conte
 import { chipsInJSON } from "@/lib/entity-chips/renderings";
 import type { ChipInputs } from "@/lib/entity-chips/types";
 import { setAnnotationDeleted } from "@/lib/annotation-manage";
-import { latestVersionIdOf, noteVersions } from "@/lib/file-version-data";
-import { pdfNoteContainer } from "@/lib/file-version";
+import { CaptureRefused, assertCaptureVersion, noteVersions } from "@/lib/file-version-data";
+import { CAPTURE_RELOAD_MESSAGE, parseCaptureOrigin, pdfNoteContainer, type CaptureOrigin } from "@/lib/file-version";
 
 /**
  * `mintAnnotationConnection`, degraded to "no bundle" on any failure.
@@ -90,7 +90,11 @@ async function connectionBundleFor(
  * the document at its stamp, which on a large doc would hold the editor back
  * by a noticeable fraction of a second.
  */
-export type DraftAnchorInput = { pdfTarget: unknown };
+export type DraftAnchorInput = {
+  pdfTarget: unknown;
+  /** Where the selection was made: the version the viewer loaded and the address it loaded it from (docs/PDF.md §13). */
+  origin?: unknown;
+};
 
 /** A draft's range anchor: postAnnotation's own fields, meaning what they mean there. */
 export type DraftRangeInput = {
@@ -307,14 +311,24 @@ export async function createDraftAnnotation(
   // target is the server's reading of it, never the client's. A reply never
   // carries one (§13p), and a target that doesn't parse leaves the draft
   // document-level, as it would have posted.
+  //
+  // The capture is against the version the viewer loaded, which the insert
+  // checks under the file row's lock (`assertCaptureVersion`): a tab left
+  // open across a promotion is refused there, and never lands a draft on an
+  // earlier version unseen.
   const rawPdfTarget = pdfTargetOf(anchor);
-  const pdfAnchor =
-    target.kind === "file" && parentId === null && rawPdfTarget !== undefined
-      ? await capturePdfTextAnchor({ fileVersionId: await latestVersionIdOf(target.id), rawTarget: rawPdfTarget })
-      : null;
+  const wantsPdfAnchor = target.kind === "file" && parentId === null && rawPdfTarget !== undefined;
+  const origin = wantsPdfAnchor ? parseCaptureOrigin((anchor as DraftAnchorInput).origin) : null;
+  if (wantsPdfAnchor && !origin) {
+    return { error: CAPTURE_RELOAD_MESSAGE };
+  }
+  const pdfAnchor = origin ? await capturePdfTextAnchor({ fileVersionId: origin.fileVersionId, rawTarget: rawPdfTarget }) : null;
 
   const seed = seedAnnotationYdoc("");
-  const annotation = await prisma.annotation.create({
+  const created = await prisma
+    .$transaction(async (tx) => {
+      if (pdfAnchor && origin) await assertCaptureVersion(tx, { ...origin, fileId: target.id });
+      return tx.annotation.create({
     data: {
       ...(target.kind === "doc" ? { docId: target.id } : { fileId: target.id }),
       parentAnnotationId: parentId,
@@ -330,7 +344,16 @@ export async function createDraftAnnotation(
           }
         : {}),
     },
-  });
+      });
+    })
+    .catch((err: unknown) => {
+      if (err instanceof CaptureRefused) return { refused: err.message };
+      throw err;
+    });
+  if ("refused" in created) {
+    return { error: created.refused };
+  }
+  const annotation = created;
   await ydocStore.createIfAbsent(ydocIdForAnnotation(annotation.id), seed.ydoc, seed.stateVector);
 
   // The composer this id is about to mount would otherwise spend a second
@@ -470,6 +493,10 @@ export async function postAnnotation(opts: {
   // the branch below is chosen by which container the annotation is in, never
   // by which fields the client filled in.
   pdfTarget?: unknown;
+  // docs/PDF.md §13 — where a note on a PDF is being posted from: the version
+  // the viewer loaded and the address it loaded it from. Sent by the PDF
+  // surface with every post, and checked wherever the note has a target.
+  pdfOrigin?: unknown;
 }): Promise<{ error?: string }> {
   const session = await auth();
   if (!session?.user) {
@@ -532,6 +559,7 @@ export async function postAnnotation(opts: {
       parentId,
       settled,
       rawTarget: opts.pdfTarget,
+      origin: parseCaptureOrigin(opts.pdfOrigin),
       // The draft's own target with the version it was measured on, which a
       // post keeps: its quads are that version's sheets'.
       draftTarget:
@@ -1090,6 +1118,8 @@ async function postFileAnnotation(opts: {
   rawTarget: unknown;
   /** The target createDraftAnnotation captured and stored, if any: what a reopened draft posts with. */
   draftTarget: { target: PdfTarget; quotedText: string; fileVersionId: string } | null;
+  /** Where the post was made (docs/PDF.md §13); null from a client that sent none. */
+  origin: CaptureOrigin | null;
   raise: boolean;
   /** Display name for the notification email — resolved by the caller, which already has the session. */
   raisedBy: string;
@@ -1111,13 +1141,28 @@ async function postFileAnnotation(opts: {
   // A client that sends no target is posting a draft it did not open here —
   // reopened after a reload, or from "Your private notes" — so the row's own,
   // stored by that same capture when the draft was created, is the anchor.
-  // A file's bytes don't move, so the stored target needs nothing redone.
-  const captured =
-    parentId === null
-      ? opts.rawTarget !== undefined
-        ? await capturePdfTextAnchor({ fileVersionId: await latestVersionIdOf(fileId), rawTarget: opts.rawTarget })
-        : opts.draftTarget
-      : null;
+  // A version's bytes don't move, so the stored target needs nothing redone.
+  //
+  // **A note with a target is posted from a page showing its version**
+  // (docs/PDF.md §13, "Versions"). A fresh selection was measured on the
+  // version the viewer loaded, so that is the one it is captured against; a
+  // reopened draft keeps the version it was opened on, and is posted from
+  // that version's page and no other. Either way the version is checked
+  // again inside the transaction that writes the anchor.
+  const wantsAnchor = parentId === null && (opts.rawTarget !== undefined || opts.draftTarget !== null);
+  const origin = wantsAnchor ? opts.origin : null;
+  if (wantsAnchor && !origin) {
+    return { error: CAPTURE_RELOAD_MESSAGE };
+  }
+  const captured = !origin
+    ? null
+    : opts.rawTarget !== undefined
+      ? await capturePdfTextAnchor({ fileVersionId: origin.fileVersionId, rawTarget: opts.rawTarget })
+      : opts.draftTarget;
+  if (captured && origin && captured.fileVersionId !== origin.fileVersionId) {
+    return { error: "This draft is on another version of the file. Open it on that version's page to post it." };
+  }
+  const claim = captured && origin ? { ...origin, fileId } : null;
   const quotedText = captured?.quotedText ?? "";
 
   // The parent's newest settled version — what the replier was actually
@@ -1148,11 +1193,12 @@ async function postFileAnnotation(opts: {
   // body is a ydoc whatever it hangs off, so its history is container-
   // independent: the file path differs in its *anchor*, not in its body.
   const now = new Date();
-  await writeSettledBody({
+  const refused = await writeSettledBody({
     annotationId,
     settled,
     userId: opts.authorUserId,
     at: now,
+    ...(claim ? { before: (tx) => assertCaptureVersion(tx, claim) } : {}),
     alongside: {
       ...(raise ? { status: "RAISED" as const, raisedAt: now } : { status: "LIVE" as const }),
       postedAt: now,
@@ -1191,7 +1237,17 @@ async function postFileAnnotation(opts: {
           ? { anchorFrom: null, anchorTo: null, quotedText: "", anchorChips: Prisma.DbNull, ydocUpdateId: null }
           : {}),
     },
-  });
+  })
+    .then(() => null)
+    .catch((err: unknown) => {
+      if (err instanceof CaptureRefused) return err.message;
+      throw err;
+    });
+  // The draft stays a draft, with the body its writer settled: nothing of the
+  // post was written.
+  if (refused !== null) {
+    return { error: refused };
+  }
 
   if (raise) {
     const file = await prisma.storedFile.findUnique({

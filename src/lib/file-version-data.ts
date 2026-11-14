@@ -2,7 +2,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import { prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
 import { displayNameOf } from "@/lib/display-name";
-import { fileVersionState, type FileVersionState } from "@/lib/file-version";
+import { CAPTURE_RELOAD_MESSAGE, fileVersionState, type CaptureOrigin, type FileVersionState } from "@/lib/file-version";
 
 // docs/PDF.md §13, "Versions" — the queries over `file_version` that more
 // than one module asks. Server-only (Prisma); the vocabulary they share with
@@ -215,4 +215,65 @@ export function summariseVersions(file: { currentVersionId: string | null; versi
       promotedBy: version.promotedBy ? displayNameOf(version.promotedBy) : null,
       abandonedAt: version.abandonedAt?.toISOString() ?? null,
     }));
+}
+
+/** A capture's origin with the file it is into: what its write checks. */
+export type CaptureClaim = CaptureOrigin & { fileId: string };
+
+/** A capture refused for the version it names. The message is for whoever made it. */
+export class CaptureRefused extends Error {
+  constructor(
+    readonly reason: "reload" | "candidate" | "abandoned" | "not-this-file",
+    message: string,
+  ) {
+    super(message);
+    this.name = "CaptureRefused";
+  }
+}
+
+/**
+ * Checks the version a capture names, **inside the transaction that inserts
+ * its row and with the file row locked** (docs/PDF.md §13, "Versions"): a
+ * posted note, a draft opened on a selection, a part added to a link, and
+ * MCP's `anchorPdfQuote`. Throws `CaptureRefused`, which rolls the insert
+ * back.
+ *
+ * - **From the bare address the version must still be the latest.** A viewer
+ *   left open there across a promotion still shows the old bytes and isn't
+ *   told, and its writer means the latest: the capture is refused with a
+ *   reload message, as the schema gate refuses a stale tab, rather than
+ *   landing on an earlier version unseen.
+ * - **From a version's own address the version must be promoted**, and not
+ *   abandoned. That page names its version in its title, so its writer has
+ *   been told which it is. A candidate takes no note and no link part:
+ *   abandoning it removes the sheets the anchor was measured on.
+ *
+ * **Why inside the transaction.** Checked before it, a promotion can commit
+ * between the check and the insert, and the note lands on an earlier version
+ * with nothing said. The lock is `FOR SHARE`: it conflicts with the update a
+ * promotion makes to `current_version_id`, which then waits for this
+ * transaction, and not with another capture's, so two readers annotating one
+ * file don't queue behind each other.
+ */
+export async function assertCaptureVersion(tx: TransactionClient, claim: CaptureClaim): Promise<void> {
+  const [file] = await tx.$queryRaw<{ currentVersionId: string | null }[]>(
+    Prisma.sql`SELECT "current_version_id" AS "currentVersionId" FROM "file" WHERE "id" = ${claim.fileId} FOR SHARE`,
+  );
+  const version = file
+    ? await tx.fileVersion.findFirst({
+        where: { id: claim.fileVersionId, fileId: claim.fileId },
+        select: { number: true, promotedAt: true, abandonedAt: true },
+      })
+    : null;
+  if (!file || !version) throw new CaptureRefused("not-this-file", "That isn't a version of this file.");
+  if (claim.address === "bare") {
+    if (claim.fileVersionId !== file.currentVersionId) throw new CaptureRefused("reload", CAPTURE_RELOAD_MESSAGE);
+    return;
+  }
+  if (version.abandonedAt !== null) {
+    throw new CaptureRefused("abandoned", `Version ${version.number} of this file was abandoned, so nothing more can be anchored on it.`);
+  }
+  if (version.promotedAt === null) {
+    throw new CaptureRefused("candidate", `Version ${version.number} is not yet this file's latest, and takes no notes or link parts until it is.`);
+  }
 }

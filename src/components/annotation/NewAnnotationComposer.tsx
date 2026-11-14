@@ -1,5 +1,6 @@
 "use client";
 
+import { usePdfCaptureOrigin } from "@/components/pdf/pdf-capture-context";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { createDraftAnnotation, postAnnotation, discardDraftAnnotation } from "@/app/actions/annotations";
 import LiveAnnotationComposer from "./LiveAnnotationComposer";
@@ -107,19 +108,22 @@ export default function NewAnnotationComposer({ target, pdfTarget, autoOpen = fa
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `open`/startTransition are read at fire time, not tracked as retrigger deps for this cross-tree signal
   }, [movedDraft, setMovedDraft]);
 
+  // On a PDF, the version this page shows and how it was reached, which the
+  // capture below names (docs/PDF.md §13).
+  const pdfOrigin = usePdfCaptureOrigin();
   const openNew = useCallback(() => {
     setError(null);
     startTransition(async () => {
       // The selection goes onto the row as well as into this slot's state,
       // so the draft keeps it through a reload (createDraftAnnotation).
-      const result = await createDraftAnnotation(target, undefined, pdfTarget !== undefined ? { pdfTarget } : undefined);
+      const result = await createDraftAnnotation(target, undefined, pdfTarget !== undefined ? { pdfTarget, origin: pdfOrigin } : undefined);
       if ("error" in result) {
         setError(result.error);
         return;
       }
       setOpen({ id: result.id, connection: result.connection, pdfTarget });
     });
-  }, [target, pdfTarget]);
+  }, [target, pdfTarget, pdfOrigin]);
 
   // Fires once per mount. The PDF panel remounts this component (a fresh
   // `key`) on every capture, so "once per mount" is exactly once per selection

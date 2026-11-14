@@ -162,3 +162,23 @@ export function linkPartsVersions(
 export function pdfNoteContainer(file: { slug: string; title: string }, version: VersionRef | undefined): { path: string; title: string } {
   return { path: pdfPath(file.slug, version ?? null), title: version ? fileVersionTitle(file.title, version) : file.title };
 }
+
+/**
+ * What a capture says of where it was made: the version its viewer loaded,
+ * and the kind of address it loaded it from (docs/PDF.md §13, "Versions").
+ * The write checks both inside the transaction that inserts
+ * (`assertCaptureVersion`, file-version-data.ts).
+ */
+export type CaptureOrigin = { fileVersionId: string; address: "bare" | "version" };
+
+/** A capture's origin as a client sent it, or null when it isn't one. Parsed, never cast: a server action is sent whatever its caller likes. */
+export function parseCaptureOrigin(raw: unknown): CaptureOrigin | null {
+  if (!raw || typeof raw !== "object") return null;
+  const { fileVersionId, address } = raw as Record<string, unknown>;
+  if (typeof fileVersionId !== "string" || fileVersionId === "" || fileVersionId.length > 64) return null;
+  if (address !== "bare" && address !== "version") return null;
+  return { fileVersionId, address };
+}
+
+/** What a capture is told when the page it was made on no longer shows what its writer means. */
+export const CAPTURE_RELOAD_MESSAGE = "This file has a newer version than the one this page is showing. Reload the page, then select the passage again.";

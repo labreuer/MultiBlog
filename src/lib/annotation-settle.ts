@@ -1,7 +1,7 @@
 import type { JSONContent } from "@tiptap/core";
 import type { Role } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, type TransactionClient } from "@/lib/prisma";
 import { flushAnnotationCache } from "@/lib/annotation-admin";
 import { decodeAnnotationBody } from "@/lib/annotation-body";
 import { refreshAnchorsIntoNote } from "@/lib/entity-chips/refresh";
@@ -156,10 +156,17 @@ export async function writeSettledBody(opts: {
   userId: string;
   at: Date;
   alongside: Prisma.AnnotationUpdateInput;
+  /**
+   * A check that belongs to this write's own transaction and rolls it back
+   * by throwing: a PDF capture's version, which must still be right when the
+   * anchor lands (`assertCaptureVersion`).
+   */
+  before?: (tx: TransactionClient) => Promise<void>;
 }): Promise<void> {
   const { annotationId, settled, userId, at, alongside } = opts;
   const ydocId = ydocIdForAnnotation(annotationId);
   await prisma.$transaction(async (tx) => {
+    await opts.before?.(tx);
     const existing = await tx.ydocSnapshot.findFirst({
       where: { ydocId, lastYdocUpdateId: settled.mark },
       select: { id: true },

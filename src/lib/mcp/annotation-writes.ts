@@ -1,4 +1,4 @@
-import { noteVersions } from "@/lib/file-version-data";
+import { CaptureRefused, noteVersions } from "@/lib/file-version-data";
 import { pdfNoteContainer } from "@/lib/file-version";
 import { chipMarkdownBetween, chipMarkdowns, chipsInJSON } from "@/lib/entity-chips/renderings";
 import { writesBack } from "@/lib/entity-chips/registry";
@@ -229,7 +229,7 @@ export async function annotateFor(ctx: McpContext, input: QuoteInput & { on: str
     passage = { text: at.shown, ...(at.chipsNow ? { chipsNow: at.chipsNow } : {}) };
   } else {
     const at = await anchorPdfQuote(container.file, input);
-    anchor = { kind: "pdf", target: at.target, quotedText: at.quotedText, fileVersionId: at.fileVersionId };
+    anchor = { kind: "pdf", target: at.target, quotedText: at.quotedText, fileVersionId: at.fileVersionId, claim: at.claim };
     passage = { text: at.quotedText, page: at.target.pageIndex + 1, ...(at.label ? { label: at.label } : {}) };
   }
 
@@ -238,6 +238,10 @@ export async function annotateFor(ctx: McpContext, input: QuoteInput & { on: str
     parentId: parent?.id ?? null,
     body,
     anchor,
+  }).catch((err: unknown) => {
+    // The PDF's version moved under the write: read it again and quote from what it shows now.
+    if (err instanceof CaptureRefused) throw new ApiError("conflict", err.message);
+    throw err;
   });
   const url = container.kind === "doc" ? `/doc/${container.doc.slug}` : await pdfNotePath(container.file, created.id);
   return {

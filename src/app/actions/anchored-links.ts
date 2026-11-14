@@ -24,7 +24,8 @@ import { docContentExtensions, pmDocContentSchema } from "@/lib/tiptap-schema";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
 import { ydocStore } from "../../../server/ydoc-store";
-import { latestVersionIdOf } from "@/lib/file-version-data";
+import { CaptureRefused, assertCaptureVersion, type CaptureClaim } from "@/lib/file-version-data";
+import { CAPTURE_RELOAD_MESSAGE, parseCaptureOrigin } from "@/lib/file-version";
 
 // docs/ANCHORED_LINKS.md — mutations on **the viewer's one open link** (a
 // draft, or a minted link reopened for editing), the mint that turns a
@@ -64,7 +65,8 @@ import { latestVersionIdOf } from "@/lib/file-version-data";
 /** One selection, as the client names it. The target's kind picks the shape. */
 export type AnchoredLinkPartInput =
   | { kind: "doc-range"; from: number; to: number; quotedText: string }
-  | { kind: "pdf-text"; target: unknown };
+  /** `origin` is where the selection was made: the version the viewer loaded and the address it loaded it from (docs/PDF.md §13). */
+  | { kind: "pdf-text"; target: unknown; origin?: unknown };
 
 export type OpenLinkPart = {
   anchorId: string;
@@ -276,12 +278,20 @@ export async function addAnchoredLinkPart(
   }
 
   let row: LinkPartRow;
+  // A PDF part is captured against the version the viewer loaded, which the
+  // insert below checks under the file row's lock.
+  let claim: CaptureClaim | null = null;
 
   if (part.kind === "pdf-text") {
-    const captured = await capturePdfTextAnchor({ fileVersionId: await latestVersionIdOf(target.id), rawTarget: part.target });
+    const origin = parseCaptureOrigin(part.origin);
+    if (!origin) {
+      return { error: CAPTURE_RELOAD_MESSAGE };
+    }
+    const captured = await capturePdfTextAnchor({ fileVersionId: origin.fileVersionId, rawTarget: part.target });
     if (!captured) {
       return { error: "That selection couldn't be anchored." };
     }
+    claim = { ...origin, fileId: target.id };
     row = pdfPartRow(target.id, captured);
   } else {
     const ydocId = ydocIdForDoc(target.id);
@@ -307,15 +317,22 @@ export async function addAnchoredLinkPart(
   }
 
   const open = await getOrCreateOpenLink(session.user.id);
-  await prisma.$transaction(async (tx) => {
+  const refused = await prisma
+    .$transaction(async (tx) => {
+      if (claim) await assertCaptureVersion(tx, claim);
     // partOrder = current count. Removals leave gaps and nothing renumbers;
     // readers order by [partOrder, id], which absorbs both gaps and the race
     // of two tabs adding at once (equal orders tie-broken by id).
     const partOrder = await tx.anchoredLinkAnchor.count({ where: { linkId: open.id } });
     await tx.anchoredLinkAnchor.create({ data: { ...row, linkId: open.id, partOrder } });
     if (open.mintedAt) await stampLinkEdited(tx, open.id);
-  });
-  return {};
+      return null;
+    })
+    .catch((err: unknown) => {
+      if (err instanceof CaptureRefused) return err.message;
+      throw err;
+    });
+  return refused === null ? {} : { error: refused };
 }
 
 /**

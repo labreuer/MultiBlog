@@ -1,4 +1,4 @@
-import { test, expect, signIn, gotoOk } from "./fixtures";
+import { test, expect, signIn, gotoOk, annotationEditor, visibleText } from "./fixtures";
 import {
   ADMIN_EMAIL,
   addTestFileVersion,
@@ -429,6 +429,105 @@ test.describe("a file with two versions", () => {
       expect(await moved(`/files/${oldSlug}/v/1`)).toBe(`/files/${file.slug}/v/1`);
     } finally {
       await dispose(made);
+    }
+  });
+  test("a capture names the version its viewer loaded, and its write checks it", async ({ page, request }) => {
+    const agent = await createAgent(request);
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: [V1_LINES] });
+    const RELOAD = "Reload the page";
+    const tray = page.getByTestId("anchored-link-tray");
+    try {
+      await signIn(page, ADMIN_EMAIL);
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+      await expectSheetText(page, V1_LINES[0]);
+
+      // A second version is promoted while this tab stays open on the bare
+      // address. The tab still shows version 1's bytes and isn't told.
+      const v2 = await addTestFileVersion(file.id, { pages: [V2_LINES] });
+
+      // ---- the stale tab: every capture is refused, and nothing is written --
+      await selectPhrase(page, 1, V1_DRAFT_PHRASE);
+      await page.getByRole("button", { name: "Add to link" }).click();
+      await expect(page.getByText(RELOAD).first()).toBeVisible({ timeout: 15_000 });
+      await selectPhrase(page, 1, V1_NOTE_QUOTE);
+      await page.getByRole("button", { name: "Annotate" }).click();
+      await expect(page.getByText(RELOAD).first()).toBeVisible({ timeout: 15_000 });
+      expect(await getFileAnchorVersions(file.id)).toEqual({ annotations: [], linkParts: [] });
+
+      // ---- version 1's own address: its page has said which version it is ----
+      // A note and a link part made there are on version 1, though it is no
+      // longer the latest.
+      await gotoOk(page, `/pdf/${file.slug}/v/1`);
+      await waitForViewer(page);
+      await selectPhrase(page, 1, V1_DRAFT_PHRASE);
+      await page.getByRole("button", { name: "Add to link" }).click();
+      await expect(tray).toContainText("1 passage", { timeout: 15_000 });
+      await selectPhrase(page, 1, V1_NOTE_QUOTE);
+      await page.getByRole("button", { name: "Annotate" }).click();
+      const editor = annotationEditor(page);
+      await editor.click();
+      await editor.pressSequentially("Made on version one's own page.");
+      await page.getByRole("button", { name: "Save" }).click();
+      await expect(visibleText(page, "Made on version one's own page.")).toBeVisible({ timeout: 15_000 });
+      await expect.poll(async () => (await getFileAnchorVersions(file.id)).annotations, { timeout: 15_000 }).toEqual([file.versionId]);
+      expect((await getFileAnchorVersions(file.id)).linkParts).toEqual([file.versionId]);
+      // Drawn here, and not on the latest, where it is listed under its version.
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+      await expectSheetText(page, V2_LINES[0]);
+      await expect(page.getByTestId("pdf-other-version-notes")).toContainText("Made on version one's own page.");
+      await expect(page.locator(".annoRect[data-anno-id]")).toHaveCount(0);
+
+      // ---- the reloaded bare address: a capture is on the latest -------------
+      await selectPhrase(page, 1, V2_NOTE_QUOTE);
+      await page.getByRole("button", { name: "Add to link" }).click();
+      await expect(tray).toContainText("2 passages", { timeout: 15_000 });
+      await expect
+        .poll(async () => [...(await getFileAnchorVersions(file.id)).linkParts].sort(), { timeout: 15_000 })
+        .toEqual([file.versionId, v2.id].sort());
+
+      // ---- MCP: the address read is the version written ---------------------
+      const onFirst = await agent.call("add_note", { on: `/pdf/${file.slug}/v/1`, body: "The bot, on version one.", quote: V1_LINK_QUOTE });
+      expect(onFirst.isError, JSON.stringify(onFirst.error)).toBe(false);
+      expect(String(onFirst.result.card)).toMatch(new RegExp(`^/pdf/${file.slug}/v/1#`));
+      const onLatest = await agent.call("add_note", { on: `/pdf/${file.slug}`, body: "The bot, on the latest.", quote: "says rather more" });
+      expect(onLatest.isError, JSON.stringify(onLatest.error)).toBe(false);
+      expect(String(onLatest.result.card)).toMatch(new RegExp(`^/pdf/${file.slug}#`));
+      // Version 1's words are not the latest's: the bare address quotes the latest alone.
+      expect((await agent.call("add_note", { on: `/pdf/${file.slug}`, body: "x", quote: V1_LINK_QUOTE })).error.code).toBe("no_match");
+      const linked = await agent.call("create_link", { links: [{ parts: [{ on: `/pdf/${file.slug}/v/1`, quote: V1_LINK_QUOTE }] }] });
+      expect(linked.isError, JSON.stringify(linked.error)).toBe(false);
+      const versions = await getFileAnchorVersions(file.id);
+      expect(versions.annotations).toEqual([file.versionId, file.versionId, v2.id]);
+      expect([...versions.linkParts].sort()).toEqual([file.versionId, file.versionId, v2.id].sort());
+
+      // ---- a candidate takes no note and no link part -----------------------
+      const v3 = await addTestFileVersion(file.id, { pages: [["A third version, not yet promoted.", "It waits."]], promote: false });
+      expect(v3.number).toBe(3);
+      const refusedNote = await agent.call("add_note", { on: `/pdf/${file.slug}/v/3`, body: "x", quote: "third version" });
+      expect(refusedNote.error.code).toBe("conflict");
+      const refusedLink = await agent.call("create_link", { links: [{ parts: [{ on: `/pdf/${file.slug}/v/3`, quote: "third version" }] }] });
+      expect(refusedLink.error.code).toBe("conflict");
+      // Its page is readable, says what it is, and refuses a capture made on it.
+      await gotoOk(page, `/pdf/${file.slug}/v/3`);
+      await waitForViewer(page);
+      await expectSheetText(page, "A third version");
+      await expect(page.getByTestId("pdf-version-banner")).toContainText("not yet the latest");
+      await selectPhrase(page, 1, "third version");
+      await page.getByRole("button", { name: "Add to link" }).click();
+      await expect(page.getByText("takes no notes or link parts").first()).toBeVisible({ timeout: 15_000 });
+      // The bare address still shows version 2: an upload changes nothing until it is promoted.
+      await gotoOk(page, `/pdf/${file.slug}`);
+      await waitForViewer(page);
+      await expectSheetText(page, V2_LINES[0]);
+      // A note with no target is the file's, and may be written from a candidate's address.
+      const whole = await agent.call("add_note", { on: `/pdf/${file.slug}/v/3`, body: "On the whole file, from the candidate." });
+      expect(whole.isError, JSON.stringify(whole.error)).toBe(false);
+      expect((await getFileAnchorVersions(file.id)).annotations).toEqual([file.versionId, file.versionId, v2.id]);
+    } finally {
+      await deleteTestFile(file.id);
+      await agent.dispose();
     }
   });
 });
