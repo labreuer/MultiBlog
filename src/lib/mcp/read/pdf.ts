@@ -5,9 +5,10 @@ import { pdfMetadata } from "@/lib/pdf-metadata";
 import { labelRanges, pageNameForSheet, pagesLabelled, sheetsLabelled, sheetsNamed, usablePageLabels } from "@/lib/pdf-page-labels";
 import { formatPageName, pageFromHash, type PageName, type PageStamp } from "@/lib/pdf-open-params";
 import { pageStampFor, pdfPath } from "@/lib/file-version";
-import { readPage, type PageReading } from "@/lib/pdf-link-reading";
+import { carriedElsewhere, readPage, type PageReading } from "@/lib/pdf-link-reading";
+import { FragmentChecker } from "@/lib/pdf-fragment-check";
 import { onePassage, parseFragmentPassages, passageWords, resolveAll, resolvePassage, skeletonOf, type PassageText } from "@/lib/pdf-fragment";
-import { checkPassage, passageElsewhere, type FilePages } from "@/lib/pdf-fragment-findings";
+import { checkPassage, checkPassageAt, passageElsewhere, type FilePages } from "@/lib/pdf-fragment-findings";
 import { overlapWindows } from "@/lib/comment-quote-match";
 import { markdownToText } from "@/lib/markdown-import";
 import { tagsForTarget } from "@/lib/tag-data";
@@ -37,8 +38,10 @@ import { readBoundFor, type ReadArgs } from "./args";
 // address that version. The two can be the same number and different sheets,
 // so once a file has a second version every sheet answered carries `link`,
 // its stamped form, which is what to write. A fragment that names another
-// version is answered on that version, and the answer says so: no version has
-// a page map yet, so none is carried.
+// version is carried to the version read, through the page maps between the
+// two, and the answer's `note` says how it was read where that changed the
+// sheet. One that can't be carried is answered on the version it names, and
+// the `note` says so.
 
 /** About this much of the page either side of a quote or a fragment link's passage. */
 const SURROUNDINGS = 300;
@@ -212,16 +215,42 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
   const fragmentRead = hasText || [args.sheet, args.sheets, args.page, args.entry, args.around].every((arg) => arg === undefined);
   const reading: PageReading | null = fragmentPage && fragmentRead ? readPage(fragmentPage, address, file.versions) : null;
   let note: string | undefined;
-  if (reading?.kind === "elsewhere") {
-    // No page map joins the two, so the link opens the version it names.
-    const named = await readableFileBySlug(ctx.actor, file.id, reading.version);
-    const said = fragmentPage?.v === undefined ? "a link without v= names the file's first version" : `its v= names version ${reading.version}`;
+  // A carried link whose sheet has no counterpart here is carried only by its
+  // words, where they occur exactly once in the version read. One without
+  // words, or whose words aren't found so, is not carried.
+  const lost =
+    reading?.kind === "carried" && reading.sheets.length === 0 && reading.state !== "abandoned"
+      ? !hasText || !(await firstPassageFoundOnce(file, fragment))
+      : false;
+  if (reading?.kind === "elsewhere" || lost) {
+    // It can't be carried, so the link opens the version it names.
+    const named = await readableFileBySlug(ctx.actor, file.id, reading!.version);
+    const said = fragmentPage?.v === undefined ? "a link without v= names the file's first version" : `its v= names version ${reading!.version}`;
+    const why = lost ? `its ${pageText(fragmentPage!)} has no counterpart on version ${file.versionNumber}` : `no page map joins it to version ${file.versionNumber}`;
     return {
       ...(await readPdf(ctx, named, args, fragment, extras)),
-      note: `Read on version ${reading.version}, at ${named.url}: ${said}, and no page map joins it to version ${file.versionNumber}.`,
+      note: `Read on version ${reading!.version}, at ${named.url}: ${said}, and ${why}.`,
     };
   }
-  if (reading && reading.kind !== "here") {
+  if (reading?.kind === "carried" && fragmentPage) {
+    const said = fragmentPage.v === undefined ? "a link without v= names the file's first version" : `its v= names version ${reading.version}`;
+    if (reading.sheets.length === 0) {
+      // Only an abandoned version's link, or one whose words were found, gets here.
+      if (!hasText) {
+        throw new ApiError("not_found", `Version ${reading.version} of this file was abandoned, and its ${pageText(fragmentPage)} has no counterpart on version ${file.versionNumber}.`);
+      }
+      note = `Read as version ${reading.version}'s: ${said}. Its ${pageText(fragmentPage)} has no counterpart on version ${file.versionNumber}, so each passage was looked for by its words alone.`;
+    } else {
+      const landed = reading.sheets[0];
+      if (carriedElsewhere(fragmentPage, landed, ownLabels, pageCount)) {
+        note = `Read as version ${reading.version}'s: ${said}, and its ${pageText(fragmentPage)} is sheet ${landed + 1} of version ${file.versionNumber}.`;
+      }
+      if (!hasText) {
+        const result = await pagesResult(file, labels, ownLabels, [landed], maxChars);
+        return note ? { ...result, note } : result;
+      }
+    }
+  } else if (reading && reading.kind !== "here") {
     const gone =
       reading.kind === "abandoned"
         ? `Version ${reading.version} of this file was abandoned, and its sheets were never matched to another version's.`
@@ -380,6 +409,13 @@ async function aroundQuote(file: ResolvedFile, labels: string[] | null, args: Re
   };
 }
 
+/** Whether the first passage of a fragment is on exactly one sheet of the version read, once: what carries a link whose sheet has no counterpart. */
+async function firstPassageFoundOnce(file: ResolvedFile, fragment: string): Promise<boolean> {
+  const first = parseFragmentPassages(`#${fragment}`)[0];
+  if (!first) return false;
+  return (await new FragmentChecker().sheetHolding(file.id, file.versionId, first, [])) !== null;
+}
+
 /**
  * A fragment link read as its passage (§8): each `text` resolved as the
  * viewer resolves it (`resolvePassage`, on the first of the sheets its page
@@ -391,11 +427,13 @@ async function aroundQuote(file: ResolvedFile, labels: string[] | null, args: Re
  * instead when it occurs exactly once elsewhere.
  *
  * Each passage is read by the version it names. One that names the version
- * read is found on its sheets. One that names an abandoned version, or a
- * version the file never had, has no version to be read on, and is looked for
- * by its words alone: it is answered where exactly one sheet of the version
- * read holds it, once, marked `foundBy`. One that names another version than
- * the first passage's is refused: the link is read on one version.
+ * read is found on its sheets. One the page maps carry to the version read
+ * is found on the sheets it lands on, and marked `carriedFrom`. One that
+ * names an abandoned version or a version the file never had, or whose sheet
+ * has no counterpart, is looked for by its words alone: it is answered where
+ * exactly one sheet of the version read holds it, once, marked `foundBy`.
+ * One that names another version, which no page map joins to the first
+ * passage's, is refused: the link is read on one version.
  */
 async function fragmentPassages(
   file: ResolvedFile,
@@ -408,7 +446,10 @@ async function fragmentPassages(
   const pageCount = file.pageCount!;
   const address = { shown: file.versionNumber, own: file.versionAddressed };
   const readings = passages.map((passage) => readPage(passage.page, address, file.versions));
-  const sheetsOf = passages.map((passage, n) => (readings[n].kind === "here" ? sheetsNamed(passage.page, ownLabels, pageCount) : []));
+  const sheetsOf = passages.map((passage, n) => {
+    const reading = readings[n];
+    return reading.kind === "here" ? sheetsNamed(passage.page, ownLabels, pageCount) : reading.kind === "carried" ? reading.sheets : [];
+  });
   const texts = await pageTexts(file.versionId, [...new Set(sheetsOf.flat())]);
   // Every page of the version read, for a miss and for a passage looked for by its words alone.
   let whole: FilePages | null = null;
@@ -434,13 +475,14 @@ async function fragmentPassages(
       throw invalid(`That link's passages name different versions (${file.versionNumber} and ${reading.version}); read each on its own version's address.`);
     }
     let found: { index: number; text: string; range: { start: number; end: number } } | null = null;
-    if (reading.kind !== "here") {
+    if (reading.kind !== "here" && !(reading.kind === "carried" && reading.sheets.length > 0)) {
       const pages = await wholeVersion();
       const sheet = passageElsewhere(pages, passage, []);
       const held = sheet !== null ? pages.pages.get(sheet - 1) : undefined;
       const range = held ? resolvePassage(held.text, passage, held.skeleton) : null;
       if (sheet === null || !held || !range) {
-        throw new ApiError("no_match", `A passage of that link names version ${reading.version}, which can't be read, and its words aren't on exactly one sheet of version ${file.versionNumber}.`, {
+        const why = reading.kind === "carried" ? `whose ${pageText(passage.page)} has no counterpart here` : "which can't be read";
+        throw new ApiError("no_match", `A passage of that link names version ${reading.version}, ${why}, and its words aren't on exactly one sheet of version ${file.versionNumber}.`, {
           passage: passageWords(passage),
         });
       }
@@ -457,8 +499,12 @@ async function fragmentPassages(
     }
     if (!found) {
       // The check's own finding, over every page, for the answer.
-      const finding = checkPassage(await wholeVersion(), passage);
-      throw new ApiError("no_match", `A passage of that fragment link isn't on ${pageText(passage.page)}.`, {
+      const finding = reading.kind === "carried" ? checkPassageAt(await wholeVersion(), passage, sheetsOf[n]) : checkPassage(await wholeVersion(), passage);
+      const where =
+        reading.kind === "carried"
+          ? `sheet ${sheetsOf[n][0] + 1} of version ${file.versionNumber}, where version ${reading.version}'s ${pageText(passage.page)} is now`
+          : pageText(passage.page);
+      throw new ApiError("no_match", `A passage of that fragment link isn't on ${where}.`, {
         passage: passageWords(passage),
         ...(finding.kind === "no-match"
           ? {
@@ -473,7 +519,12 @@ async function fragmentPassages(
               : {}),
       });
     }
-    out.push({ sheet: found.index + 1, ...(labels ? { page: labels[found.index] } : {}), ...surroundings(found.text, found.range.start, found.range.end) });
+    out.push({
+      sheet: found.index + 1,
+      ...(labels ? { page: labels[found.index] } : {}),
+      ...(reading.kind === "carried" ? { carriedFrom: { version: reading.version, ...("sheet" in passage.page ? { sheet: passage.page.sheet } : { page: passage.page.label }) } } : {}),
+      ...surroundings(found.text, found.range.start, found.range.end),
+    });
   }
   return { kind: "pdf-passages", url: file.url, passages: out };
 }

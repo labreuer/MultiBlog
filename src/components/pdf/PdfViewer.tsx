@@ -67,6 +67,22 @@ function openingSheet(page: PageName, ownLabels: readonly string[] | null, pageC
   return sheets.length > 0 ? sheets[0] + 1 : null;
 }
 
+/**
+ * The 1-based sheet to open at for a fragment's page, as the surface reads it
+ * (`opensAt`): the sheet it names here, the sheet the page maps carried it
+ * to, or none.
+ */
+function sheetToOpen(
+  page: PageName,
+  opensAt: ((page: PageName) => "as-written" | number | null) | undefined,
+  ownLabels: readonly string[] | null,
+  pageCount: number,
+): number | null {
+  const opening = opensAt ? opensAt(page) : "as-written";
+  if (opening === null) return null;
+  return opening === "as-written" ? openingSheet(page, ownLabels, pageCount) : Math.min(opening, pageCount);
+}
+
 /** One tab in the side panel, and the pane it selects. */
 export type PdfPane = {
   /** Stable id; also part of the tab's and the pane's DOM ids, which
@@ -136,13 +152,14 @@ type Props = {
   /** The presence/follow control, rendered in the toolbar. Absent until Phase 4. */
   followBar?: ReactNode;
   /**
-   * Whether the viewer opens at the sheet a fragment's page names
-   * (docs/PDF.md §13, "Links into the file"): the surface answers by the
-   * version the page names, since a `#sheet=50&v=1` read on version 2 names a
-   * sheet of other bytes. Absent, every page opens, as on a file with one
-   * version.
+   * The sheet the viewer opens at for a fragment's page (docs/PDF.md §13,
+   * "Links into the file"): the surface answers by the version the page
+   * names, since a `#sheet=50&v=1` read on version 2 names a sheet of other
+   * bytes. `"as-written"` is the sheet the page names here; a number is the
+   * 1-based sheet the page maps carried it to; null opens at none. Absent,
+   * every page opens as written, as on a file with one version.
    */
-  opensAt?: (page: PageName) => boolean;
+  opensAt?: (page: PageName) => "as-written" | number | null;
 };
 
 const ZOOM_PRESETS = ["page-fit", "page-width", "0.5", "0.75", "1", "1.25", "1.5", "2", "3"] as const;
@@ -283,8 +300,7 @@ export default function PdfViewer({
       // Only a page the surface reads on this version (`opensAt`): the sheet
       // another version's link names is a sheet of other bytes.
       const namedPage = pageFromHash(window.location.hash);
-      const askedPage = namedPage && (opensAtRef.current?.(namedPage) ?? true) ? namedPage : null;
-      const askedSheet = askedPage && openingSheet(askedPage, pending.ownPageLabels, pending.pdf.numPages);
+      const askedSheet = namedPage && sheetToOpen(namedPage, opensAtRef.current, pending.ownPageLabels, pending.pdf.numPages);
       if (askedSheet) viewer.currentPageNumber = askedSheet;
       handleRef.current = pending;
       setPageLabels(pending.pageLabels);
@@ -302,9 +318,8 @@ export default function PdfViewer({
     // into a document already open changes only the fragment.
     const onHashChange = () => {
       const named = pageFromHash(window.location.hash);
-      const page = named && (opensAtRef.current?.(named) ?? true) ? named : null;
       const handle = handleRef.current;
-      const sheet = page && handle && openingSheet(page, handle.ownPageLabels, handle.pdf.numPages);
+      const sheet = named && handle && sheetToOpen(named, opensAtRef.current, handle.ownPageLabels, handle.pdf.numPages);
       if (handle && sheet) handle.viewer.currentPageNumber = sheet;
     };
     window.addEventListener("hashchange", onHashChange);

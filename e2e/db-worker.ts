@@ -44,6 +44,7 @@ import { UploadError, deleteBytesIfUnreferenced, storagePathFor, storedByteSize,
 import { extractPdf } from "@/lib/pdf-extract";
 import { pdfMetadata } from "@/lib/pdf-metadata";
 import { parsePdfTarget } from "@/lib/pdf-anchor";
+import { parsePageMap } from "@/lib/pdf-page-map";
 import { buildTestPdf, type TestOutlineItem, type TestPageLabelRange } from "../scripts/make-test-pdf";
 import {
   contentExtensions,
@@ -660,6 +661,8 @@ export async function createTestFile(opts: {
    * default, which is the common case in the wild.
    */
   pageLabels?: readonly TestPageLabelRange[];
+  /** The pages (1-based) that draw a filled rectangle: one with no lines is a sheet with ink and no text. */
+  inked?: readonly number[];
 }): Promise<TestFile> {
   const { ownerEmail, title = uniqueTitle("file"), visibility = "PRIVATE" } = opts;
   assertSafe(ownerEmail);
@@ -672,7 +675,7 @@ export async function createTestFile(opts: {
     ["Page two begins here, well past the first screenful.", "Distinctive phrase: xylophone marmalade."],
   ];
 
-  const bytes = buildTestPdf(pageLines, { outline: opts.outline, pageLabels: opts.pageLabels });
+  const bytes = buildTestPdf(pageLines, { outline: opts.outline, pageLabels: opts.pageLabels, inked: opts.inked });
   // Hashed here as well as by the store, because the lock has to be taken
   // before the bytes are written and the store only reports the sha after.
   const sha256 = createHash("sha256").update(bytes).digest("hex");
@@ -820,6 +823,13 @@ export type TestVersionFacts = {
   promotedByEmail: string | null;
   /** Whether the row holds the update id a promotion stamps. */
   promotedAtUpdateId: boolean;
+  /**
+   * Its page map as stored (docs/PDF.md §13, "Matching the pages"): for each
+   * sheet of its base the 0-based sheet of this version, -1 for removed and
+   * -2 for unmapped; with how many of its questions are open, who stored it
+   * and the carry that did. Null where it has none.
+   */
+  pageMap: { sheets: number[]; openRuns: number; storedByEmail: string | null; carryId: string | null } | null;
 };
 
 /** A file's versions, in number order, each with what its row and the disk hold. */
@@ -838,6 +848,9 @@ export async function getFileVersionFacts(fileId: string): Promise<TestVersionFa
           promotedAt: true,
           abandonedAt: true,
           promotedAtUpdateId: true,
+          pageMap: true,
+          pageMapCarryId: true,
+          pageMapStoredBy: { select: { email: true } },
           baseVersion: { select: { number: true } },
           uploadedBy: { select: { email: true } },
           promotedBy: { select: { email: true } },
@@ -859,6 +872,15 @@ export async function getFileVersionFacts(fileId: string): Promise<TestVersionFa
       uploadedByEmail: version.uploadedBy?.email ?? null,
       promotedByEmail: version.promotedBy?.email ?? null,
       promotedAtUpdateId: version.promotedAtUpdateId !== null,
+      pageMap: ((map) =>
+        map
+          ? {
+              sheets: map.sheets,
+              openRuns: map.runs.filter((run) => run.answer === null).length,
+              storedByEmail: version.pageMapStoredBy?.email ?? null,
+              carryId: version.pageMapCarryId,
+            }
+          : null)(parsePageMap(version.pageMap)),
     })),
   );
 }

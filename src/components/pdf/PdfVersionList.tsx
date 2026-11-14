@@ -1,7 +1,7 @@
 import Link from "next/link";
 import LocalTime from "@/components/LocalTime";
 import { formatBytes } from "@/lib/file-format";
-import { filesPath, pdfPath, type FileVersionState } from "@/lib/file-version";
+import { filesPath, pdfMapPath, pdfPath, type FileVersionState } from "@/lib/file-version";
 import type { FileVersionSummary, VersionManage } from "@/lib/file-version-data";
 import PdfCandidateActions from "./PdfCandidateActions";
 import PdfVersionUploader from "./PdfVersionUploader";
@@ -14,9 +14,11 @@ import styles from "./PdfVersions.module.css";
 //
 // **To whoever may manage the file it is also where a version is made and
 // ended** (`manage`): the upload of a new one, a waiting version's promotion
-// and abandoning, and the number of posted notes still on each earlier
-// version, which nothing moves yet. A manager sees the section on a file
-// with one version too, since the upload is how it gains a second.
+// and abandoning, the number of posted notes still on each earlier version,
+// and each version's page map, with the questions it has open and a link to
+// the page where they are answered or a map is built. A manager sees the
+// section on a file with one version too, since the upload is how it gains a
+// second.
 //
 // Rendered on the server and handed into the viewer island as part of its
 // `metadata` prop (PdfSurfaceClient's header). Versions are in no listing of
@@ -82,8 +84,30 @@ export default function PdfVersionList({ slug, versions, shownId, manage }: Prop
                   {notes === 1 ? "1 posted note is" : `${notes} posted notes are`} still on this version.
                 </div>
               )}
+              {manage && version.baseNumber !== null && version.state !== "candidate" && (version.map || version.state !== "abandoned") && (
+                <div className={styles.versionFacts} data-testid="pdf-version-map">
+                  {version.map ? (
+                    <>
+                      Pages matched with version {version.baseNumber}&apos;s
+                      {version.map.openRuns > 0 && ` (${version.map.openRuns} ${version.map.openRuns === 1 ? "question" : "questions"} open)`}.{" "}
+                      <a href={pdfMapPath(slug, version.number)}>Page map</a>
+                    </>
+                  ) : (
+                    <>
+                      Pages not matched with version {version.baseNumber}&apos;s. <a href={pdfMapPath(slug, version.number)}>Match them</a>
+                    </>
+                  )}
+                </div>
+              )}
               {manage && version.state === "candidate" && latest && (
-                <PdfCandidateActions versionId={version.id} number={version.number} latestNumber={latest.number} facts={manage.candidateFacts} />
+                <PdfCandidateActions
+                  slug={slug}
+                  versionId={version.id}
+                  number={version.number}
+                  latestNumber={latest.number}
+                  map={version.map}
+                  facts={manage.candidateFacts}
+                />
               )}
             </li>
           );

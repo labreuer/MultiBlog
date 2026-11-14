@@ -5,7 +5,16 @@ import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import { canUserManageFile } from "@/lib/file-authz";
 import { revertFileSlug as revertFileSlugInDb } from "@/lib/file-slug";
-import { abandonFileVersion, promoteFileVersion, setFileDeleted, setFileSlug, setFileTitle, setFileVisibility } from "@/lib/file-manage";
+import {
+  abandonFileVersion,
+  answerFileVersionMapRun,
+  buildFileVersionMap,
+  promoteFileVersion,
+  setFileDeleted,
+  setFileSlug,
+  setFileTitle,
+  setFileVisibility,
+} from "@/lib/file-manage";
 import { actorFromSessionUser, type Actor } from "@/lib/actor";
 import { ApiError } from "@/lib/api/errors";
 import { DocVisibility } from "@/generated/prisma/enums";
@@ -135,4 +144,20 @@ export async function promoteVersion(versionId: string): Promise<VersionActionRe
 export async function abandonVersion(versionId: string): Promise<VersionActionResult> {
   if (typeof versionId !== "string") return { ok: false, error: "That isn't a version." };
   return versionAction((actor) => abandonFileVersion(actor, versionId));
+}
+
+/**
+ * Stores the page map between a version and the one it was uploaded over,
+ * where it has none (docs/PDF.md §13, "Matching the pages"): the act that
+ * says the two hold the same text.
+ */
+export async function buildVersionMap(versionId: string): Promise<VersionActionResult> {
+  if (typeof versionId !== "string") return { ok: false, error: "That isn't a version." };
+  return versionAction((actor) => buildFileVersionMap(actor, versionId));
+}
+
+/** Accepts or declines one run of sheets of a version's page map. */
+export async function answerVersionMapRun(versionId: string, runIndex: number, accepted: boolean): Promise<VersionActionResult> {
+  if (typeof versionId !== "string" || typeof runIndex !== "number" || typeof accepted !== "boolean") return { ok: false, error: "That isn't a question of this page map." };
+  return versionAction((actor) => answerFileVersionMapRun(actor, versionId, runIndex, accepted));
 }

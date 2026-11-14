@@ -12,13 +12,13 @@ import { referenceByKey } from "@/lib/reference-data";
 import { parseReferenceSegment, referencePath } from "@/lib/references/keys";
 import { placeCitedQuotation, placedFragment } from "@/lib/cited-passage";
 import { parseCitedQuery } from "@/lib/cited-passage-query";
-import { formatPassageText } from "@/lib/pdf-fragment";
+import { formatPassageText, resolvePassage } from "@/lib/pdf-fragment";
 import { FragmentChecker } from "@/lib/pdf-fragment-check";
 import { withoutBrackets } from "@/lib/pdf-passage-pieces";
-import { fileVersionState, latestVersionOf, pageStampFor, pdfNoteContainer } from "@/lib/file-version";
+import { latestVersionOf, pageStampFor, pdfNoteContainer } from "@/lib/file-version";
 import { referentTarget } from "@/lib/pdf-link-reading";
 import type { PageStamp } from "@/lib/pdf-open-params";
-import { noteVersions } from "@/lib/file-version-data";
+import { linkVersionsOf, noteVersions } from "@/lib/file-version-data";
 
 // docs/CITATIONS.md, "Pages" — what a reference's public page can't show
 // everyone: the docs and notes citing the work, and the work's PDF, for one
@@ -60,7 +60,8 @@ function pageLabelsOf(stored: unknown): string[] | null {
  *
  * `query` is the link's raw query (src/lib/cited-passage-query.ts). A
  * `/pdf/` referent's page and `text` pairs are a link into the work's file,
- * read as the viewer reads one on the bare address (`referentTarget`). A
+ * read as the viewer reads one on the bare address and carried here, through
+ * the page maps, to the latest version (`referentTarget`). A
  * quotation is placed on the cited page, and on the pages after it
  * that a locator of several pages names, from the stored page text
  * (`placeCitedQuotation`): its brackets settled, split where a page breaks,
@@ -90,7 +91,9 @@ export async function citedPageTarget(actor: Actor | null, segment: string, page
       slug: true,
       currentVersionId: true,
       currentVersion: { select: { id: true, number: true, pageLabels: true, pageCount: true } },
-      versions: { select: { id: true, number: true, promotedAt: true, abandonedAt: true } },
+      versions: {
+        select: { id: true, number: true, pageCount: true, promotedAt: true, abandonedAt: true, baseVersionId: true, pageMap: true, pageLabels: true },
+      },
     },
   });
   if (!file) return fallback;
@@ -109,8 +112,21 @@ export async function citedPageTarget(actor: Actor | null, segment: string, page
 
   const asked = parseCitedQuery(query);
   if (asked.kind === "pairs") {
-    const versions = file.versions.map((version) => ({ number: version.number, state: fileVersionState(version, file.currentVersionId) }));
-    return referentTarget(file.slug, asked.fragment, latest.number, versions) ?? pageHref;
+    const versions = await linkVersionsOf(file);
+    const checker = new FragmentChecker();
+    // Where a passage carried to the latest is: the first of the sheets it
+    // was carried to that holds it, or the one sheet elsewhere that does.
+    const find = async (passage: Parameters<typeof resolvePassage>[1], sheets: readonly number[]): Promise<number | null> => {
+      const pages = (await checker.pagesAt(file.id, sheets))?.pages;
+      const held = sheets.find((index) => {
+        const sheet = pages?.get(index);
+        return sheet !== undefined && resolvePassage(sheet.text, passage, sheet.skeleton) !== null;
+      });
+      if (held !== undefined) return held;
+      const elsewhere = await checker.sheetHolding(file.id, latest.id, passage, sheets);
+      return elsewhere === null ? null : elsewhere - 1;
+    };
+    return (await referentTarget(file.slug, asked.fragment, latest.number, versions, find)) ?? pageHref;
   }
   if (asked.kind !== "quotation") return pageHref;
   const { placed, pages } = await placeCitedQuotation(new FragmentChecker(), { id: file.id, pageCount: latest.pageCount, ownLabels: pageLabels }, page, asked.text);

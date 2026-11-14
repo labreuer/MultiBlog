@@ -53,7 +53,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (recorded.unchanged) {
       return NextResponse.json({ id: recorded.file.id, slug: recorded.file.slug, unchanged: true });
     }
-    return NextResponse.json({ id: recorded.file.id, slug: recorded.file.slug, version: recorded.version.number, url: recorded.url }, { status: 201 });
+    return NextResponse.json(
+      { id: recorded.file.id, slug: recorded.file.slug, version: recorded.version.number, versionId: recorded.version.id, url: recorded.url },
+      { status: 201 },
+    );
   } catch (err) {
     await discardRefusedBody(request.body);
     if (err instanceof UploadError) {

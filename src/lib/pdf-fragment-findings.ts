@@ -1,5 +1,5 @@
 import { parsePdfPath } from "./file-version";
-import { namedVersion } from "./pdf-link-reading";
+import { namedVersion, type PageReading } from "./pdf-link-reading";
 import { pageFromHash, type PageName, type PageStamp } from "./pdf-open-params";
 import { sheetsNamed, usablePageLabels } from "./pdf-page-labels";
 import {
@@ -76,34 +76,50 @@ export function versionNamedBy(link: Pick<FragmentLinkHref, "version">, page: Pa
   return namedVersion(page, link.version === null ? { shown: 0, own: false } : { shown: link.version, own: true });
 }
 
-/** A link's page that names a version with nothing to read: abandoned, or one the file never had. */
-export type VersionFault = { kind: "abandoned-version"; /** The version named. */ version: number } | { kind: "no-such-version"; version: number };
+/**
+ * A link's page that names a version with nothing to read: abandoned, or one
+ * the file never had. An abandoned version's link is carried off it by its
+ * page map; `mapped` says the maps were there and the sheet had no
+ * counterpart, where otherwise a map on the way is missing.
+ */
+export type VersionFault = { kind: "abandoned-version"; /** The version named. */ version: number; mapped?: boolean } | { kind: "no-such-version"; version: number };
+
+/**
+ * How a finding on one version came from a link that names another: it was
+ * carried there through the page maps, as the viewer carries it (docs/PDF.md
+ * §13, "Links into the file"). `from` is the version the link names.
+ */
+export type Carried = { from: number };
 
 export type PassageFinding =
   | (VersionFault & { passage: FragmentPassage })
   | {
       kind: "ok";
       passage: FragmentPassage;
-      /** The version it was read on, which is the one it names. */
+      /** The version it was read on: the one it names, or the one it was carried to. */
       version: number;
-      /** The 1-based sheet it was found on: the first of the sheets its page names that holds it. */
+      /** The 1-based sheet it was found on: the first of the sheets its page names, or was carried to, that holds it. */
       sheet: number;
       /** The page's text at the match. */
       text: string;
       /** How many places on the page this form finds; above 1, the link points at the first. */
       occurrences: number;
+      /** Set where the link names another version than `version`; `byWords` where its sheet had no counterpart and its words were found once. */
+      carried?: Carried & { byWords?: boolean };
     }
   | {
       kind: "no-match";
       passage: FragmentPassage;
       version: number;
-      /** The 1-based sheets its page names, in order: one for `sheet=`, any number for a repeated label. */
+      /** The 1-based sheets its page names, or was carried to, in order: one for `sheet=`, any number for a repeated label. */
       sheets: number[];
       /** The longest stretch of the passage the first of them holds, and what that page has right after it. */
       matchedUpTo: string | null;
       pageHasThere: string | null;
       /** The 1-based page the passage is on instead, when it occurs exactly once elsewhere in the file. */
       foundOnPage: number | null;
+      /** Set where the link was carried to `version` and its words aren't where it landed; `namedHolds` where the version it names has them. */
+      carried?: Carried & { namedHolds: boolean };
     }
   | { kind: "page-out-of-range"; passage: FragmentPassage; version: number; pageCount: number }
   | {
@@ -117,7 +133,7 @@ export type PassageFinding =
 /** What a page link's page comes to. */
 export type PageLinkFinding =
   | VersionFault
-  | { kind: "ok"; version: number; /** 1-based: the sheet it opens at. */ sheet: number }
+  | { kind: "ok"; version: number; /** 1-based: the sheet it opens at. */ sheet: number; carried?: Carried }
   | { kind: "page-out-of-range"; version: number; pageCount: number }
   | { kind: "no-such-label"; version: number };
 
@@ -217,6 +233,94 @@ export function checkPassage(file: FilePages, passage: FragmentPassage): Exclude
     ...(first ? whereItStops(first.text, first.skeleton, passage) : { matchedUpTo: null, pageHasThere: null }),
     foundOnPage: passageElsewhere(file, passage, sheets),
   };
+}
+
+/**
+ * One passage looked for on the given 0-based sheets of a file, in order:
+ * what a link carried to them comes to (docs/PDF.md §13, "Links into the
+ * file"). The sheets are the ones its page's counterparts are, and no label
+ * is read. A miss says where the passage is instead, as `checkPassage`'s
+ * does, and with no sheet to look on that is the whole of the answer.
+ */
+export function checkPassageAt(file: FilePages, passage: FragmentPassage, sheets: readonly number[]): Extract<PassageFinding, { kind: "ok" | "no-match" }> {
+  const version = file.versionNumber;
+  for (const index of sheets) {
+    const page = file.pages.get(index);
+    const range = page ? resolvePassage(page.text, passage, page.skeleton) : null;
+    if (page && range) {
+      return { kind: "ok", passage, version, sheet: index + 1, text: page.text.slice(range.start, range.end), occurrences: countPassageOccurrences(page.text, passage, page.skeleton) };
+    }
+  }
+  const first = sheets.length > 0 ? file.pages.get(sheets[0]) : undefined;
+  return {
+    kind: "no-match",
+    passage,
+    version,
+    sheets: sheets.map((index) => index + 1),
+    ...(first ? whereItStops(first.text, first.skeleton, passage) : { matchedUpTo: null, pageHasThere: null }),
+    foundOnPage: passageElsewhere(file, passage, sheets),
+  };
+}
+
+/**
+ * What the check reads a file's versions through, so the reading below is
+ * one function for the database's pages and for a test's
+ * (src/lib/pdf-fragment-check.ts implements it over stored page text).
+ */
+export type PassageSource = {
+  /** A passage read on one version by the page it names there. A fault for a version with nothing to read; null for no such file. */
+  onVersion(version: number, passage: FragmentPassage): Promise<PassageFinding | null>;
+  /** A passage looked for on these 0-based sheets of a version (`checkPassageAt`). */
+  onSheets(version: number, passage: FragmentPassage, sheets: readonly number[]): Promise<Extract<PassageFinding, { kind: "ok" | "no-match" }> | null>;
+  /** Whether any of these 0-based sheets of a version holds the passage. */
+  held(version: number, passage: PassageText, sheets: readonly number[]): Promise<boolean>;
+  /** A page link's page on one version. */
+  pageOnVersion(version: number, page: PageName): Promise<PageLinkFinding | null>;
+};
+
+/**
+ * One passage of a link, **read as the viewer reads it** and checked where
+ * it lands (docs/PDF.md §13, "Links into the file"). `reading` is its page's
+ * (`readPage`), and `shown` the version its address shows.
+ *
+ * - It names the version shown, or one no page map joins to it: checked on
+ *   the version it names, which is the one it opens.
+ * - It is carried: checked on the sheets it lands on. Words that aren't
+ *   there are a miss on the version shown, and the finding says whether the
+ *   version the link names holds them, which is what a better copy's
+ *   correction looks like.
+ * - Its sheet has no counterpart: it is carried only by its words, where
+ *   they occur exactly once in the version shown. Otherwise it isn't
+ *   carried, and is checked on the version it names.
+ * - It names an abandoned version that can't be carried off, or a version
+ *   the file never had: the fault that says which.
+ */
+export async function readPassage(passage: FragmentPassage, reading: PageReading, shown: number, source: PassageSource): Promise<PassageFinding | null> {
+  if (reading.kind === "here" || reading.kind === "elsewhere") return source.onVersion(reading.version, passage);
+  if (reading.kind === "abandoned") return { kind: "abandoned-version", version: reading.version, passage };
+  if (reading.kind === "no-such-version") return { kind: "no-such-version", version: reading.version, passage };
+  const landed = await source.onSheets(shown, passage, reading.sheets);
+  if (!landed) return null;
+  if (landed.kind === "ok") return { ...landed, carried: { from: reading.version } };
+  if (reading.sheets.length > 0) {
+    const namedHolds = reading.state !== "abandoned" && (await source.held(reading.version, passage, reading.named));
+    return { ...landed, carried: { from: reading.version, namedHolds } };
+  }
+  const byWords = landed.foundOnPage !== null ? await source.onSheets(shown, passage, [landed.foundOnPage - 1]) : null;
+  if (byWords?.kind === "ok") return { ...byWords, carried: { from: reading.version, byWords: true } };
+  if (reading.state === "abandoned") return { kind: "abandoned-version", version: reading.version, mapped: true, passage };
+  return source.onVersion(reading.version, passage);
+}
+
+/** A page link's page, read as the viewer reads it: on the version it names, or on the sheet the page maps carry it to. */
+export async function readPageLink(page: PageName, reading: PageReading, shown: number, source: PassageSource): Promise<PageLinkFinding | null> {
+  if (reading.kind === "here" || reading.kind === "elsewhere") return source.pageOnVersion(reading.version, page);
+  if (reading.kind === "abandoned") return { kind: "abandoned-version", version: reading.version };
+  if (reading.kind === "no-such-version") return { kind: "no-such-version", version: reading.version };
+  if (reading.sheets.length > 0) return { kind: "ok", version: shown, sheet: reading.sheets[0] + 1, carried: { from: reading.version } };
+  // A link without words whose sheet has no counterpart is not carried: it opens the version it names.
+  if (reading.state === "abandoned") return { kind: "abandoned-version", version: reading.version, mapped: true };
+  return source.pageOnVersion(reading.version, page);
 }
 
 /** The 1-based page holding the passage when exactly one page outside `named` (0-based) does, once: `foundOnPage`, and the viewer's question when it misses (§6). */

@@ -2,7 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { locateFragmentMisses } from "@/app/actions/pdf-fragment";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { SignedOutNotice } from "@/components/SignedOutNotice";
 import { OutOfDateNotice } from "@/components/OutOfDateNotice";
@@ -10,7 +11,7 @@ import type { PdfAnnotationEntry } from "./PdfAnnotationPanel";
 import type { AnchoredLinkView } from "@/lib/anchored-link-data";
 import type { OwnDraft } from "@/lib/annotation-data";
 import { pdfPath, type ShownVersion } from "@/lib/file-version";
-import { linkVersionsFromKey, linkVersionsKey, versionToOpen } from "@/lib/pdf-link-reading";
+import { arrivalOf, parseLinkVersions } from "@/lib/pdf-link-reading";
 import type { FileVersionSummary, VersionManage } from "@/lib/file-version-data";
 import type { OtherVersionNote } from "@/lib/pdf-annotation-entries";
 
@@ -70,6 +71,8 @@ export default function PdfSurfaceClient(props: {
   version: ShownVersion;
   /** Every version of the file, for the banner on one that is not the latest. */
   versions: FileVersionSummary[];
+  /** The file's versions as a link's reading takes them, as one string (`linkVersionsJson`): a memo keys on it. */
+  linkVersions: string;
   /** What whoever may manage the file is given on a waiting version's banner; null for every other reader. */
   manage: VersionManage | null;
   fileUrl: string;
@@ -84,13 +87,19 @@ export default function PdfSurfaceClient(props: {
   anchoredLink: AnchoredLinkView | null;
   metadata: ReactNode;
 }) {
-  // **A link that names another version than the latest opens that version**
-  // (docs/PDF.md §13, "Links into the file"). Only the browser has the
-  // fragment, so the page for the latest arrives first, and this sends the
-  // reader on before the viewer mounts: to the version's own address, with
-  // the link as written, replacing the history entry. No version has a page
-  // map yet, so no such link is carried to the latest instead. On a version's
-  // own address nothing leaves: the address chose the version.
+  // **A link that can't be carried to the version shown opens the version it
+  // names** (docs/PDF.md §13, "Links into the file"). A link is carried
+  // through the page maps between the two versions, and where one on the way
+  // is missing it isn't. Only the browser has the fragment, so the page for
+  // the latest arrives first, and this sends the reader on before the viewer
+  // mounts: to the version's own address, with the link as written, replacing
+  // the history entry. On a version's own address nothing leaves: the address
+  // chose the version.
+  //
+  // **A link whose sheet has no counterpart here is carried only by its
+  // words**, where they occur exactly once in the version shown, and only
+  // the server has every sheet's text. So that one question is asked before
+  // the viewer mounts, and the answer decides between staying and going.
   //
   // **By a full load (`location.replace`), never `router.replace`.** Next's
   // client router keeps the fragment of a client navigation with the route it
@@ -122,10 +131,29 @@ export default function PdfSurfaceClient(props: {
     () => (samePath(window.location.pathname, pathname) ? window.location.hash : null),
     () => null,
   );
-  const { slug, version, versions } = props;
-  const versionsKey = linkVersionsKey(versions);
-  const linkVersions = useMemo(() => linkVersionsFromKey(versionsKey), [versionsKey]);
-  const leavingFor = hash === null ? null : versionToOpen(hash, { shown: version.number, own: version.address === "version" }, linkVersions);
+  const { slug, version, fileId } = props;
+  const arrival = useMemo(
+    () => (hash === null ? null : arrivalOf(hash, { shown: version.number, own: version.address === "version" }, parseLinkVersions(props.linkVersions))),
+    [hash, version.number, version.address, props.linkVersions],
+  );
+  // The server's answer for the fragment it was asked about: whether the link's words are on exactly one sheet here.
+  const [wordsFound, setWordsFound] = useState<{ hash: string; found: boolean } | null>(null);
+  useEffect(() => {
+    if (arrival?.kind !== "by-words" || hash === null) return;
+    let cancelled = false;
+    locateFragmentMisses(fileId, version.id, [{ passage: arrival.passage, named: [] }])
+      .then((answers) => answers[0]?.sheet != null)
+      .catch(() => false)
+      .then((found) => {
+        if (!cancelled) setWordsFound({ hash, found });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [arrival, hash, fileId, version.id]);
+  const asked = arrival?.kind === "by-words" && wordsFound?.hash === hash ? wordsFound : null;
+  const waiting = arrival?.kind === "by-words" && asked === null;
+  const leavingFor = arrival?.kind === "open" ? arrival.version : arrival?.kind === "by-words" && asked && !asked.found ? arrival.version : null;
   useEffect(() => {
     if (leavingFor === null) return;
     window.location.replace(`${pdfPath(slug, { number: leavingFor, isLatest: false }, { own: true })}${window.location.search}${window.location.hash}`);
@@ -141,7 +169,7 @@ export default function PdfSurfaceClient(props: {
     <DocPresenceProvider>
       <SignedOutNotice />
       <OutOfDateNotice />
-      {hash === null || leavingFor !== null ? <LoadingViewer /> : <PdfAnnotationSurface {...props} />}
+      {hash === null || waiting || leavingFor !== null ? <LoadingViewer /> : <PdfAnnotationSurface {...props} />}
     </DocPresenceProvider>
   );
 }

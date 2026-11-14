@@ -16,8 +16,22 @@ import { prisma } from "@/lib/prisma";
 // It searches the stored page text (`FragmentChecker.sheetHolding`), so the
 // viewer extracts no pages to ask; it draws only the one page answered.
 
-/** One passage the viewer missed, and the 0-based sheets its link names, which it has already looked on. */
-export type FragmentMiss = { passage: PassageText; named: number[] };
+/**
+ * One passage the viewer missed, and the 0-based sheets of the version shown
+ * that it has already looked on: the sheets its link names, or the ones the
+ * page maps carried it to. `from` is set for a carried link: the version it
+ * names, and the 0-based sheets it names there.
+ */
+export type FragmentMiss = { passage: PassageText; named: number[]; from?: { version: number; named: number[] } };
+
+/**
+ * Where a missed passage is: the 1-based sheet of the version shown that
+ * holds it, when exactly one sheet beside those looked on does, once; and,
+ * for a carried link, whether the version it names holds it where the link
+ * says, which is what a passage corrected by a better copy or cut by a later
+ * draft looks like (docs/PDF.md §13, "Links into the file").
+ */
+export type FragmentMissAnswer = { sheet: number | null; heldByNamed: boolean };
 
 /** A passage part is a quote's words, never a book's. */
 const MAX_PART_LENGTH = 2_000;
@@ -44,28 +58,44 @@ function missOf(value: unknown): FragmentMiss | null {
     if (!isPart(start, false) || !isPart(end, true)) return null;
     read.push({ start: start as string, end: end as string | null });
   }
-  if (!Array.isArray(named) || named.length > MAX_NAMED || !named.every((n) => Number.isInteger(n) && n >= 0)) return null;
-  return { passage: { prefix: prefix as string | null, segments: read, suffix: suffix as string | null }, named: named as number[] };
+  const sheets = (list: unknown): list is number[] => Array.isArray(list) && list.length <= MAX_NAMED && list.every((n) => Number.isInteger(n) && n >= 0);
+  if (!sheets(named)) return null;
+  const { from } = value as { from?: unknown };
+  let carriedFrom: FragmentMiss["from"];
+  if (from !== undefined && from !== null) {
+    const { version, named: there } = from as { version?: unknown; named?: unknown };
+    if (!Number.isInteger(version) || (version as number) < 1 || !sheets(there)) return null;
+    carriedFrom = { version: version as number, named: there };
+  }
+  return { passage: { prefix: prefix as string | null, segments: read, suffix: suffix as string | null }, named, ...(carriedFrom ? { from: carriedFrom } : {}) };
 }
 
 /**
- * For each miss, the 1-based sheet holding its passage when exactly one sheet
- * outside those its link names holds it, once; null otherwise. Gated by
+ * For each miss, where its passage is (`FragmentMissAnswer`). Gated by
  * `canUserReadFile`, as the bytes are, and a file this viewer can't read
- * answers every miss with null, as one that holds none of them does, so the
- * question can't be asked of a PRIVATE file.
+ * answers every miss with nothing found, as one that holds none of them
+ * does, so the question can't be asked of a PRIVATE file.
  */
-export async function locateFragmentMisses(fileId: string, fileVersionId: string, misses: unknown): Promise<(number | null)[]> {
+export async function locateFragmentMisses(fileId: string, fileVersionId: string, misses: unknown): Promise<FragmentMissAnswer[]> {
   if (typeof fileId !== "string" || typeof fileVersionId !== "string" || !Array.isArray(misses)) return [];
   const asked = misses.slice(0, MAX_FRAGMENT_PASSAGES).map(missOf);
-  const none = asked.map(() => null);
+  const none = asked.map((): FragmentMissAnswer => ({ sheet: null, heldByNamed: false }));
   const session = await auth();
   if (!session?.user) return none;
   const file = await prisma.storedFile.findUnique({ where: { id: fileId }, select: { id: true, visibility: true } });
   if (!file || !(await canUserReadFile(session.user.id, session.user.role, file))) return none;
 
   const checker = new FragmentChecker();
-  const found: (number | null)[] = [];
-  for (const miss of asked) found.push(miss ? await checker.sheetHolding(file.id, fileVersionId, miss.passage, miss.named) : null);
+  const found: FragmentMissAnswer[] = [];
+  for (const miss of asked) {
+    if (!miss) {
+      found.push({ sheet: null, heldByNamed: false });
+      continue;
+    }
+    const sheet = await checker.sheetHolding(file.id, fileVersionId, miss.passage, miss.named);
+    // Asked only of a miss nothing else answers: a passage found on another sheet is shown there.
+    const heldByNamed = sheet === null && miss.from !== undefined && (await checker.heldOn(file.id, miss.from.version, miss.passage, miss.from.named));
+    found.push({ sheet, heldByNamed });
+  }
   return found;
 }

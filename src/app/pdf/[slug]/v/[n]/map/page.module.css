@@ -1,0 +1,78 @@
+/* docs/PDF.md §13, "Matching the pages" — a version's page map: an ordinary
+   centred page of prose and small tables, outside the viewer's shell. */
+
+.page {
+  max-width: 54rem;
+  margin: 2rem auto 4rem;
+  padding: 0 1rem;
+  font-size: 0.95rem;
+  color: var(--foreground);
+}
+
+.page h1 {
+  font-size: 1.3rem;
+  margin-bottom: 1rem;
+}
+
+.page h2 {
+  font-size: 1.05rem;
+  margin: 1.6rem 0 0.6rem;
+}
+
+.page h3 {
+  font-size: 0.95rem;
+  margin-bottom: 0.3rem;
+}
+
+.page p + p {
+  margin-top: 0.5rem;
+}
+
+.quiet {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.run {
+  padding: 0.8rem;
+  margin-bottom: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+/* A run can be three hundred sheets: the table scrolls inside its box. */
+.rows {
+  max-height: 22rem;
+  overflow: auto;
+  margin: 0.6rem 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.rows table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.rows th,
+.rows td {
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.rows th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-muted);
+  font-weight: 600;
+}
+
+.excerpt {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--text-secondary);
+}

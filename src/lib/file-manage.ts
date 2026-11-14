@@ -1,6 +1,8 @@
 import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
 import { lockFileHash, lockFileRow } from "@/lib/file-version-data";
 import { deleteBytesIfUnreferenced } from "@/lib/file-storage";
+import { storePageMap, storeRunAnswer } from "@/lib/pdf-page-map-build";
+import { pageMapNumbers, type PageMapNumbers } from "@/lib/pdf-page-map";
 
 // How long a version's write may wait for the file row or a hash: Prisma's
 // default, five seconds, is less than an upload's insert of a large book's
@@ -235,4 +237,41 @@ export async function abandonFileVersion(actor: Actor, versionId: string): Promi
     await deleteBytesIfUnreferenced(version.sha256, others);
   }, VERSION_WRITE_TIMEOUTS);
   return { slug: version.slug, number: version.number };
+}
+
+// ---------------------------------------------------------------------------
+// docs/PDF.md §13, "Matching the pages" — the two acts a manager makes about
+// a version's page map. Each takes `canUserManageFile`, as promoting does,
+// and neither is open to a bot by its person's place.
+
+/**
+ * Stores the page map between a version and its base, where the version has
+ * none. **Storing a map says the two versions hold the same text.** It moves
+ * no note. What it changes at once is where links land: a link that names one
+ * of the two versions is carried to the other from then on, and no longer
+ * opens the version it names. Asked for a version that has a map already, it
+ * answers that map and writes nothing.
+ */
+export async function buildFileVersionMap(actor: Actor, versionId: string): Promise<{ slug: string; number: number; stored: boolean; numbers: PageMapNumbers }> {
+  const version = await requireManageableVersion(actor, versionId);
+  const { map, stored } = await storePageMap(versionId, { userId: actor.userId });
+  return { slug: version.slug, number: version.number, stored, numbers: pageMapNumbers(map) };
+}
+
+/**
+ * Answers one run of sheets of a version's page map: accepted, which pairs
+ * its sheets as proposed and stays, or declined, which takes the question
+ * off the list of open ones. Any manager may answer at any time, while the
+ * version is a candidate and after its promotion. Accepting moves no note.
+ */
+export async function answerFileVersionMapRun(
+  actor: Actor,
+  versionId: string,
+  runIndex: number,
+  accepted: boolean,
+): Promise<{ slug: string; number: number; numbers: PageMapNumbers }> {
+  const version = await requireManageableVersion(actor, versionId);
+  if (!Number.isInteger(runIndex) || runIndex < 0) throw invalid("That isn't one of this page map's questions.");
+  const { map } = await storeRunAnswer(versionId, runIndex, accepted, { userId: actor.userId });
+  return { slug: version.slug, number: version.number, numbers: pageMapNumbers(map) };
 }

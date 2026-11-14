@@ -61,7 +61,7 @@ export default function PdfVersionBanner({ slug, version, versions, manage, clas
         {version.state === "earlier" && <p>A note made here is on version {shown.number}.</p>}
         {version.state === "candidate" && <p>It takes no notes and no link parts until it is.</p>}
         {version.state === "candidate" && manage && (
-          <PdfCandidateActions versionId={shown.id} number={shown.number} latestNumber={latest.number} facts={manage.candidateFacts} />
+          <PdfCandidateActions slug={slug} versionId={shown.id} number={shown.number} latestNumber={latest.number} map={shown.map} facts={manage.candidateFacts} />
         )}
       </div>
       <button type="button" className={styles.dismiss} onClick={() => setDismissed(true)} aria-label="Dismiss the version notice">

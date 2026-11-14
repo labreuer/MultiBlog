@@ -166,6 +166,7 @@ model User {
   fileDeletions          StoredFile[]             @relation("FileDeletedBy")
   fileVersionsUploaded   FileVersion[]            @relation("FileVersionUploadedBy")
   fileVersionsPromoted   FileVersion[]            @relation("FileVersionPromotedBy")
+  pageMapsStored         FileVersion[]            @relation("FileVersionPageMapStoredBy")
   annotations            Annotation[]             @relation("AnnotationAuthor")
   annotationDeletions    Annotation[]             @relation("AnnotationDeletedBy")
   docLinks               DocLink[]
@@ -1384,26 +1385,42 @@ model FileVersion {
   // filled the same way.
   outline     Json?
 
-  uploadedAt         DateTime  @default(now()) @map("uploaded_at")
-  uploadedByUserId   String?   @map("uploaded_by_user_id")
-  promotedAt         DateTime? @map("promoted_at")
-  promotedByUserId   String?   @map("promoted_by_user_id")
-  abandonedAt        DateTime? @map("abandoned_at")
+  uploadedAt            DateTime  @default(now()) @map("uploaded_at")
+  uploadedByUserId      String?   @map("uploaded_by_user_id")
+  promotedAt            DateTime? @map("promoted_at")
+  promotedByUserId      String?   @map("promoted_by_user_id")
+  abandonedAt           DateTime? @map("abandoned_at")
   // The version that was the latest when this one was uploaded; NULL for a
   // version 1. Stored, since it can't be worked out from the numbers once a
   // version between two others has been abandoned.
-  baseVersionId      String?   @map("base_version_id")
+  baseVersionId         String?   @map("base_version_id")
   // The highest `ydoc_update.id` when the row was made and when it was
   // promoted, 0 where the log was empty: a clock for dating a link against a
   // version (docs/PDF.md §13, "Links into the file"). Plain BigInts with no
   // relation, as `Annotation.ydocUpdateId` is.
-  uploadedAtUpdateId BigInt    @map("uploaded_at_update_id")
-  promotedAtUpdateId BigInt?   @map("promoted_at_update_id")
+  uploadedAtUpdateId    BigInt    @map("uploaded_at_update_id")
+  promotedAtUpdateId    BigInt?   @map("promoted_at_update_id")
+  // docs/PDF.md §13, "Matching the pages" — the page map between this version
+  // and its base: for each sheet of the base, a sheet of this version or
+  // none, with the questions its runs of sheets raise and their answers. One
+  // JSON value, read through `parsePageMap` (src/lib/pdf-page-map.ts), never
+  // a cast. NULL until a deliberate act stores one, which happens once: it
+  // says the two versions hold the same text, and links are carried through
+  // it from then on. An answer to a run rewrites the value under the file
+  // row's lock; nothing else does, and nothing takes a map away.
+  pageMap               Json?     @map("page_map")
+  // Who stored the map and when, and the bulk carry that did, where one did
+  // (`file_anchor_move.carry_id`): what undoing that carry from the database
+  // would take away with its moves.
+  pageMapStoredAt       DateTime? @map("page_map_stored_at")
+  pageMapStoredByUserId String?   @map("page_map_stored_by_user_id")
+  pageMapCarryId        String?   @map("page_map_carry_id")
 
   file                StoredFile           @relation("FileVersions", fields: [fileId], references: [id], onDelete: Cascade)
   currentOf           StoredFile?          @relation("FileCurrentVersion")
   uploadedBy          User?                @relation("FileVersionUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
   promotedBy          User?                @relation("FileVersionPromotedBy", fields: [promotedByUserId], references: [id], onDelete: SetNull)
+  pageMapStoredBy     User?                @relation("FileVersionPageMapStoredBy", fields: [pageMapStoredByUserId], references: [id], onDelete: SetNull)
   baseVersion         FileVersion?         @relation("FileVersionBase", fields: [baseVersionId], references: [id], onDelete: SetNull)
   basedOnThis         FileVersion[]        @relation("FileVersionBase")
   pageTexts           FilePageText[]

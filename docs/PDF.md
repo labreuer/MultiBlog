@@ -1276,24 +1276,25 @@ available without rendering.
 
 ## 13. Versions of a file — plan
 
-**Built so far: steps 1 to 9 of "Building it".** A file takes a new version: whoever may
+**Built so far: steps 1 to 10 of "Building it".** A file takes a new version: whoever may
 manage it uploads new bytes, which wait as a candidate at their own address, and promotes
 or abandons them. Every version has its own address, and what is drawn, listed, titled and
 linked goes by version. Every anchor into a PDF names its version, and a capture's write
 checks the version its viewer loaded. A link names the version whose sheets it counts with
-`v=`, and every reader of a link reads it by that version (Links into the file).
+`v=`, and every reader of a link reads it by that version (Links into the file). A version
+has a page map from the version it was uploaded over, once a manager asks for one, and a
+link is carried through the maps between the version it names and the version shown
+(Matching the pages).
 
-**Not built: the page maps and the moves**, steps 10 to 13. Until they are, every version
-behaves as a revised text whose notes can't be moved: a note stays on the version it is on,
-and a link opens the version it names. So wherever this section says a link is *carried*, a
-note is *moved*, a map is built or a run of sheets is answered, it describes the plan. The
-subsections "Matching the pages", "Placing each anchor" and "Moving a note forward" are
-plan throughout, and so is the carry in "Promotion" and in "Links into the file".
+**Not built: the moves**, steps 11 to 13. Until they are, a note stays on the version it is
+on. So wherever this section says a note is *moved* or *carried*, it describes the plan. The
+subsections "Placing each anchor" and "Moving a note forward" are plan throughout, and so
+is the carry in "Promotion".
 
-**Three measured rules of that plan are written, with nothing calling them yet**: how alike
-two sheets are (`src/lib/pdf-sheet-alike.ts`), a range carried through the diff of two
-sheets (`src/lib/pdf-quote-carry.ts`), and the transform fitted to the words two sheets
-share (`src/lib/pdf-sheet-fit.ts`). Each is pure and has its unit tests.
+**Two measured rules of that plan are written, with nothing calling them yet**: a range
+carried through the diff of two sheets (`src/lib/pdf-quote-carry.ts`), and the transform
+fitted to the words two sheets share (`src/lib/pdf-sheet-fit.ts`). Each is pure and has its
+unit tests.
 
 The rest of the section is a plan in those parts, and the one exception to this file's
 "every statement is current". Where a statement below is of something built, it names the

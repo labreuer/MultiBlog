@@ -17,7 +17,8 @@ import { referencesOfFile } from "@/lib/reference-files";
 import { canWriteReferences } from "@/lib/role-checks";
 import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
 import { fileVersionTitle, pdfPath, type ShownVersion } from "@/lib/file-version";
-import { VERSION_SUMMARY_SELECT, postedNotesByVersion, summariseVersions, type FileVersionSummary, type VersionManage } from "@/lib/file-version-data";
+import { VERSION_SUMMARY_SELECT, linkVersionsOf, postedNotesByVersion, summariseVersions, type FileVersionSummary, type VersionManage } from "@/lib/file-version-data";
+import { linkVersionsJson } from "@/lib/pdf-link-reading";
 import styles from "./page.module.css";
 
 // PLAN.md §19, docs/PDF.md §13 "Addresses" — the PDF reading view, for both
@@ -52,6 +53,8 @@ type FileVersionForRead = {
   shown: ShownVersion;
   /** The hash of the version shown, which its byte URL names. */
   sha256: string;
+  /** The file's versions as a link's reading takes them, as one string (`linkVersionsJson`). */
+  linkVersions: string;
 };
 
 export const loadFileVersionForRead = gated(async (user, slug: string, versionNumber: number | null): Promise<FileVersionForRead | AccessRejection> => {
@@ -97,7 +100,8 @@ export const loadFileVersionForRead = gated(async (user, slug: string, versionNu
     state: found.state,
     address: versionNumber === null ? "bare" : "version",
   };
-  return { file, versions, shown, sha256: found.sha256 };
+  const linkVersions = linkVersionsJson(await linkVersionsOf({ currentVersionId: file.currentVersionId, versions: rows }));
+  return { file, versions, shown, sha256: found.sha256, linkVersions };
 });
 
 /** The page's title: the file's on the bare address, and `<title>, version <n>` on a version's own, the latest's included. */
@@ -132,7 +136,7 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
     );
   }
   const {
-    value: { file, versions, shown, sha256 },
+    value: { file, versions, shown, sha256, linkVersions },
     user,
   } = access;
 
@@ -225,6 +229,7 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
         slug={file.slug}
         version={shown}
         versions={versions}
+        linkVersions={linkVersions}
         manage={manage}
         fileUrl={fileUrl}
         // A version's own page says "the latest" beside its title while it is.

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { test, expect, signIn, gotoOk, annotationEditor, visibleText } from "./fixtures";
+import { expectAddress, expectSheetText, fragmentOf, selectPhrase, token, waitForViewer, type Page } from "./pdf-version-helpers";
 import {
   ADMIN_EMAIL,
   abandonTestVersion,
@@ -27,20 +28,14 @@ import { buildTestPdf, type TestPageLabelRange } from "../scripts/make-test-pdf"
 // fixture and checks the reads; here the version is made the way a person or
 // a bot makes one, and the writes are what is checked.
 //
-// No version has a page map yet, so nothing is carried: a note stays on the
-// version it is on, and a link opens the version it names.
+// Every version here is uploaded as a revised text, so none has a page map
+// and nothing is carried: a note stays on the version it is on, and a link
+// opens the version it names. e2e/pdf-better-copy.spec.ts is the other kind.
 //
 // **Every file's text is its own.** The store is content-addressed, so two
 // tests uploading the same lines would share one blob, and an abandoning in
 // one would count the other's row. A token in each line makes each test's
 // bytes its own, which is also what lets a search name one version's text.
-
-type Page = import("@playwright/test").Page;
-
-/** Letters only, so a search for it is one word and stems to itself. */
-function token(): string {
-  return `q${Math.random().toString(36).slice(2, 10).replace(/[0-9]/g, "x")}${Date.now().toString(36).replace(/[0-9]/g, "z")}`;
-}
 
 // Roman front matter and an arabic body, so a `p=` names a printed page.
 const LABELS: TestPageLabelRange[] = [
@@ -58,45 +53,6 @@ function copy(tag: string, which: string): string[][] {
 
 const pdfOf = (pages: string[][]): Buffer => Buffer.from(buildTestPdf(pages, { pageLabels: LABELS }));
 
-async function waitForViewer(page: Page) {
-  await page.waitForFunction(() => document.querySelector(".pdfViewer .page .textLayer") !== null, undefined, {
-    timeout: 30_000,
-  });
-}
-
-/** The sheet's text as the viewer drew it: which bytes the page is showing. */
-async function expectSheetText(page: Page, text: string, sheet = 1) {
-  await expect(page.locator(`.pdfViewer .page[data-page-number='${sheet}'] .textLayer`)).toContainText(text, { timeout: 30_000 });
-}
-
-async function selectPhrase(page: Page, pageNumber: number, needle: string) {
-  const found = await page.evaluate(
-    ({ pageNumber, needle }) => {
-      const layer = document.querySelector(`.pdfViewer .page[data-page-number="${pageNumber}"] .textLayer`);
-      if (!layer) return "no text layer";
-      const walker = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT);
-      let node: Node | null;
-      while ((node = walker.nextNode())) {
-        const text = node.textContent ?? "";
-        const index = text.indexOf(needle);
-        if (index < 0) continue;
-        const range = document.createRange();
-        range.setStart(node, index);
-        range.setEnd(node, index + needle.length);
-        const selection = window.getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(range);
-        return "ok";
-      }
-      return "phrase not found in any single text node";
-    },
-    { pageNumber, needle },
-  );
-  expect(found, `selecting "${needle}" on page ${pageNumber}`).toBe("ok");
-  await page.mouse.up();
-  await page.dispatchEvent("body", "pointerup");
-}
-
 /** A new version sent to the browser's route, as the uploader sends one. */
 async function putVersion(page: Page, fileId: string, bytes: Buffer, filename: string) {
   const response = await page.request.put(`/api/files/${fileId}?filename=${encodeURIComponent(filename)}`, {
@@ -106,24 +62,6 @@ async function putVersion(page: Page, fileId: string, bytes: Buffer, filename: s
   return { status: response.status(), body: (await response.json()) as Record<string, unknown> };
 }
 
-const fragmentOf = (card: string) => card.split("#")[1];
-
-/**
- * The address a page is on, path and fragment, exactly. A pattern anchored at
- * its end alone passes a fragment written twice, which is what a client
- * navigation that carried one leaves behind.
- */
-async function expectAddress(page: Page, address: string) {
-  await expect
-    .poll(
-      () => {
-        const url = new URL(page.url());
-        return `${url.pathname}${url.hash}`;
-      },
-      { timeout: 30_000 },
-    )
-    .toBe(address);
-}
 const RELOAD = "Reload the page";
 
 test.describe("a file takes a new version", () => {
@@ -755,7 +693,7 @@ test.describe("a file takes a new version", () => {
       let report = await check(String(before.result.id));
       // The old link names version 1 and finds its words there: no fault, though the latest lacks them.
       expect(report).toContain("0 error(s), 0 warning(s)");
-      expect(report).toContain("names version 1; the latest is version 2");
+      expect(report).toContain("is read on version 1; the latest is version 2");
       expect(report).not.toContain("[unstamped]");
 
       // The same link, typed by hand into a doc written after the second version: read as version 1's, and warned of.

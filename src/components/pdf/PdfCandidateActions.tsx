@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { abandonVersion, promoteVersion, type VersionActionResult } from "@/app/actions/files";
+import { abandonVersion, buildVersionMap, promoteVersion, type VersionActionResult } from "@/app/actions/files";
 import type { CandidateFacts } from "@/lib/file-version-candidate";
+import { pdfMapPath } from "@/lib/file-version";
+import type { PageMapNumbers } from "@/lib/pdf-page-map";
 import styles from "./PdfVersions.module.css";
 
 // docs/PDF.md §13, "The upload" — what a candidate shows whoever may manage
@@ -18,19 +20,32 @@ import styles from "./PdfVersions.module.css";
 // the address this page is on means something else: the latest's own page,
 // or the page of an abandoned version.
 //
-// Promoting moves no note and carries no link: nothing has a page map yet, so
-// every note stays on the version it is on, listed on the latest's page under
-// that version, and every link opens the version it names.
+// **The page map, where it has one, in numbers** (§13, "Matching the
+// pages"): sheets paired, removed and unmapped, and the runs of sheets with a
+// question open, with a link to where they are answered. Without one this
+// offers to build it, and says what storing one means: that the two versions
+// hold the same text, so links written against either are carried to the
+// other from then on.
+//
+// Promoting moves no note. Every note stays on the version it is on, listed
+// on the latest's page under that version. A link written against the
+// outgoing version is carried to this one where it has a map, and opens the
+// version it names where it has none.
 
 type Props = {
+  slug: string;
   versionId: string;
   number: number;
   /** The number of the version `/pdf/<slug>` shows now. */
   latestNumber: number;
+  /** The candidate's page map in numbers; null where it has none. */
+  map: PageMapNumbers | null;
   facts: CandidateFacts | null;
 };
 
-export default function PdfCandidateActions({ versionId, number, latestNumber, facts }: Props) {
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+export default function PdfCandidateActions({ slug, versionId, number, latestNumber, map, facts }: Props) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [confirmingAbandon, setConfirmingAbandon] = useState(false);
@@ -49,9 +64,26 @@ export default function PdfCandidateActions({ versionId, number, latestNumber, f
 
   return (
     <div className={styles.manage} data-testid="pdf-candidate-actions">
+      {map ? (
+        <p className={styles.versionFacts} data-testid="pdf-candidate-map">
+          Its pages are matched with version {latestNumber}&apos;s: {count(map.paired, "sheet", "sheets")} paired, {map.removed} removed and {map.unmapped} unmapped.{" "}
+          {map.openRuns > 0 && <>{count(map.openRuns, "question about a run of sheets is", "questions about runs of sheets are")} open. </>}
+          <a href={pdfMapPath(slug, number)}>{map.openRuns > 0 ? "Answer on the page map" : "See the page map"}</a>
+        </p>
+      ) : (
+        <p className={styles.versionFacts} data-testid="pdf-candidate-no-map">
+          Its pages are not matched with version {latestNumber}&apos;s. Matching them says the two versions hold the same text: a link written against either is
+          then carried to the other, and notes can be carried forward.{" "}
+          <button type="button" className={styles.manageButton} disabled={pending} data-testid="pdf-candidate-build-map" onClick={() => run(buildVersionMap)}>
+            Match its pages
+          </button>
+        </p>
+      )}
       <p className={styles.versionFacts}>
-        Promoting makes version {number} the one this file&apos;s address shows. Notes stay on version {latestNumber}, where they are still drawn and listed, and a link
-        written against version {latestNumber} still opens it.
+        Promoting makes version {number} the one this file&apos;s address shows. Notes stay on version {latestNumber}, where they are still drawn and listed.{" "}
+        {map
+          ? `A link written against version ${latestNumber} is carried to version ${number}.`
+          : `A link written against version ${latestNumber} still opens it.`}
       </p>
       {facts?.unlabelled && (
         <p className={styles.manageWarning} data-testid="pdf-candidate-unlabelled">

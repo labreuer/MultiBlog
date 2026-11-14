@@ -3,6 +3,9 @@ import type { DocVisibility } from "@/generated/prisma/enums";
 import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
 import { displayNameOf } from "@/lib/display-name";
 import { CAPTURE_RELOAD_MESSAGE, fileVersionState, type CaptureOrigin, type FileVersionState } from "@/lib/file-version";
+import type { LinkVersion } from "@/lib/pdf-link-reading";
+import { pdfMetadata } from "@/lib/pdf-metadata";
+import { pageMapNumbers, parsePageMap, type PageMapNumbers } from "@/lib/pdf-page-map";
 
 // docs/PDF.md §13, "Versions" — the queries over `file_version` that more
 // than one module asks. Server-only (Prisma); the vocabulary they share with
@@ -230,6 +233,10 @@ export type FileVersionSummary = {
   promotedAt: string | null;
   promotedBy: string | null;
   abandonedAt: string | null;
+  /** The number of the version it was uploaded over; null for a first version. */
+  baseNumber: number | null;
+  /** Its page map from that version, in numbers; null where it has none (docs/PDF.md §13, "Matching the pages"). */
+  map: PageMapNumbers | null;
 };
 
 /** The select `summariseVersions` reads, for a file query that takes its versions along. */
@@ -243,6 +250,9 @@ export const VERSION_SUMMARY_SELECT = {
   uploadedAt: true,
   promotedAt: true,
   abandonedAt: true,
+  baseVersionId: true,
+  pageMap: true,
+  pageLabels: true,
   uploadedBy: { select: { name: true } },
   promotedBy: { select: { name: true } },
 } as const satisfies Prisma.FileVersionSelect;
@@ -266,7 +276,55 @@ export function summariseVersions(file: { currentVersionId: string | null; versi
       promotedAt: version.promotedAt?.toISOString() ?? null,
       promotedBy: version.promotedBy ? displayNameOf(version.promotedBy) : null,
       abandonedAt: version.abandonedAt?.toISOString() ?? null,
+      baseNumber: file.versions.find((other) => other.id === version.baseVersionId)?.number ?? null,
+      map: mapNumbersOf(version.pageMap),
     }));
+}
+
+function mapNumbersOf(stored: unknown): PageMapNumbers | null {
+  const map = parsePageMap(stored);
+  return map ? pageMapNumbers(map) : null;
+}
+
+/** A file's versions as a link's reading takes them, with what carrying reads. */
+type LinkVersionRow = {
+  id: string;
+  number: number;
+  pageCount: number | null;
+  promotedAt: Date | null;
+  abandonedAt: Date | null;
+  baseVersionId: string | null;
+  pageMap: unknown;
+  pageLabels: unknown;
+};
+
+/**
+ * A file's versions as every reader of a link takes them
+ * (`src/lib/pdf-link-reading.ts`): each with its state, the version it was
+ * uploaded over, the pairing of its page map, its sheets and its own labels.
+ *
+ * **A file with one version gets its number and state alone**: nothing can
+ * be carried there, and its labels would only be weight on the page. A
+ * version whose labels haven't been read yet has them read and stored now,
+ * as every reader of them does (`pdfMetadata`), so a `p=` that names it
+ * finds its sheets.
+ */
+export async function linkVersionsOf(file: { currentVersionId: string | null; versions: readonly LinkVersionRow[] }): Promise<LinkVersion[]> {
+  const versions = [...file.versions].sort((a, b) => a.number - b.number);
+  if (versions.length < 2) return versions.map((version) => ({ number: version.number, state: fileVersionState(version, file.currentVersionId) }));
+  return Promise.all(
+    versions.map(async (version): Promise<LinkVersion> => {
+      const stored = Array.isArray(version.pageLabels) ? (version.pageLabels as unknown[]) : ((await pdfMetadata(version.id))?.pageLabels ?? null);
+      return {
+        number: version.number,
+        state: fileVersionState(version, file.currentVersionId),
+        base: versions.find((other) => other.id === version.baseVersionId)?.number ?? null,
+        map: parsePageMap(version.pageMap)?.sheets ?? null,
+        pageCount: version.pageCount,
+        labels: stored ? stored.map((label) => (typeof label === "string" ? label : "")) : null,
+      };
+    }),
+  );
 }
 
 /**

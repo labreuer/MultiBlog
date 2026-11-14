@@ -1,4 +1,6 @@
 import { fileVersionState, latestVersionOf, pdfPath, type FileVersionState } from "@/lib/file-version";
+import { linkVersionsOf } from "@/lib/file-version-data";
+import type { LinkVersion } from "@/lib/pdf-link-reading";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canUserReadDoc } from "@/lib/doc-authz";
 import { canUserReadFile } from "@/lib/file-authz";
@@ -76,8 +78,8 @@ export type ResolvedFile = {
   /** The reference named the version by its own address, /pdf/<slug>/v/<n>; false for the bare address, which means the latest. */
   versionAddressed: boolean;
   versionState: FileVersionState;
-  /** Every version of the file, by number: what a link's `v=` is read against (src/lib/pdf-link-reading.ts). */
-  versions: { number: number; state: FileVersionState }[];
+  /** Every version of the file, by number, with its page map's pairing: what a link's `v=` is read against and carried through (src/lib/pdf-link-reading.ts). */
+  versions: LinkVersion[];
   /** The address read: the version's own where the reference named it, the bare one otherwise. */
   url: string;
   filename: string;
@@ -96,7 +98,20 @@ const FILE_SELECT = {
   deletedByUserId: true,
   currentVersionId: true,
   versions: {
-    select: { id: true, number: true, filename: true, contentType: true, byteSize: true, sha256: true, pageCount: true, promotedAt: true, abandonedAt: true },
+    select: {
+      id: true,
+      number: true,
+      filename: true,
+      contentType: true,
+      byteSize: true,
+      sha256: true,
+      pageCount: true,
+      promotedAt: true,
+      abandonedAt: true,
+      baseVersionId: true,
+      pageMap: true,
+      pageLabels: true,
+    },
   },
 } as const;
 
@@ -133,7 +148,7 @@ export async function readableFileBySlug(actor: Actor, slugOrId: string, version
     isLatest,
     versionAddressed,
     versionState,
-    versions: file.versions.map((candidate) => ({ number: candidate.number, state: fileVersionState(candidate, file.currentVersionId) })).sort((a, b) => a.number - b.number),
+    versions: await linkVersionsOf(file),
     url: pdfPath(file.slug, { number: version.number, isLatest }, { own: versionAddressed }),
     filename: version.filename,
     contentType: version.contentType,

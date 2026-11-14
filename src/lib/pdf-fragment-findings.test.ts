@@ -1,8 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkPage, checkPassage, parseFragmentLinkHref, passageElsewhere, versionNamedBy, type FilePages } from "./pdf-fragment-findings";
-import { onePassage, skeletonOf, type FragmentPassage } from "./pdf-fragment";
+import {
+  checkPage,
+  checkPassage,
+  checkPassageAt,
+  parseFragmentLinkHref,
+  passageElsewhere,
+  readPageLink,
+  readPassage,
+  versionNamedBy,
+  type FilePages,
+  type PassageSource,
+} from "./pdf-fragment-findings";
+import { onePassage, resolvePassage, skeletonOf, type FragmentPassage } from "./pdf-fragment";
+import { readPage, type LinkAddress, type LinkVersion } from "./pdf-link-reading";
 import type { PageName } from "./pdf-open-params";
+import { REMOVED } from "./pdf-page-map";
 
 // docs/PDF_FRAGMENT_LINKS.md §8 — which hrefs the check reads, and what a
 // passage or a page link comes to against a file's pages, with labels and
@@ -157,4 +170,117 @@ test("a finding names the version it was read on", () => {
   const miss = checkPassage(second, passage({ sheet: 1 }, "the totem passage"));
   assert.equal(miss.kind === "no-match" && miss.version, 2);
   assert.deepEqual(checkPage(second, second.ownLabels, { sheet: 9 }), { kind: "page-out-of-range", version: 2, pageCount: 5 });
+});
+
+// docs/PDF.md §13, "Links into the file" — the check reads a link as the
+// viewer does: carried through the page maps, and checked where it lands.
+//
+// Three versions of one text. Version 2 is a better copy of version 1: its
+// first sheet is gone, so every sheet moved up one, and "modem" on the third
+// sheet was corrected to "modern". Version 3 is a revised text with no map,
+// which cut the totem passage.
+function versionPages(versionNumber: number, texts: readonly string[]): FilePages {
+  return {
+    fileId: "f",
+    slug: "book",
+    versionNumber,
+    stamp: versionNumber,
+    pageCount: texts.length,
+    textVersion: "v",
+    ownLabels: [],
+    pages: new Map(texts.map((text, index) => [index, { text, skeleton: skeletonOf(text) }])),
+  };
+}
+
+const FIRST = versionPages(1, ["A cover sheet.", "The law of participation holds here.", "The modem mind stands apart.", "A totem passage closes the chapter."]);
+const BETTER = versionPages(2, ["The law of participation holds here.", "The modern mind stands apart.", "A totem passage closes the chapter."]);
+const REVISED = versionPages(3, ["The law of participation holds here, somewhat revised.", "The modern mind stands apart."]);
+const PAGES = new Map([FIRST, BETTER, REVISED].map((pages) => [pages.versionNumber, pages]));
+
+const versionsWith = (latest: number): LinkVersion[] => [
+  { number: 1, state: "earlier", base: null, map: null, pageCount: 4 },
+  { number: 2, state: latest === 2 ? "latest" : "earlier", base: 1, map: [REMOVED, 0, 1, 2], pageCount: 3 },
+  ...(latest === 3 ? [{ number: 3, state: "latest" as const, base: 2, map: null, pageCount: 2 }] : []),
+];
+
+/** The check's source over the made pages: what `FragmentChecker` is over stored page text. */
+const SOURCE: PassageSource = {
+  onVersion: async (version, linked) => checkPassage(PAGES.get(version)!, linked),
+  onSheets: async (version, linked, sheets) => checkPassageAt(PAGES.get(version)!, linked, sheets),
+  held: async (version, linked, sheets) =>
+    sheets.some((index) => {
+      const sheet = PAGES.get(version)!.pages.get(index);
+      return sheet !== undefined && resolvePassage(sheet.text, linked, sheet.skeleton) !== null;
+    }),
+  pageOnVersion: async (version, page) => checkPage(PAGES.get(version)!, [], page),
+};
+
+const read = (linked: FragmentPassage, address: LinkAddress, versions: LinkVersion[]) =>
+  readPassage(linked, readPage(linked.page, address, versions), address.shown, SOURCE);
+
+test("a link carried to a sheet that holds its words is checked there, and is no fault", async () => {
+  // Written against version 1, without a stamp: its sheet 2 is the latest's sheet 1.
+  const finding = await read(passage({ sheet: 2 }, "law of participation"), { shown: 2, own: false }, versionsWith(2));
+  assert.deepEqual(finding && [finding.kind, finding.version, finding.kind === "ok" && finding.sheet, finding.kind === "ok" && finding.carried], ["ok", 2, 1, { from: 1 }]);
+  // A link that names the latest is read there as written, and carries nothing.
+  const here = await read(passage({ sheet: 1, v: 2 }, "law of participation"), { shown: 2, own: false }, versionsWith(2));
+  assert.deepEqual(here && [here.kind, here.version, here.kind === "ok" && here.carried], ["ok", 2, undefined]);
+});
+
+test("a link carried to a sheet where its words were corrected is a miss where it lands", async () => {
+  const finding = await read(passage({ sheet: 3 }, "modem mind"), { shown: 2, own: false }, versionsWith(2));
+  assert.equal(finding?.kind, "no-match");
+  assert.deepEqual(finding?.kind === "no-match" && [finding.version, finding.sheets, finding.carried], [2, [2], { from: 1, namedHolds: true }]);
+  // Words neither version holds: the version named doesn't hold them either.
+  const never = await read(passage({ sheet: 3 }, "postmodern mind"), { shown: 2, own: false }, versionsWith(2));
+  assert.deepEqual(never?.kind === "no-match" && never.carried, { from: 1, namedHolds: false });
+});
+
+test("a link that can't be carried is checked on the version it names, whatever the latest lacks", async () => {
+  // A revised text stands between: no map joins version 1 to version 3, so the link opens version 1.
+  const finding = await read(passage({ sheet: 4 }, "totem passage"), { shown: 3, own: false }, versionsWith(3));
+  assert.deepEqual(finding && [finding.kind, finding.version, finding.kind === "ok" && finding.carried], ["ok", 1, undefined]);
+  // And one stamped with version 2, whose words version 3 cut, is checked on version 2.
+  const second = await read(passage({ sheet: 3, v: 2 }, "totem passage"), { shown: 3, own: false }, versionsWith(3));
+  assert.deepEqual(second && [second.kind, second.version], ["ok", 2]);
+});
+
+test("a link onto a sheet with no counterpart is carried by its words, or not at all", async () => {
+  // Version 1's cover sheet was removed. Its words are nowhere in version 2, so the link opens version 1, where they are.
+  const cover = await read(passage({ sheet: 1 }, "cover sheet"), { shown: 2, own: false }, versionsWith(2));
+  assert.deepEqual(cover && [cover.kind, cover.version], ["ok", 1]);
+  // A link that names that sheet for words another sheet holds, once: carried by its words.
+  const stray = await read(passage({ sheet: 1 }, "totem passage"), { shown: 2, own: false }, versionsWith(2));
+  assert.deepEqual(stray && [stray.kind, stray.version, stray.kind === "ok" && stray.sheet, stray.kind === "ok" && stray.carried], ["ok", 2, 3, { from: 1, byWords: true }]);
+});
+
+test("a link that names a version with nothing to read is its fault", async () => {
+  const versions: LinkVersion[] = [...versionsWith(2), { number: 3, state: "abandoned", base: 2, map: null, pageCount: 3 }, { number: 4, state: "abandoned", base: 2, map: [0, REMOVED, 1], pageCount: 3 }];
+  const bare = { shown: 2, own: false };
+  // Abandoned with no map: nothing can confirm it.
+  assert.deepEqual(await read(passage({ sheet: 1, v: 3 }, "law of participation"), bare, versions), {
+    kind: "abandoned-version",
+    version: 3,
+    passage: passage({ sheet: 1, v: 3 }, "law of participation"),
+  });
+  // Abandoned with a map: carried off it, and checked where it lands.
+  const carried = await read(passage({ sheet: 1, v: 4 }, "law of participation"), bare, versions);
+  assert.deepEqual(carried && [carried.kind, carried.version, carried.kind === "ok" && carried.carried], ["ok", 2, { from: 4 }]);
+  // Its sheet with no counterpart, and words that are nowhere: the fault says the maps were there.
+  const lost = await read(passage({ sheet: 3, v: 4 }, "nowhere at all"), bare, versions);
+  assert.deepEqual(lost && [lost.kind, lost.kind === "abandoned-version" && lost.mapped], ["abandoned-version", true]);
+  // A version the file never had.
+  const none = await read(passage({ sheet: 1, v: 9 }, "law of participation"), bare, versions);
+  assert.equal(none?.kind, "no-such-version");
+});
+
+test("a page link is carried to the sheet the maps give, or opens the version it names", async () => {
+  const versions = versionsWith(2);
+  const bare = { shown: 2, own: false };
+  const link = (page: PageName) => readPageLink(page, readPage(page, bare, versions), 2, SOURCE);
+  assert.deepEqual(await link({ sheet: 3 }), { kind: "ok", version: 2, sheet: 2, carried: { from: 1 } });
+  // The removed sheet: not carried, so it is read on version 1.
+  assert.deepEqual(await link({ sheet: 1 }), { kind: "ok", version: 1, sheet: 1 });
+  assert.deepEqual(await link({ sheet: 9 }), { kind: "page-out-of-range", version: 1, pageCount: 4 });
+  assert.deepEqual(await link({ sheet: 2, v: 2 }), { kind: "ok", version: 2, sheet: 2 });
 });

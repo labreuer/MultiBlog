@@ -96,3 +96,73 @@ export function sheetsAlike(a: SheetInPlace, b: SheetInPlace): boolean {
     sheetMoved(b.skeleton, a.skeleton, a.before, a.after) <= ALIKE_MOVED
   );
 }
+
+/**
+ * The runs of four letters of many sheets, each given a number, so that two
+ * sheets' runs are compared as sorted lists of numbers. A page map's builder
+ * compares a sheet with many others (rule 3's alignment), and counting each
+ * sheet's runs anew for every pair is most of what that would cost.
+ */
+export class RunBook {
+  private ids = new Map<string, number>();
+
+  /** A skeleton's runs of four letters as their numbers, sorted, each as often as it occurs. */
+  runsOf(skeleton: string): Uint32Array {
+    const runs = new Uint32Array(Math.max(0, skeleton.length - SHARE_RUN + 1));
+    for (let at = 0; at < runs.length; at++) {
+      const run = skeleton.slice(at, at + SHARE_RUN);
+      let id = this.ids.get(run);
+      if (id === undefined) {
+        id = this.ids.size;
+        this.ids.set(run, id);
+      }
+      runs[at] = id;
+    }
+    return runs.sort();
+  }
+}
+
+/** A sheet in its place with its runs numbered in one `RunBook`: what `preparedAlike` compares. */
+export type PreparedSheet = SheetInPlace & { runs: Uint32Array };
+
+/** Each of a version's sheets in its place, its runs numbered in `book`. Two versions compared share one book. */
+export function prepareSheets(skeletons: readonly string[], book: RunBook): PreparedSheet[] {
+  return skeletons.map((skeleton, index) => ({
+    skeleton,
+    before: skeletons[index - 1] ?? "",
+    after: skeletons[index + 1] ?? "",
+    runs: book.runsOf(skeleton),
+  }));
+}
+
+/** How many runs two sorted lists hold in common, each of one list's answering for one of the other's. */
+function sharedRuns(a: Uint32Array, b: Uint32Array): number {
+  let shared = 0;
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      shared++;
+      i++;
+      j++;
+    } else if (a[i] < b[j]) i++;
+    else j++;
+  }
+  return shared;
+}
+
+/**
+ * `sheetsAlike` for two sheets prepared in one `RunBook`: the same answer,
+ * with the share read from the numbered runs. Words moved to a neighbour are
+ * looked for only once the share has passed, which is for few pairs.
+ */
+export function preparedAlike(a: PreparedSheet, b: PreparedSheet): boolean {
+  if (!hasRunsToCompare(a.skeleton) || !hasRunsToCompare(b.skeleton)) return false;
+  const shared = sharedRuns(a.runs, b.runs);
+  // Divided, as `sheetShare` divides: multiplied out, a share of exactly 0.55 falls a rounding short.
+  if (shared / a.runs.length < ALIKE_SHARE || shared / b.runs.length < ALIKE_SHARE) return false;
+  return (
+    sheetMoved(a.skeleton, b.skeleton, b.before, b.after) <= ALIKE_MOVED &&
+    sheetMoved(b.skeleton, a.skeleton, a.before, a.after) <= ALIKE_MOVED
+  );
+}
