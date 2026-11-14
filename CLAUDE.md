@@ -537,6 +537,12 @@ working on.
   Where a value is kept in visual-viewport space *and* rendered, the two are separate fields
   (`marker` vs `markerStyle`); collapsing them applies the shift twice.
   docs/mobile/coordinates.html.
+- **A client navigation that carries a fragment leaves it on the path.** Next's router
+  (16.2.11) puts the `#…` of a `<Link>` or a `router.push`/`replace` on every later client
+  navigation to that path, so a plain link then arrives by a fragment its reader never
+  followed. On a PDF that fragment names a sheet and a version, and sends them elsewhere: a
+  link to `/pdf/…#sheet=…` is a plain `<a>`, and the viewer's own going is
+  `location.replace`. TODO.md, "A client navigation with a fragment…"; docs/PDF.md §0.
 - **A Next dynamic-route `params` value arrives percent-encoded, not literal.** `getParamValue`
   runs `encodeURIComponent` on every string param before handing it to user code (verified
   against `next@16.2.11`), so a route packing two ids into one segment as `a+b` would see

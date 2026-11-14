@@ -36,7 +36,7 @@ import { changeDocSlug, uniqueDocSlug } from "@/lib/doc-slug";
 import { changeFileSlug, uniqueFileSlug } from "@/lib/file-slug";
 import { countVersionsHolding, createFileWithFirstVersion, latestVersionIdOf, lockFileHash, lockFileRow } from "@/lib/file-version-data";
 import { fileVersionState } from "@/lib/file-version";
-import { recordUpload, stageUpload } from "@/lib/file-ingest";
+import { recordUpload, recordVersionUpload, stageUpload } from "@/lib/file-ingest";
 import { abandonFileVersion, promoteFileVersion } from "@/lib/file-manage";
 import { changeTagSlug, uniqueTagSlug } from "@/lib/tag-slug";
 import { targetFromColumns, targetToColumns, type AnchorTarget } from "@/lib/anchors";
@@ -614,9 +614,12 @@ export type TestFile = {
 async function withShaLock<T>(sha256: string, work: () => Promise<T>): Promise<T> {
   return prisma.$transaction(
     async (tx) => {
-      // `$executeRaw`, not `$queryRaw`: the lock function returns `void`,
-      // which the query path refuses to deserialize as a column.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sha256}))`;
+      // The app's own lock on a hash (docs/PDF.md §13, "The upload"), which
+      // every upload's insert and every removal of a blob takes: a spec that
+      // uploads through a route and another worker's delete of the same bytes
+      // then can't cross either. Nothing `work` calls takes it again, which
+      // would wait on this transaction for good.
+      await lockFileHash(tx, sha256);
       return work();
     },
     // A cold extractPdf under a loaded suite runs well past the 5 s default.
@@ -923,6 +926,8 @@ export async function uploadAcrossAbandon(opts: {
   /** The candidate's bytes again, as its uploader would send them. */
   pages: string[][];
   pageLabels?: readonly TestPageLabelRange[];
+  /** Record them as the next version of this file, in place of a new file: `recordVersionUpload`'s check in place of `recordUpload`'s. */
+  asVersionOf?: string;
 }): Promise<{ deduped: boolean; recorded: { ok: true; fileId: string } | { ok: false; error: string; status: number } }> {
   const actor = await testActor(opts.email);
   const candidate = await prisma.fileVersion.findUniqueOrThrow({ where: { id: opts.candidateVersionId }, select: { sha256: true } });
@@ -933,7 +938,10 @@ export async function uploadAcrossAbandon(opts: {
   await prisma.$transaction(
     async (tx) => {
       await lockFileHash(tx, candidate.sha256);
-      recording = recordUpload(actor, staged, { title: uniqueTitle("across-abandon") }).then(
+      const record = opts.asVersionOf
+        ? recordVersionUpload(actor, opts.asVersionOf, staged)
+        : recordUpload(actor, staged, { title: uniqueTitle("across-abandon") });
+      recording = record.then(
         (recorded): Recorded => ({ ok: true, fileId: recorded.file.id }),
         (err: unknown): Recorded => ({ ok: false, error: err instanceof Error ? err.message : String(err), status: err instanceof UploadError ? err.status : 0 }),
       );
@@ -946,6 +954,22 @@ export async function uploadAcrossAbandon(opts: {
     { timeout: 60_000 },
   );
   return { deduped: staged.stored.deduped, recorded: await recording! };
+}
+
+/**
+ * A promotion and an abandoning of one candidate, begun together: two
+ * managers' clicks. Each checks under the file row's lock that the version is
+ * still the file's candidate, so exactly one may do what it was asked.
+ * Without the lock both pass their check, and the file's latest version is
+ * left abandoned, with no bytes.
+ */
+export async function raceVersionActs(versionId: string, email: string): Promise<{ promoted: VersionActOutcome; abandoned: VersionActOutcome }> {
+  const actor = await testActor(email);
+  const [promoted, abandoned] = await Promise.all([
+    versionAct(() => promoteFileVersion(actor, versionId)),
+    versionAct(() => abandonFileVersion(actor, versionId)),
+  ]);
+  return { promoted, abandoned };
 }
 
 /**
@@ -3185,6 +3209,7 @@ const handlers = {
   promoteTestVersion,
   abandonTestVersion,
   uploadAcrossAbandon,
+  raceVersionActs,
   holdFileHashLock,
   promoteTestVersionSlowly,
   createTestTag,

@@ -339,6 +339,31 @@ in order; the two about moves wait for the moves:
   is held as an abandoning holds it, and the upload is refused once the blob is gone.
   Removing the check from `recordUpload` turns that test red.
 
+## A client navigation with a fragment leaves it on the path (Next 16.2.11)
+
+**Status:** open, and wider than PDFs. Next's client router keeps the fragment of a client
+navigation with the route it reached, and puts it on every later client navigation to that
+path while the entry lives: `discoverKnownRoute` is handed the URL with its hash
+(`fetchServerResponse`'s `canonicalUrl`, through `createHrefFromUrl`, which keeps a hash by
+default), and `navigateUsingPrefetchedRouteTree` then builds the address as
+`route.canonicalUrl + url.hash`. So after a `<Link>` or a `router.push` to `/doc/x#card`, a
+plain link to `/doc/x` arrives at `/doc/x#card`, and a link to `/doc/x#other` at
+`/doc/x#card#other`, which names neither.
+
+It was found as a reader sent to the wrong version of a PDF: the viewer's going to the
+version a link names was a `router.replace` with the link's fragment, the path kept it, and
+the version banner's link back to the latest then arrived as though by that link
+(docs/PDF.md §13, "Links into the file"). The PDF surface's own fragment-bearing
+navigations and search's page links are full loads now (`location.replace`, a plain `<a>`).
+
+Still client navigations with a fragment, each to a card's name, and not a complete list: the
+list of notes on other versions (`PdfOtherVersionNotes`), search's annotation and comment
+hits, and a reference's cited-by notes. A card's name is no page parameter, so none of
+these can send a reader to another version; what each can do is bring a later plain link to
+the same page in at that card. Either make each a plain `<a>`, or look for the fix upstream
+before the next Next bump and drop the workarounds. `e2e/pdf-version-upload.spec.ts` asserts
+exact addresses (`expectAddress`), which is what shows a fragment written twice.
+
 ## An upload refused before its body is read resets the connection (docs/PDF.md §2a)
 
 **Status:** low priority. `POST /api/files/upload` answers 401 and 403 without reading the

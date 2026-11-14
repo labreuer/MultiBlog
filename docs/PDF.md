@@ -71,10 +71,20 @@ it, so this list is the whole of the warning.
   does not name a link built from a template string, which on a file with a second version
   is read as the first version's.
 
-`e2e/pdf-versions.spec.ts` guards the first three, and `e2e/pdf-version-upload.spec.ts` the
-fourth, the fifth and the sixth, each by making its race happen in order. That spec also
-holds a promotion open beside a capture, which is what tells a check inside the capture's
-transaction from one just before it.
+- **A client navigation to a PDF's address never carries a fragment**: a `<Link>` or a
+  `router.replace` to `/pdf/…#sheet=…` leaves that fragment on the path for every later
+  client navigation to it, and the reader then arrives by a link they never followed, read
+  as whichever version it names (§13, "Links into the file"). Such a link is a plain `<a>`,
+  and the viewer's own going is `location.replace`.
+
+`e2e/pdf-versions.spec.ts` guards the first three. `e2e/pdf-version-upload.spec.ts` guards
+the rest, the races by making each happen: it holds a promotion open and starts five of the
+capture's six writers beside it (a draft's insert, a post's settle and the tray's add from
+three browser tabs, and MCP's `add_note` and `create_link`; `extend_link` shares the last
+one's check), which is what tells a check inside the capture's transaction from one just
+before it; it records an upload while the lock on its hash is held; and it begins a
+promotion and an abandoning of one candidate together. Removing the check under the hash
+lock, or the file row's lock from the two acts, turns its test red.
 
 ---
 
@@ -1643,8 +1653,10 @@ Three rules hold throughout:
   - **A fragment in the URL is read by the viewer's rules** (Links into the file): an
     unstamped `#sheet=50` on the bare address is the first version's sheet. The tool's own
     `sheet` argument is a sheet of the version read. The two can be the same number and
-    different sheets, so once a file has a second version each sheet answered carries
-    `link`, its stamped form. A fragment that can't be carried, which is every one that
+    different sheets, so once a file has a second version each sheet a read answers by
+    sheet (`sheet`, `sheets`, `page`, an outline entry's pages, a page link) carries `link`,
+    its stamped form. A quote's occurrences (`around`) and a fragment link's passages name
+    their sheets without one, beside the `url` of the version read. A fragment that can't be carried, which is every one that
     names another version until the maps exist, is answered on the version it names, and
     the answer's `note` says so (`readPdf`, `src/lib/mcp/read/pdf.ts`).
     - **The fragment decides the version only where it decides what is read.** A read that
@@ -1672,7 +1684,8 @@ makes the version row with its page text (`recordVersionUpload`). It refuses any
 a PDF. `stageUpload` checks only the uploader's role, so the file's own checks come before
 the body is stored (`assertMayUploadVersion`): whoever uploads may manage the file, it is a
 live PDF, and no candidate stands. Each is made again under the file row's lock when the
-row is written, since the body can take a minute to arrive.
+row is written, since the body can take a minute to arrive: an owner taken off the file
+meanwhile uploads nothing.
 
 - **A body refused by those checks is received and dropped, never left unread**
   (`discardRefusedBody`). A response sent over a request nobody read closes the connection
@@ -1686,6 +1699,9 @@ row is written, since the body can take a minute to arrive.
   version's number is one more than the file's rows, and "no candidate stands" is true for
   one of two uploads. The partial unique index still refuses a second candidate, and the
   upload answers that as a conflict.
+  - **Each of these transactions may wait a minute for its locks**, where Prisma's default
+    gives up after five seconds: another upload's insert of a large book's page text holds
+    the file row, or the hash, for longer than that.
 
 **MCP uploads a version through its own byte route**, `POST
 /api/mcp/files?versionOf=<file id>&filename=…`. The `upload` tool answers that URL when it is
@@ -1715,6 +1731,12 @@ share"), so the checks are the same ones.
   - **So this route leaves "no candidate stands" to the write.** Refused before the body is
     read, a retry would never reach its key, which is the bytes' hash. The other checks are
     still made first.
+  - **The key also holds which version was the latest and how many had been abandoned when
+    the upload began** (`uploadGeneration`). A retry sees what the first request saw, since
+    an upload changes neither. The same bytes sent again after the candidate was abandoned,
+    which is how a wrong choice at the upload is put right, or after another version was
+    promoted, which is how an earlier version is restored, are a new upload. Keyed on the
+    bytes alone they would be answered for a day with a candidate that is gone.
 - **It makes a candidate and nothing more.** It builds no map and promotes nothing. Saying
   that two versions hold the same text, and making one the latest, stay a person's acts on
   the candidate's page (Open).
@@ -2374,6 +2396,18 @@ what its writer saw.
     browser has the fragment, so the page for the latest arrives first, and the surface
     waits one render for the fragment and never opens bytes the reader is about to leave.
     A `?sel=` goes with it.
+    - **The fragment is read only once the address bar shows this page's own path.** On a
+      client navigation the surface renders a commit before the router writes the new URL,
+      and the fragment still in the bar is the page's the reader came from.
+  - **It goes by a full load (`location.replace`), and every link the surface offers that
+    carries a fragment is a plain `<a>`**: the passage offered on another version, and an
+    abandoned version's link to the latest. Next's client router (16.2.11) keeps the
+    fragment of a client navigation with the route it reached and puts it on every later
+    client navigation to that path, so a `router.replace` to `/pdf/book/v/1#sheet=50` leaves
+    that path carrying `#sheet=50`. The next plain link to it, the version banner's
+    included, then arrives by a fragment its reader never followed, which names a version
+    and so sends them somewhere else. Search's page links are plain `<a>`s for the same
+    reason (TODO.md has the rest of the app's).
   - **A link whose passages name different versions goes by its first page**, the one the
     viewer opens at. The others are then read on that version's own address, where each
     that names another version is offered at that version's address.
@@ -2543,6 +2577,8 @@ discarded annotation's, which takes its links with it.
   its chip.
 - A body that can't be dated, one with no log or one whose replay fails, is taken as
   written before the mark, so the check stays quiet rather than guess.
+- Only the upload's mark is asked today, which is what the warning below needs. The
+  promotion's is stored for the batch under Open.
 - An update whose transaction was open when a mark was read can carry an id below the mark
   and commit after it. The check only warns, so that is accepted.
 

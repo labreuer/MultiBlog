@@ -13,6 +13,7 @@ import {
   holdFileHashLock,
   promoteTestVersion,
   promoteTestVersionSlowly,
+  raceVersionActs,
   renameTestFileSlug,
   uploadAcrossAbandon,
   type TestFile,
@@ -106,6 +107,23 @@ async function putVersion(page: Page, fileId: string, bytes: Buffer, filename: s
 }
 
 const fragmentOf = (card: string) => card.split("#")[1];
+
+/**
+ * The address a page is on, path and fragment, exactly. A pattern anchored at
+ * its end alone passes a fragment written twice, which is what a client
+ * navigation that carried one leaves behind.
+ */
+async function expectAddress(page: Page, address: string) {
+  await expect
+    .poll(
+      () => {
+        const url = new URL(page.url());
+        return `${url.pathname}${url.hash}`;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(address);
+}
 const RELOAD = "Reload the page";
 
 test.describe("a file takes a new version", () => {
@@ -252,22 +270,32 @@ test.describe("a file takes a new version", () => {
       // From another page, so the page for the latest loads first and the viewer goes on from it.
       await gotoOk(page, "/files");
       await page.goto(`/pdf/${file.slug}${sheetLink}`);
-      await expect(page).toHaveURL(new RegExp(`/pdf/${file.slug}/v/1#sheet=2&text=first\\+copy\\+begins$`), { timeout: 30_000 });
+      await expectAddress(page, `/pdf/${file.slug}/v/1#sheet=2&text=first+copy+begins`);
       await waitForViewer(page);
       await expectSheetText(page, `first copy begins ${tag}`, 2);
       await expect(page.getByTestId("pdf-fragment-banner")).toContainText("first copy begins", { timeout: 20_000 });
       await expect(banner).toContainText("an earlier version");
+      // From here the banner's link reaches the latest and stays there: the
+      // address bar still holds this page's fragment while the latest's page
+      // first renders, and read then it would name version 1 and send the
+      // reader straight back.
+      await banner.getByRole("link", { name: "version 2" }).click();
+      await expectSheetText(page, `second copy ${tag}`);
+      await expect(highlight(page, v1Note.id)).toHaveCount(0);
+      await expectAddress(page, `/pdf/${file.slug}`);
+      await expect(banner).toHaveCount(0);
+      await expect(page.getByTestId("pdf-fragment-banner")).toHaveCount(0);
       // By printed page, and into the page already open: a fragment's change alone.
       await gotoOk(page, `/pdf/${file.slug}`);
       await waitForViewer(page);
       await page.goto(`/pdf/${file.slug}${pageLink}`);
-      await expect(page).toHaveURL(new RegExp(`/pdf/${file.slug}/v/1#p=1&text=says\\+this\\+of\\+totems$`), { timeout: 30_000 });
+      await expectAddress(page, `/pdf/${file.slug}/v/1#p=1&text=says+this+of+totems`);
       await waitForViewer(page);
       await expect(page.getByTestId("pdf-fragment-banner")).toContainText("says this of totems", { timeout: 20_000 });
       // Stamped with the latest, a link stays on the bare address.
       await page.goto(`/pdf/${file.slug}#sheet=2&v=2&text=second+copy+begins`);
       await waitForViewer(page);
-      await expect(page).toHaveURL(new RegExp(`/pdf/${file.slug}#sheet=2&v=2&text=second\\+copy\\+begins$`));
+      await expectAddress(page, `/pdf/${file.slug}#sheet=2&v=2&text=second+copy+begins`);
       await expect(page.getByTestId("pdf-fragment-banner")).toContainText("second copy begins", { timeout: 20_000 });
       await expect(banner).toHaveCount(0);
       // On a version's own address the viewer stays, and offers a passage of another version there.
@@ -276,6 +304,15 @@ test.describe("a file takes a new version", () => {
       const offered = page.getByTestId("pdf-fragment-other-version");
       await expect(offered).toContainText("On version 1", { timeout: 20_000 });
       await expect(offered.getByRole("link")).toHaveAttribute("href", `/pdf/${file.slug}/v/1#sheet=2&v=1&text=first+copy+begins`);
+      // Followed, it opens the passage on version 1; and the plain link back
+      // to the latest then arrives with no fragment of that visit's.
+      await offered.getByRole("link").click();
+      await expectAddress(page, `/pdf/${file.slug}/v/1#sheet=2&v=1&text=first+copy+begins`);
+      await waitForViewer(page);
+      await expect(page.getByTestId("pdf-fragment-banner")).toContainText("first copy begins", { timeout: 20_000 });
+      await banner.getByRole("link", { name: "version 2" }).click();
+      await expectSheetText(page, `second copy ${tag}`);
+      await expectAddress(page, `/pdf/${file.slug}`);
       // A stamp no version of the file has: the sheet as written, and a line saying so.
       await page.goto(`/pdf/${file.slug}#sheet=2&v=9`);
       await waitForViewer(page);
@@ -318,9 +355,14 @@ test.describe("a file takes a new version", () => {
       await stale.close();
 
       // ---- a note made on version 1 after the promotion --------------------
+      // Arrived by a link, whose banner the reader dismisses before writing.
       const LATE = `Made on the first copy afterwards ${tag}.`;
-      await gotoOk(reader, `/pdf/${file.slug}/v/1`);
+      await gotoOk(reader, `/pdf/${file.slug}/v/1#sheet=1&text=names+participation`);
       await waitForViewer(reader);
+      const linked = reader.getByTestId("pdf-fragment-banner");
+      await expect(linked).toContainText("names participation", { timeout: 20_000 });
+      await linked.getByRole("button", { name: "Dismiss linked passages" }).click();
+      await expect(linked).toHaveCount(0);
       await selectPhrase(reader, 1, "names participation");
       await reader.getByRole("button", { name: "Annotate" }).click();
       const editor = annotationEditor(reader);
@@ -330,6 +372,11 @@ test.describe("a file takes a new version", () => {
       await expect(reader.getByRole("button", { name: "Write an annotation..." })).toBeVisible({ timeout: 15_000 });
       await expect(visibleText(reader, LATE)).toBeVisible({ timeout: 15_000 });
       await expect.poll(async () => (await getFileAnchorVersions(file.id)).annotations, { timeout: 15_000 }).toEqual([file.versionId, file.versionId]);
+      // The post refreshes the page's server data. That is no new arrival by
+      // the link: the banner stays dismissed, and the reader is not taken
+      // back to the passage.
+      await reader.waitForLoadState("networkidle");
+      await expect(linked).toHaveCount(0);
       // Drawn there, and not on the latest, where it is listed under its version.
       await gotoOk(reader, `/pdf/${file.slug}`);
       await waitForViewer(reader);
@@ -374,9 +421,13 @@ test.describe("a file takes a new version", () => {
       expect((await page.request.get(`/api/files/${file.id}/${versions[2].sha256}`)).status()).toBe(404);
       // The link it offers: the latest's viewer says the version was abandoned, and opens no sheet for it.
       await page.getByTestId("pdf-abandoned-latest").click();
-      await expect(page).toHaveURL(new RegExp(`/pdf/${file.slug}#sheet=2&v=3$`));
+      await expectAddress(page, `/pdf/${file.slug}#sheet=2&v=3`);
       await waitForViewer(page);
       await expect(page.getByTestId("pdf-fragment-version-note")).toContainText("Version 3 was abandoned", { timeout: 20_000 });
+      // On the latest, and still there once the viewer has read the link: not on version 1, which says the same of version 3.
+      await expectSheetText(page, `second copy ${tag}`);
+      await expectAddress(page, `/pdf/${file.slug}#sheet=2&v=3`);
+      await expect(page.getByTestId("pdf-version-banner")).toHaveCount(0);
       // MCP answers the same of its address: the version is gone, and where the latest is.
       const goneRead = await agent.call("read", { url: `/pdf/${file.slug}/v/3` });
       expect(goneRead.error).toMatchObject({ code: "not_found" });
@@ -455,13 +506,29 @@ test.describe("a file takes a new version", () => {
       const refusedRoute = await request.post(`${ownGrant.result.url}&versionOf=${file.id}&filename=second.pdf`, { data: second, headers: { "Content-Type": "application/pdf" } });
       expect(refusedRoute.status()).toBe(404);
 
-      // The rule is this upload's alone: the bot may not promote what it uploaded. Its person does.
+      // The rule is this upload's alone: the bot may neither promote nor abandon what it uploaded.
       expect(await promoteTestVersion(versions[1].id, bot.user.email)).toMatchObject({ ok: false });
-      await gotoOk(personPage, `/pdf/${file.slug}/v/2`);
-      await personPage.getByTestId("pdf-version-banner").getByRole("button", { name: "Promote version 2" }).click();
-      await expect(personPage.locator("[data-pdf-viewer]")).toContainText("version 2 (the latest)", { timeout: 60_000 });
+      expect(await abandonTestVersion(versions[1].id, bot.user.email)).toMatchObject({ ok: false });
+
+      // Its person abandons the candidate, and the bot sends the same file
+      // again, which is how a wrong upload is put right. It is a new upload,
+      // not a repeat of the first: the answer is a new candidate, never the
+      // one that is gone.
+      expect(await abandonTestVersion(versions[1].id, person.email)).toEqual({ ok: true, number: 2 });
+      const resent = await send(bot, second);
+      expect(resent.status, JSON.stringify(resent)).toBe(201);
+      expect(resent.body).toMatchObject({ version: 3, url: `/pdf/${file.slug}/v/3` });
+      // And a retry of that one is answered with it.
+      expect((await send(bot, second)).body).toMatchObject({ code: "already_done", result: { version: 3 } });
       versions = await getFileVersionFacts(file.id);
-      expect(versions[1]).toMatchObject({ state: "latest", promotedByEmail: person.email });
+      expect(versions.map(({ number, state, bytesOnDisk }) => `${number} ${state} ${bytesOnDisk}`)).toEqual(["1 latest true", "2 abandoned true", "3 candidate true"]);
+
+      // Its person promotes it.
+      await gotoOk(personPage, `/pdf/${file.slug}/v/3`);
+      await personPage.getByTestId("pdf-version-banner").getByRole("button", { name: "Promote version 3" }).click();
+      await expect(personPage.locator("[data-pdf-viewer]")).toContainText("version 3 (the latest)", { timeout: 60_000 });
+      versions = await getFileVersionFacts(file.id);
+      expect(versions[2]).toMatchObject({ state: "latest", promotedByEmail: person.email });
       // The latest's bytes again: unchanged, and nothing written.
       const again = await request.post(`${(await bot.call("upload", { kind: "file", versionOf: file.id })).result.url}&filename=again.pdf`, {
         data: second,
@@ -520,6 +587,29 @@ test.describe("a file takes a new version", () => {
       expect(await promoteTestVersion(fourth.id, reader.email)).toMatchObject({ ok: false });
       expect(await abandonTestVersion(fourth.id, reader.email)).toMatchObject({ ok: false });
       expect((await getFileVersionFacts(file.id))[3].state).toBe("candidate");
+
+      // ---- two managers' clicks on one candidate, at once ------------------
+      // One promotes and one abandons, begun together. Each checks under the
+      // file row's lock that the version is still the candidate, so exactly
+      // one does what it was asked, whichever got there first. Without the
+      // lock both pass their check, and the file's latest version is left
+      // abandoned, with no bytes. Several rounds, since a race has to overlap
+      // to show.
+      let candidate = fourth;
+      for (let round = 0; round < 5; round++) {
+        const { promoted, abandoned } = await raceVersionActs(candidate.id, ADMIN_EMAIL);
+        expect([promoted.ok, abandoned.ok].filter(Boolean), `round ${round}: ${JSON.stringify({ promoted, abandoned })}`).toHaveLength(1);
+        const after = await getFileVersionFacts(file.id);
+        const raced = after.find((version) => version.id === candidate.id)!;
+        expect(raced).toMatchObject(promoted.ok ? { state: "latest", bytesOnDisk: true, promotedAtUpdateId: true } : { state: "abandoned", pageTextRows: 0 });
+        // The latest always has its bytes and its page text, and is never abandoned.
+        const latest = after.filter((version) => version.state === "latest");
+        expect(latest).toHaveLength(1);
+        expect(latest[0]).toMatchObject({ bytesOnDisk: true });
+        expect(latest[0].pageTextRows).toBeGreaterThan(0);
+        expect((await putVersion(page, file.id, pdfOf(copy(tag, `round${round}`)), `round-${round}.pdf`)).status).toBe(201);
+        candidate = (await getFileVersionFacts(file.id)).at(-1)!;
+      }
     } finally {
       await deleteTestFile(file.id);
     }
@@ -568,6 +658,71 @@ test.describe("a file takes a new version", () => {
     } finally {
       await deleteTestFile(file.id);
       await agent.dispose();
+    }
+  });
+
+  test("a browser's captures begun beside a promotion wait for it, and are refused", async ({ page }) => {
+    const tag = token();
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: copy(tag, "first") });
+    try {
+      await signIn(page, ADMIN_EMAIL);
+      expect((await putVersion(page, file.id, pdfOf(copy(tag, "second")), "second.pdf")).status).toBe(201);
+      const candidate = (await getFileVersionFacts(file.id))[1];
+
+      // Three tabs on the bare address, each one click from a capture: a
+      // draft about to be posted, a selection about to open a draft, and a
+      // selection about to join a link. Each of the three is a writer of its
+      // own, with its own transaction to check its version in.
+      const posting = page;
+      await gotoOk(posting, `/pdf/${file.slug}`);
+      await waitForViewer(posting);
+      await selectPhrase(posting, 1, "Front matter");
+      await posting.getByRole("button", { name: "Annotate" }).click();
+      const editor = annotationEditor(posting);
+      await editor.click();
+      await editor.pressSequentially(`A draft beside the promotion ${tag}.`);
+      const drafting = await page.context().newPage();
+      await gotoOk(drafting, `/pdf/${file.slug}`);
+      await waitForViewer(drafting);
+      await selectPhrase(drafting, 1, "names participation");
+      await expect(drafting.getByRole("button", { name: "Annotate" })).toBeVisible();
+      const linking = await page.context().newPage();
+      await gotoOk(linking, `/pdf/${file.slug}`);
+      await waitForViewer(linking);
+      await selectPhrase(linking, 1, "participation here");
+      await expect(linking.getByRole("button", { name: "Add to link" })).toBeVisible();
+      // The draft is on version 1, which is the latest, and nothing else is written yet.
+      expect(await getFileAnchorVersions(file.id)).toEqual({ annotations: [file.versionId], linkParts: [] });
+
+      // The promotion holds the file row before it commits, and the three
+      // clicks land while it does. Each writer's check waits for the commit
+      // and then finds another version the latest. One that checked before
+      // its transaction would have passed, and written on version 1 unseen.
+      const HOLD = 5_000;
+      const promotion = promoteTestVersionSlowly(candidate.id, ADMIN_EMAIL, HOLD);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const clicked = Date.now();
+      await Promise.all([
+        posting.getByRole("button", { name: "Save" }).click(),
+        drafting.getByRole("button", { name: "Annotate" }).click(),
+        linking.getByRole("button", { name: "Add to link" }).click(),
+      ]);
+      // The clicks landed inside the hold, or this proves nothing.
+      expect(Date.now() - clicked).toBeLessThan(HOLD - 1_500);
+      for (const tab of [posting, drafting, linking]) {
+        await expect(tab.getByText(RELOAD).first()).toBeVisible({ timeout: 30_000 });
+      }
+      await promotion;
+      // Nothing more was written: the draft is still the only row, still on
+      // version 1, and neither a second draft nor a link part exists.
+      expect(await getFileAnchorVersions(file.id)).toEqual({ annotations: [file.versionId], linkParts: [] });
+      expect((await getFileVersionFacts(file.id)).map(({ number, state }) => `${number} ${state}`)).toEqual(["1 earlier", "2 latest"]);
+      // The draft was not posted: version 1's page lists no note of it for anyone else to see.
+      await gotoOk(linking, `/pdf/${file.slug}`);
+      await waitForViewer(linking);
+      await expect(linking.getByTestId("pdf-other-version-notes")).toHaveCount(0);
+    } finally {
+      await deleteTestFile(file.id);
     }
   });
 
@@ -666,19 +821,37 @@ test.describe("a file takes a new version", () => {
       expect(crossed.recorded.ok === false && crossed.recorded.error).toContain("Send the file again");
       expect((await getFileVersionFacts(file.id))[1]).toMatchObject({ state: "abandoned", bytesOnDisk: false, pageTextRows: 0 });
 
-      // Sent again, as the refusal says, the bytes are stored anew and the version is made.
+      // The same crossing for a version's upload, which has its own insert:
+      // the abandoned candidate's bytes are sent again, to this file, and
+      // another candidate of them is abandoned underneath.
       expect((await putVersion(page, file.id, pdfOf(SECOND), "second.pdf")).body).toMatchObject({ version: 3 });
-      candidate = (await getFileVersionFacts(file.id))[2];
-      expect(candidate).toMatchObject({ number: 3, state: "candidate", bytesOnDisk: true, sha256: (await getFileVersionFacts(file.id))[1].sha256 });
+      const other = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: copy(tag, "other") });
+      made.push(other.id);
+      const crossedVersion = await uploadAcrossAbandon({
+        candidateVersionId: (await getFileVersionFacts(file.id))[2].id,
+        email: ADMIN_EMAIL,
+        pages: SECOND,
+        pageLabels: LABELS,
+        asVersionOf: other.id,
+      });
+      expect(crossedVersion.deduped).toBe(true);
+      expect(crossedVersion.recorded).toMatchObject({ ok: false, status: 409 });
+      expect((await getFileVersionFacts(other.id)).length).toBe(1);
+      expect((await getFileVersionFacts(file.id))[2]).toMatchObject({ state: "abandoned", bytesOnDisk: false });
+
+      // Sent again, as the refusal says, the bytes are stored anew and the version is made.
+      expect((await putVersion(page, file.id, pdfOf(SECOND), "second.pdf")).body).toMatchObject({ version: 4 });
+      candidate = (await getFileVersionFacts(file.id))[3];
+      expect(candidate).toMatchObject({ number: 4, state: "candidate", bytesOnDisk: true, sha256: (await getFileVersionFacts(file.id))[1].sha256 });
 
       // ---- an abandoning waits for whoever holds the hash -------------------
       const HOLD = 1_500;
       let held = holdFileHashLock(candidate.sha256, HOLD);
       await new Promise((resolve) => setTimeout(resolve, 300));
       const abandoned = await abandonTestVersion(candidate.id, ADMIN_EMAIL);
-      expect(abandoned).toEqual({ ok: true, number: 3 });
+      expect(abandoned).toEqual({ ok: true, number: 4 });
       expect(Date.now()).toBeGreaterThanOrEqual((await held).releasedAt);
-      expect((await getFileVersionFacts(file.id))[2]).toMatchObject({ state: "abandoned", bytesOnDisk: false });
+      expect((await getFileVersionFacts(file.id))[3]).toMatchObject({ state: "abandoned", bytesOnDisk: false });
 
       // ---- and so does an upload's insert ----------------------------------
       const FOURTH = pdfOf(copy(tag, "fourth"));
@@ -686,7 +859,7 @@ test.describe("a file takes a new version", () => {
       held = holdFileHashLock(sha, HOLD);
       await new Promise((resolve) => setTimeout(resolve, 300));
       const uploaded = await putVersion(page, file.id, FOURTH, "fourth.pdf");
-      expect(uploaded).toMatchObject({ status: 201, body: { version: 4 } });
+      expect(uploaded).toMatchObject({ status: 201, body: { version: 5 } });
       expect(Date.now()).toBeGreaterThanOrEqual((await held).releasedAt);
 
       // ---- a version another row shares its bytes with keeps them -----------
@@ -694,10 +867,10 @@ test.describe("a file takes a new version", () => {
       const twin = await page.request.post(`/api/files/upload?filename=${encodeURIComponent(`twin-${tag}.pdf`)}`, { data: FOURTH, headers: { "Content-Type": "application/pdf" } });
       expect(twin.status()).toBe(200);
       made.push(String(((await twin.json()) as { id: string }).id));
-      const fourth = (await getFileVersionFacts(file.id))[3];
-      expect(await abandonTestVersion(fourth.id, ADMIN_EMAIL)).toEqual({ ok: true, number: 4 });
-      expect((await getFileVersionFacts(file.id))[3]).toMatchObject({ state: "abandoned", bytesOnDisk: true, pageTextRows: 0 });
-      expect((await getFileVersionFacts(made[0]))[0]).toMatchObject({ state: "latest", bytesOnDisk: true });
+      const fifth = (await getFileVersionFacts(file.id))[4];
+      expect(await abandonTestVersion(fifth.id, ADMIN_EMAIL)).toEqual({ ok: true, number: 5 });
+      expect((await getFileVersionFacts(file.id))[4]).toMatchObject({ state: "abandoned", bytesOnDisk: true, pageTextRows: 0 });
+      expect((await getFileVersionFacts(made.at(-1)!))[0]).toMatchObject({ state: "latest", bytesOnDisk: true });
 
       const { stdout } = await promisify(execFile)("npx", ["tsx", "scripts/integrity/check-file-versions.ts", "--file", file.id]);
       expect(stdout).toContain("0 error(s).");

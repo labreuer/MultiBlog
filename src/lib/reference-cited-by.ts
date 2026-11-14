@@ -15,8 +15,8 @@ import { parseCitedQuery } from "@/lib/cited-passage-query";
 import { formatPassageText } from "@/lib/pdf-fragment";
 import { FragmentChecker } from "@/lib/pdf-fragment-check";
 import { withoutBrackets } from "@/lib/pdf-passage-pieces";
-import { fileVersionState, latestVersionOf, pageStampFor, pdfNoteContainer, pdfPath } from "@/lib/file-version";
-import { stampedFragment, versionToOpen, type LinkVersion } from "@/lib/pdf-link-reading";
+import { fileVersionState, latestVersionOf, pageStampFor, pdfNoteContainer } from "@/lib/file-version";
+import { referentTarget } from "@/lib/pdf-link-reading";
 import type { PageStamp } from "@/lib/pdf-open-params";
 import { noteVersions } from "@/lib/file-version-data";
 
@@ -117,27 +117,6 @@ export async function citedPageTarget(actor: Actor | null, segment: string, page
   if (placed && pages) return `/pdf/${file.slug}#${placedFragment(placed, pages)}`;
   // `pageHref` ends in its page with its stamp, so the passage follows both.
   return `${pageHref}&text=${formatPassageText(withoutBrackets(asked.text))}`;
-}
-
-/**
- * Where a `/pdf/` referent's pairs send a reader (docs/PDF.md §13, "Links
- * into the file"): the link they make into the work's file, read as the
- * viewer reads one on the bare address. Each page names the version its `v=`
- * says, or the file's first. One that names the latest opens there. One that
- * names another version can't be carried, no page map existing, and opens
- * the version it names. One whose version is abandoned or was never the
- * file's goes to the bare address, where the viewer says so.
- *
- * The pairs are written anew (`stampedFragment`), so a referent's `page=`
- * leaves as `sheet=` and every page carries its stamp once the file has a
- * second version. Null where the pairs name no page.
- */
-export function referentTarget(slug: string, fragment: string, latestNumber: number, versions: readonly LinkVersion[]): string | null {
-  const address = { shown: latestNumber, own: false };
-  const written = stampedFragment(fragment, address, versions.length);
-  if (written === null) return null;
-  const elsewhere = versionToOpen(fragment, address, versions);
-  return `${elsewhere === null ? pdfPath(slug) : pdfPath(slug, { number: elsewhere, isLatest: false })}#${written}`;
 }
 
 export async function referenceCitedBy(actor: Actor, referenceId: string): Promise<ReferenceCitedBy> {

@@ -42,7 +42,9 @@ const FILE_HASH_LOCK_SPACE = 0x626c6f62;
  * Holds a blob's hash for the rest of `tx` (docs/PDF.md §13, "The upload"):
  * an advisory lock, held to the end of the transaction, as a slug's claim is.
  * **Whatever writes a row holding a hash, and whatever removes a hash's
- * bytes, takes it**, so the two can't cross:
+ * bytes, takes it**, so the two can't cross (the e2e fixtures take it too,
+ * around their own creates and deletes; `scripts/test-file.ts`, a dev tool
+ * run by hand, does not):
  *
  * - an upload, of a file's first version or a later one, in the transaction
  *   that inserts its row, where it then checks the blob is still on disk

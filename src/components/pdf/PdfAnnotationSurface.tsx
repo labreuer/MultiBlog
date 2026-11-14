@@ -17,7 +17,7 @@ import { attachAnnoClicks, attachAnnoLayers, type AnnoLayerEntry } from "./anno-
 import { usePdfPresence } from "./use-pdf-presence";
 import { usePdfOutline } from "./use-pdf-outline";
 import { usePdfFragment } from "./use-pdf-fragment";
-import { opensSheetAsWritten, readPage } from "@/lib/pdf-link-reading";
+import { linkVersionsFromKey, linkVersionsKey, opensSheetAsWritten, readPage } from "@/lib/pdf-link-reading";
 import type { PageName } from "@/lib/pdf-open-params";
 import PdfFragmentBanner from "./PdfFragmentBanner";
 import { PdfFollowBar, PdfIndicatorStrip, PdfPresenceRail, type AnnotationTick } from "./PdfRails";
@@ -353,12 +353,17 @@ export default function PdfAnnotationSurface({
   // Each is read by the version it names (docs/PDF.md §13, "Links into the
   // file"): `linkContext` is what that reading takes, this page's address and
   // the file's versions.
+  //
+  // **Keyed on what the versions are, never on the `versions` prop itself.**
+  // That prop is the server's, and has a new identity on every
+  // `router.refresh()`: posting a note, editing one, tagging the file. A
+  // context that changed with it would resolve the fragment again each time,
+  // scroll the reader back to the linked passage and bring back a banner they
+  // had dismissed.
+  const versionsKey = linkVersionsKey(versions);
   const linkContext = useMemo(
-    () => ({
-      address: { shown: version.number, own: version.address === "version" },
-      versions: versions.map(({ number, state }) => ({ number, state })),
-    }),
-    [version.number, version.address, versions],
+    () => ({ address: { shown: version.number, own: version.address === "version" }, versions: linkVersionsFromKey(versionsKey) }),
+    [version.number, version.address, versionsKey],
   );
   const opensAt = useCallback((page: PageName) => opensSheetAsWritten(readPage(page, linkContext.address, linkContext.versions)), [linkContext]);
   const fragment = usePdfFragment(handle, fileId, version.id, linkContext);

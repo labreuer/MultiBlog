@@ -1260,6 +1260,9 @@ version (`recordVersionUpload`, `src/lib/file-ingest.ts`, which the browser's
   abandoned. That check alone is left to the write, inside the idempotency key: a retry
   must reach its key, which is the bytes' hash, to be answered `already_done` with the
   candidate the first request made as its `result`.
+- **The key also holds which version was the latest, and how many had been abandoned, when
+  the upload began.** So the same bytes sent again after that candidate was abandoned, or
+  after another version was promoted, are a new upload and not a repeat of the first.
 - **Bytes the latest version already holds answer `unchanged`**, and nothing is written.
   Bytes an earlier version holds make a version as any others do.
 - **A refused body is received and dropped**, never left unread, so the refusal reaches
@@ -1380,9 +1383,11 @@ check below reports.
   version 1's sheet 50.
 - **The tool's own `sheet`, `sheets` and `page` are of the version read**, the address's.
   The same number can so be two sheets, which is why, once a file has a second version,
-  every sheet a read answers carries `link`: its address with its stamp,
-  `/pdf/<slug>#p=49&v=3`. That is the form to write. A file with one version has none, and
-  its answers are as they were.
+  every sheet a read answers by sheet (`sheet`, `sheets`, `page`, an outline entry's pages,
+  a page link) carries `link`: its address with its stamp, `/pdf/<slug>#p=49&v=3`. That is
+  the form to write. A file with one version has none, and its answers are as they were. A
+  quote's occurrences (`around`) and a fragment link's passages name their sheets without
+  one, beside the `url` of the version read.
 - **A fragment whose version is abandoned, or was never the file's,** has no version to be
   read on. With `text`, each passage is looked for by its words alone in the version read,
   and answered where exactly one sheet holds it once, marked `foundBy`. Without, one that

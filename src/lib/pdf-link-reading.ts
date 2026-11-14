@@ -13,12 +13,31 @@
 //
 // Pure and browser-safe, so the reading is a unit test.
 
-import { pageStampFor, type FileVersionState } from "./file-version";
+import { pageStampFor, pdfPath, type FileVersionState } from "./file-version";
 import { formatFragmentPassages, parseFragmentPassages } from "./pdf-fragment";
 import { formatPageName, pageFromHash, type PageName, type PageStamp } from "./pdf-open-params";
 
 /** A version of the file, as much of it as a link's reading needs. */
 export type LinkVersion = { number: number; state: FileVersionState };
+
+/**
+ * A file's versions as one string, and back: what a client component keys a
+ * memo or an effect on. The list itself arrives as a server prop with a new
+ * identity on every refresh, and a reading that re-ran with it would jump the
+ * reader back to a linked passage whenever anything on the page was saved.
+ */
+export function linkVersionsKey(versions: readonly LinkVersion[]): string {
+  return versions.map(({ number, state }) => `${number}:${state}`).join(",");
+}
+
+export function linkVersionsFromKey(key: string): LinkVersion[] {
+  return key === ""
+    ? []
+    : key.split(",").map((part) => {
+        const [number, state] = part.split(":");
+        return { number: Number(number), state: state as FileVersionState };
+      });
+}
 
 /**
  * The address a link is read on: the version it shows, and whether the
@@ -124,4 +143,26 @@ export function stampedFragment(fragment: string, address: LinkAddress, versionC
   }
   const page = pageFromHash(fragment);
   return page ? formatPageName({ ...page, stamp: stampOfRead(page, address, versionCount) }) : null;
+}
+
+/**
+ * Where a link's pairs send a reader who follows them from outside the
+ * viewer, as the cited-page route does for a `/pdf/` referent (docs/PDF.md
+ * §13, "Links into the file"): read as the viewer reads a link on the bare
+ * address. Each page names the version its `v=` says, or the file's first.
+ * Pairs that name the latest open there. Pairs that name another version
+ * can't be carried, no page map existing, and open the version they name.
+ * Pairs whose version is abandoned or was never the file's go to the bare
+ * address, where the viewer says so.
+ *
+ * The pairs are written anew (`stampedFragment`), so a `page=` leaves as
+ * `sheet=` and every page carries its stamp once the file has a second
+ * version. Null where the pairs name no page.
+ */
+export function referentTarget(slug: string, fragment: string, latestNumber: number, versions: readonly LinkVersion[]): string | null {
+  const address = { shown: latestNumber, own: false };
+  const written = stampedFragment(fragment, address, versions.length);
+  if (written === null) return null;
+  const elsewhere = versionToOpen(fragment, address, versions);
+  return `${elsewhere === null ? pdfPath(slug) : pdfPath(slug, { number: elsewhere, isLatest: false })}#${written}`;
 }

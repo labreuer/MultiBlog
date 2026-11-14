@@ -1,6 +1,12 @@
 import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
 import { lockFileHash, lockFileRow } from "@/lib/file-version-data";
 import { deleteBytesIfUnreferenced } from "@/lib/file-storage";
+
+// How long a version's write may wait for the file row or a hash: Prisma's
+// default, five seconds, is less than an upload's insert of a large book's
+// page text can hold either. The upload's own transactions take the same
+// (`VERSION_WRITE_TIMEOUTS`, file-ingest.ts, which imports nothing from here).
+const VERSION_WRITE_TIMEOUTS = { maxWait: 30_000, timeout: 60_000 } as const;
 import { canUserManageFile } from "@/lib/file-authz";
 import { changeFileSlug, freeFileSlugFor } from "@/lib/file-slug";
 import { FILE_MANAGER_ROLES } from "@/lib/role-checks";
@@ -200,7 +206,7 @@ export async function promoteFileVersion(actor: Actor, versionId: string): Promi
     // refreshed by the trigger on `current_version_id`, which reads the new
     // latest's filename.
     await tx.storedFile.update({ where: { id: version.fileId }, data: { currentVersionId: versionId, updatedByUserId: actor.userId } });
-  });
+  }, VERSION_WRITE_TIMEOUTS);
   return { slug: version.slug, number: version.number };
 }
 
@@ -227,6 +233,6 @@ export async function abandonFileVersion(actor: Actor, versionId: string): Promi
     // Every other row holding these bytes: this one is abandoned now, and holds none.
     const others = await tx.fileVersion.count({ where: { sha256: version.sha256, abandonedAt: null } });
     await deleteBytesIfUnreferenced(version.sha256, others);
-  });
+  }, VERSION_WRITE_TIMEOUTS);
   return { slug: version.slug, number: version.number };
 }

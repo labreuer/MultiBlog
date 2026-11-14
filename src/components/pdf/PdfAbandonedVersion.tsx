@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useSyncExternalStore } from "react";
 import LocalTime from "@/components/LocalTime";
 import { pdfPath } from "@/lib/file-version";
@@ -22,6 +21,10 @@ import styles from "./PdfVersions.module.css";
 // from any address of the file.
 //
 // A client component for that alone: the server never sees a fragment.
+//
+// The link is a plain `<a>`, never a `<Link>`: it may carry `#sheet=…`, and a
+// client navigation that carries a fragment leaves it on the path it reached
+// for every later one (PdfSurfaceClient's header has the mechanism).
 
 function subscribeHash(onChange: () => void): () => void {
   window.addEventListener("hashchange", onChange);
@@ -55,9 +58,9 @@ export default function PdfAbandonedVersion({ slug, title, number, abandonedAt, 
         . It was uploaded and never became the latest, and its pages were removed.
       </p>
       <p>
-        <Link href={`${pdfPath(slug)}${carried}`} data-testid="pdf-abandoned-latest">
+        <a href={`${pdfPath(slug)}${carried}`} data-testid="pdf-abandoned-latest">
           Open the latest version{latestNumber !== null ? `, version ${latestNumber}` : ""}
-        </Link>
+        </a>
       </p>
     </main>
   );

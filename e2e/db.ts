@@ -199,6 +199,8 @@ export const abandonTestVersion = (...args: Parameters<DbHandlers["abandonTestVe
   call("abandonTestVersion", ...args);
 export const uploadAcrossAbandon = (...args: Parameters<DbHandlers["uploadAcrossAbandon"]>): ReturnType<DbHandlers["uploadAcrossAbandon"]> =>
   call("uploadAcrossAbandon", ...args);
+export const raceVersionActs = (...args: Parameters<DbHandlers["raceVersionActs"]>): ReturnType<DbHandlers["raceVersionActs"]> =>
+  call("raceVersionActs", ...args);
 export const holdFileHashLock = (...args: Parameters<DbHandlers["holdFileHashLock"]>): ReturnType<DbHandlers["holdFileHashLock"]> =>
   call("holdFileHashLock", ...args);
 export const promoteTestVersionSlowly = (

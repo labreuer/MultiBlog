@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import { pageFromHash } from "./pdf-open-params";
 import { parseFragmentPassages } from "./pdf-fragment";
 import {
+  linkVersionsFromKey,
+  linkVersionsKey,
   namedVersion,
   opensSheetAsWritten,
   readByWordsAlone,
   readPage,
+  referentTarget,
   stampedFragment,
   versionToOpen,
   type LinkAddress,
@@ -124,4 +127,28 @@ test("a link is written on with each page stamped by the version it names", () =
   // Nothing that names a page is nothing to write.
   assert.equal(stampedFragment("text=orphan", BARE, 5), null);
   assert.equal(stampedFragment("", BARE, 5), null);
+});
+
+test("a referent's pairs go to the version they name, written anew", () => {
+  // Unstamped, on a file with several versions: version 1's own address, the page= leaving as sheet=.
+  assert.equal(referentTarget("book", "page=53&text=law+of+participation", 3, VERSIONS), "/pdf/book/v/1#sheet=53&v=1&text=law+of+participation");
+  // Stamped with the latest: the bare address.
+  assert.equal(referentTarget("book", "p=49&v=3&text=law+of+participation", 3, VERSIONS), "/pdf/book#p=49&v=3&text=law+of+participation");
+  assert.equal(referentTarget("book", "sheet=53&v=2", 3, VERSIONS), "/pdf/book/v/2#sheet=53&v=2");
+  // An abandoned version, or one the file never had, has no address to go to: the bare one, where the viewer says so.
+  assert.equal(referentTarget("book", "sheet=53&v=4&text=a", 3, VERSIONS), "/pdf/book#sheet=53&v=4&text=a");
+  assert.equal(referentTarget("book", "sheet=53&v=9", 3, VERSIONS), "/pdf/book#sheet=53&v=9");
+  // A file with one version: nothing to stamp, and nowhere else to go.
+  assert.equal(referentTarget("book", "page=53&text=a", 1, [{ number: 1, state: "latest" }]), "/pdf/book#sheet=53&text=a");
+  // Pairs that name no page are no link.
+  assert.equal(referentTarget("book", "text=orphan", 3, VERSIONS), null);
+});
+
+test("a file's versions round-trip through the key a client component memoises on", () => {
+  const key = linkVersionsKey(VERSIONS);
+  assert.equal(key, "1:earlier,2:earlier,3:latest,4:abandoned,5:candidate");
+  assert.deepEqual(linkVersionsFromKey(key), VERSIONS);
+  assert.deepEqual(linkVersionsFromKey(""), []);
+  // The same versions in a new array are the same key: what keeps a server refresh from re-reading a link.
+  assert.equal(linkVersionsKey(VERSIONS.map((version) => ({ ...version }))), key);
 });

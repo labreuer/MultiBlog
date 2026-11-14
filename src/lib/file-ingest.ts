@@ -116,7 +116,7 @@ export async function discardStagedUpload(staged: StagedUpload): Promise<void> {
   await prisma.$transaction(async (tx) => {
     await lockFileHash(tx, sha256);
     await deleteBytesIfUnreferenced(sha256, await tx.fileVersion.count({ where: { sha256, abandonedAt: null } }));
-  });
+  }, VERSION_WRITE_TIMEOUTS);
 }
 
 /**
@@ -231,7 +231,7 @@ export async function recordUpload(
         bytes: { filename, contentType: contentTypeForKind(kind), byteSize: stored.byteSize, sha256: stored.sha256, pageCount, metadata, pages },
       });
       return { id: made.id, slug: made.slug, title: made.title };
-    });
+    }, VERSION_WRITE_TIMEOUTS);
     return { file, sha256: stored.sha256, existing: false };
   } catch (err) {
     await discardStagedUpload(staged);
@@ -246,6 +246,13 @@ export async function recordUpload(
 
 /** The file a version is being uploaded to, as its checks found it. */
 export type VersionUploadTarget = { id: string; slug: string; title: string };
+
+/**
+ * How long a write here may wait for a lock before Prisma gives up on its
+ * transaction: the default, five seconds, is less than another upload's
+ * insert of a large book's page text can hold the file row or the hash.
+ */
+export const VERSION_WRITE_TIMEOUTS = { maxWait: 30_000, timeout: 60_000 } as const;
 
 /** What a version's upload came to: a candidate, or nothing, for bytes the latest version already holds. */
 export type RecordedVersion =
@@ -277,7 +284,11 @@ function candidateStands(file: { slug: string }, number: number): UploadError {
  *   reach its idempotency key to be answered with the candidate the first
  *   request made, and the key is the bytes' hash.
  */
-export async function assertMayUploadVersion(actor: Actor, fileId: string, opts: { allowCandidate?: boolean } = {}): Promise<VersionUploadTarget> {
+export async function assertMayUploadVersion(
+  actor: Actor,
+  fileId: string,
+  opts: { allowCandidate?: boolean } = {},
+): Promise<VersionUploadTarget & { /** Which of the file's states this upload was begun in: see `uploadGeneration`. */ generation: string }> {
   const file = await prismaIncludingDeleted.storedFile.findUnique({
     where: { id: fileId },
     select: {
@@ -286,8 +297,9 @@ export async function assertMayUploadVersion(actor: Actor, fileId: string, opts:
       title: true,
       visibility: true,
       deletedByUserId: true,
+      currentVersionId: true,
       currentVersion: { select: { pageCount: true } },
-      versions: { where: { promotedAt: null, abandonedAt: null }, select: { number: true } },
+      versions: { select: { number: true, promotedAt: true, abandonedAt: true } },
     },
   });
   const mayUpload = file ? await canUserUploadFileVersion(actor.userId, actor.role, file.id) : false;
@@ -297,8 +309,31 @@ export async function assertMayUploadVersion(actor: Actor, fileId: string, opts:
   if (!mayUpload) throw new UploadError("You can read this file but not manage it, so you can't give it a new version.", 403);
   if (file.deletedByUserId !== null) throw new UploadError("This file is deleted, and takes no new version until it is restored.", 409);
   if (!file.currentVersion || file.currentVersion.pageCount === null) throw new UploadError("Only a PDF takes a new version.", 415);
-  if (!opts.allowCandidate && file.versions.length > 0) throw candidateStands(file, file.versions[0].number);
-  return { id: file.id, slug: file.slug, title: file.title };
+  const standing = file.versions.find((version) => version.promotedAt === null && version.abandonedAt === null);
+  if (!opts.allowCandidate && standing) throw candidateStands(file, standing.number);
+  return {
+    id: file.id,
+    slug: file.slug,
+    title: file.title,
+    generation: uploadGeneration(file.currentVersionId, file.versions.filter((version) => version.abandonedAt !== null).length),
+  };
+}
+
+/**
+ * What tells a retry of a version's upload from the same bytes sent again on
+ * purpose: which version was the latest, and how many had been abandoned,
+ * when the upload began. MCP's route puts it in its idempotency key beside
+ * the bytes' hash.
+ *
+ * A retry sees what the first request saw, since an upload changes neither,
+ * and is answered with the candidate that request made. The same bytes sent
+ * again after that candidate was abandoned, which is how a wrong choice at
+ * the upload is put right, or after another version was promoted, which is
+ * how an earlier version is restored, are a new upload: without this they
+ * would be answered for a day with a candidate that is gone.
+ */
+function uploadGeneration(currentVersionId: string | null, abandoned: number): string {
+  return `${currentVersionId ?? "none"}:${abandoned}`;
 }
 
 /**
@@ -353,10 +388,18 @@ export async function recordVersionUpload(actor: Actor, fileId: string, staged: 
       const file = await lockFileRow(tx, fileId);
       if (!file) throw new UploadError("That file doesn't exist, or isn't yours to read.", 404);
       if (file.deleted) throw new UploadError("This file is deleted, and takes no new version until it is restored.", 409);
-      const versions = await tx.fileVersion.findMany({ where: { fileId }, select: { id: true, number: true, sha256: true, promotedAt: true, abandonedAt: true } });
+      // Asked again now that the body has arrived: an owner taken off the file meanwhile uploads nothing.
+      if (!(await canUserUploadFileVersion(actor.userId, actor.role, fileId))) {
+        throw new UploadError("You can no longer manage this file, so you can't give it a new version.", 403);
+      }
+      const versions = await tx.fileVersion.findMany({
+        where: { fileId },
+        select: { id: true, number: true, sha256: true, pageCount: true, promotedAt: true, abandonedAt: true },
+      });
       const latest = versions.find((version) => version.id === file.currentVersionId);
+      if (!latest || latest.pageCount === null) throw new UploadError("Only a PDF takes a new version.", 415);
       // Bytes the latest already holds: nothing to do, and nothing is written.
-      if (latest?.sha256 === stored.sha256) return { file: target, unchanged: true };
+      if (latest.sha256 === stored.sha256) return { file: target, unchanged: true };
       const standing = versions.find((version) => version.promotedAt === null && version.abandonedAt === null);
       if (standing) throw candidateStands(target, standing.number);
 
@@ -384,7 +427,7 @@ export async function recordVersionUpload(actor: Actor, fileId: string, staged: 
         data: parsed.pages.map((text, pageIndex) => ({ fileVersionId: version.id, pageIndex, textVersion: parsed.textVersion, text })),
       });
       return { file: target, unchanged: false, version, url: pdfPath(target.slug, { number: version.number, isLatest: false }) };
-    });
+    }, VERSION_WRITE_TIMEOUTS);
   } catch (err) {
     if (err instanceof UploadError) return refuse(err);
     // The one-candidate index, where two uploads got past each other's lock on different rows of nothing.

@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
 import { SignedOutNotice } from "@/components/SignedOutNotice";
@@ -10,7 +10,7 @@ import type { PdfAnnotationEntry } from "./PdfAnnotationPanel";
 import type { AnchoredLinkView } from "@/lib/anchored-link-data";
 import type { OwnDraft } from "@/lib/annotation-data";
 import { pdfPath, type ShownVersion } from "@/lib/file-version";
-import { versionToOpen } from "@/lib/pdf-link-reading";
+import { linkVersionsFromKey, linkVersionsKey, versionToOpen } from "@/lib/pdf-link-reading";
 import type { FileVersionSummary, VersionManage } from "@/lib/file-version-data";
 import type { OtherVersionNote } from "@/lib/pdf-annotation-entries";
 
@@ -43,6 +43,20 @@ const PdfAnnotationSurface = dynamic(() => import("./PdfAnnotationSurface"), {
   ssr: false,
   loading: LoadingViewer,
 });
+
+/** Whether two paths are one address, a trailing slash and an escape aside. */
+function samePath(a: string, b: string | null): boolean {
+  if (b === null) return false;
+  const plain = (path: string) => {
+    const trimmed = path.replace(/\/+$/, "");
+    try {
+      return decodeURIComponent(trimmed);
+    } catch {
+      return trimmed;
+    }
+  };
+  return plain(a) === plain(b);
+}
 
 function subscribeHash(onChange: () => void): () => void {
   window.addEventListener("hashchange", onChange);
@@ -78,22 +92,44 @@ export default function PdfSurfaceClient(props: {
   // map yet, so no such link is carried to the latest instead. On a version's
   // own address nothing leaves: the address chose the version.
   //
+  // **By a full load (`location.replace`), never `router.replace`.** Next's
+  // client router keeps the fragment of a client navigation with the route it
+  // reached, and puts it on every later client navigation to that path
+  // (16.2.11: `discoverKnownRoute` is handed the URL with its hash, and
+  // `navigateUsingPrefetchedRouteTree` then appends the new one to it). A
+  // `router.replace` to `/pdf/<slug>/v/1#sheet=50` so leaves that path
+  // carrying `#sheet=50`, and the next plain link to it arrives with a
+  // fragment its reader never followed. A full load keeps no such memory, and
+  // costs nothing here: no viewer has mounted yet, and the version's page is
+  // another document.
+  //
   // Null on the server and on the first paint, where there is no fragment to
   // read, so the surface waits one render for it and never mounts a viewer on
   // bytes the reader is about to leave.
-  const router = useRouter();
+  //
+  // **Null, too, until the address bar shows this page's own path.** On a
+  // client navigation this component renders a commit before the router
+  // writes the new URL, so `window.location` is still the page the reader
+  // came from, and its fragment is that page's. Read then, a reader who
+  // followed "the latest is version 2" from `/pdf/book/v/1#sheet=50` would be
+  // taken for someone arriving with `#sheet=50`, read as version 1's, and
+  // sent straight back. `usePathname()` is the router's own answer and is
+  // already this page's; once the bar agrees, the snapshot changes and this
+  // renders again.
+  const pathname = usePathname();
   const hash = useSyncExternalStore<string | null>(
     subscribeHash,
-    () => window.location.hash,
+    () => (samePath(window.location.pathname, pathname) ? window.location.hash : null),
     () => null,
   );
   const { slug, version, versions } = props;
-  const linkVersions = useMemo(() => versions.map(({ number, state }) => ({ number, state })), [versions]);
+  const versionsKey = linkVersionsKey(versions);
+  const linkVersions = useMemo(() => linkVersionsFromKey(versionsKey), [versionsKey]);
   const leavingFor = hash === null ? null : versionToOpen(hash, { shown: version.number, own: version.address === "version" }, linkVersions);
   useEffect(() => {
     if (leavingFor === null) return;
-    router.replace(`${pdfPath(slug, { number: leavingFor, isLatest: false }, { own: true })}${window.location.search}${window.location.hash}`);
-  }, [leavingFor, router, slug]);
+    window.location.replace(`${pdfPath(slug, { number: leavingFor, isLatest: false }, { own: true })}${window.location.search}${window.location.hash}`);
+  }, [leavingFor, slug]);
 
   // The provider is above the surface rather than inside it because the
   // surface's own presence hook attaches to the socket this owns (docs/YDOC.md

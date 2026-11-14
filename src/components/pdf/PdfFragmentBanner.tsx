@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { pdfPath } from "@/lib/file-version";
 import { formatFragmentPassages } from "@/lib/pdf-fragment";
@@ -37,6 +36,11 @@ import styles from "@/components/anchored-link/AnchoredLinkBanner.module.css";
 // instead: it was looked for by its words alone, and its row says that it was
 // found that way, or that it wasn't found. A link without words gets one
 // line saying the same of its page.
+//
+// **The offer is a plain `<a>`, never a `<Link>`**: a client navigation that
+// carries a fragment leaves it on the path it reached, for every later client
+// navigation there (PdfSurfaceClient's header has the mechanism), and this
+// one carries `#sheet=…`.
 
 type Props = {
   regions: FragmentRegion[];
@@ -103,7 +107,7 @@ export default function PdfFragmentBanner({ regions, page, slug, shownVersion, a
           {page.reading.kind === "elsewhere" ? (
             <>
               This link names version {page.reading.version}, and couldn&apos;t be brought to version {shownVersion}.{" "}
-              <Link href={`${versionPath(slug, page.reading.version)}#${formatPageName(stamped(page.page))}`}>Open it on version {page.reading.version}</Link>
+              <a href={`${versionPath(slug, page.reading.version)}#${formatPageName(stamped(page.page))}`}>Open it on version {page.reading.version}</a>
             </>
           ) : page.reading.kind === "abandoned" ? (
             <>{goneVersion(page.reading)}, so this link opens no sheet.</>
@@ -122,9 +126,9 @@ export default function PdfFragmentBanner({ regions, page, slug, shownVersion, a
                 <span style={quiet}>
                   On version {reading.version}, and couldn&apos;t be brought to version {shownVersion}.{" "}
                 </span>
-                <Link href={`${versionPath(slug, reading.version)}#${formatFragmentPassages([{ ...region.passage, page: stamped(region.passage.page) }])}`}>
+                <a href={`${versionPath(slug, reading.version)}#${formatFragmentPassages([{ ...region.passage, page: stamped(region.passage.page) }])}`}>
                   Open it on version {reading.version}
-                </Link>
+                </a>
               </li>
             );
           }

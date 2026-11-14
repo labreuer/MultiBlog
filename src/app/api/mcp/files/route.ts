@@ -59,9 +59,14 @@ export async function POST(request: Request) {
         if (url.searchParams.has(newFileOnly)) throw new ApiError("invalid", `${newFileOnly} is for a new file; a new version keeps its file's title and owners.`);
       }
       // Before the body is read. A candidate standing is left to the write, so a retry reaches its key.
-      await assertMayUploadVersion(ctx.actor, versionOf, { allowCandidate: true });
+      const { generation } = await assertMayUploadVersion(ctx.actor, versionOf, { allowCandidate: true });
       const staged = await stageUpload(ctx.actor, { body: request.body, filename });
-      const keyArgs = { sha256: staged.stored.sha256, filename, versionOf };
+      // `generation` is which version was the latest and how many had been
+      // abandoned when this began. A retry sees what the first request saw.
+      // The same bytes after the candidate was abandoned, or after another
+      // version was promoted, are a new upload, and would otherwise be
+      // answered for a day with a candidate that is gone.
+      const keyArgs = { sha256: staged.stored.sha256, filename, versionOf, generation };
       const recorded = await onceWithin(token.id, `POST ${ROUTE}`, keyArgs, url.searchParams.get("idempotencyKey") ?? undefined, async () => {
         const made = await recordVersionUpload(ctx.actor, versionOf, staged);
         if (made.unchanged) {
