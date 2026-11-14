@@ -4988,8 +4988,10 @@ quotation's segments"), §4, §6, §8, §9, and §12 for the departures; the vie
 still a plan, §13 there. A citation's passage: [docs/CITATIONS.md](docs/CITATIONS.md), "A
 passage in a citation".**
 
-## 33. Replacing a PDF's bytes
+## 33. Versions of a PDF
 
-Planned 2026-11-10: new bytes for a file as its next version, readable at an address of its
-own, every anchor reconciled onto its pages (by label, then by text, then by a person), and one
-promotion that makes it the latest. **Plan: [docs/PDF.md](docs/PDF.md) §13.**
+Planned 2026-11-10, and redrawn 2026-11-13 around versions that are kept: new bytes for a file
+as its next version, readable for good at an address of its own, and a promotion that makes it
+the latest and waits for nothing. Notes are moved forward to it, in bulk for a better copy of
+the same text and one at a time by their authors for a revised one. **Plan:
+[docs/PDF.md](docs/PDF.md) §13.**
