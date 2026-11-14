@@ -2,10 +2,12 @@ import { prisma } from "@/lib/prisma";
 import { currentTextVersion } from "@/lib/pdf-extract";
 import { storedPageText } from "@/lib/pdf-page-text";
 import { pdfMetadata } from "@/lib/pdf-metadata";
-import { labelRanges, pagesLabelled, sheetsLabelled, sheetsNamed, usablePageLabels } from "@/lib/pdf-page-labels";
-import { pageFromHash, type PageName } from "@/lib/pdf-open-params";
+import { labelRanges, pageNameForSheet, pagesLabelled, sheetsLabelled, sheetsNamed, usablePageLabels } from "@/lib/pdf-page-labels";
+import { formatPageName, pageFromHash, type PageName, type PageStamp } from "@/lib/pdf-open-params";
+import { pageStampFor, pdfPath } from "@/lib/file-version";
+import { readPage, type PageReading } from "@/lib/pdf-link-reading";
 import { onePassage, parseFragmentPassages, passageWords, resolveAll, resolvePassage, skeletonOf, type PassageText } from "@/lib/pdf-fragment";
-import { checkPassage, type FilePages } from "@/lib/pdf-fragment-findings";
+import { checkPassage, passageElsewhere, type FilePages } from "@/lib/pdf-fragment-findings";
 import { overlapWindows } from "@/lib/comment-quote-match";
 import { markdownToText } from "@/lib/markdown-import";
 import { tagsForTarget } from "@/lib/tag-data";
@@ -13,7 +15,7 @@ import type { StoredOutlineEntry } from "@/lib/pdf-extract";
 import { ApiError, ERROR_LIST_CAP, invalid } from "@/lib/api/errors";
 import type { McpContext, ToolResult } from "../tool";
 import { dayOf } from "../shape";
-import type { ResolvedFile } from "../resolve";
+import { readableFileBySlug, type ResolvedFile } from "../resolve";
 import { fragmentParams } from "../url";
 import { readBoundFor, type ReadArgs } from "./args";
 
@@ -26,6 +28,17 @@ import { readBoundFor, type ReadArgs } from "./args";
 // and search's hits use it, and its `page` is the printed page, the sheet's
 // label; responses carry the page beside the sheet wherever the PDF has
 // usable labels. Labels are a lookup, never a coordinate.
+//
+// **Versions** (docs/PDF.md §13). The tool's own `sheet`, `sheets` and `page`
+// are of the version read: the latest, or the one a version's own address
+// names. **A fragment in the URL is read by the viewer's rules**
+// (src/lib/pdf-link-reading.ts): its `v=` names the version whose sheets it
+// counts, and without one it names the file's first, or on a version's own
+// address that version. The two can be the same number and different sheets,
+// so once a file has a second version every sheet answered carries `link`,
+// its stamped form, which is what to write. A fragment that names another
+// version is answered on that version, and the answer says so: no version has
+// a page map yet, so none is carried.
 
 /** About this much of the page either side of a quote or a fragment link's passage. */
 const SURROUNDINGS = 300;
@@ -127,13 +140,20 @@ function findEntry(entries: readonly StoredOutlineEntry[], title: string): numbe
  * number, its printed page and its text, and the next sheet to ask for when
  * they don't all fit.
  */
-async function pagesResult(file: ResolvedFile, labels: string[] | null, indexes: number[], maxChars: number): Promise<ToolResult> {
+async function pagesResult(file: ResolvedFile, labels: string[] | null, ownLabels: string[] | null, indexes: number[], maxChars: number): Promise<ToolResult> {
   const texts = await pageTexts(file.versionId, indexes);
   const pages: Record<string, unknown>[] = [];
   let size = 0;
   let next: number | null = null;
+  const stamp = stampOf(file);
   for (const index of indexes) {
-    const entry = { sheet: index + 1, ...(labels ? { page: labels[index] } : {}), text: texts.get(index) ?? "" };
+    const entry = {
+      sheet: index + 1,
+      ...(labels ? { page: labels[index] } : {}),
+      // The sheet's stamped form, once the file has a second version: a link without `v=` would name the first.
+      ...(stamp !== "sole" ? { link: `${pdfPath(file.slug)}#${formatPageName({ ...pageNameForSheet(ownLabels, file.pageCount ?? 0, index), stamp })}` } : {}),
+      text: texts.get(index) ?? "",
+    };
     const cost = JSON.stringify(entry).length;
     if (pages.length > 0 && size + cost > maxChars - 1000) {
       next = index + 1;
@@ -143,6 +163,11 @@ async function pagesResult(file: ResolvedFile, labels: string[] | null, indexes:
     size += cost;
   }
   return { kind: "pdf-pages", url: file.url, sheets: pages, ...(next !== null ? { next } : {}) };
+}
+
+/** The stamp a link to the version read carries (`pageStampFor`). */
+function stampOf(file: ResolvedFile): PageStamp {
+  return pageStampFor(file.versionNumber, file.versions.length);
 }
 
 /** `1-based N` or `N-M` sheets into 0-based page indexes, inside the file. */
@@ -180,7 +205,37 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
   const maxChars = readBoundFor(ctx.token.client);
   const { page: fragmentPage, hasText } = viewerFragment(fragment);
 
-  if (hasText) return fragmentPassages(file, labels, ownLabels, fragment);
+  // The fragment's page is read as the viewer reads a link (docs/PDF.md §13,
+  // "Links into the file"), by the version it names.
+  const address = { shown: file.versionNumber, own: file.versionAddressed };
+  // Only where the fragment decides what is read: the tool's own `sheet`, `sheets`, `page`, `entry` and `around` are of the version read.
+  const fragmentRead = hasText || [args.sheet, args.sheets, args.page, args.entry, args.around].every((arg) => arg === undefined);
+  const reading: PageReading | null = fragmentPage && fragmentRead ? readPage(fragmentPage, address, file.versions) : null;
+  let note: string | undefined;
+  if (reading?.kind === "elsewhere") {
+    // No page map joins the two, so the link opens the version it names.
+    const named = await readableFileBySlug(ctx.actor, file.id, reading.version);
+    const said = fragmentPage?.v === undefined ? "a link without v= names the file's first version" : `its v= names version ${reading.version}`;
+    return {
+      ...(await readPdf(ctx, named, args, fragment, extras)),
+      note: `Read on version ${reading.version}, at ${named.url}: ${said}, and no page map joins it to version ${file.versionNumber}.`,
+    };
+  }
+  if (reading && reading.kind !== "here") {
+    const gone =
+      reading.kind === "abandoned"
+        ? `Version ${reading.version} of this file was abandoned, and its sheets were never matched to another version's.`
+        : `This file has no version ${reading.version}.`;
+    if (!hasText && reading.kind === "abandoned") {
+      throw new ApiError("not_found", `${gone} Nothing says which sheet of version ${file.versionNumber} that link names.`);
+    }
+    note = hasText
+      ? `${gone} Each passage was looked for by its words alone, in version ${file.versionNumber}.`
+      : `${gone} The sheet is read as written, on version ${file.versionNumber}.`;
+  }
+  const noted = (result: ToolResult): ToolResult => (note ? { ...result, note } : result);
+
+  if (hasText) return noted(await fragmentPassages(file, labels, ownLabels, fragment));
   if (args.around !== undefined) return { ...(await aroundQuote(file, labels, args)), ...(await extras()) };
 
   if (args.entry !== undefined) {
@@ -192,7 +247,7 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
     }
     const span = outline.spanOf(index);
     if (!span) throw new ApiError("not_found", `The outline entry "${args.entry}" points at no page of this file.`);
-    return pagesResult(file, labels, allPages(pageCount).slice(span.from, span.to + 1), maxChars);
+    return pagesResult(file, labels, ownLabels, allPages(pageCount).slice(span.from, span.to + 1), maxChars);
   }
 
   const asked = [args.sheet !== undefined, args.sheets !== undefined, args.page !== undefined].filter(Boolean).length;
@@ -200,19 +255,19 @@ export async function readPdf(ctx: McpContext, file: ResolvedFile, args: ReadArg
   if (args.page !== undefined) {
     const indexes = pagesLabelled(labels, args.page).filter((index) => index < pageCount);
     if (indexes.length === 0) throw new ApiError("not_found", `No sheet of this PDF has the printed page "${args.page}".`);
-    return pagesResult(file, labels, indexes, maxChars);
+    return pagesResult(file, labels, ownLabels, indexes, maxChars);
   }
-  if (args.sheets !== undefined) return pagesResult(file, labels, pageRange(args.sheets, pageCount), maxChars);
+  if (args.sheets !== undefined) return pagesResult(file, labels, ownLabels, pageRange(args.sheets, pageCount), maxChars);
   // A page link opens at the first sheet carrying its label, as the viewer does.
   if (args.sheet === undefined && fragmentPage !== null && "label" in fragmentPage) {
     const sheets = sheetsLabelled(ownLabels, pageCount, fragmentPage.label);
     if (sheets.length === 0) throw new ApiError("not_found", `No sheet of this PDF has the printed page "${fragmentPage.label}".`);
-    return pagesResult(file, labels, [sheets[0]], maxChars);
+    return noted(await pagesResult(file, labels, ownLabels, [sheets[0]], maxChars));
   }
   const sheet = args.sheet ?? (fragmentPage && "sheet" in fragmentPage ? fragmentPage.sheet : null);
   if (sheet !== null && sheet !== undefined) {
     if (sheet > pageCount) throw invalid(`This PDF has ${pageCount} sheets.`);
-    return pagesResult(file, labels, [sheet - 1], maxChars);
+    return args.sheet === undefined ? noted(await pagesResult(file, labels, ownLabels, [sheet - 1], maxChars)) : pagesResult(file, labels, ownLabels, [sheet - 1], maxChars);
   }
 
   // The file itself.
@@ -334,6 +389,13 @@ async function aroundQuote(file: ResolvedFile, labels: string[] | null, args: Re
  * answers `no_match` with what the fragment-link check reports: where its
  * skeleton stops matching, what the page has there, and the page it is on
  * instead when it occurs exactly once elsewhere.
+ *
+ * Each passage is read by the version it names. One that names the version
+ * read is found on its sheets. One that names an abandoned version, or a
+ * version the file never had, has no version to be read on, and is looked for
+ * by its words alone: it is answered where exactly one sheet of the version
+ * read holds it, once, marked `foundBy`. One that names another version than
+ * the first passage's is refused: the link is read on one version.
  */
 async function fragmentPassages(
   file: ResolvedFile,
@@ -344,11 +406,47 @@ async function fragmentPassages(
   const passages = parseFragmentPassages(`#${fragment}`);
   if (passages.length === 0) throw invalid("That fragment's text= parameters don't parse as a fragment link.");
   const pageCount = file.pageCount!;
-  const sheetsOf = passages.map((passage) => sheetsNamed(passage.page, ownLabels, pageCount));
+  const address = { shown: file.versionNumber, own: file.versionAddressed };
+  const readings = passages.map((passage) => readPage(passage.page, address, file.versions));
+  const sheetsOf = passages.map((passage, n) => (readings[n].kind === "here" ? sheetsNamed(passage.page, ownLabels, pageCount) : []));
   const texts = await pageTexts(file.versionId, [...new Set(sheetsOf.flat())]);
+  // Every page of the version read, for a miss and for a passage looked for by its words alone.
+  let whole: FilePages | null = null;
+  const wholeVersion = async (): Promise<FilePages> => {
+    if (whole) return whole;
+    const all = await pageTexts(file.versionId, allPages(pageCount));
+    whole = {
+      fileId: file.id,
+      slug: file.slug,
+      versionNumber: file.versionNumber,
+      stamp: stampOf(file),
+      pageCount,
+      textVersion: await currentTextVersion(),
+      ownLabels,
+      pages: new Map([...all].map(([i, t]) => [i, { text: t, skeleton: skeletonOf(t) }])),
+    };
+    return whole;
+  };
   const out: Record<string, unknown>[] = [];
   for (const [n, passage] of passages.entries()) {
+    const reading = readings[n];
+    if (reading.kind === "elsewhere") {
+      throw invalid(`That link's passages name different versions (${file.versionNumber} and ${reading.version}); read each on its own version's address.`);
+    }
     let found: { index: number; text: string; range: { start: number; end: number } } | null = null;
+    if (reading.kind !== "here") {
+      const pages = await wholeVersion();
+      const sheet = passageElsewhere(pages, passage, []);
+      const held = sheet !== null ? pages.pages.get(sheet - 1) : undefined;
+      const range = held ? resolvePassage(held.text, passage, held.skeleton) : null;
+      if (sheet === null || !held || !range) {
+        throw new ApiError("no_match", `A passage of that link names version ${reading.version}, which can't be read, and its words aren't on exactly one sheet of version ${file.versionNumber}.`, {
+          passage: passageWords(passage),
+        });
+      }
+      out.push({ sheet, ...(labels ? { page: labels[sheet - 1] } : {}), foundBy: "its words alone", ...surroundings(held.text, range.start, range.end) });
+      continue;
+    }
     for (const index of sheetsOf[n]) {
       const text = texts.get(index);
       const range = text !== undefined ? resolvePassage(text, passage) : null;
@@ -359,16 +457,7 @@ async function fragmentPassages(
     }
     if (!found) {
       // The check's own finding, over every page, for the answer.
-      const all = await pageTexts(file.versionId, allPages(pageCount));
-      const pages: FilePages = {
-        fileId: file.id,
-        slug: file.slug,
-        pageCount,
-        textVersion: await currentTextVersion(),
-        ownLabels,
-        pages: new Map([...all].map(([i, t]) => [i, { text: t, skeleton: skeletonOf(t) }])),
-      };
-      const finding = checkPassage(pages, passage);
+      const finding = checkPassage(await wholeVersion(), passage);
       throw new ApiError("no_match", `A passage of that fragment link isn't on ${pageText(passage.page)}.`, {
         passage: passageWords(passage),
         ...(finding.kind === "no-match"

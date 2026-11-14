@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import type { PdfViewerHandle } from "./PdfViewer";
 import { locateFragmentMisses } from "@/app/actions/pdf-fragment";
 import { parseFragmentPassages, resolvePassage, type FragmentPassage } from "@/lib/pdf-fragment";
+import { readByWordsAlone, readPage, type LinkAddress, type LinkVersion, type PageReading } from "@/lib/pdf-link-reading";
+import { pageFromHash, type PageName } from "@/lib/pdf-open-params";
 import { sheetsNamed } from "@/lib/pdf-page-labels";
 import { normalisePageText, textVersionFor, type NormalisedPage } from "@/lib/pdf-text";
 import { quadSourceItems, quadsForRange, type MeasureText, type QuadSourceItem } from "@/lib/pdf-quads";
@@ -25,6 +27,16 @@ import { PDFJS_VERSION } from "@/lib/pdfjs-client";
 // none holds it, the server is asked where it is instead (§6, "A miss looks
 // beyond its page"), once for every miss of the fragment, and the one page
 // it answers is read here and drawn.
+//
+// **Each passage is read by the version it names** (docs/PDF.md §13, "Links
+// into the file"; src/lib/pdf-link-reading.ts): its `v=`, or without one the
+// file's first version, or on a version's own address that version. One that
+// names the version shown is found as above. One that names another version
+// is not looked for here at all: no page map joins the two, so its sheet and
+// its words are another version's, and the banner offers it there. One that
+// names an abandoned version, or a version the file never had, has no version
+// to open instead, and is looked for by its words alone: drawn where exactly
+// one sheet of the version shown holds it, once.
 
 /** One passage of the fragment, and where it is: `target` is null when no page holds it. */
 export type FragmentRegion = {
@@ -35,18 +47,29 @@ export type FragmentRegion = {
   target: PdfTarget | null;
   /** Whether `target` is on a sheet the link doesn't name, where the server found the passage instead. */
   elsewhere: boolean;
+  /** How the passage's page was read against the file's versions. */
+  reading: PageReading;
 };
+
+/** The link's context: the address this page is, and the file's versions. */
+export type FragmentLinkContext = { address: LinkAddress; versions: readonly LinkVersion[] };
 
 export type PdfFragment = {
   regions: FragmentRegion[];
+  /**
+   * A link without words, when its page is not one of the version shown: the
+   * page and how it was read, for the banner to say so. Null for a link with
+   * passages, and for a page of the version shown, which simply opens.
+   */
+  page: { page: PageName; reading: PageReading } | null;
   /** Bumps on every resolution, so the surface can jump once per fragment rather than once per render. */
   resolution: number;
 };
 
 type PageText = { items: QuadSourceItem[]; normalised: NormalisedPage };
 
-export function usePdfFragment(handle: PdfViewerHandle | null, fileId: string, fileVersionId: string): PdfFragment {
-  const [state, setState] = useState<PdfFragment>({ regions: [], resolution: 0 });
+export function usePdfFragment(handle: PdfViewerHandle | null, fileId: string, fileVersionId: string, link: FragmentLinkContext): PdfFragment {
+  const [state, setState] = useState<PdfFragment>({ regions: [], page: null, resolution: 0 });
 
   useEffect(() => {
     if (!handle) return;
@@ -63,17 +86,24 @@ export function usePdfFragment(handle: PdfViewerHandle | null, fileId: string, f
       const passages = parseFragmentPassages(window.location.hash);
       const regions = await Promise.all(
         passages.map(async (passage, index): Promise<FragmentRegion> => {
-          const named = sheetsNamed(passage.page, handle.ownPageLabels, handle.pdf.numPages);
+          const reading = readPage(passage.page, link.address, link.versions);
+          // Only a page of the version shown names sheets of this document.
+          const named = reading.kind === "here" ? sheetsNamed(passage.page, handle.ownPageLabels, handle.pdf.numPages) : [];
           let target: PdfTarget | null = null;
           for (const pageIndex of named) {
             target = await targetFor(handle, pages, pageIndex, passage, measure);
             if (target) break;
           }
-          return { id: `fragment-${index}`, passage, named, target, elsewhere: false };
+          return { id: `fragment-${index}`, passage, named, target, elsewhere: false, reading };
         }),
       );
-      // One question for every miss, and only the pages answered are read.
-      const misses = regions.filter((region) => region.target === null);
+      const wordless = passages.length === 0 ? pageFromHash(window.location.hash) : null;
+      const wordlessReading = wordless ? readPage(wordless, link.address, link.versions) : null;
+      const page = wordless && wordlessReading && wordlessReading.kind !== "here" ? { page: wordless, reading: wordlessReading } : null;
+      // One question for every miss, and only the pages answered are read. A
+      // passage of another version that can be opened is not a miss: it is
+      // offered there. One with no version to open is asked of every sheet.
+      const misses = regions.filter((region) => region.target === null && (region.reading.kind === "here" || readByWordsAlone(region.reading)));
       if (misses.length > 0) {
         const answers = await locateFragmentMisses(
           fileId,
@@ -94,9 +124,9 @@ export function usePdfFragment(handle: PdfViewerHandle | null, fileId: string, f
       }
       if (run !== generation) return;
       setState((previous) =>
-        regions.length === 0 && previous.regions.length === 0
+        regions.length === 0 && previous.regions.length === 0 && page === null && previous.page === null
           ? previous
-          : { regions, resolution: previous.resolution + 1 },
+          : { regions, page, resolution: previous.resolution + 1 },
       );
     };
 
@@ -106,7 +136,7 @@ export function usePdfFragment(handle: PdfViewerHandle | null, fileId: string, f
       generation++;
       window.removeEventListener("hashchange", resolve);
     };
-  }, [handle, fileId, fileVersionId]);
+  }, [handle, fileId, fileVersionId, link]);
 
   return state;
 }

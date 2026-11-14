@@ -17,6 +17,8 @@ import { attachAnnoClicks, attachAnnoLayers, type AnnoLayerEntry } from "./anno-
 import { usePdfPresence } from "./use-pdf-presence";
 import { usePdfOutline } from "./use-pdf-outline";
 import { usePdfFragment } from "./use-pdf-fragment";
+import { opensSheetAsWritten, readPage } from "@/lib/pdf-link-reading";
+import type { PageName } from "@/lib/pdf-open-params";
 import PdfFragmentBanner from "./PdfFragmentBanner";
 import { PdfFollowBar, PdfIndicatorStrip, PdfPresenceRail, type AnnotationTick } from "./PdfRails";
 import {
@@ -344,7 +346,19 @@ export default function PdfAnnotationSurface({
   // names, found in this document on arrival and on every hashchange. Drawn
   // with a followed anchored link's outline, and mirrored into a ref for the
   // layer's callbacks like the link parts above.
-  const fragment = usePdfFragment(handle, fileId, version.id);
+  //
+  // Each is read by the version it names (docs/PDF.md §13, "Links into the
+  // file"): `linkContext` is what that reading takes, this page's address and
+  // the file's versions.
+  const linkContext = useMemo(
+    () => ({
+      address: { shown: version.number, own: version.address === "version" },
+      versions: versions.map(({ number, state }) => ({ number, state })),
+    }),
+    [version.number, version.address, versions],
+  );
+  const opensAt = useCallback((page: PageName) => opensSheetAsWritten(readPage(page, linkContext.address, linkContext.versions)), [linkContext]);
+  const fragment = usePdfFragment(handle, fileId, version.id, linkContext);
   const fragmentRegionsRef = useRef(fragment.regions);
   useEffect(() => {
     fragmentRegionsRef.current = fragment.regions;
@@ -966,6 +980,7 @@ export default function PdfAnnotationSurface({
           fileUrl={fileUrl}
           title={title}
           onReady={onReady}
+          opensAt={opensAt}
           panes={panes}
           activePane={activePane}
           onSelectPane={setActivePane}
@@ -998,7 +1013,7 @@ export default function PdfAnnotationSurface({
           }
         />
 
-        {(anchoredLink || fragment.regions.length > 0 || !version.isLatest) && (
+        {(anchoredLink || fragment.regions.length > 0 || fragment.page !== null || !version.isLatest) && (
           // One overlay for every banner: a ?sel= visit and a fragment can
           // arrive together, on a version that is not the latest, and fixed
           // boxes at one spot would cover each other.
@@ -1015,11 +1030,16 @@ export default function PdfAnnotationSurface({
                 }}
               />
             )}
-            {fragment.regions.length > 0 && (
+            {(fragment.regions.length > 0 || fragment.page !== null) && (
               <PdfFragmentBanner
                 // A new fragment is a new arrival: one dismissed before shows again.
                 key={fragment.resolution}
                 regions={fragment.regions}
+                page={fragment.page}
+                slug={slug}
+                shownVersion={version.number}
+                address={linkContext.address}
+                versionCount={versions.length}
                 pageLabels={handle?.pageLabels ?? null}
                 className={styles.overlayBanner}
                 onJumpToTarget={(target) => jumpToTarget(target)}

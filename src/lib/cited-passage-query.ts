@@ -20,11 +20,13 @@ export type CitedQuery =
   | { kind: "unreadable" };
 
 const PAGE_PARAM = /^(?:sheet|page|p)=/;
+// What a `/pdf/` referent's pairs keep besides their pages: each page's `v`, which says whose sheets it counts (docs/PDF.md §13), and its `text`s.
+const PAIR_PARAM = /^(?:sheet|page|p|v|text)=/;
 
 /**
  * A citation's query, as it arrived (still percent-encoded, no `?`), as the
  * fragment grammar reads it (docs/PDF_FRAGMENT_LINKS.md §2): with a page, the
- * `sheet`, `page`, `p` and `text` parameters in order, the fragment a `/pdf/` referent
+ * `sheet`, `page`, `p`, `v` and `text` parameters in order, the fragment a `/pdf/` referent
  * gave; with a `text` alone, the quotation, read before decoding as a
  * fragment's is.
  *
@@ -36,7 +38,7 @@ const PAGE_PARAM = /^(?:sheet|page|p)=/;
 export function parseCitedQuery(query: string): CitedQuery {
   const params = query.replace(/^\?/, "").replace(/%2C/gi, ",").split("&").filter(Boolean);
   if (params.some((param) => PAGE_PARAM.test(param))) {
-    return { kind: "pairs", fragment: params.filter((param) => PAGE_PARAM.test(param) || param.startsWith("text=")).join("&") };
+    return { kind: "pairs", fragment: params.filter((param) => PAIR_PARAM.test(param)).join("&") };
   }
   const text = params.find((param) => param.startsWith("text="));
   if (text === undefined) return { kind: "none" };

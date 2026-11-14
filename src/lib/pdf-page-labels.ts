@@ -1,4 +1,4 @@
-import type { PageName } from "./pdf-open-params";
+import type { PageForm, PageName } from "./pdf-open-params";
 
 // PLAN.md §19c — page labels: what a PDF calls its own pages.
 //
@@ -257,8 +257,8 @@ export function sheetsNamed(page: PageName, ownLabels: readonly string[] | null 
 }
 
 /**
- * How a writer names the sheet at 0-based `sheetIndex` (PDF_FRAGMENT_LINKS.md
- * §8): `p=` with its own label where the file has usable labels, and `sheet=`
+ * The form a writer names the sheet at 0-based `sheetIndex` in
+ * (PDF_FRAGMENT_LINKS.md §8), to which it adds its stamp (`formatPageName`): `p=` with its own label where the file has usable labels, and `sheet=`
  * where it has none, where a `p=` would turn into a printed page the day the
  * file gained labels. Also `sheet=` for a sheet whose own label is empty,
  * which no `p` names, and where an earlier sheet carrying the same label
@@ -274,7 +274,7 @@ export function pageNameForSheet(
   pageCount: number,
   sheetIndex: number,
   holds: (earlierSheet: number) => boolean = () => true,
-): PageName {
+): PageForm {
   const own = ownLabels?.[sheetIndex]?.trim();
   if (!own || !usablePageLabels(ownLabels, pageCount)) return { sheet: sheetIndex + 1 };
   const earlier = pagesLabelled(ownLabels!, own).filter((index) => index < sheetIndex);
@@ -288,7 +288,7 @@ export function pageNameForSheet(
  * `p=` would turn into a printed page the day the file gained labels. Null
  * when no sheet carries it.
  */
-export function pageNameForLabel(ownLabels: readonly string[] | null | undefined, pageCount: number, label: string): PageName | null {
+export function pageNameForLabel(ownLabels: readonly string[] | null | undefined, pageCount: number, label: string): PageForm | null {
   const sheets = sheetsLabelled(ownLabels, pageCount, label);
   if (sheets.length === 0) return null;
   return ownLabels && usablePageLabels(ownLabels, pageCount) ? { label: ownLabels[sheets[0]].trim() } : { sheet: sheets[0] + 1 };

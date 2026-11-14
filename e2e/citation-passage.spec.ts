@@ -167,8 +167,8 @@ test.describe("a passage in a citation", () => {
       expect(await follow(hrefs[0])).toBe(`/pdf/${file.slug}#sheet=3&text=It+may+also,within+but+it&sheet=4&text=is+detected+primarily+without`);
       await expect(banner(page)).toContainText("is detected primarily without", { timeout: 20_000 });
       expect(await follow(hrefs[1])).toBe(`/pdf/${file.slug}#sheet=2&text=The+law+of+participation...fades+from+view`);
-      // A /pdf/ referent's pairs go through as its writer wrote them, page= included.
-      expect(await follow(hrefs[2])).toBe(`/pdf/${file.slug}#page=2&text=a+direction...beatific+consummation`);
+      // A /pdf/ referent's pairs are written anew by the route, as every link the app writes is: its page= leaves as sheet=.
+      expect(await follow(hrefs[2])).toBe(`/pdf/${file.slug}#sheet=2&text=a+direction...beatific+consummation`);
 
       // Signed out, the PDF isn't theirs to open: the reference's page, without the words.
       const anonymous = await browser.newContext({ storageState: { cookies: [], origins: [] } });

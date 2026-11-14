@@ -111,9 +111,27 @@ test("sheet= and page= are one parameter, each pairing with the texts after it",
   // An unreadable sheet= forgets the page before it, as page= does.
   assert.deepEqual(parseFragmentPassages("#page=3&text=a&sheet=x&text=b").map((p) => p.page), [{ sheet: 3 }]);
   // What a writer writes reads back as itself.
-  const written = formatFragmentPassages(passages);
+  const written = formatFragmentPassages(passages.map((p) => ({ ...p, page: { ...p.page, stamp: "sole" as const } })));
   assert.equal(written, "sheet=3&text=a&sheet=4&text=b&p=xii&text=c");
   assert.deepEqual(parseFragmentPassages(written), passages);
+});
+
+test("a v= stamps its page, and so every text of that page", () => {
+  const pages = (hash: string) => parseFragmentPassages(hash).map((p) => p.page);
+  assert.deepEqual(pages("#sheet=3&v=2&text=a&text=b"), [{ sheet: 3, v: 2 }, { sheet: 3, v: 2 }]);
+  // Each page takes its own stamp, and a page without one has none.
+  assert.deepEqual(pages("#sheet=3&v=2&text=a&p=xii&text=b&sheet=9&v=1&text=c"), [{ sheet: 3, v: 2 }, { label: "xii" }, { sheet: 9, v: 1 }]);
+  // Written after its page's text, it is still that page's, for the text before it too.
+  assert.deepEqual(pages("#sheet=3&text=a&v=2&text=b"), [{ sheet: 3, v: 2 }, { sheet: 3, v: 2 }]);
+  // Before any page it is ignored, and a second one for a page is ignored.
+  assert.deepEqual(pages("#v=2&sheet=3&text=a"), [{ sheet: 3 }]);
+  assert.deepEqual(pages("#sheet=3&v=2&v=5&text=a"), [{ sheet: 3, v: 2 }]);
+  // An unreadable one is no stamp.
+  assert.deepEqual(pages("#sheet=3&v=x&text=a"), [{ sheet: 3 }]);
+  // A writer puts it straight after the page, and it reads back.
+  const written = formatFragmentPassages([{ page: { sheet: 50, stamp: 2 }, ...whole("law of participation") }]);
+  assert.equal(written, "sheet=50&v=2&text=law+of+participation");
+  assert.deepEqual(pages(`#${written}`), [{ sheet: 50, v: 2 }]);
 });
 
 test("at most MAX_FRAGMENT_PASSAGES passages are read", () => {
@@ -125,25 +143,25 @@ test("a writer emits letters and digits joined by +, folding accents and keeping
   assert.deepEqual(fragmentWords("could not yet ‘call his soul his own’."), ["could", "not", "yet", "call", "his", "soul", "his", "own"]);
   assert.deepEqual(fragmentWords("Lévy-Bruhl’s ﬁnding"), ["Levy", "Bruhl", "s", "finding"]);
   assert.equal(
-    formatFragmentPassages([{ page: { sheet: 30 }, ...whole("law of participation", { prefix: "identity, but of the" }) }]),
+    formatFragmentPassages([{ page: { sheet: 30, stamp: "sole" }, ...whole("law of participation", { prefix: "identity, but of the" }) }]),
     "sheet=30&text=identity+but+of+the-,law+of+participation",
   );
   assert.equal(
     formatFragmentPassages([
-      { page: { sheet: 40 }, prefix: null, segments: [{ start: "It may also", end: "within, but it" }], suffix: null },
-      { page: { sheet: 41 }, prefix: null, segments: [{ start: "is detected", end: null }], suffix: "primarily" },
+      { page: { sheet: 40, stamp: "sole" }, prefix: null, segments: [{ start: "It may also", end: "within, but it" }], suffix: null },
+      { page: { sheet: 41, stamp: "sole" }, prefix: null, segments: [{ start: "is detected", end: null }], suffix: "primarily" },
     ]),
     "sheet=40&text=It+may+also,within+but+it&sheet=41&text=is+detected,-primarily",
   );
   // A printed page is written p=, and reads back as itself.
   const labelled = formatFragmentPassages([
-    { page: { label: "49" }, prefix: null, segments: [{ start: "could not yet", end: null }], suffix: null },
-    { page: { label: "A 1" }, prefix: null, segments: [{ start: "a", end: null }], suffix: null },
+    { page: { label: "49", stamp: "sole" }, prefix: null, segments: [{ start: "could not yet", end: null }], suffix: null },
+    { page: { label: "A 1", stamp: "sole" }, prefix: null, segments: [{ start: "a", end: null }], suffix: null },
   ]);
   assert.equal(labelled, "p=49&text=could+not+yet&p=A%201&text=a");
   assert.deepEqual(parseFragmentPassages(labelled).map((p) => p.page), [{ label: "49" }, { label: "A 1" }]);
   // A letter with no ASCII base is percent-encoded, and survives the round trip.
-  const greek = formatFragmentPassages([{ page: { sheet: 1 }, prefix: null, segments: [{ start: "εἴδωλον", end: null }], suffix: null }]);
+  const greek = formatFragmentPassages([{ page: { sheet: 1, stamp: "sole" }, prefix: null, segments: [{ start: "εἴδωλον", end: null }], suffix: null }]);
   assert.match(greek, /^sheet=1&text=%/);
   assert.equal(fragmentWords(parseFragmentPassages(greek)[0].segments[0].start).join(" "), fragmentWords("εἴδωλον").join(" "));
 });
@@ -199,7 +217,7 @@ test("an ellipsis at either end, or two in a row, is dropped", () => {
 
 test("a writer joins segments with ..., and they read back as themselves", () => {
   const passage = { page: { label: "8" }, prefix: null, segments: [seg("a direction in"), seg("a beatific", "consummation")], suffix: null };
-  const written = formatFragmentPassages([passage]);
+  const written = formatFragmentPassages([{ ...passage, page: { ...passage.page, stamp: "sole" } }]);
   assert.equal(written, "p=8&text=a+direction+in...a+beatific,consummation");
   assert.deepEqual(parseFragmentPassages(written), [passage]);
 });

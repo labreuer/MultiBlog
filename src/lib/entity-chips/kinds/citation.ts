@@ -1,5 +1,6 @@
 import { inlineRuns, mergeRuns, runsHaveMarks, runsText, type InlineRun } from "../../inline-markdown";
-import { formatPageName } from "../../pdf-open-params";
+import { parsePdfPath } from "../../file-version";
+import { formatPageName, stampFragment, type PageStamp } from "../../pdf-open-params";
 import { quotationText } from "../../pdf-passage-pieces";
 import { pageNameForLabel } from "../../pdf-page-labels";
 import type { ReferenceEntry } from "../../references/entry";
@@ -61,13 +62,26 @@ export function referentKind(referent: string): "quote" | "pdf" | "elsewhere" | 
     } catch {
       return null;
     }
-    return /^\/pdf\/[^/?#]+\/?(?:#|$)/.test(referent) ? "pdf" : "elsewhere";
+    return pdfReferentPath(referent) ? "pdf" : "elsewhere";
   }
   try {
     return new URL(referent).protocol === "https:" ? "elsewhere" : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * The PDF a `/pdf/` referent names: its slug, and the version whose own
+ * address it is written on, `/pdf/<slug>/v/<n>`, which is what a reader on an
+ * earlier version copies from the address bar (docs/PDF.md §13, "Links into
+ * the file"). Null for a referent that is no address of a PDF.
+ */
+export function pdfReferentPath(referent: string): { slug: string; version: number | null } | null {
+  const hash = referent.indexOf("#");
+  const path = hash < 0 ? referent : referent.slice(0, hash);
+  // A query makes it a link elsewhere, as it always was: the cited-page route's own query is the passage.
+  return path.startsWith("/") && !path.includes("?") ? parsePdfPath(path) : null;
 }
 
 /**
@@ -249,14 +263,25 @@ function referentHref(referent: string | undefined, cited: readonly { key: strin
     if (!text) return null;
     return `${referencePath(key)}/p/${encodeURIComponent(several ? locator : firstPage(locator))}?text=${text}`;
   }
-  const pairs = fragmentPairs(referent.slice(referent.indexOf("#") + 1));
+  const hash = referent.indexOf("#");
+  const pairs = hash < 0 ? null : fragmentPairs(referent.slice(hash + 1), pdfReferentPath(referent)?.version ?? null);
   return pairs ? `${citedPagePath(key, locator)}?${pairs}` : null;
 }
 
-/** A fragment's `sheet`, `page`, `p` and `text` parameters, in order and as written: what a `/pdf/` referent hands the cited-page route. Null for none. */
-export function fragmentPairs(fragment: string): string | null {
-  const kept = fragment.split("&").filter((param) => /^(?:sheet|page|p|text)=/.test(param));
-  return kept.length > 0 ? kept.join("&") : null;
+/**
+ * A fragment's `sheet`, `page`, `p`, `v` and `text` parameters, in order and
+ * as written: what a `/pdf/` referent hands the cited-page route. Null for
+ * none. `v` is kept, since it says which version's sheets a pair counts.
+ *
+ * `addressVersion` is the version of a referent written on a version's own
+ * address, `/pdf/<slug>/v/<n>#…`: its pages name version n's sheets, and
+ * since the route's query has no address to say so, each rides with `v=<n>`
+ * unless it has a stamp of its own.
+ */
+export function fragmentPairs(fragment: string, addressVersion: number | null = null): string | null {
+  const kept = fragment.split("&").filter((param) => /^(?:sheet|page|p|v|text)=/.test(param));
+  if (kept.length === 0) return null;
+  return addressVersion === null ? kept.join("&") : stampFragment(kept.join("&"), addressVersion);
 }
 
 /** Where a citation of the work with this key, at this locator, links: `/references/<key>/p/<first page>`, or the reference's page. */
@@ -337,14 +362,18 @@ function itemLabel(item: CitationItem, form: CitationForm, name: string): Label 
  * `p=` link of the same page land on the same sheet. `pageLabels` are the
  * file's own, as stored: `[]` for a file with none once its metadata is
  * read, and null before. A file with no page count isn't a PDF.
+ *
+ * The labels, the page count and `stamp` are the latest version's: a
+ * citation's page is resolved on it at every click (docs/PDF.md §13, "Links
+ * into the file"), and the link says so once the file has a second version.
  */
 export function pdfPageHref(
-  file: { slug: string; pageLabels: string[] | null; pageCount: number | null } | null,
+  file: { slug: string; pageLabels: string[] | null; pageCount: number | null; stamp: PageStamp } | null,
   locator: string | undefined,
 ): string | null {
   if (!file || !locator || file.pageCount === null) return null;
   const page = pageNameForLabel(file.pageLabels, file.pageCount, firstPage(locator));
-  return page ? `/pdf/${file.slug}#${formatPageName(page)}` : null;
+  return page ? `/pdf/${file.slug}#${formatPageName({ ...page, stamp: file.stamp })}` : null;
 }
 
 /** What every label in a doc reads from the doc's citations as a whole: each work's number and its told-apart short label. */
