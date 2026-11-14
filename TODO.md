@@ -247,7 +247,7 @@ list's answer names the latest version, and one that differs from the version sh
 banner with a reload. A broadcast on the presence channel at promotion would tell the tab
 sooner, and reaches only tabs connected at that moment.
 
-Four races the plan closes itself, kept here because each fails silently if its step is
+Five races the plan closes itself, kept here because each fails silently if its step is
 skipped:
 
 - **A capture that commits beside a promotion.** The check of the capture's version belongs
@@ -270,6 +270,12 @@ skipped:
 - **The two lazy writers**, `extract` in `src/lib/pdf-page-text.ts` and `fill` in
   `src/lib/pdf-metadata.ts`, parse for seconds and then write. Each must write under the
   version whose bytes it read, never under "the file's latest" looked up afterwards.
+- **An upload beside an abandoning of the same bytes.** `storeUploadStream` finds the blob on
+  disk and stores nothing, and its row is written seconds later. The abandoning counts the
+  rows holding the hash and removes the blob. Both take one advisory lock on the hash: the
+  upload in the transaction that inserts its row, where it checks the blob is still there,
+  and the abandoning around its count and its removal, before it commits. Without it a
+  version's row is left with no bytes, which nothing reports until the integrity check runs.
 
 ## The MCP server: what is left (docs/MCP.md)
 
