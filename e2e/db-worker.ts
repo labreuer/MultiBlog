@@ -38,10 +38,10 @@ import { countVersionsHolding, createFileWithFirstVersion, latestVersionIdOf, lo
 import { fileVersionState } from "@/lib/file-version";
 import { recordUpload, recordVersionUpload, stageUpload } from "@/lib/file-ingest";
 import { abandonFileVersion, promoteFileVersion } from "@/lib/file-manage";
-import { newCarryId, planCarry, writeCarry } from "@/lib/file-anchor-move";
+import { planCarry, previewCarryFromVersion, runPlannedCarry } from "@/lib/file-anchor-move";
 import { moveNote, setNoteMoveHidden, setNoteStays } from "@/lib/file-note-move";
 import { ApiError } from "@/lib/api/errors";
-import { writePageMapIfNone } from "@/lib/pdf-page-map-build";
+import { storePageMap } from "@/lib/pdf-page-map-build";
 import { changeTagSlug, uniqueTagSlug } from "@/lib/tag-slug";
 import { targetFromColumns, targetToColumns, type AnchorTarget } from "@/lib/anchors";
 import { UploadError, deleteBytesIfUnreferenced, storagePathFor, storedByteSize, storeUploadStream } from "@/lib/file-storage";
@@ -829,10 +829,12 @@ export type TestVersionFacts = {
   /**
    * Its page map as stored (docs/PDF.md §13, "Matching the pages"): for each
    * sheet of its base the 0-based sheet of this version, -1 for removed and
-   * -2 for unmapped; with how many of its questions are open, who stored it
-   * and the carry that did. Null where it has none.
+   * -2 for unmapped; the sheets of each side read as blank, which is the
+   * blank-sheet read's own answer (`readSheetsInk`); with how many of its
+   * questions are open, who stored it and the carry that did. Null where it
+   * has none.
    */
-  pageMap: { sheets: number[]; openRuns: number; storedByEmail: string | null; carryId: string | null } | null;
+  pageMap: { sheets: number[]; blank: { from: number[]; to: number[] }; openRuns: number; storedByEmail: string | null; carryId: string | null } | null;
 };
 
 /** A file's versions, in number order, each with what its row and the disk hold. */
@@ -879,6 +881,7 @@ export async function getFileVersionFacts(fileId: string): Promise<TestVersionFa
         map
           ? {
               sheets: map.sheets,
+              blank: map.blank,
               openRuns: map.runs.filter((run) => run.answer === null).length,
               storedByEmail: version.pageMapStoredBy?.email ?? null,
               carryId: version.pageMapCarryId,
@@ -1258,14 +1261,17 @@ export async function undoCarryInSql(carryId: string): Promise<{ moves: number; 
  * - `restamp`: these notes' targets name another text version meanwhile, as
  *   the text-version script leaves one whose sheet reads the same.
  * - `away`: these notes leave the version meanwhile, for the latest.
+ * - `matched`: the maps the carry meant to store are stored meanwhile, as
+ *   another manager's "Match them" would store them.
  *
- * Answers what the carry's write then did.
+ * The write is the carry's own transaction (`runPlannedCarry`), not a copy of
+ * it. Answers what it then did, or the words it was refused with.
  */
 export async function carryAcrossChanges(
   versionId: string,
   actorEmail: string,
-  between: { mark?: string[]; retarget?: string[]; restamp?: string[]; away?: string[] },
-): Promise<{ carryId: string; moved: number; skipped: number; stayed: { number: number; count: number }[]; storedMaps: number[] }> {
+  between: { mark?: string[]; retarget?: string[]; restamp?: string[]; away?: string[]; matched?: boolean },
+): Promise<{ carryId: string; moved: number; skipped: number; stayed: { number: number; count: number }[]; storedMaps: number[] } | { refused: string }> {
   assertSafe(actorEmail);
   const user = await prisma.user.findUniqueOrThrow({ where: { email: actorEmail }, select: { id: true, role: true } });
   const actor = { userId: user.id, role: user.role };
@@ -1284,13 +1290,25 @@ export async function carryAcrossChanges(
     await prisma.$executeRaw`UPDATE annotation SET file_version_id = ${latest} WHERE id = ANY(${between.away}::text[])`;
   }
 
-  const carryId = newCarryId();
-  return prisma.$transaction(async (tx) => {
-    await lockFileRow(tx, version.fileId);
-    for (const { version: mapped, map } of plan.mapsToStore) await writePageMapIfNone(tx, mapped.id, map, { userId: user.id, carryId });
-    const result = await writeCarry(tx, plan, actor, carryId);
-    return { carryId, moved: result.moved, skipped: result.skipped, stayed: result.stayed, storedMaps: result.storedMaps };
-  });
+  if (between.matched) for (const { version: mapped } of plan.mapsToStore) await storePageMap(mapped.id, { userId: user.id });
+
+  try {
+    const result = await runPlannedCarry(plan, actor);
+    return { carryId: result.carryId, moved: result.moved, skipped: result.skipped, stayed: result.stayed, storedMaps: result.storedMaps };
+  } catch (err) {
+    if (err instanceof ApiError) return { refused: err.message };
+    throw err;
+  }
+}
+
+/**
+ * What the carry a manager starts on `versionId` would do, as that user:
+ * the look a person takes before running one, which works its maps out and
+ * stores none (docs/PDF.md §13, "Matching the pages").
+ */
+export async function previewCarryAs(versionId: string, actorEmail: string): Promise<{ toNumber: number; notes: number; parts: number; storesMaps: number[] }> {
+  const preview = await previewCarryFromVersion(await testActor(actorEmail), versionId);
+  return { toNumber: preview.toNumber, notes: preview.notes, parts: preview.parts, storesMaps: preview.storesMaps };
 }
 
 /**
@@ -3532,6 +3550,7 @@ const handlers = {
   undoCarryInSql,
   makeVersionFault,
   carryAcrossChanges,
+  previewCarryAs,
   noteActAs,
   getFileVersionFacts,
   promoteTestVersion,

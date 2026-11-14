@@ -209,6 +209,11 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
         candidateFacts: waiting && latest ? await candidateFactsFor(actorFromSessionUser(user), file.id, waiting, latest) : null,
       }
     : null;
+  // A page map's numbers and the version it is from belong to that half too.
+  // The map itself reaches every reader's viewer, which carries links with it
+  // (`linkVersions`); what it found, in numbers, is its managers' to read.
+  const sent = (version: FileVersionSummary): FileVersionSummary => (manage ? version : { ...version, baseNumber: null, map: null });
+  const listed = versions.map(sent);
 
   // PLAN.md §20d — the tag chips, handed to the viewer as its Metadata
   // pane.
@@ -239,7 +244,7 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
         fileId={file.id}
         slug={file.slug}
         version={shown}
-        versions={versions}
+        versions={listed}
         linkVersions={linkVersions}
         manage={manage}
         fileUrl={fileUrl}
@@ -263,7 +268,7 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
           // Listed once a file has a second version: its only version needs no
           // list. A manager has it from the first, since it holds the upload.
           (versions.length > 1 || manage?.takesVersions) && (
-            <PdfVersionList key="versions" slug={file.slug} versions={versions} shownId={shown.id} manage={manage} />
+            <PdfVersionList key="versions" slug={file.slug} versions={listed} shownId={shown.id} manage={manage} />
           ),
         ]}
       />

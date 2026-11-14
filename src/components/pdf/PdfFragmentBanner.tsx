@@ -227,12 +227,20 @@ export default function PdfFragmentBanner({
             }
             const landed = region.target.pageIndex;
             const changed = carriedElsewhere(region.passage.page, landed, ownPageLabels, pageCount);
+            // The page maps brought it here, or its words did: found on another
+            // sheet than the one its own became, or its sheet has no counterpart.
+            const written = writtenPage(region.passage.page);
+            const how = region.named.includes(landed)
+              ? `its ${written} is sheet ${landed + 1} here`
+              : region.named.length > 0
+                ? `its ${written} is sheet ${region.named[0] + 1} here, and its words were found on sheet ${landed + 1}`
+                : `its ${written} has no counterpart here, and its words were found on sheet ${landed + 1}`;
             return (
               <li key={region.id}>
                 <button type="button" className={styles.partButton} onClick={() => onJumpToTarget(region.target!)} title="Jump to this passage">
                   {changed && (
                     <span data-testid="pdf-fragment-carried">
-                      Read as version {reading.version}: its {writtenPage(region.passage.page)} is sheet {landed + 1} here:{" "}
+                      Read as version {reading.version}: {how}:{" "}
                     </span>
                   )}
                   <span className={styles.partQuote}>{region.target.quote.exact}</span>

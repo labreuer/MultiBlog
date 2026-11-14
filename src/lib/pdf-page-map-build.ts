@@ -101,22 +101,52 @@ async function versionForMap(versionId: string): Promise<VersionForMap> {
   return version;
 }
 
+/** Each version's sheets as they were read, by its id: what several maps worked out together share. */
+export type SheetFactsRead = Map<string, Promise<VersionSheets>>;
+
 /**
  * The page map between a version and its base, worked out and **not
  * stored**. Refused for a first version, which has no base to be matched
  * with, and for an abandoned one, whose text is gone.
+ *
+ * **`read` is for a caller that works out several maps of one file.** A
+ * version between two others is the version of one map and the base of the
+ * next, and with one `read` handed to each call its sheets are read, and its
+ * document opened, once for both.
  */
-export async function workOutPageMap(versionId: string): Promise<{ map: PageMap; version: VersionForMap }> {
+export async function workOutPageMap(versionId: string, read: SheetFactsRead = new Map()): Promise<{ map: PageMap; version: VersionForMap }> {
   const version = await versionForMap(versionId);
   if (!version.baseVersion) throw new ApiError("invalid", `Version ${version.number} is this file's first, so there is no earlier version to match its sheets with.`);
   if (version.abandonedAt !== null) throw new ApiError("conflict", `Version ${version.number} was abandoned, and its text is gone, so its sheets can't be matched now.`);
-  const [base, own] = await Promise.all([sheetFactsOf(version.baseVersion), sheetFactsOf(version)]);
+  const factsOf = (source: MapSource): Promise<VersionSheets> => {
+    const held = read.get(source.id);
+    if (held) return held;
+    const facts = sheetFactsOf(source);
+    read.set(source.id, facts);
+    return facts;
+  };
+  const [base, own] = await Promise.all([factsOf(version.baseVersion), factsOf(version)]);
   return { map: pairSheets(base, own), version };
 }
 
 /** A map as its column takes it. */
 export function pageMapColumn(map: PageMap): Prisma.InputJsonValue {
   return map as unknown as Prisma.InputJsonValue;
+}
+
+/**
+ * The map a version's row holds, or null where it holds none. **A stored
+ * value that is no map is not "none"**: every reader takes it for no map, but
+ * a write over it would store a second one and lose whatever answers the
+ * first held, so it is refused, for `check-file-versions.ts` to name
+ * (`map-unreadable`).
+ */
+function standingMap(pageMap: unknown): PageMap | null {
+  const standing = parsePageMap(pageMap);
+  if (!standing && pageMap !== null && pageMap !== undefined) {
+    throw new ApiError("conflict", "This version has a stored page map that can't be read, and nothing is written over it. The integrity check for file versions names it.");
+  }
+  return standing;
 }
 
 /**
@@ -132,7 +162,7 @@ export async function writePageMapIfNone(
 ): Promise<{ map: PageMap; stored: boolean }> {
   const row = await tx.fileVersion.findUnique({ where: { id: versionId }, select: { pageMap: true } });
   if (!row) throw new ApiError("not_found", "That version doesn't exist.");
-  const standing = parsePageMap(row.pageMap);
+  const standing = standingMap(row.pageMap);
   if (standing) return { map: standing, stored: false };
   await tx.fileVersion.update({
     where: { id: versionId },
@@ -153,7 +183,7 @@ const MAP_WRITE_TIMEOUTS = { maxWait: 30_000, timeout: 60_000 } as const;
  */
 export async function storePageMap(versionId: string, by: { userId: string }): Promise<{ map: PageMap; stored: boolean; fileId: string; number: number }> {
   const existing = await versionForMap(versionId);
-  const standing = parsePageMap(existing.pageMap);
+  const standing = standingMap(existing.pageMap);
   if (standing) return { map: standing, stored: false, fileId: existing.fileId, number: existing.number };
   const { map, version } = await workOutPageMap(versionId);
   const written = await prisma.$transaction(async (tx) => {

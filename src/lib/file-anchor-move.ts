@@ -7,7 +7,7 @@ import { canUserManageFile } from "@/lib/file-authz";
 import { lockFileRow } from "@/lib/file-version-data";
 import { parsePdfTarget, type PdfTarget } from "@/lib/pdf-anchor";
 import { mapsJoin, parsePageMap, type MapVersion, type PageMap } from "@/lib/pdf-page-map";
-import { workOutPageMap, writePageMapIfNone } from "@/lib/pdf-page-map-build";
+import { workOutPageMap, writePageMapIfNone, type SheetFactsRead } from "@/lib/pdf-page-map-build";
 import { prisma, type TransactionClient } from "@/lib/prisma";
 
 // docs/PDF.md §13, "Moving a note forward" — the move: an anchor on one
@@ -379,8 +379,11 @@ export async function planCarry(fileId: string, destinationId: string, startFrom
     if (!start || !at || start.promotedAt === null || start.abandonedAt !== null || start.id === destination.id) {
       throw new ApiError("conflict", `Version ${destination.number} was not uploaded over that version, so no note on it can be carried there.`);
     }
+    // One reading of each version's sheets for all of them: a version between
+    // two others is the version of one map and the base of the next.
+    const read: SheetFactsRead = new Map();
     for (const version of forward.reverse()) {
-      if (!version.map) mapsToStore.push({ version, map: (await workOutPageMap(version.id)).map });
+      if (!version.map) mapsToStore.push({ version, map: (await workOutPageMap(version.id, read)).map });
     }
   }
   const maps = mapsOfLine(versions, new Map(mapsToStore.map(({ version, map }) => [version.id, map])));
@@ -500,9 +503,20 @@ export async function carryFromVersion(actor: Actor, versionId: string): Promise
   const version = await requireCarryVersion(actor, versionId);
   if (!version.currentVersionId) throw new ApiError("conflict", "This file has no latest version to carry notes to.");
   const plan = await planCarry(version.fileId, version.currentVersionId, versionId);
+  return { ...(await runPlannedCarry(plan, actor)), slug: version.slug };
+}
+
+/**
+ * The one transaction of a carry started on a version, from a plan worked
+ * out before it: the maps the plan means to store, then its moves. Apart
+ * from `carryFromVersion` so that a test can change something between the
+ * working-out and the write and run this very transaction
+ * (`carryAcrossChanges`, e2e/db-worker.ts). It asks no gate: its caller has.
+ */
+export async function runPlannedCarry(plan: CarryPlan, actor: Actor): Promise<CarryResult> {
   const carryId = newCarryId();
-  const result = await prisma.$transaction(async (tx) => {
-    const file = await lockFileRow(tx, version.fileId);
+  return prisma.$transaction(async (tx) => {
+    const file = await lockFileRow(tx, plan.fileId);
     if (!file) throw new ApiError("not_found", "File not found.");
     if (file.deleted) throw new ApiError("conflict", "This file is deleted, and no note on it is moved until it is restored.");
     for (const { version: mapped, map } of plan.mapsToStore) {
@@ -513,7 +527,6 @@ export async function carryFromVersion(actor: Actor, versionId: string): Promise
     }
     return writeCarry(tx, plan, actor, carryId);
   }, MOVE_WRITE_TIMEOUTS);
-  return { ...result, slug: version.slug };
 }
 
 /**

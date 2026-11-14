@@ -521,9 +521,15 @@ the admin account.
   with `undoCarryInSql`, and compares: that fixture is the SQL of
   docs/PDF.md §13's recipe, so a change to either is a change to both.
 - **A carry's write is raced by `carryAcrossChanges`**, which works a carry
-  out, changes the notes it is told to in between (marks one, gives one
-  another target, restamps one's text version, moves one away) and then
-  writes. What the write skipped is the test.
+  out, changes what it is told to in between (marks a note, gives one another
+  target, restamps one's text version, moves one away, or has the page map
+  stored by another request) and then runs the carry's own transaction
+  (`runPlannedCarry`). What the write skipped, or the words it was refused
+  with, is the test. `previewCarryAs` is the look a manager takes first, which
+  must leave no page map behind.
+- **`getFileVersionFacts` answers a stored page map's blank sheets** beside its
+  pairing. They are the one place the blank-sheet read's answer shows: a
+  better copy's map pairs the same whatever that read says.
 - **A user the UI offers nothing is tested through the write layer.**
   `noteActAs(email, act)` calls `moveNote`, `setNoteStays` or
   `setNoteMoveHidden` as that user and answers the refusal. A server action

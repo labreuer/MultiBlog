@@ -33,6 +33,11 @@ import styles from "./PdfVersions.module.css";
 // Each decision is written as it is made. A note that had changed since its
 // suggestion was worked out is not moved, and the list is worked out again.
 //
+// **A marked draft or link part is listed last, under "Marked as staying"**,
+// with the control that takes the mark off. A posted note has that on its
+// card and on its entry in the rest of the list; a draft and a part have
+// neither, so without this a mark on one could not be taken back.
+//
 // **It is the first part of the list of notes on other versions**
 // (`PdfOtherVersionNotes` mounts it inside its own box), under the version
 // each note is on, as the rest of that list is. So a posted note's line is
@@ -74,7 +79,11 @@ export default function PdfNoteWorklist({ fileId, items, notes, latestNumber, pa
   );
 
   if (items.length === 0) return null;
-  const byVersion = [...new Set(items.map((item) => item.versionNumber))].sort((a, b) => b - a).map((number) => ({ number, group: items.filter((item) => item.versionNumber === number) }));
+  const undecided = items.filter((item) => !item.stays);
+  const staying = items.filter((item) => item.stays);
+  const byVersion = [...new Set(undecided.map((item) => item.versionNumber))]
+    .sort((a, b) => b - a)
+    .map((number) => ({ number, group: undecided.filter((item) => item.versionNumber === number) }));
 
   const open = (message?: { key: string; message: string }) => {
     setError(message ?? null);
@@ -113,10 +122,10 @@ export default function PdfNoteWorklist({ fileId, items, notes, latestNumber, pa
     });
   };
 
-  const stay = (item: WorklistItem) => {
+  const stay = (item: WorklistItem, stays: boolean) => {
     setError(null);
     startTransition(async () => {
-      const answer = await markNoteStays({ kind: item.kind, id: item.id }, true).catch(() => ({ ok: false as const, error: FAILED }));
+      const answer = await markNoteStays({ kind: item.kind, id: item.id }, stays).catch(() => ({ ok: false as const, error: FAILED }));
       if (answer.ok) onChanged(item);
       else setError({ key: keyOf(item), message: answer.error });
     });
@@ -124,19 +133,23 @@ export default function PdfNoteWorklist({ fileId, items, notes, latestNumber, pa
 
   return (
     <div data-testid="pdf-worklist">
-      <p className={styles.partHeading}>Your notes on earlier versions</p>
-      <p className={styles.versionFacts}>
-        Each is still on the version it was made on, where it is drawn. Move one to version {latestNumber}, or mark it as staying where it is.
-      </p>
-      <div className={styles.manageRow}>
-        <button type="button" className={styles.manageButton} disabled={pending} data-testid="pdf-worklist-open" onClick={() => open()}>
-          {pending && !opened ? "Working out where each could go…" : opened ? "Work them out again" : "Suggest where each could go"}
-        </button>
-        {/* The same notes as a table, with the drafts and link parts left out: /annotations lists posted notes. */}
-        <Link className={styles.worklistLink} href="/annotations?earlier=mine">
-          In the annotations table
-        </Link>
-      </div>
+      {undecided.length > 0 && (
+        <>
+          <p className={styles.partHeading}>Your notes on earlier versions</p>
+          <p className={styles.versionFacts}>
+            Each is still on the version it was made on, where it is drawn. Move one to version {latestNumber}, or mark it as staying where it is.
+          </p>
+          <div className={styles.manageRow}>
+            <button type="button" className={styles.manageButton} disabled={pending} data-testid="pdf-worklist-open" onClick={() => open()}>
+              {pending && !opened ? "Working out where each could go…" : opened ? "Work them out again" : "Suggest where each could go"}
+            </button>
+            {/* The same notes as a table, with the drafts and link parts left out: /annotations lists posted notes. */}
+            <Link className={styles.worklistLink} href="/annotations?earlier=mine">
+              In the annotations table
+            </Link>
+          </div>
+        </>
+      )}
       {error && error.key === null && (
         <p className={styles.manageError} role="alert">
           {error.message}
@@ -207,7 +220,7 @@ export default function PdfNoteWorklist({ fileId, items, notes, latestNumber, pa
                       <button type="button" className={styles.manageButton} disabled={pending} data-testid="pdf-worklist-place" onClick={() => onPlace(item)}>
                         Place it myself
                       </button>
-                      <button type="button" className={styles.manageButton} disabled={pending} data-testid="pdf-worklist-stays" onClick={() => stay(item)}>
+                      <button type="button" className={styles.manageButton} disabled={pending} data-testid="pdf-worklist-stays" onClick={() => stay(item, true)}>
                         It stays on version {item.versionNumber}
                       </button>
                     </div>
@@ -223,6 +236,39 @@ export default function PdfNoteWorklist({ fileId, items, notes, latestNumber, pa
           </ul>
         </div>
       ))}
+      {staying.length > 0 && (
+        <div data-testid="pdf-worklist-staying">
+          <p className={styles.partHeading}>Marked as staying</p>
+          <p className={styles.versionFacts}>Each stays on its version, and no carry moves it, until its mark is taken off.</p>
+          <ul className={styles.list}>
+            {staying.map((item) => {
+              const key = keyOf(item);
+              return (
+                <li key={key} className={`${styles.entry} ${styles.worklistItem}`} data-testid="pdf-worklist-staying-item" data-note-kind={item.kind} data-note-id={item.id}>
+                  <span className={styles.entryMeta}>
+                    {worklistKindWords(item.what, item.kind === "link-part" ? item.text : "")}, on version {item.versionNumber}
+                  </span>
+                  <span className={styles.worklistQuote}>{item.quotedText ? `“${item.quotedText}”` : "(a region with no words)"}</span>
+                  {/* A plain <a>: the address carries a fragment (CLAUDE.md, "A client navigation that carries a fragment…"). */}
+                  <a href={item.href} className={styles.entryBody}>
+                    {item.kind === "annotation" ? item.text || "(no words yet)" : `Sheet ${item.pageIndex + 1} of version ${item.versionNumber}`}
+                  </a>
+                  <div className={styles.manageRow}>
+                    <button type="button" className={styles.manageButton} disabled={pending} data-testid="pdf-worklist-unstay" onClick={() => stay(item, false)}>
+                      Take the mark off
+                    </button>
+                  </div>
+                  {error?.key === key && (
+                    <p className={styles.manageError} role="alert">
+                      {error.message}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

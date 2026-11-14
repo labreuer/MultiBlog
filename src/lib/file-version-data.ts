@@ -380,7 +380,7 @@ export type CaptureClaim = CaptureOrigin & { fileId: string };
 /** A capture refused for the version it names. The message is for whoever made it. */
 export class CaptureRefused extends Error {
   constructor(
-    readonly reason: "reload" | "candidate" | "abandoned" | "not-this-file",
+    readonly reason: "reload" | "candidate" | "abandoned" | "not-this-file" | "moved",
     message: string,
   ) {
     super(message);
@@ -433,4 +433,30 @@ export async function assertCaptureVersion(tx: TransactionClient, claim: Capture
   if (version.promotedAt === null) {
     throw new CaptureRefused("candidate", `Version ${version.number} is not yet this file's latest, and takes no notes or link parts until it is.`);
   }
+}
+
+/**
+ * Checks that a draft with a target is still on the version its post names,
+ * **in the transaction that posts it, after `assertCaptureVersion` has locked
+ * the file row** (docs/PDF.md §13, "Writing a move"). Throws `CaptureRefused`.
+ *
+ * A post writes the draft's target and version with its body. A draft is in
+ * its author's worklist, so it can be moved to a later version from another
+ * tab while its composer stands open on the page of the version it was made
+ * on. Posted from there unchecked, the row would go back to the target and
+ * version it left, with its history saying it had reached another: an anchor
+ * put on a version by something other than a move, which nothing could undo.
+ *
+ * A move locks the file row `FOR UPDATE`, so behind the capture's `FOR SHARE`
+ * the row read here is as the move left it, or the move has yet to begin and
+ * finds the note posted where it was.
+ */
+export async function assertDraftOnVersion(tx: TransactionClient, annotationId: string, fileVersionId: string): Promise<void> {
+  const row = await tx.annotation.findUnique({ where: { id: annotationId }, select: { fileVersionId: true, fileVersion: { select: { number: true } } } });
+  // A draft with no target is on no version, and takes the one its post gives it.
+  if (!row || row.fileVersionId === null || row.fileVersionId === fileVersionId) return;
+  throw new CaptureRefused(
+    "moved",
+    `This note is now on version ${row.fileVersion?.number ?? "another"} of the file: it was moved there while it was open here. Open it on that version's page to post it.`,
+  );
 }

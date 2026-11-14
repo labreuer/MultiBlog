@@ -162,8 +162,14 @@ function reportVersionFault(where: string, label: string, fault: VersionFault, f
   }
 }
 
-/** What follows from the version a page was read on: a warning where the link's own address shows another, and a verbose line where it isn't the latest. */
-function reportVersionRead(where: string, label: string, version: number, finding: Checked): void {
+/**
+ * What follows from the version a page was read on: a warning where the
+ * link's own address shows another, and a verbose line where it isn't the
+ * latest. A link carried to the version it was read on has a line of its own
+ * saying so, and gets neither.
+ */
+function reportVersionRead(where: string, label: string, version: number, finding: Checked, carried: boolean): void {
+  if (carried) return;
   if (finding.addressVersion !== null && version !== finding.addressVersion) {
     report(
       "warn",
@@ -194,7 +200,7 @@ function reportFinding(where: string, href: string, page: PageName | null, findi
       reportVersionFault(where, label, finding.page, finding, href);
       return;
     }
-    reportVersionRead(where, label, finding.page.version, finding);
+    reportVersionRead(where, label, finding.page.version, finding, finding.page.kind === "ok" && finding.page.carried !== undefined);
     if (finding.page.kind === "ok" && finding.page.carried) {
       const stamp = finding.versionCount > 1 ? finding.page.version : ("sole" as const);
       note(
@@ -215,7 +221,7 @@ function reportFinding(where: string, href: string, page: PageName | null, findi
       reportVersionFault(where, label, passage, finding, href);
       continue;
     }
-    reportVersionRead(where, label, passage.version, finding);
+    reportVersionRead(where, label, passage.version, finding, "carried" in passage && passage.carried !== undefined);
     if (passage.kind === "ok") {
       if (passage.occurrences > 1) {
         report("warn", where, "repeats", `${label} occurs ${passage.occurrences} times on its page; the link points at the first`);

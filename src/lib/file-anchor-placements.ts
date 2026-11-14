@@ -21,10 +21,13 @@ import { prisma } from "@/lib/prisma";
 // those are then read together: the destination's in one open, and each
 // earlier version's (a rectangle's own sheet, for the fit) in one.
 //
-// **It writes nothing and locks nothing.** The work takes seconds, so it
+// **It writes no anchor and locks nothing.** The work takes seconds, so it
 // comes before the transaction that writes a move, whose own condition is
 // what holds against a note that changed meanwhile (`writeAnchorMoves`,
-// src/lib/file-anchor-move.ts).
+// src/lib/file-anchor-move.ts). The one thing it may write is the later
+// version's page text at the current text version, where that version has
+// none yet: every new target names it, and it is extracted as a capture
+// extracts it (`storedPageText`).
 //
 // Server-only (Prisma, `node:fs`).
 

@@ -196,6 +196,7 @@ export const makeVersionFault = (...args: Parameters<DbHandlers["makeVersionFaul
   call("makeVersionFault", ...args);
 export const carryAcrossChanges = (...args: Parameters<DbHandlers["carryAcrossChanges"]>): ReturnType<DbHandlers["carryAcrossChanges"]> =>
   call("carryAcrossChanges", ...args);
+export const previewCarryAs = (...args: Parameters<DbHandlers["previewCarryAs"]>): ReturnType<DbHandlers["previewCarryAs"]> => call("previewCarryAs", ...args);
 export const noteActAs = (...args: Parameters<DbHandlers["noteActAs"]>): ReturnType<DbHandlers["noteActAs"]> => call("noteActAs", ...args);
 export const getFileAnchorVersions = (
   ...args: Parameters<DbHandlers["getFileAnchorVersions"]>

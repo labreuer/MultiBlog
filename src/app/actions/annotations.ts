@@ -52,7 +52,7 @@ import { chipInputsForBodies, chipInputsForBody } from "@/lib/entity-chips/conte
 import { chipsInJSON } from "@/lib/entity-chips/renderings";
 import type { ChipInputs } from "@/lib/entity-chips/types";
 import { setAnnotationDeleted } from "@/lib/annotation-manage";
-import { CaptureRefused, assertCaptureVersion, noteVersions } from "@/lib/file-version-data";
+import { CaptureRefused, assertCaptureVersion, assertDraftOnVersion, noteVersions } from "@/lib/file-version-data";
 import { CAPTURE_RELOAD_MESSAGE, parseCaptureOrigin, pdfNoteContainer, type CaptureOrigin } from "@/lib/file-version";
 
 /**
@@ -1207,7 +1207,17 @@ async function postFileAnnotation(opts: {
     settled,
     userId: opts.authorUserId,
     at: now,
-    ...(claim ? { before: (tx) => assertCaptureVersion(tx, claim) } : {}),
+    // The version the post names, and then that the draft is still on it: a
+    // draft moved from another tab since this composer opened is not written
+    // back to the target and version it left.
+    ...(claim && captured
+      ? {
+          before: async (tx) => {
+            await assertCaptureVersion(tx, claim);
+            await assertDraftOnVersion(tx, annotationId, captured.fileVersionId);
+          },
+        }
+      : {}),
     alongside: {
       ...(raise ? { status: "RAISED" as const, raisedAt: now } : { status: "LIVE" as const }),
       postedAt: now,

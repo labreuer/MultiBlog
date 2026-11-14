@@ -301,6 +301,12 @@ export type WorklistItem = NoteRef & {
   fingerprint: string;
   /** A posted note, a draft, a part of a minted link, or a part of the link open in the tray. */
   what: "note" | "draft" | "part" | "open-part";
+  /**
+   * Marked "stays here": listed only so the mark can be taken off. A draft
+   * or a link's part alone, which has no card or entry of its own to take it
+   * off from; a marked posted note is not in the worklist at all.
+   */
+  stays: boolean;
   quotedText: string;
   /** Its sheet on its own version, 0-based. */
   pageIndex: number;
@@ -320,6 +326,11 @@ const TEXT_SHOWN = 160;
  * "My notes on earlier versions": the viewer's notes and link parts, and
  * those of the bots that work for them, on any version of the file but the
  * latest, less the ones marked as staying.
+ *
+ * **A marked draft or link part is still answered, flagged `stays`**, for
+ * the list to offer the mark's taking off: a posted note has that on its own
+ * card and its entry, and these two have neither. No suggestion is worked
+ * out for one.
  *
  * Drafts and the parts of the link open in the tray are in it, the viewer's
  * own alone. Replies are not, since each travels with its root, and neither
@@ -353,7 +364,9 @@ async function ownNotesOn(
       const target = parsePdfTarget(row.target);
       const number = numberOf.get(row.versionId);
       const own = row.authorId === viewerId;
-      if (!target || number === undefined || row.marked || row.gone || (row.unposted && !own)) return [];
+      if (!target || number === undefined || row.gone || (row.unposted && !own)) return [];
+      // A marked posted note has left the list: its card and its entry take the mark off.
+      if (row.marked && kind === "annotation" && !row.unposted) return [];
       const text = row.text.trim();
       const item: WorklistItem = {
         kind,
@@ -362,6 +375,7 @@ async function ownNotesOn(
         versionNumber: number,
         fingerprint: row.fingerprint,
         what: kind === "annotation" ? (row.unposted ? "draft" : "note") : row.unposted ? "open-part" : "part",
+        stays: row.marked,
         quotedText: row.quotedText,
         pageIndex: target.pageIndex,
         text: text.length > TEXT_SHOWN ? `${text.slice(0, TEXT_SHOWN).trimEnd()}…` : text,
@@ -419,7 +433,7 @@ export async function openWorklist(actor: Actor, fileId: string): Promise<Opened
   const versions = await lineOf(file.id);
   const destination = versions.find((version) => version.id === file.currentVersionId);
   if (!destination) throw new ApiError("conflict", "This file has no latest version.");
-  const notes = await ownNotesOn(actor.userId, file);
+  const notes = (await ownNotesOn(actor.userId, file)).filter(({ item }) => !item.stays);
   const sources = versions.filter((version) => version.id !== destination.id && version.abandonedAt === null);
   const placements = await workOutPlacements(
     notes.map(({ item, target }) => ({ versionId: item.versionId, target })),

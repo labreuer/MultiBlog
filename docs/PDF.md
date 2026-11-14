@@ -1530,6 +1530,14 @@ Three rules hold throughout:
       version's page and no other: the post names the page's version, and one that differs
       from the draft's is refused. "Your private notes" links such a draft to its version
       in place of offering Edit.
+    - **A draft moved while its composer stood open is not posted back where it was.** A
+      draft is in its author's worklist, so another tab can move it to a later version
+      while the tab that opened it still holds its selection. A post writes the draft's
+      target and version with its body, so in the post's transaction, behind the capture's
+      lock, the draft must still be on the version the post names
+      (`assertDraftOnVersion`). Otherwise it is refused, naming the version the note is
+      now on, and the draft is left whole. Unchecked, the post would put the row back on
+      the version it left with its history saying it had reached another.
     - **A post refused for its version leaves the draft whole**, and says so in its answer
       (`captureRefused`, `PostAnnotationResult`). One caller discards a draft it could not
       post: the composer, when another draft is reopened over the one it holds, on the
@@ -1551,9 +1559,10 @@ Three rules hold throughout:
   when it and the latest were uploaded, and the time between them in the largest unit that
   fits (years, months, days, hours, minutes or seconds), rounded to the nearest, with a link
   to the latest. A candidate's banner says it is not yet the latest (`PdfVersionBanner`).
-  - **An earlier version's banner says where a note made there is, and who moves it**: "A
-    note made here is on version 1. Its author can move it to version 2 from that version's
-    page, or mark it here as staying."
+  - **An earlier version's banner says where a note made there is, and what moves it**: "A
+    note made here is on version 1 until it is moved to version 2: by its author, from that
+    version's page, or by a manager's carry of the notes that place themselves there. Its
+    author can mark it here as staying."
   - **A candidate's banner says it takes no notes and no link parts until it is the
     latest**, and shows whoever may manage the file what a promotion would do, with the two
     acts that end its waiting (The upload).
@@ -1667,13 +1676,16 @@ Three rules hold throughout:
     and `partsOn`), with the bulk carry where it has either (`PdfCarryActions`; Moving a
     note forward);
   - a link to its map page, with the number of questions open on its map;
-  - each carry that moved notes to it, under the version it moved them to: who ran it, when,
-    how many it moved, and whether its moves are shown, with the control that shows or hides
+  - each carry that moved notes to it, under the version it moved them to: when it ran, how
+    many it moved, and whether its moves are shown, with the control that shows or hides
     them together (`PdfCarryRecord`, from `carriesOf`).
 
   A manager has the list on a file with one version too, since it holds the upload. None of
   that half reaches another reader's page: the page sends it only where `canUserManageFile`
-  holds (`VersionManage`). Versions are in no listing of files, since they are not files.
+  holds (`VersionManage`), and leaves each version's base and its map's numbers out of the
+  summaries it sends anyone else. The map itself is in every reader's page, since the viewer
+  carries links with it (Links into the file). Versions are in no listing of files, since
+  they are not files.
 - **MCP's `read` takes `/pdf/<slug>/v/<n>`**, and the latest without it. Its byte route
   (`/api/mcp/files/<id>`) takes no hash. It serves the latest version's bytes, and with
   `?v=<n>` that version's.
@@ -1915,6 +1927,10 @@ what a carry would do stores none: it works on maps it builds and throws away
   (`writePageMapIfNone`), so two requests can't each store one. A later carry reads the map
   as it stands, with the answers its runs have been given. Nothing rebuilds one or takes one
   away (Open).
+  - **A stored value that can't be read is not "none".** Every reader takes it for no map,
+    and a write over it would be a second map, with whatever answers the first held lost.
+    So building one there, and a carry that would, are refused, and the integrity check
+    names the version (`map-unreadable`).
 - **A deleted file takes none**, and no answer to a run, as it takes no promotion.
 
 **The map's page is `/pdf/<slug>/v/<n>/map`**, for whoever may manage the file. A reader
@@ -1977,8 +1993,8 @@ rules 4 and 5. It is built in order of trust:
      list holds. One operator list can't say an image failed: pdfjs (6.2.108) resolves a
      list that an error cut short, and drops a failed mask by default. So each sheet is
      read with `stopAtErrors`, and one whose list then holds no painting operator is read
-     again without it. A longer second list means the first was cut short, and the sheet
-     is ink.
+     again without it, from the document opened a second time, since the option is the
+     document's. A longer second list means the first was cut short, and the sheet is ink.
    - **A document that can't be read at all leaves every sheet without text as ink**, so
      none is taken for blank.
    - **Text is not ink.** A scan's text layer is drawn in rendering mode 3, which paints
@@ -2136,9 +2152,16 @@ reads what the rules take and measures the target each placement gives.
   earlier version's in one (`extractSheetsItems`, `src/lib/pdf-extract.ts`, which reads many
   sheets of one open document with each sheet's page box and rotation; `extractPageItems`
   is that for one sheet).
-- **It writes nothing and locks nothing.** The work takes seconds, so it comes before the
+  - **A carry that first builds maps reads each version's sheets once for all of them**
+    (`SheetFactsRead`, handed to each `workOutPageMap`): a version between two others is
+    the version of one map and the base of the next. Building a map opens a document only
+    for its sheets without text, and that is a read apart from the placing's.
+- **It writes no anchor and locks nothing.** The work takes seconds, so it comes before the
   transaction that writes a move, whose own condition is what holds against a note that
-  changed meanwhile (Moving a note forward, "Writing a move").
+  changed meanwhile (Moving a note forward, "Writing a move"). The one thing it may write
+  is the later version's page text at the current text version, where that version has none
+  yet: every new target names it, and it is extracted as a capture extracts it
+  (`storedPageText`).
 
 **It places itself** by the first of these that holds, tried in this order:
 
@@ -2576,6 +2599,9 @@ one nobody has looked at, and no worklist ever empties.
   the rest of the list on the latest's page, with "You marked it as staying on version n"
   and "Take the mark off", and its card on its own version says the same. Any other reader
   sees the note listed as any note on that version is.
+  - **A marked draft or link part is listed at the end of the worklist**, under "Marked as
+    staying", with the same control. Neither has a card or an entry in that list, so
+    without it a mark on one could not be taken back (`WorklistItem.stays`).
 - **It is written with the file row locked**, on the version the note is then on, and
   refused where that is the latest (`setNoteStays`). A carry's write refuses a marked row
   (below), so a mark made while a carry was working out its placements holds.
@@ -2621,6 +2647,8 @@ once.
   discard their work. The note is then on an earlier version again, and its next suggestion
   starts from where they put it. So a target given by hand is checked as a move is, and not
   as a capture from `/pdf/<slug>` is (Versions).
+  - **So the write layer takes any promoted version later than the one the note is on**
+    (`moveNote`). The page offers the latest alone.
 - **Nothing is staged.** Each decision is written as it is made, and a placement the app worked
   out and couldn't write is worked out again. So nothing is decided against a candidate
   (Open).
@@ -2948,6 +2976,9 @@ opens.**
     version shown**, which is where the same link read on this version would open.
   - **The current form names the sheet as a writer would** (`pageNameForSheet`): by its
     label on a file whose labels are usable, and by sheet otherwise.
+  - **It says so where the words and not the map brought it**: "its sheet 1 has no
+    counterpart here, and its words were found on sheet 5", or the sheet its own became
+    beside the sheet the words were found on.
 - **Words not found where the link was carried** are reported as any miss is, "Not found on
   page n". The miss's answer also says whether the version the link names holds them
   (`locateFragmentMisses`, whose answer for each passage is a sheet and `heldByNamed`), and
@@ -3055,8 +3086,10 @@ MCP's write check share one reading (PDF_FRAGMENT_LINKS.md §8).
     version's stamp, which is the link that version's page offers (Addresses).
 - **A link that names a version the file never had is an error** in the check, and refused
   by MCP's.
-- **A link on one version's own address that names another** is warned of by both: the
-  viewer stays on the version the address shows and offers the passage on the one named.
+- **A link on one version's own address that names another, and can't be carried there,**
+  is warned of by both: the viewer stays on the version the address shows and offers the
+  passage on the one named. One the maps carry to that address is read where it lands, as
+  on the bare address.
 - **A link to a version's own address is a link into that version**:
   `/pdf/<slug>/v/<n>#sheet=…&text=…`, which is what a reader on an earlier version copies from
   the address bar. One parser reads a PDF's path for every reader of a link (`parsePdfPath`,
@@ -3371,7 +3404,9 @@ Rejected, with reasons:
   viewer draws none (Open).
 - **A race is made to happen in order**, since none shows from one request: a fixture holds
   a lock, or changes a row between a carry's working-out and its write
-  (`carryAcrossChanges`).
+  (`carryAcrossChanges`). The write it then runs is the carry's own transaction
+  (`runPlannedCarry`, which `carryFromVersion` is the gate and the plan in front of), not a
+  copy of it.
 - **A fault no write layer makes is written by hand** (`makeVersionFault`), for the
   integrity check to name.
 - **A write layer is called as a given user** where the UI offers that user nothing to
@@ -3424,7 +3459,9 @@ test while each file has one version. So four specs make second versions:
 - **`e2e/pdf-better-copy.spec.ts`**, a better copy: two fixtures with the same text, the
   second having its first sheet removed, a blank sheet added and one word changed. It is
   five tests, each its own file:
-  - **the links**: the pages matched at the upload, what the candidate's page says of the
+  - **the links**: the pages matched at the upload, the stored map's blank sheets, which
+    are the blank-sheet read's own answer (the sheet the better copy gained is one, and
+    neither copy's plate is), what the candidate's page says of the
     map, the map's page refused to a reader who can't manage the file, where a `sheet=`
     link and a `p=` link written against the first copy land, the banner saying how each
     was read, a link to the removed sheet carried by its words or opening version 1, a link
@@ -3446,9 +3483,11 @@ test while each file has one version. So four specs make second versions:
     every anchor's row with what it was before the carry;
   - **the write's own condition**, with each change made between a carry's working-out and
     its write: a note marked "stays here", one given another target, one whose text version
-    alone was restamped, and one that left the version. The carry moves the restamped one
-    and a note nothing touched, counts the other three as skipped, and stores a map on its
-    way, which its undo takes away again;
+    alone was restamped, and one that left the version. A look at what the carry would do
+    comes first and leaves the version without a map. The carry then moves the restamped
+    one and a note nothing touched, counts the other three as skipped, and stores a map on
+    its way, which its undo takes away again. A second carry is refused, and moves
+    nothing, where the map it meant to store was stored by another request meanwhile;
   - **a run of sheets**: a sheet whose text the later copy reads quite otherwise, which the
     map proposes by its place. A note on it whose words stand twice in the later copy has
     no place until the run is accepted on the map's page, and the carry offered below the
@@ -3464,8 +3503,9 @@ test while each file has one version. So four specs make second versions:
     card and version 1's list saying it was moved;
   - a note on the rewritten passage placed by hand, and one on the cut passage marked as
     staying and gone from the worklist;
-  - a draft and a part of the open link in the worklist, each moved, the tray's store
-    loading again;
+  - a draft and a part of the open link in the worklist, each marked as staying and the
+    mark taken off again from the list, and then each moved, the tray's store loading
+    again;
   - the author's own card on version 1 marking a note and taking the mark off, and a move
     hidden and shown again;
   - a move of a marked note taking the mark off, a move backwards refused, and a mark on
@@ -3474,6 +3514,8 @@ test while each file has one version. So four specs make second versions:
     notes, and the write layer refusing each of them;
   - a bot's note in the worklist of the person it works for;
   - the `/annotations` filter;
+  - a draft opened on a selection in one tab and moved from another, whose post from the
+    first tab is refused, the note staying the draft it is on the version it reached;
   - a link written against version 1 opening version 1, by sheet and by page.
 
   The two long specs end on a clean run of `check-file-versions.ts` over their own carries,

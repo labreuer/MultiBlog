@@ -5,6 +5,7 @@ import PdfCarryActions from "@/components/pdf/PdfCarryActions";
 import PdfMapActions from "@/components/pdf/PdfMapActions";
 import { canUserManageFile } from "@/lib/file-authz";
 import { parseVersionNumber, pdfMapPath, pdfPath } from "@/lib/file-version";
+import { formatPageName } from "@/lib/pdf-open-params";
 import { pageMapViewFor, type MapRunView } from "@/lib/pdf-page-map-view";
 import { titleWhenOk } from "@/lib/route-access";
 import { signInPath } from "@/lib/sign-in-redirect";
@@ -73,7 +74,8 @@ export default async function PdfVersionMapPage({ params }: Params) {
   if (!view) notFound();
 
   const own = (number: number) => pdfPath(file.slug, { number, isLatest: false }, { own: true });
-  const sheetLink = (number: number, sheet: number) => <a href={`${own(number)}#sheet=${sheet}&v=${number}`}>{sheet}</a>;
+  // Written as every link into a file is (`formatPageName`), stamped with its version: a map is of a file with two at least.
+  const sheetLink = (number: number, sheet: number) => <a href={`${own(number)}#${formatPageName({ sheet, stamp: number })}`}>{sheet}</a>;
   const base = view.baseNumber;
 
   return (

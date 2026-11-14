@@ -258,6 +258,22 @@ test.describe("a revised text", () => {
       await expect(card(one.page, botNote).getByTestId("pdf-note-moved")).toContainText(`Moved from version 1 by ${one.user.name}.`, { timeout: 30_000 });
 
       // ---- a draft, and a part of the open link ----------------------------------------
+      // A mark on either is taken off from the list itself: neither has a card
+      // or an entry to take it off from, as a posted note has.
+      const staying = (id: string) => worklist.locator(`[data-testid="pdf-worklist-staying-item"][data-note-id="${id}"]`);
+      for (const id of [draft, openPart]) {
+        await item(id).getByTestId("pdf-worklist-stays").click();
+        await expect(item(id)).toHaveCount(0, { timeout: 30_000 });
+        await expect(staying(id)).toContainText("on version 1");
+      }
+      const marks = (await getFileAnchorMoves(file.id)).filter((move) => move.toNumber === null).map((move) => move.anchorId);
+      expect(marks.sort()).toEqual([draft, openPart].sort());
+      for (const id of [draft, openPart]) {
+        await staying(id).getByTestId("pdf-worklist-unstay").click();
+        await expect(staying(id)).toHaveCount(0, { timeout: 30_000 });
+        await expect(item(id)).toBeVisible();
+      }
+      expect((await getFileAnchorMoves(file.id)).filter((move) => move.toNumber === null)).toEqual([]);
       // A draft is moved as a draft: still private, on the latest.
       await expect(item(draft)).not.toHaveAttribute("data-suggestion", "none");
       await item(draft).getByTestId("pdf-worklist-accept").click();
@@ -327,7 +343,9 @@ test.describe("a revised text", () => {
       await expect(moved.locator(`[data-thread-id="${botNote}"]`).getByTestId("pdf-note-moved-to")).toContainText(`Moved to version 2 by ${one.user.name}.`);
       await expect(two.page.locator(`.annoRect[data-anno-id="${survives}"]`)).toHaveCount(0);
       // The earlier version's banner says what a note's author can do with it.
-      await expect(two.page.getByTestId("pdf-version-banner")).toContainText("Its author can move it to version 2 from that version's page, or mark it here as staying.");
+      await expect(two.page.getByTestId("pdf-version-banner")).toContainText(
+        "A note made here is on version 1 until it is moved to version 2: by its author, from that version's page, or by a manager's carry of the notes that place themselves there. Its author can mark it here as staying.",
+      );
 
       // ---- the author's own card on the earlier version's page ---------------------------
       await gotoOk(one.page, `${at}/v/1`);
@@ -366,6 +384,29 @@ test.describe("a revised text", () => {
       expect(await noteActAs(one.user.email, { act: "move", kind: "annotation", id: cut, toVersionId: versions[1].id, target: JSON.parse(rowOf(rows, survives).row).pdf_target })).toEqual({ ok: true, moved: true });
       moves = await getFileAnchorMoves(file.id);
       expect(moves.filter((move) => move.anchorId === cut)).toEqual([expect.objectContaining({ fromNumber: 1, toNumber: 2, wasMarked: true, hidden: false })]);
+
+      // ---- a draft moved while its composer stands open --------------------------------------
+      // A second tab opens a draft on a selection of version 1 and leaves its composer open.
+      const tab = await one.page.context().newPage();
+      await gotoOk(tab, `${at}/v/1`);
+      await waitForViewer(tab);
+      await selectPhrase(tab, 1, "opens with a claim");
+      await tab.getByRole("button", { name: "Annotate" }).click();
+      await annotationEditor(tab).click();
+      await annotationEditor(tab).pressSequentially(`Begun before it was moved ${tag}.`);
+      const begun = (await getFileAnchorRows(file.id)).find((row) => row.kind === "annotation" && row.quotedText === "opens with a claim")!;
+      expect(begun.versionNumber).toBe(1);
+      // Its author moves it to the latest meanwhile, as their worklist in another tab would.
+      expect(await noteActAs(one.user.email, { act: "move", kind: "annotation", id: begun.id, toVersionId: versions[1].id })).toEqual({ ok: true, moved: true });
+      // Posted from the tab that opened it, it would go back to version 1's
+      // target and version, with its history saying it had reached version 2.
+      // The post is refused, and the note stays the draft it is, where it is.
+      await tab.getByRole("button", { name: "Save" }).click();
+      await expect(tab.getByText("is now on version 2 of the file").first()).toBeVisible({ timeout: 30_000 });
+      const stillDraft = (await getFileAnchorRows(file.id)).find((row) => row.id === begun.id)!;
+      expect(stillDraft.versionNumber).toBe(2);
+      expect(JSON.parse(stillDraft.row).status).toBe("DRAFT");
+      await tab.close();
 
       // ---- the integrity check, over every move and mark made here ------------------------
       expect((await checkFileVersions(file.id)).stdout).toContain("0 error(s).");

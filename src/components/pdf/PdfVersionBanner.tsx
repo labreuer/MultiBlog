@@ -66,7 +66,9 @@ export default function PdfVersionBanner({ slug, version, versions, manage, clas
           {latestIsLater ? "later" : "earlier"}.
         </p>
         {version.state === "earlier" && (
-          <p>{`A note made here is on version ${shown.number}. Its author can move it to version ${latest.number} from that version's page, or mark it here as staying.`}</p>
+          <p>
+            {`A note made here is on version ${shown.number} until it is moved to version ${latest.number}: by its author, from that version's page, or by a manager's carry of the notes that place themselves there. Its author can mark it here as staying.`}
+          </p>
         )}
         {version.state === "candidate" && <p>It takes no notes and no link parts until it is.</p>}
         {version.state === "candidate" && manage && (

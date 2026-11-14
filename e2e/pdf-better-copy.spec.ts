@@ -5,6 +5,7 @@ import {
   ADMIN_EMAIL,
   addTestFileVersion,
   carryAcrossChanges,
+  previewCarryAs,
   createTestAnnotation,
   createTestApiToken,
   createTestDoc,
@@ -112,7 +113,10 @@ test.describe("a better copy of the same text", () => {
 
       let versions = await getFileVersionFacts(file.id);
       expect(versions[1]).toMatchObject({ number: 2, state: "candidate", baseNumber: 1 });
-      expect(versions[1].pageMap).toEqual({ sheets: MAP, openRuns: 0, storedByEmail: ADMIN_EMAIL, carryId: null });
+      // The map's blank sheets are the blank-sheet read's own answer: the sheet
+      // the better copy gained draws nothing, and each copy's plate, which has
+      // no text either, draws its ink and is no blank sheet.
+      expect(versions[1].pageMap).toEqual({ sheets: MAP, blank: { from: [], to: [1] }, openRuns: 0, storedByEmail: ADMIN_EMAIL, carryId: null });
       expect(versions[0].pageMap).toBeNull();
 
       // The candidate's page says what the map found, in numbers, and links its page.
@@ -196,7 +200,9 @@ test.describe("a better copy of the same text", () => {
       await follow(page, `${at}#sheet=1&text=symptoms+of+iconoclasm`);
       await expectAddress(page, `${at}#sheet=1&text=symptoms+of+iconoclasm`);
       await waitForViewer(page);
-      await expect(fragmentBanner(page).getByTestId("pdf-fragment-carried")).toContainText("its sheet 1 is sheet 5 here", { timeout: 30_000 });
+      await expect(fragmentBanner(page).getByTestId("pdf-fragment-carried")).toContainText("its sheet 1 has no counterpart here, and its words were found on sheet 5", {
+        timeout: 30_000,
+      });
 
       // A link without words is carried by the map alone.
       await follow(page, `${at}#sheet=2`);
@@ -585,7 +591,12 @@ test.describe("a better copy of the same text", () => {
       const second = await addTestFileVersion(file.id, { pages: betterCopy(tag), pageLabels: BETTER_LABELS, inked: [4] });
       expect((await getFileVersionFacts(file.id))[1].pageMap).toBeNull();
 
+      // A look at what the carry would do works the map out and stores none.
+      expect(await previewCarryAs(file.versionId, ADMIN_EMAIL)).toEqual({ toNumber: 2, notes: 5, parts: 0, storesMaps: [2] });
+      expect((await getFileVersionFacts(file.id))[1].pageMap).toBeNull();
+
       const result = await carryAcrossChanges(file.versionId, ADMIN_EMAIL, { mark: [marked], retarget: [retargeted], restamp: [restamped], away: [away] });
+      if ("refused" in result) throw new Error(result.refused);
       // All five placed themselves. Two were written: the one nothing touched,
       // and the one whose target differs only in the text version it names.
       expect(result).toMatchObject({ moved: 2, skipped: 3, stayed: [], storedMaps: [2] });
@@ -614,6 +625,14 @@ test.describe("a better copy of the same text", () => {
       const undone = await getFileAnchorRows(file.id);
       expect(undone.find((row) => row.id === untouched)!.versionNumber).toBe(1);
       expect(JSON.parse(undone.find((row) => row.id === restamped)!.row).pdf_target.textVersion).toBe("restamped/0");
+
+      // A map another manager stored while a carry worked refuses that carry:
+      // its placements went through a map of its own. Nothing is moved, and
+      // the map that stands is the other manager's, of no carry.
+      const beaten = await carryAcrossChanges(file.versionId, ADMIN_EMAIL, { matched: true });
+      expect(beaten).toEqual({ refused: expect.stringContaining("pages were matched while this carry was being worked out") });
+      expect((await getFileVersionFacts(file.id))[1].pageMap).toMatchObject({ sheets: MAP, carryId: null });
+      expect((await getFileAnchorRows(file.id)).find((row) => row.id === untouched)!.versionNumber).toBe(1);
     } finally {
       await deleteTestFile(file.id);
       await agent.dispose();
