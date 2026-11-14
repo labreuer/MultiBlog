@@ -180,6 +180,9 @@ of the same table that reaches no version, and is in none of the move checks:
   file's, or its anchor is into no file.
 - `move-to-unpromoted`: a move reached a version that was never promoted, or was abandoned.
 - `move-not-forward`: a move reached a version that is not later than the one it left.
+- `move-out-of-time`: a move's `moved_at` is before the version it reached was uploaded, or
+  later than now. Every time is UTC, so a time in the server's own zone, written by leaving
+  the column to its `CURRENT_TIMESTAMP` default, lands hours off on a server not in UTC.
 - `move-chain-broken`: a move left another version than the one its anchor's move before
   it reached.
 - `anchor-not-where-moved`: an anchor is not on the version its newest move reached.

@@ -727,18 +727,20 @@ test.describe("a better copy of the same text", () => {
       const skipped = await note("symptoms of iconoclasm");
       const markedElsewhere = await note("future of meaning");
       const offFile = await note("Idolatry is the name");
+      const tooEarly = await note("the imagination may yet achieve");
+      const tooLate = await note("may annotate the word");
 
-      // Version 2 is promoted and a carry takes all six to it, storing its map; version 3 is then the latest, and version 4 a candidate.
+      // Version 2 is promoted and a carry takes all eight to it, storing its map; version 3 is then the latest, and version 4 a candidate.
       const second = await addTestFileVersion(file.id, { pages: betterCopy(tag), pageLabels: BETTER_LABELS, inked: [4] });
-      expect(await carryAcrossChanges(file.versionId, ADMIN_EMAIL, {})).toMatchObject({ moved: 6, skipped: 0, storedMaps: [2] });
+      expect(await carryAcrossChanges(file.versionId, ADMIN_EMAIL, {})).toMatchObject({ moved: 8, skipped: 0, storedMaps: [2] });
       const third = await addTestFileVersion(file.id, { pages: betterCopy(`${tag} again`), pageLabels: BETTER_LABELS, inked: [4] });
       const candidate = await addTestFileVersion(file.id, { pages: betterCopy(`${tag} once more`), pageLabels: BETTER_LABELS, inked: [4], promote: false });
       const onLatest = await note("phenomena were not yet objects");
-      expect((await getFileAnchorRows(file.id)).map((row) => row.versionNumber)).toEqual([2, 2, 2, 2, 2, 2, 3]);
+      expect((await getFileAnchorRows(file.id)).map((row) => row.versionNumber)).toEqual([2, 2, 2, 2, 2, 2, 2, 2, 3]);
 
       const clean = await checkFileVersions(file.id);
       expect(clean.stdout).toContain("1 page map(s) checked.");
-      expect(clean.stdout).toContain('6 move(s) and 0 "stays here" mark(s) checked.');
+      expect(clean.stdout).toContain('8 move(s) and 0 "stays here" mark(s) checked.');
       expect(clean.stdout).toContain("0 error(s).");
       expect(clean.failed).toBe(false);
 
@@ -764,6 +766,9 @@ test.describe("a better copy of the same text", () => {
       await makeVersionFault({ fault: "anchor", annotationId: skipped, versionId: third.id });
       // A move that names a version of another file.
       const stray = await makeVersionFault({ fault: "move", annotationId: offFile, fromVersionId: second.id, toVersionId: other.versionId });
+      // The carry's time as a server eight hours west of UTC writes it (before version 2 was uploaded), and as one eight hours east does (after now).
+      const west = await makeVersionFault({ fault: "moved-at", annotationId: tooEarly, hours: -8 });
+      const east = await makeVersionFault({ fault: "moved-at", annotationId: tooLate, hours: 8 });
 
       // ---- a "stays here" mark -------------------------------------------------
       // One that names version 1, on a note that is on version 2; and one on a note on the latest.
@@ -787,6 +792,8 @@ test.describe("a better copy of the same text", () => {
       expect(said(`file_anchor_move ${early}`, "move-to-unpromoted")).toHaveLength(1);
       expect(said(`file_anchor_move ${gap}`, "move-chain-broken")).toHaveLength(1);
       expect(said(`file_anchor_move ${stray}`, "move-off-file")).toHaveLength(1);
+      expect(said(`file_anchor_move ${west}`, "move-out-of-time")[0]).toContain("before version 2 was uploaded");
+      expect(said(`file_anchor_move ${east}`, "move-out-of-time")[0]).toContain("later than now");
       expect(said(`file_anchor_move ${wrongVersion}`, "mark-off-version")).toHaveLength(1);
       expect(said(`file_anchor_move ${noLater}`, "mark-on-latest")).toHaveLength(1);
 
@@ -802,8 +809,10 @@ test.describe("a better copy of the same text", () => {
       expect(names(named(offFile))).toEqual(["anchor-not-where-moved", "move-off-file"]);
       expect(names(named(markedElsewhere))).toEqual(["mark-off-version"]);
       expect(names(named(onLatest))).toEqual(["mark-on-latest"]);
+      expect(names(named(tooEarly))).toEqual(["move-out-of-time"]);
+      expect(names(named(tooLate))).toEqual(["move-out-of-time"]);
       expect(stdout).toContain(`${lines.length} error(s).`);
-      expect(lines).toHaveLength(13);
+      expect(lines).toHaveLength(15);
     } finally {
       await deleteTestFile(file.id);
       await deleteTestFile(other.id);

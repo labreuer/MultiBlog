@@ -207,6 +207,11 @@ export async function writeAnchorMoves(
   }
 
   const hidden = carryId !== null;
+  // Named in both inserts rather than left to the column's default:
+  // CURRENT_TIMESTAMP into a `timestamp` column is the clock in the session's
+  // time zone, the server's own unless set, where every Prisma write stores
+  // UTC. A bound Date arrives as UTC without a zone, so the cast keeps it.
+  const movedAt = new Date();
   const moved: { kind: AnchorKind; id: string }[] = [];
   const batchOf = (kind: AnchorKind, from: number) =>
     JSON.stringify(
@@ -233,8 +238,8 @@ export async function writeAnchorMoves(
           AND ${carryId !== null ? CARRIES_NOTE : Prisma.sql`TRUE`}
         RETURNING a."id", prior."file_version_id" AS "from", prior."pdf_target" AS "target", prior."quoted_text" AS "quote"
       )
-      INSERT INTO "file_anchor_move" ("annotation_id", "from_version_id", "from_target", "from_quoted_text", "to_version_id", "moved_by_user_id", "carry_id", "was_marked", "hidden")
-      SELECT m."id", m."from", m."target", m."quote", ${destination}, ${movedByUserId}, ${carryId},
+      INSERT INTO "file_anchor_move" ("annotation_id", "from_version_id", "from_target", "from_quoted_text", "to_version_id", "moved_by_user_id", "moved_at", "carry_id", "was_marked", "hidden")
+      SELECT m."id", m."from", m."target", m."quote", ${destination}, ${movedByUserId}, ${movedAt}::timestamp(3), ${carryId},
              EXISTS (SELECT 1 FROM "file_anchor_move" k WHERE k."annotation_id" = m."id" AND k."to_version_id" IS NULL), ${hidden}
       FROM moved m
       RETURNING "annotation_id" AS "id"`);
@@ -257,8 +262,8 @@ export async function writeAnchorMoves(
           AND ${carryId !== null ? CARRIES_PART : Prisma.sql`TRUE`}
         RETURNING p."id", prior."file_version_id" AS "from", prior."selector" AS "target", prior."quoted_text" AS "quote"
       )
-      INSERT INTO "file_anchor_move" ("anchored_link_anchor_id", "from_version_id", "from_target", "from_quoted_text", "to_version_id", "moved_by_user_id", "carry_id", "was_marked", "hidden")
-      SELECT m."id", m."from", m."target", m."quote", ${destination}, ${movedByUserId}, ${carryId},
+      INSERT INTO "file_anchor_move" ("anchored_link_anchor_id", "from_version_id", "from_target", "from_quoted_text", "to_version_id", "moved_by_user_id", "moved_at", "carry_id", "was_marked", "hidden")
+      SELECT m."id", m."from", m."target", m."quote", ${destination}, ${movedByUserId}, ${movedAt}::timestamp(3), ${carryId},
              EXISTS (SELECT 1 FROM "file_anchor_move" k WHERE k."anchored_link_anchor_id" = m."id" AND k."to_version_id" IS NULL), ${hidden}
       FROM moved m
       RETURNING "anchored_link_anchor_id" AS "id"`);
