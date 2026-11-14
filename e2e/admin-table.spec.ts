@@ -4,7 +4,7 @@
 // /users is the subject for both because it's the one table with inline-edit
 // cells, so it exercises the full idle → edited → saving → saved path that
 // §16f describes; the URL assertions hold for every table on the kit.
-import { test, expect } from "./fixtures";
+import { test, expect, gotoOk } from "./fixtures";
 import { codeDefaultColumns } from "@/lib/admin-table-columns";
 import { columnOrderFor } from "@/lib/column-order";
 import {
@@ -726,11 +726,15 @@ test.describe("admin table kit", () => {
     await clearColumnOrder(ADMIN_EMAIL);
 
     const tables = ["posts", "docs", "files", "users", "comments", "annotations", "tags", "links"] as const;
+    // A page that failed has no header row, and two empty lists are equal: so
+    // the answer is checked, and so is there being a list at all.
     const headers = async (table: string) => {
-      await page.goto(`/${table}`);
-      return (await page.locator("table").first().locator("thead th").allTextContents()).map((t) =>
+      await gotoOk(page, `/${table}`);
+      const names = (await page.locator("table").first().locator("thead th").allTextContents()).map((t) =>
         t.replace(/[▲▼]/g, "").trim(),
       );
+      expect(names, table).not.toEqual([]);
+      return names;
     };
     try {
       const before = new Map<string, string[]>();
