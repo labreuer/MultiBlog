@@ -159,6 +159,13 @@ export const unpublishTestPost = (...args: Parameters<DbHandlers["unpublishTestP
   call("unpublishTestPost", ...args);
 export const deleteTestPost = (...args: Parameters<DbHandlers["deleteTestPost"]>): Promise<void> =>
   call("deleteTestPost", ...args);
+// A hard delete made to land between two statements of a page's read
+// (db-worker.ts; docs/DATABASE.md, "A relation is loaded in a statement of its own").
+export const lockCommentThreads = (...args: Parameters<DbHandlers["lockCommentThreads"]>): ReturnType<DbHandlers["lockCommentThreads"]> =>
+  call("lockCommentThreads", ...args);
+export const deletePostUnderThreadLock = (
+  ...args: Parameters<DbHandlers["deletePostUnderThreadLock"]>
+): ReturnType<DbHandlers["deletePostUnderThreadLock"]> => call("deletePostUnderThreadLock", ...args);
 
 export const createTestDoc = (...args: Parameters<DbHandlers["createTestDoc"]>): Promise<TestDoc> =>
   call("createTestDoc", ...args);

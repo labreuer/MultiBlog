@@ -415,6 +415,72 @@ export async function deleteTestPost(idOrSlug: string): Promise<void> {
   await deleteTestDoc(docId).catch(() => {});
 }
 
+// The transaction `lockCommentThreads` leaves open for
+// `deletePostUnderThreadLock` to finish: one at a time in each worker's process.
+let heldThreadLock: { docId: string; release: () => void; done: Promise<void> } | null = null;
+
+/**
+ * Takes the lock that makes every read of `comment_thread` wait, and answers
+ * once it is held. `deletePostUnderThreadLock` then hard-deletes this post
+ * under it and lets go. A page asked for between the two reads the post's
+ * comments, waits for their threads, and finds none: a comment whose thread
+ * is null, which is what a hard delete beside any read can leave
+ * (docs/DATABASE.md, "A relation is loaded in a statement of its own").
+ *
+ * The whole table is held, since a plain read waits for nothing less, so every
+ * other worker's read of a thread waits too: keep the time between the two
+ * calls short. The lock is let go after 15 seconds whatever happens.
+ */
+export async function lockCommentThreads(postId: string): Promise<void> {
+  if (heldThreadLock) throw new Error("lockCommentThreads: this worker already holds the lock.");
+  const post = await prisma.post.findUnique({ where: { id: postId }, include: { authors: { include: { user: true } } } });
+  if (!post) throw new Error(`lockCommentThreads: no post ${postId}.`);
+  if (post.authors.length === 0 || post.authors.some((a) => !SAFE_EMAIL.test(a.user.email))) {
+    throw new Error(`Refusing to delete post "${post.title}" — it has a non-throwaway (or missing) author.`);
+  }
+  let held!: () => void;
+  let release!: () => void;
+  const taken = new Promise<void>((resolve) => (held = resolve));
+  const released = new Promise<void>((resolve) => (release = resolve));
+  const done = prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`LOCK TABLE "comment_thread" IN ACCESS EXCLUSIVE MODE`;
+      held();
+      await released;
+      await tx.post.delete({ where: { id: postId } });
+    },
+    { timeout: 15_000 },
+  );
+  // Its failure is `deletePostUnderThreadLock`'s to report; unhandled, it would end this process.
+  done.catch(() => {});
+  heldThreadLock = { docId: post.docId, release, done };
+  try {
+    // The lock, or the transaction failing before it took it.
+    await Promise.race([taken, done]);
+  } catch (err) {
+    heldThreadLock = null;
+    throw err;
+  }
+}
+
+/**
+ * Waits `afterMs`, hard-deletes the post `lockCommentThreads` named, lets the
+ * lock go, and removes the post's own doc as `deleteTestPost` does. `afterMs`
+ * is the time a page asked for at the same moment has to read its comments
+ * before the delete is committed.
+ */
+export async function deletePostUnderThreadLock(afterMs: number): Promise<{ releasedAt: number }> {
+  const lock = heldThreadLock;
+  if (!lock) throw new Error("deletePostUnderThreadLock: lockCommentThreads comes first.");
+  heldThreadLock = null;
+  await new Promise((resolve) => setTimeout(resolve, afterMs));
+  lock.release();
+  await lock.done;
+  const releasedAt = Date.now();
+  await deleteTestDoc(lock.docId).catch(() => {});
+  return { releasedAt };
+}
+
 // ---------------------------------------------------------------------------
 // Docs and annotations (PLAN.md §12) — same @example.com safety rail as
 // posts/users; deleteTestDoc additionally removes the doc's derived ydoc:
@@ -3533,6 +3599,8 @@ const handlers = {
   deleteTestUser,
   createTestPost,
   deleteTestPost,
+  lockCommentThreads,
+  deletePostUnderThreadLock,
   getPostPath,
   createTestDoc,
   addTestDocAuthor,

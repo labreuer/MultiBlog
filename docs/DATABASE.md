@@ -187,6 +187,54 @@ code just written: `tsc` complains about a model or column that is plainly in
 `schema.prisma`, or, with a server that was left running, `prisma.<newModel>` is `undefined`
 at the first query.
 
+## A relation is loaded in a statement of its own
+
+A read that names a relation in `include` or `select` is not one statement. Prisma sends the
+rows' statement, then one more for each relation, keyed by the ids the first returned.
+`/comments`' page of comments is five: the comments, their commenters, their threads, the
+users who moderated them, and the threads' posts. No transaction joins them, so each sees the
+database as it is when it runs.
+
+**A parent row hard-deleted between two of them arrives as null, in a field typed as never
+null.** Prisma raises nothing. The caller's first read of the field throws, and a page answers
+500 with `Cannot read properties of null`. The row that lost its parent is gone by then too:
+its foreign key cascaded, or would have refused the delete.
+
+- **`rowsWithParents`** (`src/lib/rows-with-parents.ts`) leaves such rows out, and a listing
+  that reads a required relation takes its rows through it: `/comments`, `/annotations`,
+  `/files`, `/tags`, `/links`, `/references`, and the parts of the links into a doc or a file
+  (`linkPartsInto`). `/posts`, `/docs` and `/users` read no required relation.
+- **An optional relation is named only where its foreign key is set.** `/annotations` throws
+  for a note with no container and `/files` for a file with no latest version. Each is a fault
+  in the data and stays loud. A row whose key names a row that didn't arrive is the delete,
+  and is left out.
+- **What hard-deletes a parent.** The app soft-deletes posts, users, docs, files, tags and
+  references. On an instance that leaves a draft link discarded by its own creator from
+  another tab, which the two reads of a part's link allow for. Everything else takes the e2e
+  suite's cleanup, a throwaway-data script ([TEST_DATA.md](TEST_DATA.md)) or SQL by hand,
+  landing during the load. The suite is where it shows: its workers share one database, and
+  one's teardown hard-deletes what another's admin table is listing.
+- **The total beside a table is counted by a statement of its own**, so for that one load it
+  can be one more than the rows listed.
+- **The other reads of a required relation are not guarded** (TODO.md, "A required relation
+  read without `rowsWithParents`…").
+
+Two other ways to close it, and why neither is used:
+
+- **One statement.** The `relationJoins` preview feature loads relations by lateral join. On,
+  it is the default for every read in the app at once, the view-backed columns of the admin
+  tables among them (PLAN.md §16e), and confining it means naming
+  `relationLoadStrategy: "query"` on every other call.
+- **One snapshot.** A transaction at repeatable read gives every statement the same view of
+  the database; one at the default level does not, since each statement of a read-committed
+  transaction sees the latest commit. It costs a transaction for each page load, and inside
+  one Prisma sends a row's sibling relations together down the transaction's one connection,
+  which `pg` reports as deprecated ("Calling client.query() when the client is already
+  executing a query").
+
+`e2e/admin-table.spec.ts` makes a delete land between two of `/comments`' statements
+(e2e/README.md, "A hard delete is made to land between two statements of a page's read").
+
 ## Adding a required column to a table that already has rows
 
 `prisma migrate dev` normally prompts interactively for how to backfill existing rows, which

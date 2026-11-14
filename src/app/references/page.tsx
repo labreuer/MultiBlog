@@ -13,6 +13,7 @@ import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import ReferencesTable from "@/components/ReferencesTable";
 import ReferenceImport from "@/components/ReferenceImport";
 import { staffDisplayNameOf } from "@/lib/display-name";
+import { rowsWithParents } from "@/lib/rows-with-parents";
 import { actorFromSessionUser } from "@/lib/actor";
 import { readableFiles } from "@/lib/reference-files";
 
@@ -119,7 +120,9 @@ export default async function ReferencesPage({
     prismaIncludingDeleted.storedFile.findMany({ where: { id: { in: tied }, deletedByUserId: null }, select: { id: true } }),
   ]);
   const liveIds = new Set(live.map((file) => file.id));
-  const rows = references.map((reference) => ({
+  // A work hard-deleted while this loaded, along with its creator, arrives
+  // without that user.
+  const rows = rowsWithParents(references, (reference) => [reference.createdBy]).map((reference) => ({
     id: reference.id,
     key: reference.key,
     short: reference.short ?? "",
