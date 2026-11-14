@@ -47,6 +47,9 @@ export type PageMapView = {
   state: FileVersionState;
   /** The version it was uploaded over; null for a first version, which has no map to have. */
   baseNumber: number | null;
+  baseVersionId: string | null;
+  /** The file's latest version, where a carry's notes go. */
+  latestNumber: number | null;
   map: {
     numbers: PageMapNumbers;
     storedBy: string | null;
@@ -89,7 +92,7 @@ export async function pageMapViewFor(fileId: string, versionId: string): Promise
       pageMapCarryId: true,
       pageMapStoredBy: { select: { name: true } },
       baseVersion: { select: { id: true, number: true, pageCount: true, pageLabels: true } },
-      file: { select: { currentVersionId: true } },
+      file: { select: { currentVersionId: true, currentVersion: { select: { number: true } } } },
     },
   });
   if (!version) return null;
@@ -98,6 +101,8 @@ export async function pageMapViewFor(fileId: string, versionId: string): Promise
     number: version.number,
     state: fileVersionState(version, version.file.currentVersionId),
     baseNumber: version.baseVersion?.number ?? null,
+    baseVersionId: version.baseVersion?.id ?? null,
+    latestNumber: version.file.currentVersion?.number ?? null,
   };
   const map = parsePageMap(version.pageMap);
   if (!map || !version.baseVersion) return { ...head, map: null };

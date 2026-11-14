@@ -62,6 +62,8 @@ export type {
   AvatarFacts,
   TestInvite,
   TestAnchoredLink,
+  TestAnchorRow,
+  TestAnchorMove,
   CommentFacts,
   CommentRevisionFacts,
   AnnotationEditFacts,
@@ -184,6 +186,14 @@ export const deleteTestFile = (...args: Parameters<DbHandlers["deleteTestFile"]>
 export const addTestFileVersion = (...args: Parameters<DbHandlers["addTestFileVersion"]>): Promise<TestFileVersion> =>
   call("addTestFileVersion", ...args);
 
+export const getFileAnchorRows = (...args: Parameters<DbHandlers["getFileAnchorRows"]>): ReturnType<DbHandlers["getFileAnchorRows"]> =>
+  call("getFileAnchorRows", ...args);
+export const getFileAnchorMoves = (...args: Parameters<DbHandlers["getFileAnchorMoves"]>): ReturnType<DbHandlers["getFileAnchorMoves"]> =>
+  call("getFileAnchorMoves", ...args);
+export const undoCarryInSql = (...args: Parameters<DbHandlers["undoCarryInSql"]>): ReturnType<DbHandlers["undoCarryInSql"]> =>
+  call("undoCarryInSql", ...args);
+export const carryAcrossChanges = (...args: Parameters<DbHandlers["carryAcrossChanges"]>): ReturnType<DbHandlers["carryAcrossChanges"]> =>
+  call("carryAcrossChanges", ...args);
 export const getFileAnchorVersions = (
   ...args: Parameters<DbHandlers["getFileAnchorVersions"]>
 ): ReturnType<DbHandlers["getFileAnchorVersions"]> => call("getFileAnchorVersions", ...args);

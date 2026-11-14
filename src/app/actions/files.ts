@@ -15,6 +15,14 @@ import {
   setFileTitle,
   setFileVisibility,
 } from "@/lib/file-manage";
+import {
+  carryFromVersion,
+  previewCarryAtPromotion,
+  previewCarryFromVersion,
+  setCarryHidden,
+  type CarryPreview,
+  type CarryResult,
+} from "@/lib/file-anchor-move";
 import { actorFromSessionUser, type Actor } from "@/lib/actor";
 import { ApiError } from "@/lib/api/errors";
 import { DocVisibility } from "@/generated/prisma/enums";
@@ -112,7 +120,7 @@ export async function refreshFilesListing(): Promise<void> {
 }
 
 /** What a version's action answers: where the file is now, or why nothing was done, in words for whoever clicked. */
-export type VersionActionResult = { ok: true; slug: string; number: number } | { ok: false; error: string };
+export type VersionActionResult = { ok: true; slug: string; number: number; carried?: CarryResult | null } | { ok: false; error: string };
 
 /**
  * A refusal as an answer, not a throw: a production build hides a thrown
@@ -135,9 +143,9 @@ async function versionAction(run: (actor: Actor) => Promise<{ slug: string; numb
 }
 
 /** Makes a waiting version the file's latest (docs/PDF.md §13, "Promotion"). It names the version, never "the candidate". */
-export async function promoteVersion(versionId: string): Promise<VersionActionResult> {
+export async function promoteVersion(versionId: string, carry: boolean = false): Promise<VersionActionResult> {
   if (typeof versionId !== "string") return { ok: false, error: "That isn't a version." };
-  return versionAction((actor) => promoteFileVersion(actor, versionId));
+  return versionAction((actor) => promoteFileVersion(actor, versionId, { carry: carry === true }));
 }
 
 /** Abandons a waiting version: its bytes and page text go, its number and its address stay (docs/PDF.md §13, "The upload"). */
@@ -160,4 +168,48 @@ export async function buildVersionMap(versionId: string): Promise<VersionActionR
 export async function answerVersionMapRun(versionId: string, runIndex: number, accepted: boolean): Promise<VersionActionResult> {
   if (typeof versionId !== "string" || typeof runIndex !== "number" || typeof accepted !== "boolean") return { ok: false, error: "That isn't a question of this page map." };
   return versionAction((actor) => answerFileVersionMapRun(actor, versionId, runIndex, accepted));
+}
+
+
+/** What an action about a carry answers: what was asked for, or why not, in words for whoever clicked. */
+export type CarryAnswer<T> = { ok: true; value: T } | { ok: false; error: string };
+
+async function carryAction<T>(run: (actor: Actor) => Promise<T>): Promise<CarryAnswer<T>> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "You are signed out. Sign in, then try again." };
+  try {
+    return { ok: true, value: await run(actorFromSessionUser(session.user)) };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, error: err.message };
+    console.error("[files] a carry's action failed:", err);
+    return { ok: false, error: "That didn't work. Reload the page and try again." };
+  }
+}
+
+/**
+ * What promoting a waiting version with the carry would move (docs/PDF.md
+ * §13, "Moving a note forward"); null where the version has no page map, and
+ * so no carry to offer. It stores nothing.
+ */
+export async function previewPromotionCarry(versionId: string): Promise<CarryAnswer<CarryPreview | null>> {
+  if (typeof versionId !== "string") return { ok: false, error: "That isn't a version." };
+  return carryAction((actor) => previewCarryAtPromotion(actor, versionId));
+}
+
+/** What a carry started on one earlier version would do: the page maps it would store and the notes it would move. It stores nothing. */
+export async function previewVersionCarry(versionId: string): Promise<CarryAnswer<CarryPreview>> {
+  if (typeof versionId !== "string") return { ok: false, error: "That isn't a version." };
+  return carryAction((actor) => previewCarryFromVersion(actor, versionId));
+}
+
+/** Runs the carry a manager starts on one earlier version, and answers what it did. */
+export async function carryVersionNotes(versionId: string): Promise<CarryAnswer<CarryResult>> {
+  if (typeof versionId !== "string") return { ok: false, error: "That isn't a version." };
+  return carryAction((actor) => carryFromVersion(actor, versionId));
+}
+
+/** Shows or hides the moves of one carry together. */
+export async function setCarryMovesHidden(carryId: string, hidden: boolean): Promise<CarryAnswer<{ changed: number }>> {
+  if (typeof carryId !== "string" || typeof hidden !== "boolean") return { ok: false, error: "That isn't a carry." };
+  return carryAction(async (actor) => ({ changed: (await setCarryHidden(actor, carryId, hidden)).changed }));
 }

@@ -4,6 +4,7 @@ import { formatBytes } from "@/lib/file-format";
 import { filesPath, pdfMapPath, pdfPath, type FileVersionState } from "@/lib/file-version";
 import type { FileVersionSummary, VersionManage } from "@/lib/file-version-data";
 import PdfCandidateActions from "./PdfCandidateActions";
+import PdfCarryActions, { PdfCarryRecord } from "./PdfCarryActions";
 import PdfVersionUploader from "./PdfVersionUploader";
 import styles from "./PdfVersions.module.css";
 
@@ -14,11 +15,12 @@ import styles from "./PdfVersions.module.css";
 //
 // **To whoever may manage the file it is also where a version is made and
 // ended** (`manage`): the upload of a new one, a waiting version's promotion
-// and abandoning, the number of posted notes still on each earlier version,
-// and each version's page map, with the questions it has open and a link to
-// the page where they are answered or a map is built. A manager sees the
-// section on a file with one version too, since the upload is how it gains a
-// second.
+// and abandoning, the posted notes and link parts still on each earlier
+// version with the bulk carry that moves them forward, each carry that ran
+// with its moves shown or hidden together, and each version's page map, with
+// the questions it has open and a link to the page where they are answered
+// or a map is built. A manager sees the section on a file with one version
+// too, since the upload is how it gains a second.
 //
 // Rendered on the server and handed into the viewer island as part of its
 // `metadata` prop (PdfSurfaceClient's header). Versions are in no listing of
@@ -30,6 +32,14 @@ const STATE_LABEL: Record<FileVersionState, string> = {
   candidate: "not yet the latest",
   abandoned: "abandoned",
 };
+
+/** "2 posted notes and 1 link part are", or either alone. */
+function stillHere(notes: number, parts: number): string {
+  const said = [notes > 0 ? `${notes} posted ${notes === 1 ? "note" : "notes"}` : null, parts > 0 ? `${parts} link ${parts === 1 ? "part" : "parts"}` : null].filter(
+    (part) => part !== null,
+  );
+  return `${said.join(" and ")} ${notes + parts === 1 ? "is" : "are"}`;
+}
 
 type Props = {
   slug: string;
@@ -49,6 +59,8 @@ export default function PdfVersionList({ slug, versions, shownId, manage }: Prop
         {[...versions].reverse().map((version) => {
           const ref = { number: version.number, isLatest: version.state === "latest" };
           const notes = manage?.notesOn[version.id] ?? 0;
+          const parts = manage?.partsOn[version.id] ?? 0;
+          const carries = manage?.carries.filter((carry) => carry.toVersionId === version.id) ?? [];
           return (
             <li key={version.id} data-version={version.number}>
               <div>
@@ -79,11 +91,19 @@ export default function PdfVersionList({ slug, versions, shownId, manage }: Prop
                   <a href={`${filesPath(slug, ref, { own: true })}/download`}>{version.filename}</a> ({formatBytes(version.byteSize)})
                 </div>
               )}
-              {manage && version.state === "earlier" && notes > 0 && (
+              {manage && version.state === "earlier" && notes + parts > 0 && (
                 <div className={styles.versionFacts} data-testid="pdf-version-notes-left">
-                  {notes === 1 ? "1 posted note is" : `${notes} posted notes are`} still on this version.
+                  {stillHere(notes, parts)} still on this version.
                 </div>
               )}
+              {manage && version.state === "earlier" && notes + parts > 0 && latest && (
+                <PdfCarryActions versionId={version.id} number={version.number} latestNumber={latest.number} />
+              )}
+              {carries.map((carry) => (
+                <PdfCarryRecord key={carry.id} carryId={carry.id} hidden={carry.hidden}>
+                  A carry moved {carry.moves === 1 ? "1 note or link part" : `${carry.moves} notes and link parts`} here, <LocalTime value={carry.at} />.
+                </PdfCarryRecord>
+              ))}
               {manage && version.baseNumber !== null && version.state !== "candidate" && (version.map || version.state !== "abandoned") && (
                 <div className={styles.versionFacts} data-testid="pdf-version-map">
                   {version.map ? (

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import LocalTime from "@/components/LocalTime";
+import PdfCarryActions from "@/components/pdf/PdfCarryActions";
 import PdfMapActions from "@/components/pdf/PdfMapActions";
 import { canUserManageFile } from "@/lib/file-authz";
 import { parseVersionNumber, pdfMapPath, pdfPath } from "@/lib/file-version";
@@ -15,6 +16,12 @@ import styles from "./page.module.css";
 // was uploaded over, which were removed and which no rule could place, and
 // the questions its runs of sheets raise, each answered here. Where the
 // version has no map, this is where one is asked for.
+//
+// **Below a promoted version's map is the bulk carry** (§13, "Moving a note
+// forward"): accepting a run of sheets moves no note, and gives the notes on
+// those sheets a place to be carried to. The carry is started on the version
+// this map is from, shows what it would move, and is run from here. A
+// candidate's notes are carried by its promotion, from its own page.
 //
 // Open to whoever may manage the file: building a map and answering a run
 // are theirs (`canUserManageFile`), and the page shows nothing a manager
@@ -186,6 +193,22 @@ export default async function PdfVersionMapPage({ params }: Params) {
                 );
               })}
             </section>
+          )}
+
+          {view.baseVersionId !== null && view.latestNumber !== null && (view.state === "latest" || view.state === "earlier") && (
+            <section data-testid="pdf-map-carry">
+              <h2>Notes</h2>
+              <p className={styles.quiet}>
+                A page map moves no note. A carry moves forward every posted note and minted link part on version {base} that places itself through it, and
+                shows what it would do first. Run again after a run of sheets is accepted, it takes the notes those sheets now reach.
+              </p>
+              <PdfCarryActions versionId={view.baseVersionId} number={base} latestNumber={view.latestNumber} />
+            </section>
+          )}
+          {view.state === "candidate" && (
+            <p className={styles.quiet} data-testid="pdf-map-carry-later">
+              Version {view.number} is not yet the latest. Its promotion can carry the notes forward, from <a href={own(view.number)}>its own page</a>.
+            </p>
           )}
 
           <section>

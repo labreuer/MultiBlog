@@ -335,8 +335,12 @@ export type VersionManage = {
   fileId: string;
   /** Whether the file takes a new version at all: a PDF does, a .docx doesn't. */
   takesVersions: boolean;
-  /** How many posted notes are on each version, by version id: what is still on an earlier one, which nothing moves yet. */
+  /** How many posted notes are on each version, by version id: what is still on an earlier one until a carry or its author moves it. */
   notesOn: Record<string, number>;
+  /** How many parts of minted links are on each version, by version id. */
+  partsOn: Record<string, number>;
+  /** The bulk carries that moved a note of this file, newest first, each shown or hidden as one (`carriesOf`, file-anchor-move.ts). */
+  carries: { id: string; toVersionId: string; at: string; moves: number; hidden: boolean }[];
   /** What a promotion of the waiting version would do to the file's citations; null where none waits. */
   candidateFacts: { unlabelled: boolean; pagedCitations: number | null } | null;
 };
@@ -350,6 +354,21 @@ export async function postedNotesByVersion(fileId: string): Promise<Record<strin
   const rows = await prisma.annotation.groupBy({
     by: ["fileVersionId"],
     where: { fileId, fileVersionId: { not: null }, status: { not: "DRAFT" }, deletedByUserId: null },
+    _count: { _all: true },
+  });
+  return Object.fromEntries(rows.flatMap((row) => (row.fileVersionId ? [[row.fileVersionId, row._count._all]] : [])));
+}
+
+/**
+ * How many parts of minted links are on each of a file's versions, by
+ * version id: the parts of a link that is deleted, or not yet minted, left
+ * out. A part of a link reopened for editing is counted, as the link is
+ * still followed while it is open.
+ */
+export async function mintedPartsByVersion(fileId: string): Promise<Record<string, number>> {
+  const rows = await prisma.anchoredLinkAnchor.groupBy({
+    by: ["fileVersionId"],
+    where: { fileId, fileVersionId: { not: null }, link: { mintedAt: { not: null }, deletedAt: null } },
     _count: { _all: true },
   });
   return Object.fromEntries(rows.flatMap((row) => (row.fileVersionId ? [[row.fileVersionId, row._count._all]] : [])));

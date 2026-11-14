@@ -1276,7 +1276,7 @@ available without rendering.
 
 ## 13. Versions of a file — plan
 
-**Built so far: steps 1 to 10 of "Building it".** A file takes a new version: whoever may
+**Built so far: steps 1 to 11 of "Building it".** A file takes a new version: whoever may
 manage it uploads new bytes, which wait as a candidate at their own address, and promotes
 or abandons them. Every version has its own address, and what is drawn, listed, titled and
 linked goes by version. Every anchor into a PDF names its version, and a capture's write
@@ -1284,17 +1284,14 @@ checks the version its viewer loaded. A link names the version whose sheets it c
 `v=`, and every reader of a link reads it by that version (Links into the file). A version
 has a page map from the version it was uploaded over, once a manager asks for one, and a
 link is carried through the maps between the version it names and the version shown
-(Matching the pages).
+(Matching the pages). A bulk carry moves forward every posted note and minted link part
+that places itself, at a promotion, from the version list and from a version's map page,
+each showing what it would move first (Placing each anchor, Moving a note forward).
 
-**Not built: the moves**, steps 11 to 13. Until they are, a note stays on the version it is
-on. So wherever this section says a note is *moved* or *carried*, it describes the plan. The
-subsections "Placing each anchor" and "Moving a note forward" are plan throughout, and so
-is the carry in "Promotion".
-
-**Two measured rules of that plan are written, with nothing calling them yet**: a range
-carried through the diff of two sheets (`src/lib/pdf-quote-carry.ts`), and the transform
-fitted to the words two sheets share (`src/lib/pdf-sheet-fit.ts`). Each is pure and has its
-unit tests.
+**Not built: the move of one note**, step 12, and the integrity checks for maps and moves,
+step 13. So the worklist, a suggestion, a note placed by hand, a "stays here" mark made by
+its author and a shown move on a card are plan. The carry already refuses a marked row,
+and a carry's moves can be shown and hidden together, with nothing yet drawing a shown one.
 
 The rest of the section is a plan in those parts, and the one exception to this file's
 "every statement is current". Where a statement below is of something built, it names the

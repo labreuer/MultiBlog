@@ -213,6 +213,47 @@ export type PageItems = {
   items: QuadSourceItem[];
 };
 
+/** One sheet as a target is measured on it: its text items, its page box and its rotation. */
+export type SheetItems = {
+  items: QuadSourceItem[];
+  /** The page box in PDF user space, `[x0, y0, x1, y1]`: pdfjs's `view`, the crop box within the media box. */
+  box: [number, number, number, number];
+  /** The page's rotation in degrees, a multiple of 90. */
+  rotation: number;
+};
+
+/**
+ * Many sheets' text items from **one open document**, each sheet read once
+ * (docs/PDF.md §13, "Moving a note forward"): the same items, in the same
+ * order, that each sheet's stored text was normalised from, with the page
+ * box and rotation a rectangle is placed by. A sheet out of range is left
+ * out of the answer. Throws, as `extractPdf` does, on a file pdfjs can't
+ * open.
+ *
+ * Opening a document costs far more than reading a sheet of it, so whatever
+ * measures more than one sheet of a version asks for them together.
+ */
+export async function extractSheetsItems(bytes: Uint8Array, sheetIndexes: readonly number[]): Promise<{ textVersion: string; sheets: Map<number, SheetItems> }> {
+  const sheets = new Map<number, SheetItems>();
+  const { task, textVersion } = await openPdf(bytes);
+  const pdf = await task.promise;
+  try {
+    for (const index of new Set(sheetIndexes)) {
+      if (!Number.isInteger(index) || index < 0 || index >= pdf.numPages) continue;
+      const page = await pdf.getPage(index + 1);
+      try {
+        const [x0, y0, x1, y1] = page.view;
+        sheets.set(index, { items: quadSourceItems(await page.getTextContent()), box: [x0, y0, x1, y1], rotation: page.rotate });
+      } finally {
+        page.cleanup();
+      }
+    }
+    return { textVersion, sheets };
+  } finally {
+    await task.destroy();
+  }
+}
+
 /**
  * One page's text items, for computing quads on the server
  * (docs/PDF_QUADS.md §3): the same items, in the same order, that the page's
@@ -220,19 +261,9 @@ export type PageItems = {
  * as `extractPdf` does, on a file pdfjs can't open.
  */
 export async function extractPageItems(bytes: Uint8Array, pageIndex: number): Promise<PageItems | null> {
-  const { task, textVersion } = await openPdf(bytes);
-  const pdf = await task.promise;
-  try {
-    if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= pdf.numPages) return null;
-    const page = await pdf.getPage(pageIndex + 1);
-    try {
-      return { textVersion, items: quadSourceItems(await page.getTextContent()) };
-    } finally {
-      page.cleanup();
-    }
-  } finally {
-    await task.destroy();
-  }
+  const { textVersion, sheets } = await extractSheetsItems(bytes, [pageIndex]);
+  const sheet = sheets.get(pageIndex);
+  return sheet ? { textVersion, items: sheet.items } : null;
 }
 
 /**

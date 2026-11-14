@@ -1,8 +1,9 @@
 import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
 import { lockFileHash, lockFileRow } from "@/lib/file-version-data";
 import { deleteBytesIfUnreferenced } from "@/lib/file-storage";
+import { newCarryId, planCarry, writeCarry, type CarryPlan, type CarryResult } from "@/lib/file-anchor-move";
 import { storePageMap, storeRunAnswer } from "@/lib/pdf-page-map-build";
-import { pageMapNumbers, type PageMapNumbers } from "@/lib/pdf-page-map";
+import { pageMapNumbers, parsePageMap, type PageMapNumbers } from "@/lib/pdf-page-map";
 
 // How long a version's write may wait for the file row or a hash: Prisma's
 // default, five seconds, is less than an upload's insert of a large book's
@@ -183,10 +184,23 @@ async function lockCandidate(tx: TransactionClient, versionId: string, fileId: s
  * Makes a candidate the file's latest version (docs/PDF.md §13, "Promotion"):
  * one transaction, the file row locked. Refused where the version is no
  * longer the file's candidate or the file is deleted, and by nothing else:
- * no note on the outgoing version holds it up.
+ * no note on the outgoing version, no unmapped sheet and no run of sheets
+ * left unanswered holds it up.
  *
- * It moves no note. An anchor stays on the version it is on, where it is
- * still drawn, and every other version's page lists it under that version.
+ * **Without `carry` it moves no note.** An anchor stays on the version it is
+ * on, where it is still drawn, and every other version's page lists it under
+ * that version.
+ *
+ * **With `carry` it runs the bulk carry** (`src/lib/file-anchor-move.ts`):
+ * every posted note and minted link part that places itself on the
+ * candidate, from every earlier version its page maps join to it, is moved
+ * there. It is taken only where the candidate has a page map, and asking for
+ * it without one is refused: a promotion builds none. The placements are
+ * worked out before the transaction, and the switch and the moves are then
+ * one transaction, so the latest is never shown without its notes. A note
+ * captured on the outgoing version after the placements were worked out
+ * stays there, and the next carry moves it.
+ *
  * The file's id, slug, title, visibility, owners, tags and references are as
  * they were; only `/pdf/<slug>` shows other bytes.
  *
@@ -195,9 +209,24 @@ async function lockCandidate(tx: TransactionClient, versionId: string, fileId: s
  * (`assertCaptureVersion`), so this update waits for it, and a capture that
  * starts after it sees the new latest and is refused.
  */
-export async function promoteFileVersion(actor: Actor, versionId: string): Promise<{ slug: string; number: number }> {
+export async function promoteFileVersion(
+  actor: Actor,
+  versionId: string,
+  opts: { carry?: boolean } = {},
+): Promise<{ slug: string; number: number; carried: CarryResult | null }> {
   const version = await requireManageableVersion(actor, versionId);
-  await prisma.$transaction(async (tx) => {
+  let plan: CarryPlan | null = null;
+  if (opts.carry) {
+    const row = await prisma.fileVersion.findUnique({ where: { id: versionId }, select: { pageMap: true, promotedAt: true, abandonedAt: true } });
+    // A version that is no longer the candidate is refused below, under the lock, and needs no plan.
+    if (row && row.promotedAt === null && row.abandonedAt === null) {
+      if (!parsePageMap(row.pageMap)) {
+        throw new ApiError("conflict", `Version ${version.number}'s pages are not matched with the latest's, so no note can be carried to it. Match its pages first, or promote it without the carry.`);
+      }
+      plan = await planCarry(version.fileId, versionId, null);
+    }
+  }
+  const carried = await prisma.$transaction(async (tx) => {
     await lockCandidate(tx, versionId, version.fileId, "promoted");
     const tail = await tx.ydocUpdate.aggregate({ _max: { id: true } });
     await tx.fileVersion.update({
@@ -208,8 +237,10 @@ export async function promoteFileVersion(actor: Actor, versionId: string): Promi
     // refreshed by the trigger on `current_version_id`, which reads the new
     // latest's filename.
     await tx.storedFile.update({ where: { id: version.fileId }, data: { currentVersionId: versionId, updatedByUserId: actor.userId } });
+    // After the switch: the write checks that its destination is promoted.
+    return plan ? writeCarry(tx, plan, actor, newCarryId()) : null;
   }, VERSION_WRITE_TIMEOUTS);
-  return { slug: version.slug, number: version.number };
+  return { slug: version.slug, number: version.number, carried };
 }
 
 /**

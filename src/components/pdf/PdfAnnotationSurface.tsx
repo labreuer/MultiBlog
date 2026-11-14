@@ -1024,10 +1024,12 @@ export default function PdfAnnotationSurface({
           }
         />
 
-        {(anchoredLink || fragment.regions.length > 0 || fragment.page !== null || !version.isLatest) && (
+        {(anchoredLink || fragment.regions.length > 0 || fragment.page !== null || !version.isLatest || manage !== null) && (
           // One overlay for every banner: a ?sel= visit and a fragment can
           // arrive together, on a version that is not the latest, and fixed
-          // boxes at one spot would cover each other.
+          // boxes at one spot would cover each other. A manager has it on
+          // the latest too, where the version banner says what the carry of
+          // a promotion just did; empty, it has no height.
           <div className={styles.anchoredLinkOverlay}>
             <PdfVersionBanner slug={slug} version={version} versions={versions} manage={manage} className={styles.overlayBanner} />
             {anchoredLink && (

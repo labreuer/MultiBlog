@@ -17,7 +17,16 @@ import { referencesOfFile } from "@/lib/reference-files";
 import { canWriteReferences } from "@/lib/role-checks";
 import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
 import { fileVersionTitle, pdfPath, type ShownVersion } from "@/lib/file-version";
-import { VERSION_SUMMARY_SELECT, linkVersionsOf, postedNotesByVersion, summariseVersions, type FileVersionSummary, type VersionManage } from "@/lib/file-version-data";
+import { carriesOf } from "@/lib/file-anchor-move";
+import {
+  VERSION_SUMMARY_SELECT,
+  linkVersionsOf,
+  mintedPartsByVersion,
+  postedNotesByVersion,
+  summariseVersions,
+  type FileVersionSummary,
+  type VersionManage,
+} from "@/lib/file-version-data";
 import { linkVersionsJson } from "@/lib/pdf-link-reading";
 import styles from "./page.module.css";
 
@@ -195,6 +204,8 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
         fileId: file.id,
         takesVersions: latest !== undefined && latest.pageCount !== null,
         notesOn: versions.length > 1 ? await postedNotesByVersion(file.id) : {},
+        partsOn: versions.length > 1 ? await mintedPartsByVersion(file.id) : {},
+        carries: versions.length > 1 ? await carriesOf(file.id) : [],
         candidateFacts: waiting && latest ? await candidateFactsFor(actorFromSessionUser(user), file.id, waiting, latest) : null,
       }
     : null;

@@ -38,12 +38,14 @@ import { countVersionsHolding, createFileWithFirstVersion, latestVersionIdOf, lo
 import { fileVersionState } from "@/lib/file-version";
 import { recordUpload, recordVersionUpload, stageUpload } from "@/lib/file-ingest";
 import { abandonFileVersion, promoteFileVersion } from "@/lib/file-manage";
+import { newCarryId, planCarry, writeCarry } from "@/lib/file-anchor-move";
+import { writePageMapIfNone } from "@/lib/pdf-page-map-build";
 import { changeTagSlug, uniqueTagSlug } from "@/lib/tag-slug";
 import { targetFromColumns, targetToColumns, type AnchorTarget } from "@/lib/anchors";
 import { UploadError, deleteBytesIfUnreferenced, storagePathFor, storedByteSize, storeUploadStream } from "@/lib/file-storage";
-import { extractPdf } from "@/lib/pdf-extract";
+import { currentTextVersion, extractPdf } from "@/lib/pdf-extract";
 import { pdfMetadata } from "@/lib/pdf-metadata";
-import { parsePdfTarget } from "@/lib/pdf-anchor";
+import { parsePdfTarget, rectToQuad } from "@/lib/pdf-anchor";
 import { parsePageMap } from "@/lib/pdf-page-map";
 import { buildTestPdf, type TestOutlineItem, type TestPageLabelRange } from "../scripts/make-test-pdf";
 import {
@@ -750,7 +752,7 @@ export type TestFileVersion = {
  */
 export async function addTestFileVersion(
   fileId: string,
-  opts: { pages: string[][]; pageLabels?: readonly TestPageLabelRange[]; promote?: boolean },
+  opts: { pages: string[][]; pageLabels?: readonly TestPageLabelRange[]; promote?: boolean; inked?: number[] },
 ): Promise<TestFileVersion> {
   const file = await prismaIncludingDeleted.storedFile.findUnique({
     where: { id: fileId },
@@ -761,7 +763,7 @@ export async function addTestFileVersion(
   const uploaderId = file.owners[0].userId;
   const promote = opts.promote ?? true;
 
-  const bytes = buildTestPdf(opts.pages, { pageLabels: opts.pageLabels });
+  const bytes = buildTestPdf(opts.pages, { pageLabels: opts.pageLabels, inked: opts.inked });
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   return withShaLock(sha256, async () => {
     const stored = await storeUploadStream(
@@ -1070,6 +1072,178 @@ export async function getFileAnchorVersions(fileId: string): Promise<{ annotatio
     prisma.anchoredLinkAnchor.findMany({ where: { fileId }, orderBy: { id: "asc" }, select: { fileVersionId: true } }),
   ]);
   return { annotations: annotations.map((row) => row.fileVersionId), linkParts: linkParts.map((row) => row.fileVersionId) };
+}
+
+/** One anchor of a file, whole: every column of its row as Postgres writes it, so two readings compare exactly. */
+export type TestAnchorRow = { kind: "annotation" | "link-part"; id: string; versionNumber: number | null; quotedText: string; row: string };
+
+/**
+ * Every row of a file that holds a PDF target, whole (docs/PDF.md §13,
+ * "Moving a note forward"): what a spec compares before a carry and after
+ * its undo. The row is `to_jsonb(row)::text`, which is canonical, so the
+ * comparison passes no number through JavaScript.
+ */
+export async function getFileAnchorRows(fileId: string): Promise<TestAnchorRow[]> {
+  const [notes, parts] = await Promise.all([
+    prisma.$queryRaw<Omit<TestAnchorRow, "kind">[]>(Prisma.sql`
+      SELECT a.id, v.number AS "versionNumber", a.quoted_text AS "quotedText", to_jsonb(a)::text AS "row"
+      FROM annotation a LEFT JOIN file_version v ON v.id = a.file_version_id
+      WHERE a.file_id = ${fileId} AND a.pdf_target IS NOT NULL ORDER BY a.created_at, a.id`),
+    prisma.$queryRaw<Omit<TestAnchorRow, "kind">[]>(Prisma.sql`
+      SELECT p.id, v.number AS "versionNumber", p.quoted_text AS "quotedText", to_jsonb(p)::text AS "row"
+      FROM anchored_link_anchor p LEFT JOIN file_version v ON v.id = p.file_version_id
+      WHERE p.file_id = ${fileId} ORDER BY p.link_id, p.part_order, p.id`),
+  ]);
+  return [...notes.map((row) => ({ kind: "annotation" as const, ...row })), ...parts.map((row) => ({ kind: "link-part" as const, ...row }))];
+}
+
+/** One row of a file's move history: a move, or a "stays here" mark (`toNumber` null). */
+export type TestAnchorMove = {
+  id: string;
+  kind: "annotation" | "link-part";
+  anchorId: string;
+  fromNumber: number;
+  toNumber: number | null;
+  carryId: string | null;
+  hidden: boolean;
+  wasMarked: boolean;
+  movedByEmail: string | null;
+  /** The quote the anchor had on the version it left. */
+  fromQuotedText: string;
+};
+
+/** A file's move history, oldest first. */
+export async function getFileAnchorMoves(fileId: string): Promise<TestAnchorMove[]> {
+  const rows = await prisma.fileAnchorMove.findMany({
+    where: { fromVersion: { fileId } },
+    orderBy: { id: "asc" },
+    select: {
+      id: true,
+      annotationId: true,
+      anchoredLinkAnchorId: true,
+      carryId: true,
+      hidden: true,
+      wasMarked: true,
+      fromQuotedText: true,
+      fromVersion: { select: { number: true } },
+      toVersion: { select: { number: true } },
+      movedBy: { select: { email: true } },
+    },
+  });
+  return rows.map((row) => ({
+    id: String(row.id),
+    kind: row.annotationId ? "annotation" : "link-part",
+    anchorId: (row.annotationId ?? row.anchoredLinkAnchorId)!,
+    fromNumber: row.fromVersion.number,
+    toNumber: row.toVersion?.number ?? null,
+    carryId: row.carryId,
+    hidden: row.hidden,
+    wasMarked: row.wasMarked,
+    movedByEmail: row.movedBy?.email ?? null,
+    fromQuotedText: row.fromQuotedText,
+  }));
+}
+
+/**
+ * Replays a carry backwards, **in SQL alone**, as docs/PDF.md §13 says a
+ * mistaken one is undone from the database ("The table holds what an undo
+ * needs"): nothing in the app undoes a move, so this is the proof that the
+ * history holds enough to.
+ *
+ * - Each of the carry's rows that is its anchor's newest move, the anchor
+ *   still on the version the row reached, has its three columns written
+ *   back: the target, the quote and the version. The row is then deleted.
+ * - A row that says its note was marked "stays here" has the mark written
+ *   back. A carry moves no marked note, so none of its rows says so; the
+ *   statement is here because the rule is the same for a move of one note.
+ * - The page maps the carry stored are taken away with it.
+ *
+ * Answers how many moves it undid and how many maps it removed.
+ */
+export async function undoCarryInSql(carryId: string): Promise<{ moves: number; maps: number }> {
+  return prisma.$transaction(async (tx) => {
+    const undone = await tx.$queryRaw<{ id: bigint }[]>(Prisma.sql`
+      WITH newest AS (
+        SELECT m.* FROM file_anchor_move m
+        WHERE m.carry_id = ${carryId} AND m.to_version_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM file_anchor_move later
+            WHERE later.id > m.id AND later.to_version_id IS NOT NULL
+              AND (later.annotation_id = m.annotation_id OR later.anchored_link_anchor_id = m.anchored_link_anchor_id)
+          )
+      ),
+      notes AS (
+        UPDATE annotation a
+        SET pdf_target = n.from_target, quoted_text = n.from_quoted_text, file_version_id = n.from_version_id
+        FROM newest n WHERE a.id = n.annotation_id AND a.file_version_id = n.to_version_id
+        RETURNING n.id
+      ),
+      parts AS (
+        UPDATE anchored_link_anchor p
+        SET selector = n.from_target, quoted_text = n.from_quoted_text, file_version_id = n.from_version_id
+        FROM newest n WHERE p.id = n.anchored_link_anchor_id AND p.file_version_id = n.to_version_id
+        RETURNING n.id
+      ),
+      marks AS (
+        INSERT INTO file_anchor_move (annotation_id, anchored_link_anchor_id, from_version_id, moved_by_user_id)
+        SELECT n.annotation_id, n.anchored_link_anchor_id, n.from_version_id, n.moved_by_user_id
+        FROM newest n WHERE n.was_marked AND n.id IN (SELECT id FROM notes UNION ALL SELECT id FROM parts)
+      )
+      DELETE FROM file_anchor_move m WHERE m.id IN (SELECT id FROM notes UNION ALL SELECT id FROM parts)
+      RETURNING m.id`);
+    const maps = await tx.$executeRaw(Prisma.sql`
+      UPDATE file_version
+      SET page_map = NULL, page_map_stored_at = NULL, page_map_stored_by_user_id = NULL, page_map_carry_id = NULL
+      WHERE page_map_carry_id = ${carryId}`);
+    return { moves: undone.length, maps };
+  });
+}
+
+/**
+ * Runs the bulk carry a manager starts on `versionId`, **with something
+ * happening between its working-out and its write**: each of the races the
+ * write's own condition is there for, made to happen in order, since none
+ * shows from one request (docs/PDF.md §13, "Writing a move").
+ *
+ * - `mark`: these notes are marked "stays here" meanwhile.
+ * - `retarget`: these notes are given another target meanwhile, as a move
+ *   from another tab would give one.
+ * - `restamp`: these notes' targets name another text version meanwhile, as
+ *   the text-version script leaves one whose sheet reads the same.
+ * - `away`: these notes leave the version meanwhile, for the latest.
+ *
+ * Answers what the carry's write then did.
+ */
+export async function carryAcrossChanges(
+  versionId: string,
+  actorEmail: string,
+  between: { mark?: string[]; retarget?: string[]; restamp?: string[]; away?: string[] },
+): Promise<{ carryId: string; moved: number; skipped: number; stayed: { number: number; count: number }[]; storedMaps: number[] }> {
+  assertSafe(actorEmail);
+  const user = await prisma.user.findUniqueOrThrow({ where: { email: actorEmail }, select: { id: true, role: true } });
+  const actor = { userId: user.id, role: user.role };
+  const version = await prisma.fileVersion.findUniqueOrThrow({ where: { id: versionId }, select: { fileId: true, file: { select: { currentVersionId: true } } } });
+  const latest = version.file.currentVersionId!;
+  const plan = await planCarry(version.fileId, latest, versionId);
+
+  for (const id of between.mark ?? []) await prisma.fileAnchorMove.create({ data: { annotationId: id, fromVersionId: versionId, movedByUserId: user.id } });
+  if (between.retarget?.length) {
+    await prisma.$executeRaw`UPDATE annotation SET pdf_target = jsonb_set(pdf_target, '{quads,0,0}', '1'::jsonb) WHERE id = ANY(${between.retarget}::text[])`;
+  }
+  if (between.restamp?.length) {
+    await prisma.$executeRaw`UPDATE annotation SET pdf_target = jsonb_set(pdf_target, '{textVersion}', '"restamped/0"'::jsonb) WHERE id = ANY(${between.restamp}::text[])`;
+  }
+  if (between.away?.length) {
+    await prisma.$executeRaw`UPDATE annotation SET file_version_id = ${latest} WHERE id = ANY(${between.away}::text[])`;
+  }
+
+  const carryId = newCarryId();
+  return prisma.$transaction(async (tx) => {
+    await lockFileRow(tx, version.fileId);
+    for (const { version: mapped, map } of plan.mapsToStore) await writePageMapIfNone(tx, mapped.id, map, { userId: user.id, carryId });
+    const result = await writeCarry(tx, plan, actor, carryId);
+    return { carryId, moved: result.moved, skipped: result.skipped, stayed: result.stayed, storedMaps: result.storedMaps };
+  });
 }
 
 export async function getFileAnnotationFacts(fileId: string): Promise<FileAnnotationFacts[]> {
@@ -1785,6 +1959,14 @@ export async function createTestAnnotation(opts: {
    * while to write. Ignored for a draft, which has not been posted.
    */
   draftOpenedMsAgo?: number;
+  /**
+   * A rectangle selection on a file's sheet (docs/PDF.md §13, "Placing each
+   * anchor"): a target with no words, its quads the rectangle, on the file's
+   * latest version or the one `versionNumber` names. The viewer has no tool
+   * that draws one, so a spec's rectangle is made here. `sheet` is 1-based
+   * and `rect` is `[x0, y0, x1, y1]` in PDF user space.
+   */
+  pdfRect?: { sheet: number; rect: [number, number, number, number]; versionNumber?: number };
 }): Promise<{ id: string }> {
   const {
     docId,
@@ -1796,6 +1978,7 @@ export async function createTestAnnotation(opts: {
     draft = false,
     parentAnnotationId,
     draftOpenedMsAgo,
+    pdfRect,
   } = opts;
   if ((docId === undefined) === (fileId === undefined)) {
     throw new Error("createTestAnnotation: pass exactly one of docId and fileId.");
@@ -1818,10 +2001,29 @@ export async function createTestAnnotation(opts: {
   // 1 of the log — so check-ydoc-integrity.ts's replay check holds for it.
   const seed = seedAnnotationYdoc(bodyText);
   const now = new Date();
+  let rectangle: { pdfTarget: Prisma.InputJsonValue; fileVersionId: string } | null = null;
+  if (pdfRect) {
+    if (!fileId) throw new Error("createTestAnnotation: a rectangle is on a file's sheet.");
+    const version = pdfRect.versionNumber
+      ? await prisma.fileVersion.findUniqueOrThrow({ where: { fileId_number: { fileId, number: pdfRect.versionNumber } }, select: { id: true } })
+      : { id: await latestVersionIdOf(fileId) };
+    const [x0, y0, x1, y1] = pdfRect.rect;
+    rectangle = {
+      fileVersionId: version.id,
+      pdfTarget: {
+        pageIndex: pdfRect.sheet - 1,
+        quads: [rectToQuad(x0, y0, x1, y1)],
+        quote: { exact: "", prefix: "", suffix: "" },
+        position: null,
+        textVersion: await currentTextVersion(),
+      },
+    };
+  }
   const annotation = await prisma.annotation.create({
     data: {
       docId,
       fileId,
+      ...(rectangle ? { pdfTarget: rectangle.pdfTarget, fileVersionId: rectangle.fileVersionId } : {}),
       userId: author.id,
       bodyText,
       proseJson: seed.proseJson as Prisma.InputJsonValue,
@@ -3227,6 +3429,10 @@ const handlers = {
   deleteTestFile,
   addTestFileVersion,
   getFileAnchorVersions,
+  getFileAnchorRows,
+  getFileAnchorMoves,
+  undoCarryInSql,
+  carryAcrossChanges,
   getFileVersionFacts,
   promoteTestVersion,
   abandonTestVersion,
