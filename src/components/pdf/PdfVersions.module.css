@@ -115,3 +115,61 @@
 .state {
   color: var(--text-secondary);
 }
+
+/* The management half: the upload, a candidate's promotion and abandoning. */
+.manage {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.manageRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.manageButton {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.manageButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.manageWarning {
+  font-size: 0.8rem;
+  color: var(--foreground);
+  padding: 0.3rem 0.5rem;
+  border-left: 3px solid var(--warning);
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+}
+
+.manageError {
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+.gone {
+  max-width: 40rem;
+  margin: 4rem auto;
+  padding: 0 1rem;
+}
+
+.gone h1 {
+  font-size: 1.3rem;
+  margin-bottom: 0.8rem;
+}
+
+.gone p + p {
+  margin-top: 0.6rem;
+}

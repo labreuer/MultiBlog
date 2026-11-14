@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { canUserReadFile } from "@/lib/file-authz";
+import { canUserManageFile, canUserReadFile } from "@/lib/file-authz";
 import { resolveFileParam } from "@/lib/file-slug";
 import { gated, type AccessRejection } from "@/lib/route-access";
 import PdfSurfaceClient from "@/components/pdf/PdfSurfaceClient";
@@ -10,11 +10,14 @@ import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import TagChips from "@/components/tags/TagChips";
 import FileReferencesPanel from "@/components/pdf/FileReferencesPanel";
 import PdfVersionList from "@/components/pdf/PdfVersionList";
+import PdfAbandonedVersion from "@/components/pdf/PdfAbandonedVersion";
+import { candidateFactsFor } from "@/lib/file-version-candidate";
+import { actorFromSessionUser } from "@/lib/actor";
 import { referencesOfFile } from "@/lib/reference-files";
 import { canWriteReferences } from "@/lib/role-checks";
 import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
 import { fileVersionTitle, pdfPath, type ShownVersion } from "@/lib/file-version";
-import { VERSION_SUMMARY_SELECT, summariseVersions, type FileVersionSummary } from "@/lib/file-version-data";
+import { VERSION_SUMMARY_SELECT, postedNotesByVersion, summariseVersions, type FileVersionSummary, type VersionManage } from "@/lib/file-version-data";
 import styles from "./page.module.css";
 
 // PLAN.md §19, docs/PDF.md §13 "Addresses" — the PDF reading view, for both
@@ -81,9 +84,10 @@ export const loadFileVersionForRead = gated(async (user, slug: string, versionNu
   const found =
     versionNumber === null ? versions.find((version) => version.id === file.currentVersionId) : versions.find((version) => version.number === versionNumber);
   // A number the file never had. Checked after the gate, so the answer says
-  // nothing to someone who may not read the file. An abandoned version has no
-  // bytes to show; its page that says so arrives with abandoning itself.
-  if (!found || found.state === "abandoned") {
+  // nothing to someone who may not read the file. An abandoned version is
+  // found: it has no bytes to show, and its address answers with a page that
+  // says so (`PdfAbandonedVersion`).
+  if (!found) {
     return "not-found";
   }
   const shown: ShownVersion = {
@@ -132,6 +136,22 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
     user,
   } = access;
 
+  // An abandoned version's address: which version it was, that it was
+  // abandoned and when, and where the latest is. Nothing of the viewer is
+  // mounted, since the version has no bytes and no page text.
+  if (shown.state === "abandoned") {
+    const gone = versions.find((version) => version.id === shown.id);
+    return (
+      <PdfAbandonedVersion
+        slug={file.slug}
+        title={file.title}
+        number={shown.number}
+        abandonedAt={gone?.abandonedAt ?? null}
+        latestNumber={versions.find((version) => version.state === "latest")?.number ?? null}
+      />
+    );
+  }
+
   // The hash is in the path, which is what makes this URL immutable and lets
   // the byte route answer `immutable` — see the route's own header. It is the
   // hash of the version shown, so the viewer reads that version's bytes for
@@ -159,6 +179,21 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
   const ownDrafts = await getOwnFileDraftAnnotations(file.id, user.id, { slug: file.slug, fileVersionId: shown.id });
   // A reference's record is public, and this page has checked its reader may read the file.
   const references = await referencesOfFile(file.id);
+
+  // docs/PDF.md §13 — what whoever may manage the file is given: the upload
+  // of a new version, a waiting version's promotion and abandoning with what
+  // a promotion would do, and the notes still on each earlier version.
+  // Null for every other reader, so none of it reaches their page.
+  const latest = versions.find((version) => version.state === "latest");
+  const waiting = versions.find((version) => version.state === "candidate");
+  const manage: VersionManage | null = (await canUserManageFile(user.id, user.role, file.id))
+    ? {
+        fileId: file.id,
+        takesVersions: latest !== undefined && latest.pageCount !== null,
+        notesOn: versions.length > 1 ? await postedNotesByVersion(file.id) : {},
+        candidateFacts: waiting && latest ? await candidateFactsFor(actorFromSessionUser(user), file.id, waiting, latest) : null,
+      }
+    : null;
 
   // PLAN.md §20d — the tag chips, handed to the viewer as its Metadata
   // pane.
@@ -190,6 +225,7 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
         slug={file.slug}
         version={shown}
         versions={versions}
+        manage={manage}
         fileUrl={fileUrl}
         // A version's own page says "the latest" beside its title while it is.
         title={shown.address === "version" && shown.isLatest ? `${readingTitle(file, shown)} (the latest)` : readingTitle(file, shown)}
@@ -207,8 +243,11 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
             canWrite={canWriteReferences(user.role)}
             isPrivate={file.visibility === "PRIVATE"}
           />,
-          // Listed once a file has a second version: its only version needs no list.
-          versions.length > 1 && <PdfVersionList key="versions" slug={file.slug} versions={versions} shownId={shown.id} />,
+          // Listed once a file has a second version: its only version needs no
+          // list. A manager has it from the first, since it holds the upload.
+          (versions.length > 1 || manage?.takesVersions) && (
+            <PdfVersionList key="versions" slug={file.slug} versions={versions} shownId={shown.id} manage={manage} />
+          ),
         ]}
       />
       {/* docs/ANCHORED_LINKS.md — the open-link tray, a self-fetching

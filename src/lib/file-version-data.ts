@@ -1,6 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 import type { DocVisibility } from "@/generated/prisma/enums";
-import { prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
+import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
 import { displayNameOf } from "@/lib/display-name";
 import { CAPTURE_RELOAD_MESSAGE, fileVersionState, type CaptureOrigin, type FileVersionState } from "@/lib/file-version";
 
@@ -31,6 +31,56 @@ export async function latestVersionIdOf(fileId: string): Promise<string> {
  */
 export function countVersionsHolding(sha256: string): Promise<number> {
   return prismaIncludingDeleted.fileVersion.count({ where: { sha256, abandonedAt: null } });
+}
+
+// The first key of the two-key advisory lock below, so these locks occupy a
+// space of their own: "blob" as four ASCII bytes. A slug's claim has its own
+// (`lockFileSlug`, src/lib/file-slug.ts).
+const FILE_HASH_LOCK_SPACE = 0x626c6f62;
+
+/**
+ * Holds a blob's hash for the rest of `tx` (docs/PDF.md §13, "The upload"):
+ * an advisory lock, held to the end of the transaction, as a slug's claim is.
+ * **Whatever writes a row holding a hash, and whatever removes a hash's
+ * bytes, takes it**, so the two can't cross:
+ *
+ * - an upload, of a file's first version or a later one, in the transaction
+ *   that inserts its row, where it then checks the blob is still on disk
+ *   (`assertBlobStored`);
+ * - abandoning a candidate, around its count of the other rows holding the
+ *   hash and its removal of the blob, which it does before it commits;
+ * - `discardStagedUpload`, around the same count and removal.
+ *
+ * Without it, bytes uploaded again beside the abandoning of the candidate
+ * that held them leave a row with no bytes: `storeUploadStream` finds the
+ * blob on disk and stores nothing, and its row is written seconds later,
+ * after the abandoning counted no other row and removed the blob. Nothing
+ * reports that until the integrity check runs.
+ *
+ * A file row is locked before a hash where a transaction takes both, so no
+ * two of them can wait on each other.
+ */
+export async function lockFileHash(tx: TransactionClient, sha256: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${FILE_HASH_LOCK_SPACE}::int4, hashtext(${sha256}))`;
+}
+
+/**
+ * Locks a file's row `FOR UPDATE` for the rest of `tx`, and answers what a
+ * version's write checks under it: which version is the latest, and whether
+ * the file is deleted. Null for no such file.
+ *
+ * The upload of a version, a promotion and an abandoning each take it, so
+ * two of them on one file run one after the other: a version's number is one
+ * more than the file's rows, and "still the candidate" is true for only one
+ * of two clicks. It conflicts with the `FOR SHARE` a capture takes
+ * (`assertCaptureVersion`), which is what makes a promotion wait for a
+ * capture in flight.
+ */
+export async function lockFileRow(tx: TransactionClient, fileId: string): Promise<{ currentVersionId: string | null; deleted: boolean } | null> {
+  const [row] = await tx.$queryRaw<{ currentVersionId: string | null; deleted: boolean }[]>(
+    Prisma.sql`SELECT "current_version_id" AS "currentVersionId", ("deleted_by_user_id" IS NOT NULL) AS "deleted" FROM "file" WHERE "id" = ${fileId} FOR UPDATE`,
+  );
+  return row ?? null;
 }
 
 /** What a version's bytes decide, as a parse of them reports it. */
@@ -215,6 +265,34 @@ export function summariseVersions(file: { currentVersionId: string | null; versi
       promotedBy: version.promotedBy ? displayNameOf(version.promotedBy) : null,
       abandonedAt: version.abandonedAt?.toISOString() ?? null,
     }));
+}
+
+/**
+ * What the version list gives whoever may manage the file (docs/PDF.md §13,
+ * "Addresses"): never sent for any other reader.
+ */
+export type VersionManage = {
+  fileId: string;
+  /** Whether the file takes a new version at all: a PDF does, a .docx doesn't. */
+  takesVersions: boolean;
+  /** How many posted notes are on each version, by version id: what is still on an earlier one, which nothing moves yet. */
+  notesOn: Record<string, number>;
+  /** What a promotion of the waiting version would do to the file's citations; null where none waits. */
+  candidateFacts: { unlabelled: boolean; pagedCitations: number | null } | null;
+};
+
+/**
+ * How many posted notes are on each of a file's versions, by version id: its
+ * roots with a PDF target, DRAFTs and deleted ones left out. A reply has no
+ * version of its own and is with its root, so it is not counted apart.
+ */
+export async function postedNotesByVersion(fileId: string): Promise<Record<string, number>> {
+  const rows = await prisma.annotation.groupBy({
+    by: ["fileVersionId"],
+    where: { fileId, fileVersionId: { not: null }, status: { not: "DRAFT" }, deletedByUserId: null },
+    _count: { _all: true },
+  });
+  return Object.fromEntries(rows.flatMap((row) => (row.fileVersionId ? [[row.fileVersionId, row._count._all]] : [])));
 }
 
 /** A capture's origin with the file it is into: what its write checks. */

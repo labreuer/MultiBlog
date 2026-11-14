@@ -38,7 +38,7 @@ import AnchoredLinkBanner from "@/components/anchored-link/AnchoredLinkBanner";
 import type { AnchoredLinkPart, AnchoredLinkView } from "@/lib/anchored-link-data";
 import type { OwnDraft } from "@/lib/annotation-data";
 import type { ShownVersion } from "@/lib/file-version";
-import type { FileVersionSummary } from "@/lib/file-version-data";
+import type { FileVersionSummary, VersionManage } from "@/lib/file-version-data";
 import type { OtherVersionNote } from "@/lib/pdf-annotation-entries";
 import PdfVersionBanner from "./PdfVersionBanner";
 import { PdfCaptureProvider } from "./pdf-capture-context";
@@ -95,6 +95,8 @@ type Props = {
    */
   version: ShownVersion;
   versions: FileVersionSummary[];
+  /** What a manager of the file is given on a waiting version's banner; null for every other reader. */
+  manage: VersionManage | null;
   fileUrl: string;
   title: string;
   entries: PdfAnnotationEntry[];
@@ -122,6 +124,7 @@ export default function PdfAnnotationSurface({
   slug,
   version,
   versions,
+  manage,
   fileUrl,
   title,
   entries,
@@ -1018,7 +1021,7 @@ export default function PdfAnnotationSurface({
           // arrive together, on a version that is not the latest, and fixed
           // boxes at one spot would cover each other.
           <div className={styles.anchoredLinkOverlay}>
-            <PdfVersionBanner slug={slug} version={version} versions={versions} className={styles.overlayBanner} />
+            <PdfVersionBanner slug={slug} version={version} versions={versions} manage={manage} className={styles.overlayBanner} />
             {anchoredLink && (
               <AnchoredLinkBanner
                 link={anchoredLink}

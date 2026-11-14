@@ -14,6 +14,7 @@ import {
   uploadKindForFilename,
   type FileLimits,
 } from "@/lib/file-format";
+import { sendFile, uploadFailureMessage } from "@/lib/upload-client";
 import styles from "./FileUploader.module.css";
 
 // PLAN.md §19 — the upload control above the /files table.
@@ -27,8 +28,6 @@ import styles from "./FileUploader.module.css";
 // distinguish it from the wifi dropping. XHR reports it as `status === 0` on
 // the error event, which — combined with the size we know we were sending — is
 // enough to name the likely cause instead of shrugging.
-
-const PROXY_SUSPECT_BYTES = 1024 * 1024;
 
 export default function FileUploader({ isAdmin }: { isAdmin: boolean }) {
   const router = useRouter();
@@ -83,52 +82,31 @@ export default function FileUploader({ isAdmin }: { isAdmin: boolean }) {
         return;
       }
 
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", `${FILE_UPLOAD_PATH}?filename=${encodeURIComponent(file.name)}`);
-      xhr.setRequestHeader("Content-Type", contentTypeForKind(kind));
       setProgress({ sent: 0, total: file.size });
-
-      xhr.upload.addEventListener("progress", (event) => {
-        if (event.lengthComputable) setProgress({ sent: event.loaded, total: event.total });
-      });
-
-      xhr.addEventListener("load", () => {
+      // The sender is src/lib/upload-client.ts's, shared with the upload of a
+      // new version of a file: progress, and the 413 and severed-connection
+      // messages that name the proxy, since neither mentions nginx.
+      void sendFile({
+        method: "POST",
+        url: `${FILE_UPLOAD_PATH}?filename=${encodeURIComponent(file.name)}`,
+        file,
+        contentType: contentTypeForKind(kind),
+        onProgress: (sent, total) => setProgress({ sent, total }),
+      }).then((outcome) => {
         setProgress(null);
-        if (xhr.status >= 200 && xhr.status < 300) {
+        if (outcome.kind === "ok") {
           setNote(`Uploaded ${file.name}.`);
-          // The bytes went to a Route Handler, which can't revalidate the page
-          // that called it; this Server Action is what refreshes the listing.
+          // The route handler can't revalidate /files itself, so ask a Server
+          // Action to; refresh either way, since a failed revalidation still
+          // leaves a router cache worth refetching.
           refreshFilesListing()
             .then(() => router.refresh())
             .catch(() => router.refresh());
           return;
         }
-        if (xhr.status === 413) {
-          // Could be ours (file-storage.ts answers 413 over the limit) or the
-          // proxy's. Ours is JSON with a message; nginx's is an HTML error
-          // page, and that difference is what tells them apart.
-          setError(parseError(xhr) ?? proxyRejectedUploadMessage(limits?.maxUploadBytes ?? file.size));
-          return;
-        }
-        setError(parseError(xhr) ?? `Upload failed (HTTP ${xhr.status}).`);
+        const message = uploadFailureMessage(outcome, file, limits);
+        if (message) setError(message);
       });
-
-      xhr.addEventListener("error", () => {
-        setProgress(null);
-        // status 0 means the request never completed at the HTTP level: the
-        // connection was refused, severed, or blocked. For a body big enough
-        // to trip a default client_max_body_size, a proxy cutting us off is by
-        // far the likeliest cause and worth naming; for a small one it really
-        // is just the network.
-        setError(
-          file.size > PROXY_SUSPECT_BYTES
-            ? proxyRejectedUploadMessage(limits?.maxUploadBytes ?? file.size)
-            : "The upload failed — check your connection and try again.",
-        );
-      });
-
-      xhr.addEventListener("abort", () => setProgress(null));
-      xhr.send(file);
     },
     [limits, router],
   );
@@ -236,14 +214,4 @@ export default function FileUploader({ isAdmin }: { isAdmin: boolean }) {
       )}
     </div>
   );
-}
-
-/** The `error` field of our own JSON error body, or null when the response isn't ours (an nginx HTML page). */
-function parseError(xhr: XMLHttpRequest): string | null {
-  try {
-    const parsed = JSON.parse(xhr.responseText) as { error?: unknown };
-    return typeof parsed.error === "string" ? parsed.error : null;
-  } catch {
-    return null;
-  }
 }

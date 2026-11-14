@@ -91,6 +91,26 @@ export async function canUserManageFile(userId: string, role: Role, fileId: stri
   return file.owners.length > 0;
 }
 
+/**
+ * Uploading a new version of a file (docs/PDF.md §13, "The upload"): whoever
+ * may manage it, **and a bot whose person may**. `canUserManageFile` is asked
+ * a second time with the person's id and the bot's own role
+ * (`user.works_for_user_id`, docs/PERMISSIONS.md "Bots"), so the bot borrows
+ * its person's place among the file's owners and never their role: a bot
+ * whose role can't manage files uploads nothing, and one never outranks its
+ * person. Otherwise a file its person uploaded in the browser would refuse
+ * the bot that corrected its text.
+ *
+ * **This upload's rule alone.** Nothing else a manager does passes to a bot
+ * by it: promoting, abandoning, renaming and the rest ask
+ * `canUserManageFile`.
+ */
+export async function canUserUploadFileVersion(userId: string, role: Role, fileId: string): Promise<boolean> {
+  if (await canUserManageFile(userId, role, fileId)) return true;
+  const account = await prisma.user.findUnique({ where: { id: userId }, select: { worksForUserId: true } });
+  return account?.worksForUserId ? canUserManageFile(account.worksForUserId, role, fileId) : false;
+}
+
 export type ReadableFile = { id: string; slug: string; title: string };
 
 /**
