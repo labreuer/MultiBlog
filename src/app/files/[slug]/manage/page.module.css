@@ -1,0 +1,174 @@
+/* /files/[id]/manage — a file's manage page (docs/PDF.md §14). A listings-width
+   column (STYLE.md, "Breakpoints and centred-column widths"): it is a form, not
+   a reading surface. */
+
+.main {
+  max-width: 680px;
+  margin: 4rem auto;
+  padding: 0 1rem;
+  font-family: sans-serif;
+}
+
+.forbidden {
+  max-width: 480px;
+  margin: 4rem auto;
+  font-family: sans-serif;
+}
+
+.back {
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
+.title {
+  font-size: 1.5rem;
+  margin-bottom: 1.5rem;
+  overflow-wrap: anywhere;
+}
+
+/* The disabled sections of a deleted file are one fieldset; its own chrome is
+   none of the page's business. */
+.sections {
+  border: none;
+  min-width: 0;
+}
+
+.sections:disabled {
+  opacity: 0.55;
+}
+
+.section {
+  padding: 1.25rem 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.section h2 {
+  font-size: 1.05rem;
+  margin-bottom: 0.75rem;
+}
+
+.section p + p,
+.section p + .row,
+.section .row + p {
+  margin-top: 0.5rem;
+}
+
+/* Label/value rows, as the download landing's card has them. */
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 0.75rem;
+  font-size: 0.9rem;
+  margin-top: 0.75rem;
+}
+
+.facts dt {
+  color: var(--text-secondary);
+}
+
+.facts dd {
+  overflow-wrap: anywhere;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.wide {
+  flex: 1 1 16rem;
+  min-width: 0;
+  padding: 4px 6px;
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.help,
+.muted {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.warning {
+  color: var(--warning-text);
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.error {
+  color: var(--error);
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.notice {
+  color: var(--success);
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.danger {
+  color: var(--danger);
+}
+
+.deletedNote {
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--foreground);
+}
+
+.owners {
+  list-style: none;
+  margin-top: 0.75rem;
+}
+
+.owner {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: grab;
+}
+
+.owner + .owner {
+  margin-top: 0.25rem;
+}
+
+.ownerName {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dragOver {
+  background: var(--accent-wash);
+  outline: 1px dashed var(--accent-outline);
+  color: var(--foreground);
+}
+
+/* The stored list beside an edit that started from another one. */
+.current {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--foreground);
+  font-size: 0.9rem;
+}
+
+.current ol {
+  margin: 0.5rem 0 0.5rem 1.5rem;
+}

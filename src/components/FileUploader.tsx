@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { refreshFilesListing } from "@/app/actions/files";
 import {
   FILE_LIMITS_PATH,
@@ -36,6 +37,8 @@ export default function FileUploader({ isAdmin }: { isAdmin: boolean }) {
   const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // The manage page of the file just uploaded, which the upload route's answer names by its id.
+  const [uploadedId, setUploadedId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [probing, setProbing] = useState(false);
 
@@ -61,6 +64,7 @@ export default function FileUploader({ isAdmin }: { isAdmin: boolean }) {
     (file: File) => {
       setError(null);
       setNote(null);
+      setUploadedId(null);
 
       // The same table the route decides with (src/lib/file-format.ts), so a
       // file this refuses is exactly a file that upload would have refused —
@@ -96,6 +100,8 @@ export default function FileUploader({ isAdmin }: { isAdmin: boolean }) {
         setProgress(null);
         if (outcome.kind === "ok") {
           setNote(`Uploaded ${file.name}.`);
+          const body = outcome.body as { id?: unknown } | null;
+          if (body && typeof body.id === "string") setUploadedId(body.id);
           // The route handler can't revalidate /files itself, so ask a Server
           // Action to; refresh either way, since a failed revalidation still
           // leaves a router cache worth refetching.
@@ -119,6 +125,7 @@ export default function FileUploader({ isAdmin }: { isAdmin: boolean }) {
     setProbing(true);
     setError(null);
     setNote(null);
+    setUploadedId(null);
 
     const payload = new Blob([new Uint8Array(limits.maxUploadBytes)]);
     const xhr = new XMLHttpRequest();
@@ -206,7 +213,17 @@ export default function FileUploader({ isAdmin }: { isAdmin: boolean }) {
       )}
 
       {error && <p className={styles.error}>{error}</p>}
-      {note && !error && <p className={styles.note}>{note}</p>}
+      {note && !error && (
+        <p className={styles.note}>
+          {note}
+          {uploadedId && (
+            <>
+              {" "}
+              <Link href={`/files/${uploadedId}/manage`}>Manage it</Link>
+            </>
+          )}
+        </p>
+      )}
       {limits && !busy && !error && !note && (
         <p className={styles.note}>
           {UPLOAD_ACCEPT_LABEL}, up to {formatBytes(limits.maxUploadBytes)}.

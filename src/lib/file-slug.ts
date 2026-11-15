@@ -160,6 +160,31 @@ export async function freeFileSlugFor(
 }
 
 /**
+ * Drops each past slug of `fileId` that a live file answers on as its current
+ * one, for the transaction that restores it (docs/PDF.md §14, "Delete or
+ * restore").
+ *
+ * While a file is deleted its past slugs are free as its current one is
+ * (`fileSlugInUse`), so an upload may take one. Restored with such a row, the
+ * file would hold as a past slug the one a live file answers on: it redirects
+ * nobody, since `resolveFileParam` gives the address to the live file, and
+ * that live file's next change of slug would fail on `file_slug_history`'s
+ * unique index, the change recording the slug it leaves. Each slug is held
+ * first (`lockFileSlug`), in one order, so an upload claiming one meanwhile is
+ * either seen or waits. Answers the slugs dropped.
+ */
+export async function dropPastSlugsTakenMeanwhile(client: Prisma.TransactionClient, fileId: string): Promise<string[]> {
+  const past = (await client.fileSlugHistory.findMany({ where: { fileId }, select: { slug: true } })).map((row) => row.slug).sort();
+  if (past.length === 0) return [];
+  for (const slug of past) await lockFileSlug(client, slug);
+  const taken = (
+    await client.storedFile.findMany({ where: { slug: { in: past }, deletedByUserId: null, id: { not: fileId } }, select: { slug: true } })
+  ).map((file) => file.slug);
+  if (taken.length > 0) await client.fileSlugHistory.deleteMany({ where: { fileId, slug: { in: taken } } });
+  return taken;
+}
+
+/**
  * Drops a redirect *into a deleted file* that would stand in the way of
  * recording `slug` as a live file's past url.
  *
@@ -173,36 +198,54 @@ async function clearDeadHistoryRow(tx: Prisma.TransactionClient, slug: string): 
   await tx.fileSlugHistory.deleteMany({ where: { slug, file: { deletedByUserId: { not: null } } } });
 }
 
-/** Renames a file's slug, recording the old one in FileSlugHistory. No-ops if unchanged. */
+/** What a deleted file's slug answers to a change: it names nothing until the restore settles it. */
+export const DELETED_FILE_SLUG_REFUSAL = "This file is deleted, and its url can't be changed until it is restored.";
+
+/**
+ * The file's slug, its row locked for the rest of `tx`, or a refusal where it
+ * is gone or deleted.
+ *
+ * **A deleted file's slug can't be changed** (docs/PDF.md §14, "The address
+ * and the gate"). It is free for a live file to take, and so is each of its
+ * past ones, so a change in between can collide on `file_slug_history`'s
+ * unique index: a live file that took the deleted one's slug and moved off it
+ * holds it as a past slug, which recording the deleted file's own change would
+ * insert again, and `clearDeadHistoryRow` clears only a row leading to a
+ * deleted file. The restore settles the slug (`freeFileSlugFor`). Locked, so
+ * a delete committed meanwhile is seen here and one started meanwhile waits.
+ */
+async function lockLiveFileSlug(tx: Prisma.TransactionClient, fileId: string): Promise<string> {
+  const [file] = await tx.$queryRaw<{ slug: string; deleted: boolean }[]>`
+    SELECT slug, (deleted_by_user_id IS NOT NULL) AS deleted FROM file WHERE id = ${fileId} FOR UPDATE`;
+  if (!file) throw new Error("File not found.");
+  if (file.deleted) throw new Error(DELETED_FILE_SLUG_REFUSAL);
+  return file.slug;
+}
+
+/** Renames a file's slug, recording the old one in FileSlugHistory. No-ops if unchanged; refused for a deleted file. */
 export async function changeFileSlug(fileId: string, newSlugInput: string, updatedByUserId: string): Promise<string> {
   const newSlug = slugify(newSlugInput, "file");
 
   return prismaIncludingDeleted.$transaction(async (tx) => {
-    const file = await tx.storedFile.findUnique({ where: { id: fileId }, select: { slug: true } });
-    if (!file) {
-      throw new Error("File not found.");
-    }
-    if (file.slug === newSlug) {
+    const currentSlug = await lockLiveFileSlug(tx, fileId);
+    if (currentSlug === newSlug) {
       return newSlug;
     }
     await lockFileSlug(tx, newSlug);
     if (await fileSlugInUse(newSlug, tx)) {
       throw new Error(`Url "${newSlug}" is already in use.`);
     }
-    await clearDeadHistoryRow(tx, file.slug);
-    await tx.fileSlugHistory.create({ data: { fileId, slug: file.slug } });
+    await clearDeadHistoryRow(tx, currentSlug);
+    await tx.fileSlugHistory.create({ data: { fileId, slug: currentSlug } });
     await tx.storedFile.update({ where: { id: fileId }, data: { slug: newSlug, updatedByUserId } });
     return newSlug;
   });
 }
 
-/** Swaps a file's slug back to its most recent past one — see revertDocSlug for the full rationale. */
+/** Swaps a file's slug back to its most recent past one — see revertDocSlug for the full rationale. Refused for a deleted file, as a change is. */
 export async function revertFileSlug(fileId: string, updatedByUserId: string): Promise<string> {
   return prismaIncludingDeleted.$transaction(async (tx) => {
-    const file = await tx.storedFile.findUnique({ where: { id: fileId }, select: { slug: true } });
-    if (!file) {
-      throw new Error("File not found.");
-    }
+    const currentSlug = await lockLiveFileSlug(tx, fileId);
     const lastHistory = await tx.fileSlugHistory.findFirst({ where: { fileId }, orderBy: { createdAt: "desc" } });
     if (!lastHistory) {
       throw new Error("No past url to revert to.");
@@ -219,8 +262,8 @@ export async function revertFileSlug(fileId: string, updatedByUserId: string): P
     }
     await tx.fileSlugHistory.delete({ where: { id: lastHistory.id } });
     if (Date.now() - lastHistory.createdAt.getTime() >= REVERT_DISCARD_WINDOW_MS) {
-      await clearDeadHistoryRow(tx, file.slug);
-      await tx.fileSlugHistory.create({ data: { fileId, slug: file.slug } });
+      await clearDeadHistoryRow(tx, currentSlug);
+      await tx.fileSlugHistory.create({ data: { fileId, slug: currentSlug } });
     }
     await tx.storedFile.update({ where: { id: fileId }, data: { slug: lastHistory.slug, updatedByUserId } });
     return lastHistory.slug;
@@ -234,8 +277,8 @@ export async function revertFileSlug(fileId: string, updatedByUserId: string): P
  * /doc/[slug] has through resolveDocSlugHistory.
  *
  * Uses prismaIncludingDeleted so a soft-deleted file still *resolves*; the
- * caller decides what to do about it (the reading route 404s, a future manage
- * route would want to offer an undelete).
+ * caller decides what to do about it (the reading route 404s, the manage page
+ * offers its restore).
  *
  * **`findFirst`, not `findUnique`, and in a deliberate order.** Since
  * `file_slug_live_key` is partial, a slug is unique among live files only —

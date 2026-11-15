@@ -6,13 +6,14 @@ import Link from "next/link";
 import { updatePostSlug, deletePostSlugHistory, revertPostSlug } from "@/app/actions/posts";
 import { updateUserSlug, deleteUserSlugHistory, revertUserSlug } from "@/app/actions/users";
 import { updateDocSlug, deleteDocSlugHistory, revertDocSlug } from "@/app/actions/docs";
+import { updateFileSlug, revertFileSlug, type FileAnswer } from "@/app/actions/files";
 import { REVERT_DISCARD_WINDOW_MS } from "@/lib/slug";
 import LocalTime from "./LocalTime";
 
 export type SlugHistoryRow = { slug: string; createdAt: string };
 
 type Props = {
-  entityType: "post" | "user" | "doc";
+  entityType: "post" | "user" | "doc" | "file";
   entityId: string;
   currentSlug: string;
   // What uniquePostSlug/uniqueUserSlug would produce from this entity's
@@ -23,8 +24,21 @@ type Props = {
   // "" for a post ("/<slug>"), "/authors" for a user ("/authors/<slug>") —
   // only used to spell out the affected URL below.
   urlPrefix: string;
+  // What follows the slug in that URL: "/download" for a file that isn't a
+  // PDF, whose address is /files/<slug>/download. Empty for everything else.
+  urlSuffix?: string;
+  // False where the current url leads nowhere this reader should go: a
+  // deleted file's /pdf/<slug> answers 404, or opens the live file that took
+  // its slug meanwhile (docs/PDF.md §14).
+  linkCurrent?: boolean;
   history: SlugHistoryRow[];
 };
+
+/** A file action's answer as the value, or its refusal thrown here in the browser, where its message survives. */
+function answered<T>(answer: FileAnswer<T>): T {
+  if (!answer.ok) throw new Error(answer.error);
+  return answer.value;
+}
 
 // The one interactive surface for changing a post's or a user's slug and
 // managing its PostSlugHistory/UserSlugHistory rows — deliberately its own
@@ -39,7 +53,21 @@ type Props = {
 // instead, a one-click undo in the same spirit as the rest of the app's
 // soft-delete/restore controls (PostsTable/UsersTable: no confirmation
 // dialog, the action is its own undo).
-export default function SlugManager({ entityType, entityId, currentSlug, standardSlug, urlPrefix, history }: Props) {
+//
+// A file's branch differs in two ways (docs/PDF.md §14, "What the page
+// holds"). Its actions answer a refusal rather than throw one. And it offers
+// no deletion of a past slug: every fragment link into a PDF written before a
+// rename names the old slug, and the history row is what still opens it.
+export default function SlugManager({
+  entityType,
+  entityId,
+  currentSlug,
+  standardSlug,
+  urlPrefix,
+  urlSuffix = "",
+  linkCurrent = true,
+  history,
+}: Props) {
   const router = useRouter();
   const [slug, setSlug] = useState(currentSlug);
   const [rows, setRows] = useState(history);
@@ -72,7 +100,9 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
             ? await updatePostSlug(entityId, newSlugValue)
             : entityType === "doc"
               ? await updateDocSlug(entityId, newSlugValue)
-              : await updateUserSlug(entityId, newSlugValue);
+              : entityType === "file"
+                ? answered(await updateFileSlug(entityId, newSlugValue))
+                : await updateUserSlug(entityId, newSlugValue);
         setSlug(result.slug);
         setRows((prev) => [...prev, { slug: oldSlug, createdAt: new Date().toISOString() }]);
         setEditing(false);
@@ -114,7 +144,9 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
             ? await revertPostSlug(entityId)
             : entityType === "doc"
               ? await revertDocSlug(entityId)
-              : await revertUserSlug(entityId);
+              : entityType === "file"
+                ? answered(await revertFileSlug(entityId))
+                : await revertUserSlug(entityId);
         setSlug(result.slug);
         setRows((prev) =>
           keepReplacementRow
@@ -132,7 +164,9 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
     setDeleteError(null);
     startTransition(async () => {
       try {
-        if (entityType === "post") {
+        if (entityType === "file") {
+          return;
+        } else if (entityType === "post") {
           await deletePostSlugHistory(entityId, historySlug);
         } else if (entityType === "doc") {
           await deleteDocSlugHistory(entityId, historySlug);
@@ -152,11 +186,19 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
     <div style={{ fontFamily: "sans-serif" }}>
       <p>
         Current url:{" "}
-        <Link href={`${urlPrefix}/${slug}`}>
+        {linkCurrent ? (
+          <Link href={`${urlPrefix}/${slug}${urlSuffix}`}>
+            <strong>
+              {urlPrefix}/{slug}
+              {urlSuffix}
+            </strong>
+          </Link>
+        ) : (
           <strong>
             {urlPrefix}/{slug}
+            {urlSuffix}
           </strong>
-        </Link>
+        )}
         {!editing && (
           <>
             {" "}
@@ -168,6 +210,7 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
       </p>
       <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", marginTop: "0.5em" }}>
         Auto-generated url: {urlPrefix}/{standardSlug}
+        {urlSuffix}
         {standardSlug === slug ? (
           " — matches the current url."
         ) : (
@@ -221,6 +264,7 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
               <tr key={row.slug} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
                 <td style={{ padding: "4px 8px 4px 0" }}>
                   {urlPrefix}/{row.slug}
+                  {urlSuffix}
                 </td>
                 <td style={{ padding: "4px 8px 4px 0", color: "var(--text-secondary)" }}>
                   <LocalTime value={row.createdAt} />
@@ -233,7 +277,7 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
                   )}
                 </td>
                 <td style={{ padding: "4px 0" }}>
-                  {confirmingDeleteSlug === row.slug ? (
+                  {entityType === "file" ? null : confirmingDeleteSlug === row.slug ? (
                     <span style={{ color: "var(--text-secondary)" }}>
                       Delete?{" "}
                       <button
@@ -269,6 +313,13 @@ export default function SlugManager({ entityType, entityId, currentSlug, standar
             ))}
           </tbody>
         </table>
+      )}
+      {entityType === "file" && rows.length > 0 && (
+        <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: "0.5em" }}>
+          A past url keeps opening the file, so links written against it still work. Revert inside an hour of a
+          change undoes it outright, and keeps no past url for the one it leaves: a link written against that url in
+          that hour stops opening.
+        </p>
       )}
       {revertError && <p style={{ color: "var(--error)", fontSize: "0.85rem" }}>{revertError}</p>}
       {deleteError && <p style={{ color: "var(--error)", fontSize: "0.85rem" }}>{deleteError}</p>}

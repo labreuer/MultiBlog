@@ -2,15 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
-import { prismaIncludingDeleted } from "@/lib/prisma";
-import { canUserManageFile } from "@/lib/file-authz";
-import { revertFileSlug as revertFileSlugInDb } from "@/lib/file-slug";
 import {
   abandonFileVersion,
   answerFileVersionMapRun,
   buildFileVersionMap,
   promoteFileVersion,
+  revertFileSlugAs,
   setFileDeleted,
+  setFileOwners,
   setFileSlug,
   setFileTitle,
   setFileVisibility,
@@ -49,29 +48,91 @@ export async function updateFileVisibility(fileId: string, visibility: DocVisibi
   revalidatePath("/files");
 }
 
-export async function updateFileTitle(fileId: string, title: string): Promise<void> {
-  await setFileTitle(await sessionActor(), fileId, title);
-  revalidatePath("/files");
+// ---------------------------------------------------------------------------
+// docs/PDF.md §14 — the actions a file's manage page (/files/<id>/manage)
+// calls. **Each answers a refusal and throws none**: a production build
+// replaces a thrown error's message before it reaches the browser, and these
+// refusals (the url is taken, the owner list changed, a file needs a title)
+// are what the manager has to read. /files' cells keep the throwing actions
+// above, which they catch as every admin table's cells do.
+
+/** What a manage page's action answers: what was done, or why not, in words for whoever clicked. */
+export type FileAnswer<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** A refusal is an ApiError's message; anything else is a fault, logged and answered in a line that says to reload. */
+async function answering<T>(what: string, run: (actor: Actor) => Promise<T>): Promise<FileAnswer<T>> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "You are signed out. Sign in, then try again." };
+  try {
+    return { ok: true, value: await run(actorFromSessionUser(session.user)) };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, error: err.message };
+    console.error(`[files] ${what} failed:`, err);
+    return { ok: false, error: "That didn't work. Reload the page and try again." };
+  }
 }
 
-export async function updateFileSlug(fileId: string, newSlug: string): Promise<{ slug: string }> {
-  const slug = await setFileSlug(await sessionActor(), fileId, newSlug);
+/** /files and the file's manage page, after a manage page's act. */
+function revalidateManaged(fileId: string): void {
   revalidatePath("/files");
-  return { slug };
+  revalidatePath(`/files/${fileId}/manage`);
 }
 
-export async function revertFileSlug(fileId: string): Promise<{ slug: string }> {
-  const actor = await sessionActor();
-  const file = await prismaIncludingDeleted.storedFile.findUnique({ where: { id: fileId }, select: { id: true } });
-  if (!file) {
-    throw new Error("File not found.");
-  }
-  if (!(await canUserManageFile(actor.userId, actor.role, fileId))) {
-    throw new Error("You don't have permission to manage this file.");
-  }
-  const slug = await revertFileSlugInDb(fileId, actor.userId);
-  revalidatePath("/files");
-  return { slug };
+/** The acts of the manage page: each checks its arguments' types, since an action is sent whatever JSON its caller likes. */
+async function manageAnswer<T>(fileId: unknown, what: string, run: (actor: Actor, fileId: string) => Promise<T>): Promise<FileAnswer<T>> {
+  if (typeof fileId !== "string") return { ok: false, error: "That isn't a file." };
+  const answer = await answering(what, (actor) => run(actor, fileId));
+  if (answer.ok) revalidateManaged(fileId);
+  return answer;
+}
+
+/** A file's title, trimmed; answers the title it now has. */
+export async function updateFileTitle(fileId: string, title: string): Promise<FileAnswer<{ title: string }>> {
+  if (typeof title !== "string") return { ok: false, error: "A file needs a title." };
+  return manageAnswer(fileId, "a title's save", async (actor, id) => ({ title: await setFileTitle(actor, id, title) }));
+}
+
+/** A file's slug, the old one kept as a past one; refused for a deleted file. */
+export async function updateFileSlug(fileId: string, newSlug: string): Promise<FileAnswer<{ slug: string }>> {
+  if (typeof newSlug !== "string") return { ok: false, error: "That isn't a url." };
+  return manageAnswer(fileId, "a slug's change", async (actor, id) => ({ slug: await setFileSlug(actor, id, newSlug) }));
+}
+
+/** A file's slug put back to its most recent past one; refused for a deleted file. */
+export async function revertFileSlug(fileId: string): Promise<FileAnswer<{ slug: string }>> {
+  return manageAnswer(fileId, "a slug's revert", async (actor, id) => ({ slug: await revertFileSlugAs(actor, id) }));
+}
+
+function isIdList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((id) => typeof id === "string");
+}
+
+/**
+ * A file's whole owner list, in order, saved once. `expected` is the list the
+ * page's edit started from: one someone else changed since is refused, not
+ * overwritten (`setFileOwners`). Removals are what the page has already said
+ * the cost of, so they are allowed.
+ */
+export async function updateFileOwners(fileId: string, orderedUserIds: string[], expected: string[]): Promise<FileAnswer<null>> {
+  if (!isIdList(orderedUserIds) || !isIdList(expected)) return { ok: false, error: "That isn't a list of owners." };
+  return manageAnswer(fileId, "an owner list's save", async (actor, id) => {
+    await setFileOwners(actor, id, orderedUserIds, { allowRemovals: true, expected });
+    return null;
+  });
+}
+
+/** A file's visibility, from its manage page. */
+export async function manageFileVisibility(fileId: string, visibility: DocVisibility): Promise<FileAnswer<null>> {
+  return manageAnswer(fileId, "a visibility's change", async (actor, id) => {
+    await setFileVisibility(actor, id, visibility);
+    return null;
+  });
+}
+
+/** Deletes or restores a file from its manage page; a restore answers the slug it came back under and the one it lost, if any. */
+export async function manageFileDeleted(fileId: string, deleted: boolean): Promise<FileAnswer<{ slug: string; renamedFrom: string | null }>> {
+  if (typeof deleted !== "boolean") return { ok: false, error: "That isn't a delete or a restore." };
+  return manageAnswer(fileId, deleted ? "a delete" : "a restore", (actor, id) => setFileDeleted(actor, id, deleted));
 }
 
 /** Soft-deletes or restores (`setFileDeleted`, which renames a restored file whose url was taken meanwhile). */
@@ -172,18 +233,10 @@ export async function answerVersionMapRun(versionId: string, runIndex: number, a
 
 
 /** What an action about a carry answers: what was asked for, or why not, in words for whoever clicked. */
-export type CarryAnswer<T> = { ok: true; value: T } | { ok: false; error: string };
+export type CarryAnswer<T> = FileAnswer<T>;
 
 async function carryAction<T>(run: (actor: Actor) => Promise<T>): Promise<CarryAnswer<T>> {
-  const session = await auth();
-  if (!session?.user) return { ok: false, error: "You are signed out. Sign in, then try again." };
-  try {
-    return { ok: true, value: await run(actorFromSessionUser(session.user)) };
-  } catch (err) {
-    if (err instanceof ApiError) return { ok: false, error: err.message };
-    console.error("[files] a carry's action failed:", err);
-    return { ok: false, error: "That didn't work. Reload the page and try again." };
-  }
+  return answering("a carry's action", run);
 }
 
 /**

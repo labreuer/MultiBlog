@@ -475,3 +475,4 @@ export const getFileAnnotationQuads = (...args: Parameters<DbHandlers["getFileAn
   call("getFileAnnotationQuads", ...args);
 export const getUploadFacts = (...args: Parameters<DbHandlers["getUploadFacts"]>) => call("getUploadFacts", ...args);
 export const setTestFileOwners = (...args: Parameters<DbHandlers["setTestFileOwners"]>) => call("setTestFileOwners", ...args);
+export const getFileSlugFacts = (...args: Parameters<DbHandlers["getFileSlugFacts"]>) => call("getFileSlugFacts", ...args);

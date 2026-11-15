@@ -3525,15 +3525,20 @@ test while each file has one version. So four specs make second versions:
   The two long specs end on a clean run of `check-file-versions.ts` over their own carries,
   moves, marks and the SQL undo.
 
-## 14. Planned: a file's manage page
+## 14. A file's manage page
 
-**Not built.** One page per file where its managers do everything managing it involves:
+**Partly built.** One page per file where its managers do everything managing it involves:
 rename it, re-slug it, change its visibility and its **owners**, delete and restore it, and
 for a PDF upload, promote, abandon and carry its versions. The viewer goes back to being a
-reading surface. Today these acts are split between `/files`' row (visibility, delete), the
-viewer's Metadata pane (all of §13's management half), and the MCP server alone (title,
-slug, owners: `rename_file` and `manage`). `updateFileTitle`, `updateFileSlug` and
-`revertFileSlug` in `src/app/actions/files.ts` have no caller.
+reading surface.
+
+**Built so far: the page without versions** (Build order, item 1): the address and the
+gate, the file's facts, its title, address, visibility and owners, delete and restore, the
+actions that answer, the write layer's refusal of a new slug for a deleted file, the
+restore's drop of past slugs a live file took, `/files`' Manage column and a non-PDF's title
+cell, and the viewer's "Manage this file" link. Everything about versions (item 6 below, A
+version's page map, What the viewer keeps but that link) is still planned, and §13's
+management half is still in the viewer's Metadata pane.
 
 ### The address and the gate
 
@@ -3573,14 +3578,15 @@ slug, owners: `rename_file` and `manage`). `updateFileTitle`, `updateFileSlug` a
     - A deleted file's slug is free for a live file to take (`file_slug_live_key`,
       `src/lib/file-slug.ts`), so it names nothing until the restore, which is where it is
       settled (`freeFileSlugFor`).
-    - **A change in between can fail on `file_slug_history`'s unique index**, read from
-      `changeFileSlug` and not reproduced. A live file may take the deleted file's slug,
-      change away from it and so hold it as a past one. Renaming the deleted file then
-      records that slug as its own past one, and `clearDeadHistoryRow` clears only rows
+    - **A change in between could fail on `file_slug_history`'s unique index** (read from
+      `changeFileSlug`, not reproduced). A live file may take the deleted file's slug,
+      change away from it and so hold it as a past one. Renaming the deleted file would then
+      record that slug as its own past one, and `clearDeadHistoryRow` clears only rows
       that lead to a deleted file.
-    - **The revert moves into `src/lib/file-manage.ts`**, a function taking an `Actor`
-      beside `setFileSlug`, with the gate the action holds by itself today. The refusal is
-      then one rule in the write layer.
+    - **The refusal is in `changeFileSlug` and `revertFileSlug`** (`src/lib/file-slug.ts`),
+      under the file row's lock, so a delete committed meanwhile is seen. The revert's
+      `Actor` function is `revertFileSlugAs` in `src/lib/file-manage.ts`, beside
+      `setFileSlug`, with the gate. The refusal is one rule in the write layer.
     - MCP's `manage` restores before it sets a slug, so one call that does both still
       works.
   - A signed-out visitor goes to `signInPath(<this address>)`. A reader who may not manage
@@ -3625,9 +3631,11 @@ Top to bottom, each a section of its own:
      EDITOR manages any SHARED file, and a PRIVATE one only as an owner
      (`canUserManageFile`). For them the page says that they lose this page and the file,
      asks for confirmation, and then goes to `/files`.
-5. **Owners**, the act no browser page has offered so far. An ordered list: add from every live
+5. **Owners**, the one browser page that changes them. An ordered list: add from every live
    account in `FILE_MANAGER_ROLES` (the list the doc byline picker reads, labelled by
-   `staffDisplayNameOf`), take off, reorder by dragging.
+   `staffDisplayNameOf`), take off, reorder by dragging or by each row's ↑ and ↓ buttons,
+   which a keyboard reaches. "Discard changes" puts the edit back to the list it started
+   from.
    - **The list is edited, then saved once**, unlike `DocSettingsPanel`'s byline, which
      writes on every click. A hand-over (add someone, take yourself off) is then one
      transaction, and the list in between is never written.
@@ -3640,16 +3648,17 @@ Top to bottom, each a section of its own:
      manage it without being on the list (`canManageAnySharedFile`). The page says nothing
      of a loss, asks for no confirmation and stays where it is.
    - One save is one `setFileOwners` call with `allowRemovals` and **`expected`**, the list
-     the page loaded. `setFileOwners` gains `expected` and the file row's `FOR UPDATE`,
+     the page loaded. `setFileOwners` takes `expected` and the file row's `FOR UPDATE`,
      both as `setDocByline` has them, so a list someone else changed in between is
-     refused rather than overwritten. Both read the list in `ownerOrder`, which today's read
-     doesn't ask for. MCP's `manage` passes no `expected` and behaves as before.
+     refused rather than overwritten, and reads the list in `ownerOrder`. MCP's `manage`
+     passes no `expected`.
    - **`expected` is the list the edit started from, and a refresh replaces neither it nor
      the edit.** Every other save on the page refreshes it, and so does a map build that
      finishes. Were `expected` taken from the refreshed list, a change someone else made
      meanwhile would arrive with it and the save would overwrite that change, which is the
      case `expected` is there to refuse. After a refusal the page keeps the edit, and shows
-     beside it the list as it now is, to start again from.
+     beside it the list as it now is, to start again from. A list nobody has touched follows
+     a refresh, since no edit has started from it.
    - **The list shows every owner the file has**, one whose account was since deleted or
      moved to a role outside `FILE_MANAGER_ROLES` included, marked as such. `expected` is
      compared with all of them, and `setFileOwners` lets such an owner stay.
@@ -3785,12 +3794,12 @@ replaces a thrown error's message before it reaches the browser, and this page's
 are what its manager has to read: the url is taken, the owner list changed, a file needs a
 title, a file needs an owner.
 
-- `updateFileTitle`, `updateFileSlug` and `revertFileSlug` change to answer. Nothing calls
-  them as they are.
-- `updateFileOwners` answers from the start.
-- **Visibility, delete and restore get answering actions of their own for this page.**
-  `/files`' cells call `updateFileVisibility`, `deleteFile` and `restoreFile` and catch what
-  they throw, as every admin table's cells do, and those stay.
+- `updateFileTitle`, `updateFileSlug`, `revertFileSlug` and `updateFileOwners` answer, as
+  `FileAnswer<T>`.
+- **Visibility, delete and restore have answering actions of their own for this page**,
+  `manageFileVisibility` and `manageFileDeleted`. `/files`' cells call
+  `updateFileVisibility`, `deleteFile` and `restoreFile` and catch what they throw, as every
+  admin table's cells do.
 - **`SlugManager`'s `"file"` branch reads an answer**, where its other three catch a throw.
 
 ### A version's page map, sheet by sheet
@@ -3973,12 +3982,11 @@ a third option, and it never is one:
 - The uploader of a new file stays above the table, since a manage page needs a file to
   exist first. Its success note links to the new file's manage page: the upload route's
   answer already names the id.
-- **The title cell links every row to `/pdf/<slug>`, a `.docx` included**, which mounts a
-  PDF viewer on bytes it can't read. A non-PDF's title links to this page for a manager,
-  and to its download otherwise. The cell goes there twice, by its `<Link>` and by the
-  `onClick` that takes a click beside the link, and both change. A row carries no format
-  today, so it is sent whether its latest version is a PDF, from that version's
-  `contentType`.
+- **The title cell links a PDF to `/pdf/<slug>`, and a file of any other format to this
+  page for a manager and to its download otherwise**, since `/pdf/<slug>` would mount a PDF
+  viewer on bytes it can't read. The cell goes there twice, by its link and by the
+  `onClick` that takes a click beside the link. A row is sent whether its latest version is
+  a PDF, from that version's `contentType` (`isPdfContentType`).
 
 ### Build order
 
