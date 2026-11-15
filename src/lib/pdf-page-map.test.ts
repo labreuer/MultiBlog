@@ -11,6 +11,7 @@ import {
   pageMapFaults,
   pageMapNumbers,
   parsePageMap,
+  unpairRun,
   type MapVersion,
   type PageMap,
 } from "./pdf-page-map";
@@ -170,9 +171,44 @@ test("labels corrected: neither answer is taken, and the alignment's is one ques
   assert.deepEqual(after.sheets, [0, 1, 2, 3, 4, 5]);
   assert.equal(pageMapNumbers(after).openRuns, 0);
   assert.equal(counterpartOf(after.sheets, 3), 3);
-  // Accepted, it stays.
+  // Accepted, it is not declined, nor accepted again: it is un-paired.
   assert.ok("refused" in answerRun(after, 0, false, by));
   assert.ok("refused" in answerRun(after, 0, true, by));
+});
+
+test("an accepted run un-paired is an open question again, as it was before anyone answered", () => {
+  const sheets = [page(1), page(2), page(3), page(4), page(5), page(6)];
+  const map = pairSheets(lateLabels(...sheets), rightLabels(...sheets));
+  const unpaired = unpairRun(accepted(map, 0), 0);
+  assert.ok("map" in unpaired);
+  assert.deepEqual(unpaired.map, map);
+  assert.deepEqual(pageMapFaults(unpaired.map, { base: 6, version: 6 }), []);
+  // And it can be paired again.
+  assert.deepEqual(accepted(unpaired.map, 0).sheets, [0, 1, 2, 3, 4, 5]);
+  // Only an accepted run is un-paired: an open one and a declined one are refused, and so is a run the map lacks.
+  assert.ok("refused" in unpairRun(map, 0));
+  const declined = answerRun(map, 0, false, by);
+  assert.ok("map" in declined);
+  assert.ok("refused" in unpairRun(declined.map, 0));
+  assert.ok("refused" in unpairRun(map, 3));
+});
+
+test("un-pairing a run works out again whether the sheets beside it are removed or unmapped", () => {
+  // Base 1 and 2 face a version that dropped base 2: once the run on base 3 is
+  // paired, base 2 stands between two pairs with nothing between them, and is
+  // removed; un-paired, its neighbour after it is gone, and it is unmapped.
+  const map: PageMap = {
+    from: 3,
+    to: 2,
+    sheets: [0, UNMAPPED, UNMAPPED],
+    runs: [{ kind: "place", start: 2, proposed: [1], answer: null }],
+    blank: { from: [], to: [] },
+  };
+  const paired = accepted(map, 0);
+  assert.deepEqual(paired.sheets, [0, REMOVED, 1]);
+  const unpaired = unpairRun(paired, 0);
+  assert.ok("map" in unpaired);
+  assert.deepEqual(unpaired.map.sheets, [0, UNMAPPED, UNMAPPED]);
 });
 
 test("a declined run leaves its sheets unmapped, and may still be accepted", () => {

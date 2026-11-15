@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import {
   abandonFileVersion,
   answerFileVersionMapRun,
+  unpairFileVersionMapRun,
   buildFileVersionMap,
   promoteFileVersion,
   revertFileSlugAs,
@@ -229,6 +230,12 @@ export async function buildVersionMap(versionId: string): Promise<VersionActionR
 export async function answerVersionMapRun(versionId: string, runIndex: number, accepted: boolean): Promise<VersionActionResult> {
   if (typeof versionId !== "string" || typeof runIndex !== "number" || typeof accepted !== "boolean") return { ok: false, error: "That isn't a question of this page map." };
   return versionAction((actor) => answerFileVersionMapRun(actor, versionId, runIndex, accepted));
+}
+
+/** Un-pairs one run of sheets a manager paired, making it a question again. */
+export async function unpairVersionMapRun(versionId: string, runIndex: number): Promise<VersionActionResult> {
+  if (typeof versionId !== "string" || typeof runIndex !== "number") return { ok: false, error: "That isn't a question of this page map." };
+  return versionAction((actor) => unpairFileVersionMapRun(actor, versionId, runIndex));
 }
 
 

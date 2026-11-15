@@ -30,7 +30,8 @@ export const UNMAPPED = -2;
  *
  * Until it is accepted its sheets are unmapped. Declining leaves them so and
  * takes the question off the list of open ones; a declined run may still be
- * accepted later. An accepted run stays.
+ * accepted later. An accepted run may be un-paired, which makes it an open
+ * question again (`unpairRun`).
  */
 export type PageMapRun = {
   kind: "labels" | "place";
@@ -282,12 +283,12 @@ export function pageMapNumbers(map: PageMap): PageMapNumbers {
 /**
  * A map with one run answered, or why it can't be.
  *
- * **Accepting writes the proposed sheets into the map, and stays**: an
- * accepted run is not declined afterwards, since notes and links have gone
- * through it. Declining leaves the run's sheets unmapped; a declined run may
- * still be accepted later. Whoever stores the result does so under the file
- * row's lock, onto the map as it then reads, since the map is one value and
- * two answers would otherwise each write the whole of it.
+ * **Accepting writes the proposed sheets into the map.** An accepted run is
+ * not declined: it is un-paired (`unpairRun`), which says what it costs.
+ * Declining leaves the run's sheets unmapped; a declined run may still be
+ * accepted later. Whoever stores the result does so under the file row's
+ * lock, onto the map as it then reads, since the map is one value and two
+ * answers would otherwise each write the whole of it.
  */
 export function answerRun(
   map: PageMap,
@@ -298,7 +299,7 @@ export function answerRun(
   const run = map.runs[runIndex];
   if (!run) return { refused: "That question isn't one this page map asks." };
   if (run.answer?.accepted) {
-    return { refused: accepted ? "Those sheets are already paired as proposed." : "Those sheets were paired as proposed, which can't be taken back: notes and links have gone through them." };
+    return { refused: accepted ? "Those sheets are already paired as proposed." : "Those sheets are paired by an answer. Un-pair them to make them a question again." };
   }
   const answer = { accepted, byUserId: by.userId, at: by.at.toISOString() };
   const runs = map.runs.map((other, index) => (index === runIndex ? { ...other, answer } : other));
@@ -310,6 +311,28 @@ export function answerRun(
     taken.add(run.proposed[k]);
     sheets[run.start + k] = run.proposed[k];
   }
+  return { map: classifyUnpaired({ ...map, sheets, runs }) };
+}
+
+/**
+ * A map with one accepted run un-paired, or why it can't be: its sheets
+ * unmapped again and its answer gone, so that it is an open question, asked
+ * as it was before anyone answered (docs/PDF.md §13, "A run of sheets").
+ *
+ * **It moves nothing back.** A note or a link part a carry moved through the
+ * run's pairs is on the later version by its own target, which no map is
+ * read for, and stays there. What changes is where a link is carried: one
+ * written against the base to those sheets is carried from then on only
+ * where its words are found. Stored as an answer is, under the file row's
+ * lock onto the map as it then reads.
+ */
+export function unpairRun(map: PageMap, runIndex: number): { map: PageMap } | { refused: string } {
+  const run = map.runs[runIndex];
+  if (!run) return { refused: "That question isn't one this page map asks." };
+  if (!run.answer?.accepted) return { refused: "Those sheets aren't paired by an answer, so there is nothing to un-pair." };
+  const sheets = [...map.sheets];
+  for (let k = 0; k < run.proposed.length; k++) sheets[run.start + k] = UNMAPPED;
+  const runs = map.runs.map((other, index) => (index === runIndex ? { ...other, answer: null } : other));
   return { map: classifyUnpaired({ ...map, sheets, runs }) };
 }
 

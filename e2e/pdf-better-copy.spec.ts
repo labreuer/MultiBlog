@@ -128,8 +128,11 @@ test.describe("a better copy of the same text", () => {
       // ---- the map's own page ----------------------------------------------
       await gotoOk(page, `${at}/v/2/map`);
       await expect(page.getByTestId("pdf-map-numbers")).toContainText("4 paired, 1 removed, 0 unmapped");
-      await expect(page.getByTestId("pdf-map-paired")).toContainText("2 → 1; 3–5 → 3–5");
-      await expect(page.getByTestId("pdf-map-removed")).toContainText("1.");
+      // Sheet by sheet: the first copy's cover removed, its sheet 2 one earlier, the sheet the better copy gained, and the rest in place.
+      const rows = page.getByTestId("pdf-map-row");
+      expect(await rows.evaluateAll((items) => items.map((item) => item.getAttribute("data-row-kind")))).toEqual(["removed", "matched", "added", "matched"]);
+      await expect(rows.nth(1)).toContainText("Paired, 1 sheet earlier in version 2.");
+      await expect(rows.nth(3)).toContainText("Paired, each in its place.");
       await expect(page.getByTestId("pdf-map-run")).toHaveCount(0);
       // It is its managers' page: a reader who may read the file is refused it.
       const { page: reader } = await secondUser({ role: "AUTHOR" });
@@ -642,7 +645,7 @@ test.describe("a better copy of the same text", () => {
   // A sheet whose text the later copy reads quite otherwise is paired by no
   // rule: the map proposes it by its place and asks. Until a manager accepts,
   // a note on it whose words stand twice in the later copy has no place.
-  test("accepting a run of sheets gives its notes a place, and the carry on the map's page takes them", async ({ page, request }) => {
+  test("accepting a run of sheets gives its notes a place, the carry on the map's page takes them, and un-pairing the run leaves them there", async ({ page, request }) => {
     test.setTimeout(180_000);
     const tag = token();
     const agent = await createAgent(request, { person: true });
@@ -699,6 +702,25 @@ test.describe("a better copy of the same text", () => {
       expect(moved.versionNumber).toBe(2);
       // On the sheet the run paired, and not the other one that holds its words.
       expect(JSON.parse(moved.row).pdf_target.pageIndex).toBe(1);
+
+      // Un-paired, the run is a question again. The confirmation counts the
+      // note the carry moved through it, and the note stays where it was moved.
+      await page.reload();
+      const paired = page.getByTestId("pdf-map-run");
+      await paired.getByTestId("pdf-map-unpair").click();
+      await expect(paired.getByTestId("pdf-map-unpair-confirm")).toContainText("1 note or link part a carry moved through them stays where it was moved.");
+      await paired.getByTestId("pdf-map-unpair-yes").click();
+      await expect(paired).toHaveAttribute("data-run-state", "open", { timeout: 30_000 });
+      await expect(page.getByTestId("pdf-map-numbers")).toContainText("2 paired, 0 removed, 1 unmapped");
+      await expect(paired.getByTestId("pdf-map-accept")).toBeVisible();
+      expect((await getFileVersionFacts(file.id))[1].pageMap).toMatchObject({ openRuns: 1 });
+      const stayed = (await getFileAnchorRows(file.id)).find((row) => row.id === note)!;
+      expect(stayed.versionNumber).toBe(2);
+      expect(JSON.parse(stayed.row).pdf_target.pageIndex).toBe(1);
+      // And it can be paired again.
+      await paired.getByTestId("pdf-map-accept").click();
+      await expect(paired).toHaveAttribute("data-run-state", "accepted", { timeout: 30_000 });
+      await expect(page.getByTestId("pdf-map-numbers")).toContainText("3 paired, 0 removed, 0 unmapped");
     } finally {
       await deleteTestFile(file.id);
       await agent.dispose();

@@ -1,0 +1,189 @@
+/* docs/PDF.md §14, "A version's page map, sheet by sheet" — a page map as
+   rows, with a strip above that draws the whole base. Colour is never the only
+   sign of a row's kind: each row's line says it in words. */
+
+.list h2 {
+  font-size: 1.05rem;
+  margin: 1.6rem 0 0.6rem;
+}
+
+/* One segment per row, as wide as its sheets and never too narrow to click.
+   It wraps where the segments can't all fit at their least width. */
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 0.6rem;
+}
+
+.segment {
+  flex: 1 0 0;
+  min-width: 0.6rem;
+  height: 1.1rem;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.segment:hover,
+.segment:focus-visible {
+  outline: 2px solid var(--accent-outline);
+  outline-offset: 1px;
+}
+
+.segment-matched,
+.segment-run-accepted {
+  background: var(--fill-success);
+}
+
+.segment-removed {
+  background: var(--fill-danger);
+}
+
+.segment-run-open {
+  background: var(--fill-warning);
+  border-color: var(--warning);
+}
+
+.segment-run-declined {
+  background: var(--fill-warning);
+}
+
+/* An added stretch has no sheet of the base: a mark between two segments. */
+.segment-added {
+  flex: 0 0 auto;
+  min-width: 0;
+  width: 4px;
+  border: none;
+  background: var(--link);
+}
+
+.questionsOnly {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.6rem;
+}
+
+.rows {
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.row {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  scroll-margin-top: 1rem;
+}
+
+.row:target {
+  background: var(--accent-wash);
+}
+
+.rowSheets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* A row's printed pages, beside its sheets: what it is in the book. */
+.pages {
+  font-weight: normal;
+  color: var(--text-secondary);
+}
+
+.count {
+  font-weight: normal;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.what {
+  margin-top: 0.2rem;
+  font-size: 0.9rem;
+}
+
+.quiet {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.pairs {
+  margin-top: 0.3rem;
+  font-size: 0.85rem;
+}
+
+.pairs summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.pairs ol {
+  list-style: none;
+  margin: 0.3rem 0 0 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.gap,
+.note {
+  color: var(--text-secondary);
+}
+
+.run {
+  padding: 0.8rem;
+  margin-top: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.run p + p {
+  margin-top: 0.5rem;
+}
+
+/* A run can be three hundred sheets: the table scrolls inside its box. */
+.runSheets {
+  max-height: 22rem;
+  overflow: auto;
+  margin: 0.6rem 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.runSheets table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.runSheets th,
+.runSheets td {
+  width: 50%;
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.runSheets th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-muted);
+  font-weight: 600;
+}
+
+.excerpt {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--text-secondary);
+}
+
+.sheetLine {
+  display: block;
+  margin-top: 0.3rem;
+  font-style: italic;
+}

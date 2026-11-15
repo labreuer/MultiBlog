@@ -7,7 +7,7 @@ import { currentTextVersion, readSheetsInk } from "@/lib/pdf-extract";
 import { skeletonOf } from "@/lib/pdf-fragment";
 import { pdfMetadata } from "@/lib/pdf-metadata";
 import { usablePageLabels } from "@/lib/pdf-page-labels";
-import { answerRun, parsePageMap, type PageMap } from "@/lib/pdf-page-map";
+import { answerRun, parsePageMap, unpairRun, type PageMap } from "@/lib/pdf-page-map";
 import { pairSheets, type SheetFacts, type VersionSheets } from "@/lib/pdf-page-map-pairing";
 import { hasRunsToCompare } from "@/lib/pdf-sheet-alike";
 import { prisma, type TransactionClient } from "@/lib/prisma";
@@ -70,9 +70,7 @@ export async function sheetFactsOf(version: MapSource): Promise<VersionSheets> {
 export async function sheetTextsOf(fileVersionId: string, indexes: readonly number[] | null): Promise<Map<number, string>> {
   const texts = new Map<number, string>();
   if (indexes?.length === 0) return texts;
-  const held = (await prisma.filePageText.groupBy({ by: ["textVersion"], where: { fileVersionId } })).map((row) => row.textVersion);
-  const current = await currentTextVersion();
-  const textVersion = held.includes(current) ? current : (held.sort().at(-1) ?? null);
+  const textVersion = await textVersionRead(fileVersionId);
   if (textVersion === null) return texts;
   const rows = await prisma.filePageText.findMany({
     where: { fileVersionId, textVersion, ...(indexes ? { pageIndex: { in: [...indexes] } } : {}) },
@@ -80,6 +78,34 @@ export async function sheetTextsOf(fileVersionId: string, indexes: readonly numb
   });
   for (const row of rows) texts.set(row.pageIndex, row.text);
   return texts;
+}
+
+/** The text version a version's sheets are read at: the current one where it has it, the greatest it has otherwise, null for none. */
+async function textVersionRead(fileVersionId: string): Promise<string | null> {
+  const held = (await prisma.filePageText.groupBy({ by: ["textVersion"], where: { fileVersionId } })).map((row) => row.textVersion);
+  const current = await currentTextVersion();
+  return held.includes(current) ? current : (held.sort().at(-1) ?? null);
+}
+
+/**
+ * The 0-based sheets of a version that hold a letter or a digit, read at the
+ * text version `sheetTextsOf` reads (docs/PDF.md §14, "A version's page map,
+ * sheet by sheet"): which sheets, never their text, since two books' text is
+ * megabytes and the map's list is drawn on every load. A sheet with no row
+ * has no text, as `sheetFactsOf` reads one.
+ *
+ * **The collation is named**: a regular expression's character classes follow
+ * it, and in a database whose locale is `C` a sheet of Greek has no letter.
+ * Narrower than the matcher's own test (`hasRunsToCompare` also takes a sheet
+ * with too little text to compare), so a row claims only what was read.
+ */
+export async function sheetsWithTextOf(fileVersionId: string): Promise<Set<number>> {
+  const textVersion = await textVersionRead(fileVersionId);
+  if (textVersion === null) return new Set();
+  const rows = await prisma.$queryRaw<{ page_index: number }[]>`
+    SELECT page_index FROM file_page_text
+    WHERE file_version_id = ${fileVersionId} AND text_version = ${textVersion} AND text COLLATE "pg_c_utf8" ~ '[[:alnum:]]'`;
+  return new Set(rows.map((row) => row.page_index));
 }
 
 const VERSION_FOR_MAP = {
@@ -203,6 +229,19 @@ export async function storePageMap(versionId: string, by: { userId: string }): P
  * answer would be lost.
  */
 export async function storeRunAnswer(versionId: string, runIndex: number, accepted: boolean, by: { userId: string }): Promise<{ map: PageMap; fileId: string; number: number }> {
+  return storeRunChange(versionId, "answer a question of", (standing) => answerRun(standing, runIndex, accepted, { userId: by.userId, at: new Date() }));
+}
+
+/** Un-pairs one accepted run of a version's map (`unpairRun`), written as an answer is. */
+export async function storeRunUnpairing(versionId: string, runIndex: number): Promise<{ map: PageMap; fileId: string; number: number }> {
+  return storeRunChange(versionId, "un-pair sheets of", (standing) => unpairRun(standing, runIndex));
+}
+
+async function storeRunChange(
+  versionId: string,
+  doing: string,
+  change: (standing: PageMap) => { map: PageMap } | { refused: string },
+): Promise<{ map: PageMap; fileId: string; number: number }> {
   const version = await prisma.fileVersion.findUnique({ where: { id: versionId }, select: { fileId: true, number: true } });
   if (!version) throw new ApiError("not_found", "That version doesn't exist.");
   const map = await prisma.$transaction(async (tx) => {
@@ -211,8 +250,8 @@ export async function storeRunAnswer(versionId: string, runIndex: number, accept
     if (file.deleted) throw new ApiError("conflict", "This file is deleted, and nothing is stored about its versions until it is restored.");
     const row = await tx.fileVersion.findUnique({ where: { id: versionId }, select: { pageMap: true } });
     const standing = parsePageMap(row?.pageMap);
-    if (!standing) throw new ApiError("conflict", `Version ${version.number} has no page map to answer a question of.`);
-    const answer = answerRun(standing, runIndex, accepted, { userId: by.userId, at: new Date() });
+    if (!standing) throw new ApiError("conflict", `Version ${version.number} has no page map to ${doing}.`);
+    const answer = change(standing);
     if ("refused" in answer) throw new ApiError("conflict", answer.refused);
     await tx.fileVersion.update({ where: { id: versionId }, data: { pageMap: pageMapColumn(answer.map) } });
     return answer.map;
