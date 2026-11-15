@@ -12,7 +12,7 @@ import type { AnchoredLinkView } from "@/lib/anchored-link-data";
 import type { OwnDraft } from "@/lib/annotation-data";
 import { pdfPath, type ShownVersion } from "@/lib/file-version";
 import { arrivalOf, parseLinkVersions } from "@/lib/pdf-link-reading";
-import type { FileVersionSummary, VersionManage } from "@/lib/file-version-data";
+import type { FileVersionSummary } from "@/lib/file-version-data";
 import type { OtherVersionNote } from "@/lib/pdf-annotation-entries";
 import type { WorklistItem } from "@/lib/file-note-move";
 
@@ -74,8 +74,8 @@ export default function PdfSurfaceClient(props: {
   versions: FileVersionSummary[];
   /** The file's versions as a link's reading takes them, as one string (`linkVersionsJson`): a memo keys on it. */
   linkVersions: string;
-  /** What whoever may manage the file is given on a waiting version's banner; null for every other reader. */
-  manage: VersionManage | null;
+  /** The file's manage page, for whoever may manage it (a waiting version's banner links it); null for every other reader. */
+  manageHref: string | null;
   fileUrl: string;
   title: string;
   /** The notes on the version shown, with the file's own. */

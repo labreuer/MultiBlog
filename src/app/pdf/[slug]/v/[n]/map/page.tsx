@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import LocalTime from "@/components/LocalTime";
 import PdfCarryActions from "@/components/pdf/PdfCarryActions";
 import PdfMapActions from "@/components/pdf/PdfMapActions";
 import PdfPageMapList from "@/components/pdf/PdfPageMapList";
 import { canUserManageFile } from "@/lib/file-authz";
-import { parseVersionNumber, pdfMapPath, pdfPath } from "@/lib/file-version";
+import { parseVersionNumber, pdfMapPath } from "@/lib/file-version";
 import { pageMapViewFor } from "@/lib/pdf-page-map-view";
 import { titleWhenOk } from "@/lib/route-access";
 import { signInPath } from "@/lib/sign-in-redirect";
@@ -17,14 +18,19 @@ import styles from "./page.module.css";
 // was uploaded over, which were removed and which no rule could place, and
 // the questions its runs of sheets raise, each answered here. Where the
 // version has no map, this is where one is asked for. The map itself is
-// drawn sheet by sheet, by the component the file's manage page will draw it
-// with too (`PdfPageMapList`; §14, "A version's page map, sheet by sheet").
+// drawn sheet by sheet, by the component the file's manage page draws a
+// waiting version's with (`PdfPageMapList`; §14, "A version's page map, sheet
+// by sheet"). An answer refreshes the page, which is server-rendered.
+//
+// **It links back to the file's manage page**, not to the viewer (§14, item
+// 6): that page is where its versions are managed, and where it is reached
+// from. Each sheet in the list links to the viewer.
 //
 // **Below a promoted version's map is the bulk carry** (§13, "Moving a note
 // forward"): pairing a run of sheets moves no note, and gives the notes on
 // those sheets a place to be carried to. The carry is started on the version
 // this map is from, shows what it would move, and is run from here. A
-// candidate's notes are carried by its promotion, from its own page.
+// candidate's notes are carried by its promotion, from the manage page.
 //
 // Open to whoever may manage the file: building a map and answering a run
 // are theirs (`canUserManageFile`), and the page shows nothing a manager
@@ -69,14 +75,18 @@ export default async function PdfVersionMapPage({ params }: Params) {
   const view = await pageMapViewFor(file.id, shown.id);
   if (!view) notFound();
 
-  const own = (number: number) => pdfPath(file.slug, { number, isLatest: false }, { own: true });
+  const manageHref = `/files/${file.id}/manage`;
   const base = view.baseNumber;
+  // Changes with every answer to a run, so the carry below starts over after
+  // one: what it showed was worked out through the map as it stood.
+  const mapKey = view.map ? view.map.runs.map((run) => run.state).join(",") : "none";
 
   return (
     <main className={styles.page}>
-      <h1>
-        Page map of <a href={own(view.number)}>{readingTitle(file, { ...shown, address: "version" })}</a>
-      </h1>
+      <p className={styles.back}>
+        <Link href={manageHref}>← Manage this file</Link>
+      </p>
+      <h1>Page map of {readingTitle(file, { ...shown, address: "version" })}</h1>
       {base === null ? (
         <p>Version {view.number} is this file&apos;s first, so it has no earlier version for its sheets to be matched with.</p>
       ) : view.map === null ? (
@@ -125,12 +135,12 @@ export default async function PdfVersionMapPage({ params }: Params) {
                 A page map moves no note. A carry moves forward every posted note and minted link part on version {base} that places itself through it, and
                 shows what it would do first. Run again after a run of sheets is paired, it takes the notes those sheets now reach.
               </p>
-              <PdfCarryActions versionId={view.baseVersionId} number={base} latestNumber={view.latestNumber} />
+              <PdfCarryActions key={mapKey} versionId={view.baseVersionId} number={base} latestNumber={view.latestNumber} />
             </section>
           )}
           {view.state === "candidate" && (
             <p className={styles.quiet} data-testid="pdf-map-carry-later">
-              Version {view.number} is not yet the latest. Its promotion can carry the notes forward, from <a href={own(view.number)}>its own page</a>.
+              Version {view.number} is not yet the latest. Its promotion can carry the notes forward, from <Link href={manageHref}>the file&apos;s manage page</Link>.
             </p>
           )}
 

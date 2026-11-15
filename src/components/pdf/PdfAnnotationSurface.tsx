@@ -39,7 +39,7 @@ import AnchoredLinkBanner from "@/components/anchored-link/AnchoredLinkBanner";
 import type { AnchoredLinkPart, AnchoredLinkView } from "@/lib/anchored-link-data";
 import type { OwnDraft } from "@/lib/annotation-data";
 import type { ShownVersion } from "@/lib/file-version";
-import type { FileVersionSummary, VersionManage } from "@/lib/file-version-data";
+import type { FileVersionSummary } from "@/lib/file-version-data";
 import type { OtherVersionNote } from "@/lib/pdf-annotation-entries";
 import type { NoteRef, WorklistItem } from "@/lib/file-note-move";
 import PdfVersionBanner from "./PdfVersionBanner";
@@ -100,8 +100,8 @@ type Props = {
   versions: FileVersionSummary[];
   /** The file's versions as a link's reading takes them, as one string (`linkVersionsJson`). */
   linkVersions: string;
-  /** What a manager of the file is given on a waiting version's banner; null for every other reader. */
-  manage: VersionManage | null;
+  /** The file's manage page, for whoever may manage it (a waiting version's banner links it); null for every other reader. */
+  manageHref: string | null;
   fileUrl: string;
   title: string;
   entries: PdfAnnotationEntry[];
@@ -132,7 +132,7 @@ export default function PdfAnnotationSurface({
   version,
   versions,
   linkVersions,
-  manage,
+  manageHref,
   fileUrl,
   title,
   entries,
@@ -1091,14 +1091,12 @@ export default function PdfAnnotationSurface({
           }
         />
 
-        {(anchoredLink || fragment.regions.length > 0 || fragment.page !== null || !version.isLatest || manage !== null || placing !== null) && (
+        {(anchoredLink || fragment.regions.length > 0 || fragment.page !== null || !version.isLatest || placing !== null) && (
           // One overlay for every banner: a ?sel= visit and a fragment can
           // arrive together, on a version that is not the latest, and fixed
-          // boxes at one spot would cover each other. A manager has it on
-          // the latest too, where the version banner says what the carry of
-          // a promotion just did; empty, it has no height.
+          // boxes at one spot would cover each other.
           <div className={styles.anchoredLinkOverlay}>
-            <PdfVersionBanner slug={slug} version={version} versions={versions} manage={manage} className={styles.overlayBanner} />
+            <PdfVersionBanner slug={slug} version={version} versions={versions} manageHref={manageHref} className={styles.overlayBanner} />
             {placing && <PdfPlacingBanner item={placing} versionNumber={version.number} onCancel={() => setPlacing(null)} className={styles.overlayBanner} />}
             {anchoredLink && (
               <AnchoredLinkBanner

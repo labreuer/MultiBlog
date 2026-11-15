@@ -93,19 +93,26 @@ test.describe("a file takes a new version", () => {
       await waitForViewer(stale);
       await expectSheetText(stale, `first copy ${tag}`);
 
-      // ---- the upload, from the file's own page ----------------------------
+      // ---- the upload, from the file's manage page ---------------------------
       await signIn(page, ADMIN_EMAIL);
-      await gotoOk(page, `/pdf/${file.slug}`);
-      await waitForViewer(page);
-      // A file with one version lists none to a reader, and gives its manager the upload.
-      await page.getByRole("tab", { name: "Metadata" }).click();
-      await expect(page.getByTestId("pdf-version-uploader")).toBeVisible();
+      const manage = `/files/${file.id}/manage`;
+      await gotoOk(page, manage);
+      const section = page.getByTestId("file-versions");
+      await expect(section.getByTestId("pdf-version-uploader")).toBeVisible();
       await page.getByTestId("pdf-version-file").setInputFiles({ name: "second-copy.pdf", mimeType: "application/pdf", buffer: pdfOf(V2) });
-      // It answers the candidate's own address, and that is where the uploader lands.
-      await expect(page).toHaveURL(new RegExp(`/pdf/${file.slug}/v/2$`), { timeout: 60_000 });
+      // The page stays where it is and shows the candidate's card, with the upload refused while it waits.
+      await expect(section.getByTestId("pdf-candidate-actions")).toContainText("Promoting makes version 2", { timeout: 60_000 });
+      await expect(page).toHaveURL(new RegExp(`${manage}$`));
+      await expect(section.getByTestId("pdf-upload-refused")).toContainText("Version 2 is waiting");
+      await expect(section.getByTestId("pdf-upload-better-copy")).toBeDisabled();
+      // The candidate is looked at on its own page in the viewer, which links its manager back here.
+      await section.locator("[data-version='2']").getByRole("link", { name: "look at it" }).click();
+      await expect(page).toHaveURL(new RegExp(`/pdf/${file.slug}/v/2$`));
       await waitForViewer(page);
       await expectSheetText(page, `second copy ${tag}`);
       await expect(banner).toContainText("not yet the latest");
+      await expect(banner.getByTestId("pdf-version-banner-manage").getByRole("link")).toHaveAttribute("href", manage);
+      await expect(banner.getByTestId("pdf-candidate-actions")).toHaveCount(0);
       await expect(page).toHaveTitle(new RegExp(`^${file.title}, version 2( |$)`));
 
       let versions = await getFileVersionFacts(file.id);
@@ -138,11 +145,11 @@ test.describe("a file takes a new version", () => {
       await waitForViewer(reader);
       await expectSheetText(reader, `second copy ${tag}`);
       await expect(reader.getByTestId("pdf-version-banner")).toContainText("not yet the latest");
-      // The version list shows the reader both, and none of its management half.
+      await expect(reader.getByTestId("pdf-version-banner-manage")).toHaveCount(0);
+      // The version list shows the reader both, and no link to manage the file.
       await reader.getByRole("tab", { name: "Metadata" }).click();
       await expect(reader.getByTestId("pdf-version-list").locator("[data-version='2']")).toContainText("not yet the latest");
-      await expect(reader.getByTestId("pdf-candidate-actions")).toHaveCount(0);
-      await expect(reader.getByTestId("pdf-version-uploader")).toHaveCount(0);
+      await expect(reader.getByRole("link", { name: "Manage this file" })).toHaveCount(0);
       await reader.getByRole("tab", { name: "Annotations" }).click();
 
       // An annotation is refused on the candidate: abandoning it would take the sheets it was measured on.
@@ -160,10 +167,14 @@ test.describe("a file takes a new version", () => {
         await expect(reader.locator(`#${fragmentOf(String(whole.result.card))}`)).toBeAttached({ timeout: 20_000 });
       }
 
-      // ---- the promotion, from the candidate's banner ----------------------
-      await expect(banner.getByTestId("pdf-candidate-actions")).toContainText("Promoting makes version 2");
-      await banner.getByRole("button", { name: "Promote version 2" }).click();
-      // The page reloads in full, on the same address, which is now the latest's own.
+      // ---- the promotion, from the manage page --------------------------------
+      await gotoOk(page, manage);
+      await section.getByTestId("pdf-candidate-actions").getByRole("button", { name: "Promote version 2" }).click();
+      // The page refreshes where it is: the card goes, and version 2 is the latest.
+      await expect(section.getByTestId("pdf-candidate-actions")).toHaveCount(0, { timeout: 60_000 });
+      await expect(section.locator("[data-version='2']")).toContainText("(the latest)");
+      await expect(section.getByTestId("pdf-upload-better-copy")).toBeEnabled();
+      await gotoOk(page, `/pdf/${file.slug}/v/2`);
       await expect(page.locator("[data-pdf-viewer]")).toContainText(`${file.title}, version 2 (the latest)`, { timeout: 60_000 });
       await expect(banner).toHaveCount(0);
       await expect(page).toHaveTitle(new RegExp(`^${file.title}, version 2( |$)`));
@@ -190,9 +201,9 @@ test.describe("a file takes a new version", () => {
       // Its card's link, written for the bare address, lands on that entry.
       await page.goto(`/pdf/${file.slug}#${fragmentOf(v1Note.card)}`);
       await expect(others.locator(`#${fragmentOf(v1Note.card)}`)).toBeInViewport({ timeout: 20_000 });
-      // A manager is told how many posted notes are still on the earlier version.
-      await page.getByRole("tab", { name: "Metadata" }).click();
-      await expect(page.getByTestId("pdf-version-list").locator("[data-version='1']").getByTestId("pdf-version-notes-left")).toContainText("1 posted note");
+      // A manager is told, on the manage page, how many posted notes are still on the earlier version.
+      await gotoOk(page, manage);
+      await expect(section.locator("[data-version='1']").getByTestId("pdf-version-notes-left")).toContainText("1 posted note");
 
       await gotoOk(page, `/pdf/${file.slug}/v/1`);
       await waitForViewer(page);
@@ -339,11 +350,14 @@ test.describe("a file takes a new version", () => {
       const V3 = copy(tag, "third");
       const third = await putVersion(page, file.id, pdfOf(V3), "third-copy.pdf");
       expect(third).toMatchObject({ status: 201, body: { version: 3, url: `/pdf/${file.slug}/v/3` } });
-      await gotoOk(page, `/pdf/${file.slug}/v/3#sheet=2`);
-      await waitForViewer(page);
-      await banner.getByRole("button", { name: "Abandon version 3" }).click();
-      await banner.getByRole("button", { name: "Abandon it for good" }).click();
+      await gotoOk(page, manage);
+      const card = section.getByTestId("pdf-candidate-actions");
+      await card.getByRole("button", { name: "Abandon version 3" }).click();
+      await card.getByRole("button", { name: "Abandon it for good" }).click();
+      await expect(section.locator("[data-version='3']")).toContainText("(abandoned)", { timeout: 60_000 });
+      await expect(card).toHaveCount(0);
       // Its address answers with a page that says so, and offers the link on the latest's, stamped.
+      await gotoOk(page, `/pdf/${file.slug}/v/3#sheet=2`);
       const gone = page.getByTestId("pdf-abandoned-version");
       await expect(gone).toContainText("Version 3 of this file was abandoned", { timeout: 60_000 });
       await expect(page.getByTestId("pdf-abandoned-latest")).toHaveAttribute("href", `/pdf/${file.slug}#sheet=2&v=3`);
@@ -462,9 +476,9 @@ test.describe("a file takes a new version", () => {
       expect(versions.map(({ number, state, bytesOnDisk }) => `${number} ${state} ${bytesOnDisk}`)).toEqual(["1 latest true", "2 abandoned true", "3 candidate true"]);
 
       // Its person promotes it.
-      await gotoOk(personPage, `/pdf/${file.slug}/v/3`);
-      await personPage.getByTestId("pdf-version-banner").getByRole("button", { name: "Promote version 3" }).click();
-      await expect(personPage.locator("[data-pdf-viewer]")).toContainText("version 3 (the latest)", { timeout: 60_000 });
+      await gotoOk(personPage, `/files/${file.id}/manage`);
+      await personPage.getByTestId("pdf-candidate-actions").getByRole("button", { name: "Promote version 3" }).click();
+      await expect(personPage.getByTestId("pdf-version-list").locator("[data-version='3']")).toContainText("(the latest)", { timeout: 60_000 });
       versions = await getFileVersionFacts(file.id);
       expect(versions[2]).toMatchObject({ state: "latest", promotedByEmail: person.email });
       // The latest's bytes again: unchanged, and nothing written.
@@ -488,11 +502,10 @@ test.describe("a file takes a new version", () => {
       expect((await putVersion(page, file.id, pdfOf(copy(tag, "second")), "second.pdf")).status).toBe(201);
       const second = (await getFileVersionFacts(file.id))[1];
 
-      // A manager opens the candidate's page, and stops to think.
-      await gotoOk(page, `/pdf/${file.slug}/v/2`);
-      await waitForViewer(page);
-      const actions = page.getByTestId("pdf-version-banner").getByTestId("pdf-candidate-actions");
-      await expect(actions).toBeVisible();
+      // A manager opens the file's manage page, and stops to think.
+      await gotoOk(page, `/files/${file.id}/manage`);
+      const actions = page.getByTestId("pdf-candidate-actions");
+      await expect(actions).toContainText("Promote version 2");
 
       // Another manager abandons that candidate and uploads a different one.
       const { user: other } = await secondUser({ role: "ADMIN" });

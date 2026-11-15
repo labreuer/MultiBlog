@@ -172,3 +172,20 @@
 .current ol {
   margin: 0.5rem 0 0.5rem 1.5rem;
 }
+
+/* The versions section (docs/PDF.md §14, item 6): newest first, one row each,
+   a waiting version's card and its page map inside its row. */
+.versionList {
+  list-style: none;
+  margin-top: 0.75rem;
+}
+
+.version {
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.9rem;
+}
+
+.version > * + * {
+  margin-top: 0.2rem;
+}

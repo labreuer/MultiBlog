@@ -592,6 +592,11 @@ the admin account.
 - **A PDF note with no target has a card that is not in the rail.** Above the
   rail's width it is in the panel and out of view, so assert `toBeAttached`,
   not `toBeVisible`.
+- **"No navigation" can't be checked by counting `framenavigated`.** A
+  `router.refresh()` updates the history, and Playwright reports that as a
+  navigation of the main frame, so a refresh and a reload count alike. Leave a
+  mark on `window` before the act and read it after: only a load of the page
+  clears it (`markWindow` in `file-manage.spec.ts`).
 - **Two PDF notes on one line near the top of page 1 can leave a rail card
   under the panel's toolbar**, where a click lands on the toolbar and times
   out. `pdf-versions.spec.ts` dispatches the click there. Whether a person can

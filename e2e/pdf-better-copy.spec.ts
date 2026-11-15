@@ -94,6 +94,7 @@ test.describe("a better copy of the same text", () => {
     const agent = await createAgent(request);
     const file: TestFile = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: firstCopy(tag), pageLabels: FIRST_LABELS, inked: [4] });
     const at = `/pdf/${file.slug}`;
+    const manage = `/files/${file.id}/manage`;
     const banner = page.getByTestId("pdf-version-banner");
     const prefix = `e2ecopy${Date.now().toString(36)}`;
     const key = `${prefix}-work`;
@@ -101,15 +102,14 @@ test.describe("a better copy of the same text", () => {
     try {
       // ---- the upload, as a better copy ------------------------------------
       await signIn(page, ADMIN_EMAIL);
-      await gotoOk(page, at);
-      await waitForViewer(page);
-      await page.getByRole("tab", { name: "Metadata" }).click();
+      await gotoOk(page, manage);
       const chooser = page.waitForEvent("filechooser");
       await page.getByTestId("pdf-upload-better-copy").click();
       await (await chooser).setFiles({ name: "better-copy.pdf", mimeType: "application/pdf", buffer: betterPdf(tag) });
-      // The map is asked for before the candidate's page opens, so that page can say what it found.
-      await expect(page).toHaveURL(new RegExp(`${at}/v/2$`), { timeout: 90_000 });
-      await waitForViewer(page);
+      // The map is asked for once the upload answers, and the candidate's card says what it found, on the page the upload was made from.
+      const actions = page.getByTestId("pdf-candidate-actions");
+      await expect(actions.getByTestId("pdf-candidate-map")).toContainText("4 sheets paired, 1 removed and 0 unmapped", { timeout: 90_000 });
+      await expect(page).toHaveURL(new RegExp(`${manage}$`));
 
       let versions = await getFileVersionFacts(file.id);
       expect(versions[1]).toMatchObject({ number: 2, state: "candidate", baseNumber: 1 });
@@ -119,14 +119,23 @@ test.describe("a better copy of the same text", () => {
       expect(versions[1].pageMap).toEqual({ sheets: MAP, blank: { from: [], to: [1] }, openRuns: 0, storedByEmail: ADMIN_EMAIL, carryId: null });
       expect(versions[0].pageMap).toBeNull();
 
-      // The candidate's page says what the map found, in numbers, and links its page.
-      const actions = banner.getByTestId("pdf-candidate-actions");
-      await expect(actions.getByTestId("pdf-candidate-map")).toContainText("4 sheets paired, 1 removed and 0 unmapped");
+      // The candidate's card says what the map found, in numbers, links its page, and draws it sheet by sheet below.
       await expect(actions.getByTestId("pdf-candidate-map").getByRole("link")).toHaveAttribute("href", `${at}/v/2/map`);
       await expect(actions).toContainText("A link written against version 1 is carried to version 2.");
+      expect(await page.getByTestId("pdf-map-row").evaluateAll((items) => items.map((item) => item.getAttribute("data-row-kind")))).toEqual([
+        "removed",
+        "matched",
+        "added",
+        "matched",
+      ]);
+      // The candidate's own page says it waits, and sends its manager here.
+      await gotoOk(page, `${at}/v/2`);
+      await waitForViewer(page);
+      await expect(banner.getByTestId("pdf-version-banner-manage").getByRole("link")).toHaveAttribute("href", manage);
 
-      // ---- the map's own page ----------------------------------------------
+      // ---- the map's own page, which links back to the manage page ----------
       await gotoOk(page, `${at}/v/2/map`);
+      await expect(page.getByRole("link", { name: "← Manage this file" })).toHaveAttribute("href", manage);
       await expect(page.getByTestId("pdf-map-numbers")).toContainText("4 paired, 1 removed, 0 unmapped");
       // Sheet by sheet: the first copy's cover removed, its sheet 2 one earlier, the sheet the better copy gained, and the rest in place.
       const rows = page.getByTestId("pdf-map-row");
@@ -155,10 +164,9 @@ test.describe("a better copy of the same text", () => {
       await expect(fragmentBanner(page).getByTestId("pdf-fragment-carried")).toHaveCount(0);
 
       // ---- promoted: the bare address shows the better copy ----------------
-      await gotoOk(page, `${at}/v/2`);
-      await waitForViewer(page);
-      await banner.getByRole("button", { name: "Promote version 2" }).click();
-      await expect(page.locator("[data-pdf-viewer]")).toContainText(`${file.title}, version 2 (the latest)`, { timeout: 60_000 });
+      await gotoOk(page, manage);
+      await actions.getByRole("button", { name: /^Promote version 2/ }).click();
+      await expect(page.getByTestId("pdf-version-list").locator("[data-version='2']")).toContainText("(the latest)", { timeout: 60_000 });
       versions = await getFileVersionFacts(file.id);
       expect(versions.map(({ number, state }) => ({ number, state }))).toEqual([
         { number: 1, state: "earlier" },
@@ -313,7 +321,7 @@ test.describe("a better copy of the same text", () => {
     const tag = token();
     const file: TestFile = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: firstCopy(tag), pageLabels: FIRST_LABELS, inked: [4] });
     const at = `/pdf/${file.slug}`;
-    const banner = page.getByTestId("pdf-version-banner");
+    const manage = `/files/${file.id}/manage`;
     // Two writers beside the manager, each a person with a browser and a token of their own.
     const one = await secondUser({ role: "AUTHOR" });
     const two = await secondUser({ role: "AUTHOR" });
@@ -374,17 +382,15 @@ test.describe("a better copy of the same text", () => {
 
       // ---- the better copy, uploaded as one -----------------------------------
       await signIn(page, ADMIN_EMAIL);
-      await gotoOk(page, at);
-      await waitForViewer(page);
-      await page.getByRole("tab", { name: "Metadata" }).click();
+      await gotoOk(page, manage);
       const chooser = page.waitForEvent("filechooser");
       await page.getByTestId("pdf-upload-better-copy").click();
       await (await chooser).setFiles({ name: "better-copy.pdf", mimeType: "application/pdf", buffer: betterPdf(tag) });
-      await expect(page).toHaveURL(new RegExp(`${at}/v/2$`), { timeout: 90_000 });
-      await waitForViewer(page);
+      const card = page.getByTestId("pdf-candidate-actions");
+      await expect(card.getByTestId("pdf-candidate-map")).toBeVisible({ timeout: 90_000 });
 
-      // What the candidate's page says would carry, before anything is moved.
-      const wouldCarry = banner.getByTestId("pdf-candidate-carry");
+      // What the candidate's card says would carry, before anything is moved.
+      const wouldCarry = card.getByTestId("pdf-candidate-carry");
       await expect(wouldCarry).toHaveAttribute("data-carry-state", "ready", { timeout: 60_000 });
       await expect(wouldCarry).toContainText("3 notes and 1 link part would move to version 2.");
       await expect(wouldCarry).toContainText("1 on version 1 would stay, for its author to move or leave.");
@@ -394,12 +400,18 @@ test.describe("a better copy of the same text", () => {
       expect(await getFileAnchorMoves(file.id)).toEqual([]);
 
       // ---- promoted with the carry --------------------------------------------
-      await banner.getByTestId("pdf-candidate-promote-carry").click();
-      await expect(page.locator("[data-pdf-viewer]")).toContainText(`${file.title}, version 2 (the latest)`, { timeout: 60_000 });
-      // The page the promotion brings says what its carry did.
+      await card.getByTestId("pdf-candidate-promote-carry").click();
+      // The page says what the carry did, after the refresh that takes the candidate's card away.
       const carried = page.getByTestId("pdf-carry-outcome");
-      await expect(carried).toContainText("4 notes and link parts were moved to version 2.", { timeout: 30_000 });
+      await expect(carried).toContainText("Version 2 is now the latest.", { timeout: 60_000 });
+      await expect(carried).toContainText("4 notes and link parts were moved to version 2.");
       await expect(carried).toContainText("1 on version 1 stayed.");
+      await expect(card).toHaveCount(0);
+      await expect(page.getByTestId("pdf-version-list").locator("[data-version='2']")).toContainText("(the latest)");
+      // The latest's page in the viewer reports no carry.
+      await gotoOk(page, at);
+      await waitForViewer(page);
+      await expect(page.getByTestId("pdf-carry-outcome")).toHaveCount(0);
 
       rows = await getFileAnchorRows(file.id);
       // Both writers' notes moved, and what a carry doesn't take stayed.
@@ -491,9 +503,7 @@ test.describe("a better copy of the same text", () => {
       const beforeSecond = await getFileAnchorRows(file.id);
       expect(rowOf(beforeSecond, later).versionNumber).toBe(1);
       expect(rowOf(beforeSecond, laterKept).versionNumber).toBe(1);
-      await gotoOk(page, at);
-      await waitForViewer(page);
-      await page.getByRole("tab", { name: "Metadata" }).click();
+      await gotoOk(page, manage);
       const firstVersion = page.getByTestId("pdf-version-list").locator("[data-version='1']");
       await expect(firstVersion.getByTestId("pdf-version-notes-left")).toContainText("3 posted notes are still on this version.");
       // It shows what it would do first, and that moves nothing.
@@ -504,7 +514,6 @@ test.describe("a better copy of the same text", () => {
       await firstVersion.getByTestId("pdf-carry-run").click();
       await expect(firstVersion.getByTestId("pdf-carry-result")).toContainText("1 note or link part was moved to version 2.", { timeout: 60_000 });
       await firstVersion.getByTestId("pdf-carry-reload").click();
-      await waitForViewer(page);
       rows = await getFileAnchorRows(file.id);
       expect(rowOf(rows, later).versionNumber).toBe(2);
       expect(rowOf(rows, onPlate).versionNumber).toBe(1);
@@ -518,7 +527,6 @@ test.describe("a better copy of the same text", () => {
       expect(secondCarry).not.toBe(firstCarry);
 
       // ---- a manager shows a carry's moves together ----------------------------
-      await page.getByRole("tab", { name: "Metadata" }).click();
       const records = page.getByTestId("pdf-version-list").locator("[data-version='2']").getByTestId("pdf-carry-record");
       await expect(records).toHaveCount(2);
       await expect(records.last()).toContainText("A carry moved 4 notes and link parts here");
@@ -527,13 +535,14 @@ test.describe("a better copy of the same text", () => {
       await expect
         .poll(async () => (await getFileAnchorMoves(file.id)).filter((move) => move.toNumber !== null && !move.hidden).map((move) => move.carryId), { timeout: 30_000 })
         .toEqual([firstCarry, firstCarry, firstCarry, firstCarry]);
-      // A writer who doesn't manage the file is given no carry and may run none.
+      // A writer who doesn't manage the file is given no carry and may run none: the version list in the viewer is the reading half alone, and the manage page refuses them.
       await gotoOk(two.page, at);
       await waitForViewer(two.page);
       await two.page.getByRole("tab", { name: "Metadata" }).click();
       await expect(two.page.getByTestId("pdf-version-list")).toBeVisible();
       await expect(two.page.getByTestId("pdf-carry-record")).toHaveCount(0);
       await expect(two.page.getByTestId("pdf-carry")).toHaveCount(0);
+      await expect(two.page.getByRole("link", { name: "Manage this file" })).toHaveCount(0);
       // Shown, the carry's moves are on each moved note's card: which version it was moved from, and who moved it.
       await two.page.getByRole("tab", { name: "Annotations" }).click();
       for (const id of [word, changed, rectangle]) {

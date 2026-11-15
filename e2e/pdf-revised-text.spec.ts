@@ -63,7 +63,6 @@ test.describe("a revised text", () => {
     const tag = token();
     const file: TestFile = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: firstDraft(tag), pageLabels: LABELS });
     const at = `/pdf/${file.slug}`;
-    const banner = page.getByTestId("pdf-version-banner");
     // The author, another writer, and a bot that works for the author.
     const one = await secondUser({ role: "AUTHOR" });
     const two = await secondUser({ role: "AUTHOR" });
@@ -123,19 +122,19 @@ test.describe("a revised text", () => {
 
       // ---- the revision, uploaded as a revised text and promoted --------------
       await signIn(page, ADMIN_EMAIL);
-      await gotoOk(page, at);
-      await waitForViewer(page);
-      await page.getByRole("tab", { name: "Metadata" }).click();
+      await gotoOk(page, `/files/${file.id}/manage`);
       const chooser = page.waitForEvent("filechooser");
       await page.getByTestId("pdf-upload-revised-text").click();
       await (await chooser).setFiles({ name: "revision.pdf", mimeType: "application/pdf", buffer: revisionPdf(tag) });
-      await expect(page).toHaveURL(new RegExp(`${at}/v/2$`), { timeout: 90_000 });
-      await waitForViewer(page);
       // Its pages are not matched with the first draft's, so its promotion has no carry to offer.
-      await expect(banner.getByTestId("pdf-candidate-no-map")).toBeVisible();
-      await expect(banner.getByTestId("pdf-candidate-promote-carry")).toHaveCount(0);
-      await banner.getByRole("button", { name: "Promote version 2" }).click();
-      await expect(page.locator("[data-pdf-viewer]")).toContainText(`${file.title}, version 2 (the latest)`, { timeout: 60_000 });
+      const candidate = page.getByTestId("pdf-candidate-actions");
+      await expect(candidate.getByTestId("pdf-candidate-no-map")).toBeVisible({ timeout: 90_000 });
+      await expect(candidate.getByTestId("pdf-candidate-build-map")).toHaveText("Match its pages");
+      await expect(candidate.getByTestId("pdf-candidate-promote-carry")).toHaveCount(0);
+      await candidate.getByRole("button", { name: "Promote version 2" }).click();
+      await expect(page.getByTestId("pdf-version-list").locator("[data-version='2']")).toContainText("(the latest)", { timeout: 60_000 });
+      await gotoOk(page, at);
+      await waitForViewer(page);
       const versions = await getFileVersionFacts(file.id);
       expect(versions.map(({ number, state, pageMap }) => ({ number, state, pageMap }))).toEqual([
         { number: 1, state: "earlier", pageMap: null },

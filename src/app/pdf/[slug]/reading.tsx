@@ -12,22 +12,11 @@ import TagChips from "@/components/tags/TagChips";
 import FileReferencesPanel from "@/components/pdf/FileReferencesPanel";
 import PdfVersionList from "@/components/pdf/PdfVersionList";
 import PdfAbandonedVersion from "@/components/pdf/PdfAbandonedVersion";
-import { candidateFactsFor } from "@/lib/file-version-candidate";
-import { actorFromSessionUser } from "@/lib/actor";
 import { referencesOfFile } from "@/lib/reference-files";
 import { canWriteReferences } from "@/lib/role-checks";
 import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
 import { fileVersionTitle, pdfPath, type ShownVersion } from "@/lib/file-version";
-import { carriesOf } from "@/lib/file-anchor-move";
-import {
-  VERSION_SUMMARY_SELECT,
-  linkVersionsOf,
-  mintedPartsByVersion,
-  postedNotesByVersion,
-  summariseVersions,
-  type FileVersionSummary,
-  type VersionManage,
-} from "@/lib/file-version-data";
+import { VERSION_SUMMARY_SELECT, linkVersionsOf, summariseVersions, type FileVersionSummary } from "@/lib/file-version-data";
 import { linkVersionsJson } from "@/lib/pdf-link-reading";
 import styles from "./page.module.css";
 
@@ -194,26 +183,15 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
   // A reference's record is public, and this page has checked its reader may read the file.
   const references = await referencesOfFile(file.id);
 
-  // docs/PDF.md §13 — what whoever may manage the file is given: the upload
-  // of a new version, a waiting version's promotion and abandoning with what
-  // a promotion would do, and the notes still on each earlier version.
-  // Null for every other reader, so none of it reaches their page.
-  const latest = versions.find((version) => version.state === "latest");
-  const waiting = versions.find((version) => version.state === "candidate");
-  const manage: VersionManage | null = (await canUserManageFile(user.id, user.role, file.id))
-    ? {
-        fileId: file.id,
-        takesVersions: latest !== undefined && latest.pageCount !== null,
-        notesOn: versions.length > 1 ? await postedNotesByVersion(file.id) : {},
-        partsOn: versions.length > 1 ? await mintedPartsByVersion(file.id) : {},
-        carries: versions.length > 1 ? await carriesOf(file.id) : [],
-        candidateFacts: waiting && latest ? await candidateFactsFor(actorFromSessionUser(user), file.id, waiting, latest) : null,
-      }
-    : null;
-  // A page map's numbers and the version it is from belong to that half too.
+  // docs/PDF.md §14, "What the viewer keeps" — what whoever may manage the
+  // file is given here: a link to its manage page, where everything about its
+  // versions is done, at the top of the Metadata pane and on a waiting
+  // version's banner. Null for every other reader.
+  const manageHref = (await canUserManageFile(user.id, user.role, file.id)) ? `/files/${file.id}/manage` : null;
+  // A page map's numbers and the version it is from are kept to the manager.
   // The map itself reaches every reader's viewer, which carries links with it
   // (`linkVersions`); what it found, in numbers, is its managers' to read.
-  const sent = (version: FileVersionSummary): FileVersionSummary => (manage ? version : { ...version, baseNumber: null, map: null });
+  const sent = (version: FileVersionSummary): FileVersionSummary => (manageHref ? version : { ...version, baseNumber: null, map: null });
   const listed = versions.map(sent);
 
   // PLAN.md §20d — the tag chips, handed to the viewer as its Metadata
@@ -247,7 +225,7 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
         version={shown}
         versions={listed}
         linkVersions={linkVersions}
-        manage={manage}
+        manageHref={manageHref}
         fileUrl={fileUrl}
         // A version's own page says "the latest" beside its title while it is.
         title={shown.address === "version" && shown.isLatest ? `${readingTitle(file, shown)} (the latest)` : readingTitle(file, shown)}
@@ -258,9 +236,9 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
         anchoredLink={anchoredLink}
         metadata={[
           // docs/PDF.md §14 — where whoever may manage the file does so; by id, as every link to that page is.
-          manage && (
+          manageHref && (
             <p key="manage" className={styles.manageLink}>
-              <Link href={`/files/${file.id}/manage`}>Manage this file</Link>
+              <Link href={manageHref}>Manage this file</Link>
             </p>
           ),
           <TagChips key="tags" target={{ kind: "file", id: file.id }} />,
@@ -272,11 +250,8 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
             canWrite={canWriteReferences(user.role)}
             isPrivate={file.visibility === "PRIVATE"}
           />,
-          // Listed once a file has a second version: its only version needs no
-          // list. A manager has it from the first, since it holds the upload.
-          (versions.length > 1 || manage?.takesVersions) && (
-            <PdfVersionList key="versions" slug={file.slug} versions={listed} shownId={shown.id} manage={manage} />
-          ),
+          // Listed once a file has a second version, for every reader alike: its only version needs no list.
+          versions.length > 1 && <PdfVersionList key="versions" slug={file.slug} versions={listed} shownId={shown.id} />,
         ]}
       />
       {/* docs/ANCHORED_LINKS.md — the open-link tray, a self-fetching

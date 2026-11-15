@@ -13,13 +13,20 @@ import { signInPath } from "@/lib/sign-in-redirect";
 import type { Prisma } from "@/generated/prisma/client";
 import SlugManager from "@/components/SlugManager";
 import LocalTime from "@/components/LocalTime";
+import { actorFromSessionUser } from "@/lib/actor";
 import { FileDeleteSection, FileOwnersSection, FileTitleSection, FileVisibilitySection, type OwnerEntry } from "./sections";
+import FileVersionsSection from "./versions";
+import { managedVersionsOf, VERSIONS_SELECT } from "./versions-data";
 import styles from "./page.module.css";
 
 // docs/PDF.md §14 — one page per file where its managers do everything
-// managing it involves: its title, its slug, its visibility, its owners, and
-// deleting or restoring it. The acts are src/lib/file-manage.ts's, through the
-// answering actions in src/app/actions/files.ts.
+// managing it involves: its title, its slug, its visibility, its owners, its
+// versions (a PDF's upload, promotion, abandoning and carries, with each
+// version's page map), and deleting or restoring it. The acts are
+// src/lib/file-manage.ts's and src/lib/file-anchor-move.ts's, through the
+// answering actions in src/app/actions/files.ts and, for the two that take
+// seconds and nobody waits on, the Route Handlers under
+// /api/files/versions/<id>/.
 //
 // **Addressed by the file's id** (`/files/<id>/manage`), as `/doc/<id>/edit`
 // is: the page changes the slug, so a slug address would move under it, and
@@ -56,6 +63,7 @@ const select = {
   currentVersionId: true,
   currentVersion: { select: { filename: true, contentType: true, byteSize: true, pageCount: true } },
   metrics: { select: { annotationCount: true } },
+  versions: VERSIONS_SELECT,
   slugHistory: { orderBy: { createdAt: "asc" }, select: { slug: true, createdAt: true } },
   // Every owner, a deleted account's included: the list is shown whole and
   // `expected` is compared with all of it (setFileOwners).
@@ -99,7 +107,7 @@ export default async function ManageFilePage({ params }: { params: Promise<{ slu
   const deleted = file.deletedByUserId !== null;
   const nameOf = (person: { name: string | null; email: string } | null) => (person ? staffDisplayNameOf(person, user.role) : "");
 
-  const [eligible, standardSlug] = await Promise.all([
+  const [eligible, standardSlug, managedVersions] = await Promise.all([
     // Live accounts only (the filtered client), as the doc byline picker reads them.
     prisma.user.findMany({
       where: { role: { in: FILE_MANAGER_ROLES } },
@@ -107,6 +115,7 @@ export default async function ManageFilePage({ params }: { params: Promise<{ slu
       orderBy: { name: "asc" },
     }),
     uniqueFileSlug(file.title, file.id),
+    managedVersionsOf(actorFromSessionUser(user), file, { isPdf }),
   ]);
   const owners: OwnerEntry[] = file.owners.map(({ user: owner }) => ({
     id: owner.id,
@@ -209,6 +218,10 @@ export default async function ManageFilePage({ params }: { params: Promise<{ slu
           owners={owners}
           eligible={eligible.map((person) => ({ id: person.id, label: nameOf(person) }))}
         />
+
+        {/* Keyed on the file, so what it holds (a promotion's outcome, a
+            build that is running) outlives every refresh. */}
+        <FileVersionsSection key={file.id} fileId={file.id} slug={file.slug} isPdf={isPdf} deleted={deleted} managed={managedVersions} />
       </fieldset>
 
       <FileDeleteSection

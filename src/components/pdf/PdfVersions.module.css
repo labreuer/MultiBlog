@@ -186,7 +186,8 @@
   color: var(--text-secondary);
 }
 
-/* The management half: the upload, a candidate's promotion and abandoning. */
+/* The management half, on a file's manage page (docs/PDF.md §14, item 6):
+   the upload, a candidate's promotion and abandoning, the carries. */
 .manage {
   margin-top: 0.5rem;
   display: flex;
@@ -227,6 +228,38 @@
 .manageError {
   font-size: 0.8rem;
   color: var(--danger);
+}
+
+/* The upload's two boxes, side by side where they fit: each a button and a
+   drop target. While a file is dragged over the versions section both are
+   marked, and the one under it more strongly. */
+.dropBoxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.6rem;
+}
+
+.dropBox {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+}
+
+.dropTarget {
+  border-color: var(--link);
+  background: var(--surface-muted);
+}
+
+/* A second line inside the border, so the box keeps its size. */
+.dropOver {
+  border-style: solid;
+  border-color: var(--link);
+  box-shadow: inset 0 0 0 1px var(--link);
+  background: var(--accent-wash);
 }
 
 .gone {

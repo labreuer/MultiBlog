@@ -6,7 +6,6 @@ import {
   abandonFileVersion,
   answerFileVersionMapRun,
   unpairFileVersionMapRun,
-  buildFileVersionMap,
   promoteFileVersion,
   revertFileSlugAs,
   setFileDeleted,
@@ -17,7 +16,6 @@ import {
 } from "@/lib/file-manage";
 import {
   carryFromVersion,
-  previewCarryAtPromotion,
   previewCarryFromVersion,
   setCarryHidden,
   type CarryPreview,
@@ -216,16 +214,6 @@ export async function abandonVersion(versionId: string): Promise<VersionActionRe
   return versionAction((actor) => abandonFileVersion(actor, versionId));
 }
 
-/**
- * Stores the page map between a version and the one it was uploaded over,
- * where it has none (docs/PDF.md §13, "Matching the pages"): the act that
- * says the two hold the same text.
- */
-export async function buildVersionMap(versionId: string): Promise<VersionActionResult> {
-  if (typeof versionId !== "string") return { ok: false, error: "That isn't a version." };
-  return versionAction((actor) => buildFileVersionMap(actor, versionId));
-}
-
 /** Accepts or declines one run of sheets of a version's page map. */
 export async function answerVersionMapRun(versionId: string, runIndex: number, accepted: boolean): Promise<VersionActionResult> {
   if (typeof versionId !== "string" || typeof runIndex !== "number" || typeof accepted !== "boolean") return { ok: false, error: "That isn't a question of this page map." };
@@ -238,22 +226,16 @@ export async function unpairVersionMapRun(versionId: string, runIndex: number): 
   return versionAction((actor) => unpairFileVersionMapRun(actor, versionId, runIndex));
 }
 
+// A page map's build and a promotion's carry preview are not actions: each
+// takes seconds and nobody waits on it, so each is a Route Handler under
+// /api/files/versions/<id>/ (docs/PDF.md §14, item 6), which doesn't hold the
+// page's other saves behind it as an action would.
 
 /** What an action about a carry answers: what was asked for, or why not, in words for whoever clicked. */
 export type CarryAnswer<T> = FileAnswer<T>;
 
 async function carryAction<T>(run: (actor: Actor) => Promise<T>): Promise<CarryAnswer<T>> {
   return answering("a carry's action", run);
-}
-
-/**
- * What promoting a waiting version with the carry would move (docs/PDF.md
- * §13, "Moving a note forward"); null where the version has no page map, and
- * so no carry to offer. It stores nothing.
- */
-export async function previewPromotionCarry(versionId: string): Promise<CarryAnswer<CarryPreview | null>> {
-  if (typeof versionId !== "string") return { ok: false, error: "That isn't a version." };
-  return carryAction((actor) => previewCarryAtPromotion(actor, versionId));
 }
 
 /** What a carry started on one earlier version would do: the page maps it would store and the notes it would move. It stores nothing. */

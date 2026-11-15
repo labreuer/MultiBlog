@@ -328,24 +328,6 @@ export async function linkVersionsOf(file: { currentVersionId: string | null; ve
 }
 
 /**
- * What the version list gives whoever may manage the file (docs/PDF.md §13,
- * "Addresses"): never sent for any other reader.
- */
-export type VersionManage = {
-  fileId: string;
-  /** Whether the file takes a new version at all: a PDF does, a .docx doesn't. */
-  takesVersions: boolean;
-  /** How many posted notes are on each version, by version id: what is still on an earlier one until a carry or its author moves it. */
-  notesOn: Record<string, number>;
-  /** How many parts of minted links are on each version, by version id. */
-  partsOn: Record<string, number>;
-  /** The bulk carries that moved a note of this file, newest first, each with how many of its moves are shown (`carriesOf`, file-anchor-move.ts). */
-  carries: { id: string; toVersionId: string; at: string; moves: number; shown: number; hidden: boolean }[];
-  /** What a promotion of the waiting version would do to the file's citations; null where none waits. */
-  candidateFacts: { unlabelled: boolean; pagedCitations: number | null } | null;
-};
-
-/**
  * How many posted notes are on each of a file's versions, by version id: its
  * roots with a PDF target, DRAFTs and deleted ones left out. A reply has no
  * version of its own and is with its root, so it is not counted apart.
