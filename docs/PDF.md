@@ -3524,3 +3524,589 @@ test while each file has one version. So four specs make second versions:
 
   The two long specs end on a clean run of `check-file-versions.ts` over their own carries,
   moves, marks and the SQL undo.
+
+## 14. Planned: a file's manage page
+
+**Not built.** One page per file where its managers do everything managing it involves:
+rename it, re-slug it, change its visibility and its **owners**, delete and restore it, and
+for a PDF upload, promote, abandon and carry its versions. The viewer goes back to being a
+reading surface. Today these acts are split between `/files`' row (visibility, delete), the
+viewer's Metadata pane (all of §13's management half), and the MCP server alone (title,
+slug, owners: `rename_file` and `manage`). `updateFileTitle`, `updateFileSlug` and
+`revertFileSlug` in `src/app/actions/files.ts` have no caller.
+
+### The address and the gate
+
+- **`/files/<id>/manage`.** The segment takes a file's id, and its slug or a past slug too,
+  which redirects to the id. Every link the app writes uses the id, as `/doc/<id>/edit` does:
+  - the page changes the slug, so a slug address would move under it;
+  - two deleted files may share a slug (`resolveFileParam` prefers the live one), and a
+    deleted file is exactly what this page has to open, to restore it.
+  - The id is `StoredFile.id`, looked up on `file` and never on `file_version`, though a
+    migrated version 1 has the same id (§0).
+- **The param is read as an id first, and as a slug only where no file has that id**: a
+  `findUnique` by id, then `resolveFileParam`, which takes a slug alone. `resolveDocParam`
+  reads a doc's in the same order. A slug is whatever a manager types, so a file can be
+  given another file's id as its slug. Read slug first, that file would answer the other's
+  Manage links.
+- **The redirect from a slug to the id comes after the gate**, as the download's landing
+  orders them (`src/app/files/[slug]/landing.tsx`). A reader who may not manage the file is
+  answered Forbidden at the address they typed, and learns no id from it.
+- **The page is `src/app/files/[slug]/manage/page.tsx`.** The segment keeps the name
+  `/files/[slug]` already has, since Next refuses two names for one segment.
+- **Gated on `canUserManageFile`**, and **opens a deleted file**: the page shows the file
+  as deleted and offers its restore. The acts that refuse a deleted file (an upload, a
+  promotion, building a map) keep refusing it.
+  - **A deleted file's page is its facts and its restore.** Every other section is drawn
+    disabled, under one line that says to restore the file first, as `/files` disables the
+    visibility cell of a deleted row. The write layer would take a title, a visibility and
+    an owner list for a deleted file, and the page offers none of them: what a manager
+    wants of a deleted file is to have it back, and each of those can be done a moment
+    later.
+  - **Nothing on a deleted file's page links to it by its slug**: the link to read it, each
+    version's link to its page in the viewer and the address the Address section spells out
+    are plain text. `/pdf/<slug>` answers 404 for a deleted file, or opens the live file
+    that took its slug meanwhile.
+  - **A deleted file's slug can't be changed at all, by this page or by MCP.**
+    `setFileSlug` refuses one, and so does the revert: "This file is deleted, and its url
+    can't be changed until it is restored."
+    - A deleted file's slug is free for a live file to take (`file_slug_live_key`,
+      `src/lib/file-slug.ts`), so it names nothing until the restore, which is where it is
+      settled (`freeFileSlugFor`).
+    - **A change in between can fail on `file_slug_history`'s unique index**, read from
+      `changeFileSlug` and not reproduced. A live file may take the deleted file's slug,
+      change away from it and so hold it as a past one. Renaming the deleted file then
+      records that slug as its own past one, and `clearDeadHistoryRow` clears only rows
+      that lead to a deleted file.
+    - **The revert moves into `src/lib/file-manage.ts`**, a function taking an `Actor`
+      beside `setFileSlug`, with the gate the action holds by itself today. The refusal is
+      then one rule in the write layer.
+    - MCP's `manage` restores before it sets a slug, so one call that does both still
+      works.
+  - A signed-out visitor goes to `signInPath(<this address>)`. A reader who may not manage
+    gets Forbidden, as `/doc/[slug]/slug` answers, with a static `<title>` ("Manage
+    file"), never one read from the file.
+- **The ADMIN "Show all files" override opens nothing here.** It widens a listing and grants
+  no right, so a PRIVATE file it lists has no Manage link and this page refuses it.
+- **One page for every format.** A `.docx` has no viewer, so this is the only page about
+  it: `/files/<slug>` is where a download lands after a sign-in, and nothing links there.
+  Its versions section lists the one version it has, with its download, and offers no
+  upload, since `takesVersions` still needs page text.
+
+### What the page holds
+
+Top to bottom, each a section of its own:
+
+1. **The file.** Its title, a link to read it (`/pdf/<slug>` for a PDF, the download for
+   any other format; none for a deleted file, above), and its facts: filename, type, size,
+   pages, added and by whom, last changed and by whom, the count of annotations. The type
+   aside, these are the cells `/files` shows for its row.
+2. **Title.** `setFileTitle`. A title keeps no history, so a rename from here can't be
+   undone either (TODO.md, "`edit_link` and `rename_file` can't be audited or undone",
+   item 4, now holds for the browser too).
+3. **Address.** `SlugManager` with a `"file"` entity type: change, and revert to the last
+   slug. **It offers no deletion of a past slug.** Every fragment link into the PDF written
+   before a rename names the old slug, and the history row is what still opens it
+   (docs/PDF_FRAGMENT_LINKS.md). A doc's slug page offers that deletion; a file's does not.
+   - **A revert inside an hour of the change keeps no row for the slug it leaves**
+     (`REVERT_DISCARD_WINDOW_MS`, as for a doc's): it is the change's undo. A link written
+     against that slug in that hour stops opening, and the page says so beside the button.
+   - The address it spells out is `/pdf/<slug>` for a PDF and `/files/<slug>/download` for
+     any other format, so `urlPrefix` alone no longer says it.
+   - **It is keyed on the file's slug and its past slugs.** `SlugManager` keeps the slug and
+     the history it was mounted with, and on its own page nothing else changes either. Here
+     a restore can change both (item 7), and without the key the section would go on
+     showing the slug the file was deleted under.
+4. **Visibility.** `setFileVisibility`, with what PRIVATE means said beside it: only the
+   owners listed below can read the file.
+   - **Going PRIVATE says what it costs before it is saved**: everyone who is not an owner
+     stops reading the file, its notes and the links into it.
+   - **A viewer who manages the file without owning it loses it by that save.** An ADMIN or
+     EDITOR manages any SHARED file, and a PRIVATE one only as an owner
+     (`canUserManageFile`). For them the page says that they lose this page and the file,
+     asks for confirmation, and then goes to `/files`.
+5. **Owners**, the act no browser page has offered so far. An ordered list: add from every live
+   account in `FILE_MANAGER_ROLES` (the list the doc byline picker reads, labelled by
+   `staffDisplayNameOf`), take off, reorder by dragging.
+   - **The list is edited, then saved once**, unlike `DocSettingsPanel`'s byline, which
+     writes on every click. A hand-over (add someone, take yourself off) is then one
+     transaction, and the list in between is never written.
+   - **Before the save, the page says what it costs**: on a PRIVATE file, who loses read
+     access; for a viewer taking themselves off, that they lose this page, and on a
+     PRIVATE file the file as well. That case asks for confirmation, and the page then goes
+     to where they can still read the file, or to `/files` if they can't: `/pdf/<slug>` for
+     a PDF, and `/files` for any other format, which has no page to read it on.
+   - **An ADMIN or EDITOR taking themselves off a SHARED file loses nothing**, since they
+     manage it without being on the list (`canManageAnySharedFile`). The page says nothing
+     of a loss, asks for no confirmation and stays where it is.
+   - One save is one `setFileOwners` call with `allowRemovals` and **`expected`**, the list
+     the page loaded. `setFileOwners` gains `expected` and the file row's `FOR UPDATE`,
+     both as `setDocByline` has them, so a list someone else changed in between is
+     refused rather than overwritten. Both read the list in `ownerOrder`, which today's read
+     doesn't ask for. MCP's `manage` passes no `expected` and behaves as before.
+   - **`expected` is the list the edit started from, and a refresh replaces neither it nor
+     the edit.** Every other save on the page refreshes it, and so does a map build that
+     finishes. Were `expected` taken from the refreshed list, a change someone else made
+     meanwhile would arrive with it and the save would overwrite that change, which is the
+     case `expected` is there to refuse. After a refusal the page keeps the edit, and shows
+     beside it the list as it now is, to start again from.
+   - **The list shows every owner the file has**, one whose account was since deleted or
+     moved to a role outside `FILE_MANAGER_ROLES` included, marked as such. `expected` is
+     compared with all of them, and `setFileOwners` lets such an owner stay.
+   - **An owner change keeps no history**, as a title doesn't: `updatedByUserId` alone says
+     who made the last one. On a PRIVATE file it is also who can read it (the same TODO.md
+     item, item 5).
+6. **Versions.** A file of any other format has its one version here, with its download,
+   and nothing else. For a PDF, everything §13 put in the Metadata pane for a manager moves
+   here: the upload of a new version (`PdfVersionUploader`), a candidate's promotion and
+   abandoning with what a promotion would do (`PdfCandidateActions` and `candidateFacts`),
+   the notes and link parts still on each earlier version with the carry that moves them
+   (`PdfCarryActions`), each carry's moves shown or hidden (`PdfCarryRecord`), what a
+   promotion's carry did (`PdfCarryOutcome`'s facts, from the action's own answer), and each
+   version's page map with a link to its map page. Each version links to its own page in the
+   viewer, which is where a candidate is looked at before it is promoted. A candidate's map
+   is shown under its card sheet by sheet (A version's page map, sheet by sheet, below).
+   - **The two upload options are drop targets as well as buttons** (`useFileDrop`). "A
+     better copy" and "A revised text" are two boxes side by side, each with its line on
+     what it means, and the box a file is dropped on says which kind of version it is.
+     While a file is dragged over the versions section, both boxes are marked as targets
+     and the one under it more strongly.
+   - **A drop is refused before anything is sent**, in a line under the boxes: more than
+     one file (one version at a time); a file that isn't a PDF, in the server's own words
+     ("A new version of a PDF is a PDF."); and a file over the site's limit, as `/files`'
+     uploader says it.
+   - **A drop elsewhere on the section has its default prevented**, since the browser's
+     default is to open the PDF in place of the page, and the line asks for one of the two
+     boxes. While a candidate waits or the file is deleted, the boxes take no drop and say
+     why.
+   - **This page is server-rendered and behind no `ssr: false` boundary**, so after an act
+     `router.refresh()` delivers the new state, and the full reloads the viewer's
+     uploader and candidate actions need (CLAUDE.md's `router.refresh()` entry) are not
+     needed here. An upload stays on this page and shows the new candidate.
+   - **What outlives a refresh is held by the section, never by a card the refresh takes
+     away.** The section's client component is keyed on the file and stays mounted across
+     every refresh. It holds:
+     - **what a promotion's carry did.** The promotion's own refresh removes the candidate's
+       card with the candidate it was about, which is why the viewer's banner hands that
+       answer to the next page through `sessionStorage` (`keepCarryOutcome`). Here the
+       section shows it, and `keepCarryOutcome` goes with the banner's `PdfCarryOutcome`;
+     - **that a map build is running**, which the upload box starts and the candidate's
+       card reports, the first replaced by the second while the build runs.
+   - **The work nobody is waiting on goes through Route Handlers, not server actions**:
+     building a page map, which starts by itself after a better copy's upload, and the
+     preview of a promotion's carry (`previewPromotionCarry`), which runs when a
+     candidate's card mounts and again after each answer to a run. Each reads both
+     versions' sheets and takes seconds, around ten for a book over a thousand sheets.
+     Next's client sends a page's server actions one at a time, an implementation detail
+     its docs say may change. So as an action, a map build would hold every save made on
+     the page meanwhile (a title, an owner list) until it finished. A handler is an ordinary
+     `fetch` and runs beside them.
+     - **Two handlers, each named by the version's id**, beside `upload` and `limits`
+       under `/api/files`:
+       - `POST /api/files/versions/<versionId>/map` builds and stores the map
+         (`buildFileVersionMap`). A POST, since it writes;
+       - `GET /api/files/versions/<versionId>/promotion-carry` answers what promoting with
+         the carry would move (`previewCarryAtPromotion`). It stores nothing and answers
+         `Cache-Control: no-store`.
+
+       The actions they replace (`buildVersionMap`, `previewPromotionCarry`) go, and the
+       map page's "Match the pages" asks the first handler too.
+     - **Each handler is a wrapper, as an action is**: the session's `Actor` handed to the
+       same function in `src/lib/file-manage.ts` or `src/lib/file-anchor-move.ts`, which
+       holds the gate. A signed-out request is answered 401, as `PUT /api/files/<id>` is,
+       and never redirected. A refusal is its `ApiError`'s status with its message as
+       `{ error }`, and anything else a 500 with a line that says to reload.
+     - **A handler revalidates nothing the page then sees**, so the page calls
+       `router.refresh()` itself when a build answers, as `/files`' uploader does after its
+       own handler.
+     - **The page says a build is running for as long as its own request is open**: the
+       candidate's card shows "Matching its pages…" where it would offer "Match its pages".
+       Nothing stored says a build is running, so a page opened meanwhile offers the button,
+       and a second build started from it is wasted work and no fault: a map is written only
+       where the version has none (`writePageMapIfNone`). A promotion made during a build
+       is one without the carry, and the map is then stored on a promoted version, as one
+       asked for later is.
+     - **A version abandoned during a build gets no map.** Abandon is beside the running
+       build on this page. `storePageMap` checks that the version is not abandoned before it
+       reads, and checks again under the file row's lock, which abandoning holds, storing
+       nothing where it now is. The first check alone can pass a moment before the
+       abandoning deletes the version's page text. The map is then worked out from no
+       text, and stored on a version that links stamped with it are carried through. Read
+       from `storePageMap` and not reproduced.
+     - **A preview is asked for again when what it read has changed**: after an answer to a
+       run, and after a build. `PdfCandidateActions` keeps one asking per version for as
+       long as the page is open, which holds only while every act reloads the page, and
+       here none does. The card asks by the version and the map's stored answers, so an
+       answered run is a new asking.
+     - **A handler can stream the count of sheets read**, as lines of JSON ending in the
+       answer, which a server action can't. The read of each version's sheets would take a
+       progress callback for it. Until then the wait shows its steps without a count.
+       nginx holds a proxied response until it is whole unless the response says
+       `X-Accel-Buffering: no`, so a stream without that header arrives in one piece on
+       every deployed instance and line by line on a development machine.
+     - **A map build the page stops waiting for still finishes**: the connection dropping
+       doesn't stop the server, and a map is stored once. The page shows the stored map
+       when it is next opened.
+     - **What a manager clicks and waits for stays a server action**: promoting, abandoning,
+       answering a run, the look at what a carry from an earlier version would do
+       (`previewVersionCarry`, the first click of `PdfCarryActions`), that carry, and
+       showing or hiding a carry's moves. A promotion with the carry, a carry and the look
+       before one work out their placements first and take seconds too. The manager is
+       watching that button, so other saves queued behind it for those seconds are
+       accepted.
+   - The map page (`/pdf/<slug>/v/<n>/map`) links back here, not to the viewer.
+7. **Delete or restore.** `setFileDeleted`. A restore whose slug was taken meanwhile says
+   which slug the file came back under (`renamedFrom`).
+   - **A restore drops each past slug of the file that a live file took meanwhile**, in
+     the transaction that restores it: the rows of `file_slug_history` for this file whose
+     slug is a live file's current one.
+     - While a file is deleted its past slugs are free as its current one is
+       (`fileSlugInUse`), so an upload may take one. `freeFileSlugFor` settles the current
+       slug alone.
+     - Restored with such a row, the file holds as a past slug the one a live file
+       answers on. `resolveFileParam` gives the address to the live file, so the row
+       redirects nobody.
+     - **That live file's next change of slug then fails on `file_slug_history`'s unique
+       index**, a P2002 its manager reads as "That didn't work": the change records the
+       slug it leaves, and `clearDeadHistoryRow` clears only rows that lead to a deleted
+       file. Reproduced on a development database, with the restore's own calls
+       (`freeFileSlugFor`, then its update) followed by `changeFileSlug`.
+
+Every act is a function `src/lib/file-manage.ts` already has, taking an `Actor`, with a
+server action in `src/app/actions/files.ts` wrapping it (CLAUDE.md, "A write the UI and the
+MCP server share"). The one new act is `updateFileOwners(fileId, orderedUserIds,
+expected)`. It checks that both lists are arrays of strings before anything reads them, as
+a version's actions check their arguments: an action is sent whatever JSON its caller
+likes. Each action revalidates `/files` and this page.
+
+**Every action this page calls answers a refusal, and throws none**: `{ ok: false, error }`,
+through one helper, as a version's acts answer through `versionAction`. A production build
+replaces a thrown error's message before it reaches the browser, and this page's refusals
+are what its manager has to read: the url is taken, the owner list changed, a file needs a
+title, a file needs an owner.
+
+- `updateFileTitle`, `updateFileSlug` and `revertFileSlug` change to answer. Nothing calls
+  them as they are.
+- `updateFileOwners` answers from the start.
+- **Visibility, delete and restore get answering actions of their own for this page.**
+  `/files`' cells call `updateFileVisibility`, `deleteFile` and `restoreFile` and catch what
+  they throw, as every admin table's cells do, and those stay.
+- **`SlugManager`'s `"file"` branch reads an answer**, where its other three catch a throw.
+
+### A version's page map, sheet by sheet
+
+A candidate with a page map shows the whole map under its card. The map page
+(`/pdf/<slug>/v/<n>/map`) draws the same list from the same component, so the two never
+disagree.
+
+- **Every sheet of the base, in order, in rows.** A row is a stretch or a run: its sheets
+  on the base, an arrow, its sheets on the version, how many, and a line saying what it is.
+  - **A stretch is consecutive sheets of the base outside every run, all of one kind**:
+    - matched without a question: sheets that go to consecutive sheets of the version, all
+      moved by the same amount;
+    - removed: sheets of the base with nothing in their place (`REMOVED`);
+    - unmatched with no proposal: `UNMAPPED` sheets.
+  - **A run is one row, whole**: a question, open or left unmatched, whose card is in the
+    row (below), or sheets paired by an answer, with who answered and when. A run has one
+    answer, so nothing splits it. Its sheets of the base are consecutive. The sheets it
+    proposes need not be, since the alignment that proposes them can pass over a sheet of
+    the version (`pairSheets` collects them one at a time). The row gives the version's
+    sheets as a range where they are consecutive, and lists them where they are not.
+  - **Added sheets are rows of their own**: sheets of the version that no sheet of the base
+    goes to and that no open or declined run proposes. They have no sheet of the base.
+    A sheet a run proposes is in that run's row and no other, so every sheet of the
+    version is in exactly one row, as every sheet of the base is.
+    - **An added stretch follows the row that holds the version's sheet before its
+      first**, and comes first of all where it begins at the version's first sheet.
+      "Between the rows it falls between" has no answer for every map: the labels pair
+      sheets in whatever order they give (rule 1), so two pairs can cross.
+- **A matched stretch that moved says so**: "1 sheet earlier in version 3". A change of
+  offset starts a new stretch, so a boundary between two matched rows marks where sheets
+  were inserted or dropped.
+- **What a row says of its pairs is read, not stored, and is a fact about them, never the
+  rule that paired them.** The map keeps each sheet's counterpart, its runs and its blank
+  sheets (`PageMap`), and no rule. So a row says on how many of its pairs the page numbers
+  agree, read from the two versions' `pageLabels`, which is as true of a pair the text
+  aligned as of one the labels gave. It says how many of its sheets have no text. Showing
+  the rule itself would take a field on the map, and every map stored before that field
+  existed would have none to show.
+  - **Neither fact splits a stretch.** They are counts on its row: "300 sheets. Their page
+    numbers agree on 296, and 4 have no text." Split on them, a scan with a blank verso
+    before each chapter would be dozens of rows, and a boundary between two matched rows
+    would no longer mark an insertion or a drop.
+  - **Page numbers agree on a pair** where both sheets have a label and the two are the
+    same, trimmed and in any case, as rule 1 reads them. Where either version has no
+    usable labels (`usablePageLabels`), a row says nothing of page numbers.
+  - **"No text" is read as which sheets have none, never as their text**: one query per
+    version for the `pageIndex` of the rows of `file_page_text` that hold a letter or a
+    digit, at the text version `sheetTextsOf` reads. Every other sheet of the version has
+    no text, one with no row included: `sheetFactsOf` reads a missing row as empty. The
+    list is drawn on every load of the manage page and again after each save there, and
+    two books' text is megabytes.
+    - **The query names its collation**: `text ~ '[[:alnum:]]' COLLATE "pg_c_utf8"`. A
+      regular expression's character classes follow the collation, and in a database
+      whose locale is `C` a sheet of Greek has no letter.
+    - It is narrower than the matcher's own test (`hasRunsToCompare` also takes a sheet
+      with too little text to compare), and the row claims only what was read. The map's
+      `blank` lists don't answer it: a blank sheet has no text *and* draws nothing, so a
+      scanned plate without OCR is not in them.
+  - **An abandoned version has no rows of `file_page_text`** (abandoning deletes them) and
+    may keep its map. Its side of the list says nothing about text, and its question cards
+    show no words.
+- **Expanding a matched stretch lists its pairs**, `16 → 16 … 120 → 120`: the first and last
+  few with a count between, and, where they are few, the pairs between whose page numbers
+  disagree or that have a sheet without text. Each pair links to that sheet in the viewer,
+  stamped with its version, as a plain `<a>` (§0).
+- **A strip above the list draws the whole base**: one segment per row, as wide as its
+  sheets and never too narrow to click, coloured by kind. An added stretch has no sheet of
+  the base, and is a mark between two segments. A segment scrolls to its row. Colour is
+  never the only sign, since each row's line says its kind in words.
+- **"Questions only"** hides every row but the questions, for a map with many stretches.
+- **Answering a question changes its row in place**, and the numbers and the carry preview
+  above it.
+
+**A question's card says what is going on, in words, and offers two choices.** The map
+page's table today puts the labels' pairing in a column beside the text's, which reads as
+a third option, and it never is one:
+
+- **A `labels` run**: "By their printed page numbers, these sheets would go to sheets 15–16
+  of version 3. The words there are a different page's. The words are on sheets 14–15."
+  The labels' pairing appears only under each proposed sheet, with that sheet's words: "Not
+  sheet 15 (p. xii), whose page number matches". Rule 2 has set it aside, because its words
+  disagree.
+  - **That is true of a sheet whose label gave it another sheet and whose words refused
+    it. A `labels` run can hold three other kinds of sheet**, and each sheet's line is
+    read from the run's `byLabel` for it and from which sheets have no text:
+    - a sheet without text, or whose label's sheet has none, lost its label's pairing
+      with the sheets around it (rule 2's neighbours), and no words disagreed: "It has no
+      text to compare, and goes with the sheets around it";
+    - a sheet the labels gave nothing (`byLabel` null) is in the run because its place is
+      counted from a sheet in question: "Placed by counting from the sheets around it";
+    - a sheet proposed the very sheet its label gives says that its page number agrees.
+  - **The card's opening sentence counts only the sheets whose label gave another sheet**,
+    and names them as ranges where they are consecutive. A run with none opens with the
+    other sentence: "These sheets stand between sheets whose pairing is in question, and
+    are placed by counting from them."
+- **A `place` run**: its words are too unlike any sheet's to pair it unasked. The card names
+  the sheet that stands in its place, and whether its page number agrees.
+- **Two columns**: the sheet of the base and the proposed sheet, each with its page label
+  and its opening words.
+- **A `labels` run's card needs words `pageMapViewFor` doesn't read today**: it loads text
+  for the sheets of a `place` run alone. It reads them for both kinds: each sheet of the
+  base, the sheet proposed for it, and for a `labels` run the sheet its label gives.
+- **Each button says what it does and costs.** "Pair them by their words" (or "by their
+  place") carries the links and notes on those sheets, and can't be undone. "Leave them
+  unmatched" carries a link to them only where its words are found, and leaves a note on
+  them where it is until its author moves it. A run left unmatched can still be paired.
+
+### What the viewer keeps
+
+- **The Metadata pane** keeps the tags, the references and the version list as every reader
+  sees it: each version's state, who uploaded and promoted it and when, its own page and its
+  download. A manager also gets one "Manage this file" link at the top of the pane.
+  - **The list is shown once a file has a second version, to a manager as to any reader.**
+    A manager of a one-version file is shown it today for the upload it holds, and the
+    upload is on this page.
+- **A waiting version is pinned at the top of the list, for every reader**: "Version 3 is
+  waiting to replace version 2", then whether its pages are matched, who uploaded it and
+  when, and a link to its page.
+  - **It names both versions by number, never "this one".** The pane is on every version's
+    page, an earlier version's included, and the words are the same on each. The waiting
+    version's own page pins nothing: its banner says as much, and the link would lead to
+    the page it is on.
+  - **It says the fact, never the kind**: "Its pages are matched with version 2's" or "Its
+    pages are not matched with version 2's". Which of the two upload boxes it came through
+    is stored nowhere, and a map is what the box leaves behind. Read back as "a better
+    copy" or "a revised text", a better copy whose map is still building, or failed to
+    build, would be called a revised text.
+  - **Readers are sent whether the waiting version has a page map**, beside the pairing
+    itself, which every reader's viewer already holds to carry links with (`linkVersionsOf`).
+    It decides what becomes of a reader's own notes. The map's numbers stay out of what a
+    reader's page says: `sent` in `reading.tsx` withholds them from the version's summary.
+    They are not kept from a reader's browser, since the pairing it holds marks each sheet
+    without a counterpart as removed or unmapped.
+  - **A manager gets one more line under it**: the count of its questions still open, and a
+    link to this page to review and promote it.
+- **The Metadata tab's label carries a dot while a version waits, for a manager alone.** A
+  reader has nothing to act on there.
+- **The selection popover keeps its buttons**, and while a version waits it adds one muted
+  line under them, saying what becomes of the note or link part about to be made. The line
+  names the version shown: the latest, or on its own page an earlier one, which takes
+  notes too. A waiting version's page takes no capture (`assertCaptureVersion`) and has no
+  line.
+  - where page maps join the version shown to the waiting one (`mapsJoin`, over the
+    versions the viewer already holds): "Version 3 is waiting. A note or link part made
+    here can be carried to it when it's promoted." It says "can", since a manager may
+    promote without the carry, and a capture made while a promotion works out its
+    placements stays behind until the next carry;
+  - where they don't: "Version 3 is waiting. A note or link part made here stays on
+    version 2 unless the pages are matched." From the latest that is the waiting version's
+    own map, which can still be built, before the promotion or after it. From an earlier
+    version it is every map between the two.
+- **The latest's page no longer reports a promotion's carry** (`PdfCarryOutcome`, mounted by
+  `PdfVersionBanner` for the manager who promoted). A promotion is made from this page, which
+  reports its own outcome.
+- **`reading.tsx` stops computing `notesOn`, `partsOn`, `carries` and `candidateFacts`**,
+  since nothing on the page shows them. Those are queries every manager's view runs today.
+  What a manager is sent besides the link is the waiting version's open questions, which
+  its version summary already holds.
+- **A candidate's banner** still says the version is not yet the latest, and links its
+  managers to this page, where it is promoted or abandoned.
+- **The note worklist stays** (`PdfNoteWorklist`, "Moving a note forward"). Moving one note
+  is its author's act, made against the sheets, never a manager's.
+
+### `/files`
+
+- **A Manage column, hidden by default**: `{ key: "manage", label: "Manage", defaultHidden:
+  true }` in `ADMIN_TABLE_COLUMNS.files`, its cell a link reading "manage" to
+  `/files/<id>/manage`. It is `/docs`' Edit column (`DocsTable`'s `edit`), and like it:
+  - **the link is on a row the viewer can manage and no other** (`canManage`, already
+    computed per row). A deleted row has one, since the page opens a deleted file to restore
+    it. A PRIVATE row listed only by the ADMIN "Show all files" override has none;
+  - **the column has no sort key.** What it would sort by is this viewer's right to each
+    row, which is no property of the file. That makes it an exception to "every column
+    sorts" (CLAUDE.md, "Admin tables are one kit"), the same one `/docs`' Edit column is.
+  - It is hidden by default, unlike Edit, because the title cell already leads a manager to
+    the file. A saved column order or site default that predates the key shows it hidden,
+    as any key it doesn't name.
+- Inline visibility, delete and restore stay, and the bulk actions.
+- The uploader of a new file stays above the table, since a manage page needs a file to
+  exist first. Its success note links to the new file's manage page: the upload route's
+  answer already names the id.
+- **The title cell links every row to `/pdf/<slug>`, a `.docx` included**, which mounts a
+  PDF viewer on bytes it can't read. A non-PDF's title links to this page for a manager,
+  and to its download otherwise. The cell goes there twice, by its `<Link>` and by the
+  `onClick` that takes a click beside the link, and both change. A row carries no format
+  today, so it is sent whether its latest version is a PDF, from that version's
+  `contentType`.
+
+### Build order
+
+One PR at a time:
+
+1. **The page without versions**: the address and gate, the file's facts, title, address,
+   visibility, owners with `setFileOwners`' `expected` and lock, delete and restore; the
+   actions that answer; the write layer's refusal of a new slug for a deleted file, with
+   the revert moved into it; the restore dropping the past slugs a live file took;
+   `/files`' Manage column and the title cell of a non-PDF; and the "Manage this file"
+   link in the viewer's Metadata pane, without which a PDF's page is reached only through
+   a column hidden by default. This is where owners first become editable in the browser.
+2. **The map sheet by sheet**, on the map page as it stands: the list in rows (stretches,
+   runs and added sheets) with its strip and "Questions only", the question cards
+   reworded, and `pageMapViewFor` reading the words of a `labels` run and which sheets have
+   no text. It depends on nothing of the manage page, and its buttons still reload the
+   page.
+3. **The versions move**: the section here with its drop targets and what it holds across
+   a refresh, the two Route Handlers and the actions they replace, `storePageMap`'s check
+   under the lock that the version is not abandoned, the map's component under a
+   candidate's card with its answers changing in place, the Metadata pane cut down to its
+   reading half and its list shown from a second version on, the candidate's banner and
+   the map page linking here, the latest's page no longer reporting a carry, and the e2e
+   specs that drive versions moved to this page (`pdf-versions`, `pdf-version-upload`,
+   `pdf-better-copy`, `pdf-revised-text`). The races `e2e/pdf-version-upload.spec.ts`
+   stages (§0) are the write layer's and move unchanged. **The viewer's management half goes in the PR that
+   adds this one**, so a version's acts have one place from the start.
+4. **What the viewer gains**: the waiting version pinned for every reader with whether its
+   pages are matched, a manager's line under it, the Metadata tab's dot, and the
+   selection popover's line on each page that takes a capture.
+
+Each PR updates the docs it makes untrue, in the same PR:
+
+- **docs/PERMISSIONS.md**, where it changes a row: "owners change only through the MCP
+  server's `manage`", and the version table's "See the version list's management half".
+- **docs/MCP.md**, where it describes `manage` (§12, §15), which gains a refusal: a slug
+  for a deleted file.
+- **§13**, wherever it says a manager's act is in the Metadata pane or on a version's page:
+  the version list's management half (Addresses), where an upload goes and the full reloads
+  after it and after a candidate's acts (The upload), the map page's own description and
+  its buttons (Matching the pages), and what the latest's page reports after a promotion
+  with the carry (Moving a note forward).
+- **TODO.md**, "`edit_link` and `rename_file` can't be audited or undone": its items 4 and
+  5 say which front doors change a file's title and its owners.
+- **CLAUDE.md**, whose row for this file says what its sections hold.
+- **This section**, which becomes what is built: "Planned" and "Not built" go, and so does
+  every sentence that says how things stood before.
+
+### Checks and tests
+
+A new `e2e/file-manage.spec.ts`:
+
+- a hand-over by an AUTHOR: an owner adds a second person and takes themselves off in one
+  save, lands on `/pdf/<slug>` for a SHARED PDF and on `/files` for a PRIVATE one or a
+  SHARED `.docx`, and the second person can then manage it;
+- an ADMIN taking themselves off a SHARED file's list: no warning, no confirmation, and
+  still on the page;
+- a save over a list someone else changed since the page loaded, refused with the edit
+  kept, **and the same save after another section's save has refreshed the page**, still
+  refused;
+- **each refusal read on the page in its own words**, on the production build the suite
+  runs: a url that is taken, an owner list that changed, an empty title;
+- the PRIVATE warning naming who loses access, on the owners' save and on a change of
+  visibility; an ADMIN who is no owner setting a SHARED file PRIVATE is asked, lands on
+  `/files`, and is then refused here;
+- a past slug offered for revert and never for deletion;
+- a file whose slug is another file's id: that id's manage address opens the file with the
+  id; and a past slug followed by someone who may not manage is answered Forbidden with no
+  redirect;
+- a deleted file opened by its id, with every section but its facts and its restore
+  disabled and no link to it by its slug, and restored, including one whose slug was
+  taken: the Address section then shows the slug it came back under;
+- a deleted file with a past slug that a new upload takes: once it is restored that slug
+  is no longer among its past ones, and the upload's own slug changes without a fault;
+- a manager's "Manage this file" link in the viewer's Metadata pane, and none for a reader
+  who may not manage;
+- in `e2e/mcp-files.spec.ts`: `manage` with a slug for a deleted file is refused in those
+  words, and one call that restores it and sets a slug does both;
+- `/files`' Manage column: hidden until chosen in the column picker, then a "manage" link on
+  each row the viewer can manage, a deleted one included, and none on the others;
+- the gate: a reader who may not manage gets Forbidden, a PRIVATE file listed only by the
+  ADMIN override has no Manage link and is refused here, and a signed-out visit returns to
+  this address after sign-in;
+- a `.docx`'s page, with no upload offered;
+- a file dropped on each upload box makes that kind of version (a page map is asked for,
+  or not), and two files, a `.docx` and a drop beside the boxes are each refused with
+  nothing sent;
+- a fixture map with a row of each kind: the rows in the base's order, every sheet of the
+  base and every sheet of the version in exactly one row, a matched stretch with a sheet
+  without text and a pair whose page numbers disagree still one row with both counted; a
+  question answered changes its row, the numbers and the preview with no navigation, which
+  the spec checks by counting the page's navigations;
+- a `labels` run's card showing the words of each sheet, with the line of a sheet without
+  text and of one the labels gave nothing, and the map of an abandoned version drawn with
+  no words and nothing said about text;
+- while a version waits, on `/pdf/<slug>`: a reader sees it pinned with its pages matched
+  or not matched and is sent none of the map's numbers (the version's `map` and `baseNumber`
+  are null in what the page was sent; the pairing in `linkVersions` is there for every
+  reader), a manager also sees its open questions and the tab's dot, and the popover's line
+  reads as the version has a map or not;
+- on an earlier version's own page while a version waits: the pinned box in the same words,
+  naming both versions by number, and the popover's line naming the earlier version, as
+  page maps join it to the waiting one or don't; and nothing pinned on the waiting
+  version's own page;
+- a title saved while a page map is building is saved at once, without waiting for the
+  build; the candidate's card says the build is running and shows the map when it answers,
+  with no reload; and a signed-out request to either handler answers 401;
+- a promotion with the carry says on this page what the carry did, after the refresh that
+  takes the candidate's card away.
+
+A unit test beside the function that turns a `PageMap` into the list's rows, which is pure
+(`npm run test:unit`). The maps that matter here are ones no fixture PDF produces on
+demand:
+
+- a run whose proposed sheets are not consecutive is one row, its sheets listed;
+- a sheet proposed by an open run, or by a declined one, is in that run's row and in no
+  added row;
+- a map whose pairs cross: each added stretch after the row that holds the version's sheet
+  before its first, and one that begins at the version's first sheet first of all;
+- over each of these, every sheet of the base and of the version in exactly one row.
+
+### Open
+
+- **Promote and abandon on the candidate's own page too**, as a shortcut beside the version
+  being looked at. Planned without: one place for every act is what this section is for.
+- **Tags and references here.** Both stay in the viewer, where readers apply them too. A
+  manager's list of them here would be a second front door to the same writes.
+- **Owners for many files at once** from `/files`' bulk bar. Not planned.
+- **Telling an open viewer that a waiting version was promoted.** Left for later. It is §13's
+  "A viewer left open across a promotion is not told", and a waiting version is when it is
+  most likely to happen. The page's own socket could carry the notice to the pinned box.
