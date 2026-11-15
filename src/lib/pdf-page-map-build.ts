@@ -206,6 +206,13 @@ const MAP_WRITE_TIMEOUTS = { maxWait: 30_000, timeout: 60_000 } as const;
  * working-out reads two versions' text and may open their documents, so it
  * comes first and outside the transaction; the write then checks, under the
  * file row's lock, that no other request stored one meanwhile.
+ *
+ * **A version abandoned during the working-out gets no map.** The read
+ * refuses an abandoned version (`workOutPageMap`), and the write checks again
+ * under the file row's lock, which abandoning holds: the first check can pass
+ * a moment before the abandoning deletes the version's page text, and the map
+ * would then be worked out from no text and stored on a version that links
+ * stamped with it are carried through.
  */
 export async function storePageMap(versionId: string, by: { userId: string }): Promise<{ map: PageMap; stored: boolean; fileId: string; number: number }> {
   const existing = await versionForMap(versionId);
@@ -216,6 +223,8 @@ export async function storePageMap(versionId: string, by: { userId: string }): P
     const file = await lockFileRow(tx, version.fileId);
     if (!file) throw new ApiError("not_found", "File not found.");
     if (file.deleted) throw new ApiError("conflict", "This file is deleted, and nothing is stored about its versions until it is restored.");
+    const now = await tx.fileVersion.findUnique({ where: { id: versionId }, select: { abandonedAt: true } });
+    if (now?.abandonedAt) throw new ApiError("conflict", `Version ${version.number} was abandoned while its pages were being matched, so no map is stored.`);
     return writePageMapIfNone(tx, versionId, map, by);
   }, MAP_WRITE_TIMEOUTS);
   return { ...written, fileId: version.fileId, number: version.number };
