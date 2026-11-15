@@ -237,6 +237,13 @@ export type FileVersionSummary = {
   baseNumber: number | null;
   /** Its page map from that version, in numbers; null where it has none (docs/PDF.md §13, "Matching the pages"). */
   map: PageMapNumbers | null;
+  /**
+   * Whether it has a page map from that version: what is sent to every
+   * reader where `baseNumber` and `map` are kept to a manager (docs/PDF.md
+   * §14, "What the viewer keeps"). A reader's viewer holds the pairing
+   * itself, to carry links with (`linkVersionsOf`).
+   */
+  hasMap: boolean;
 };
 
 /** The select `summariseVersions` reads, for a file query that takes its versions along. */
@@ -278,6 +285,7 @@ export function summariseVersions(file: { currentVersionId: string | null; versi
       abandonedAt: version.abandonedAt?.toISOString() ?? null,
       baseNumber: file.versions.find((other) => other.id === version.baseVersionId)?.number ?? null,
       map: mapNumbersOf(version.pageMap),
+      hasMap: parsePageMap(version.pageMap) !== null,
     }));
 }
 
