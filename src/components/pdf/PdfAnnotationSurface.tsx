@@ -19,6 +19,7 @@ import { usePdfPresence } from "./use-pdf-presence";
 import { usePdfOutline } from "./use-pdf-outline";
 import { usePdfFragment } from "./use-pdf-fragment";
 import { openingOf, parseLinkVersions, readPage } from "@/lib/pdf-link-reading";
+import { mapsJoin } from "@/lib/pdf-page-map";
 import type { PageName } from "@/lib/pdf-open-params";
 import PdfFragmentBanner from "./PdfFragmentBanner";
 import { PdfFollowBar, PdfIndicatorStrip, PdfPresenceRail, type AnnotationTick } from "./PdfRails";
@@ -383,6 +384,22 @@ export default function PdfAnnotationSurface({
     [version.number, version.address, linkVersions],
   );
   const opensAt = useCallback((page: PageName) => openingOf(readPage(page, linkContext.address, linkContext.versions)), [linkContext]);
+
+  // docs/PDF.md §14, "What the viewer keeps" — a version waiting to replace
+  // the latest. Its number puts a dot on the Metadata tab for a manager, and
+  // the selection popover says to everyone what becomes of a capture made
+  // here: carried to it at its promotion where page maps join the version
+  // shown to it (`mapsJoin`, over the versions this page already holds), left
+  // on the version shown where they don't. "Can be carried", since a manager
+  // may promote without the carry. The waiting version's own page takes no
+  // capture (`assertCaptureVersion`), so it has no line.
+  const waitingNumber = versions.find((candidate) => candidate.state === "candidate")?.number ?? null;
+  const waitingLine = useMemo(() => {
+    if (waitingNumber === null || version.state === "candidate") return null;
+    return mapsJoin(version.number, waitingNumber, linkContext.versions)
+      ? `Version ${waitingNumber} is waiting. A note or link part made here can be carried to it when it's promoted.`
+      : `Version ${waitingNumber} is waiting. A note or link part made here stays on version ${version.number} unless the pages are matched.`;
+  }, [waitingNumber, version.number, version.state, linkContext]);
   const fragment = usePdfFragment(handle, fileId, version.id, linkContext);
   const fragmentRegionsRef = useRef(fragment.regions);
   useEffect(() => {
@@ -1039,10 +1056,17 @@ export default function PdfAnnotationSurface({
         ),
       },
       { value: ANNOTATIONS_PANE, label: "Annotations", content: panel },
-      { value: METADATA_PANE, label: "Metadata", content: <PdfMetadataPanel>{metadata}</PdfMetadataPanel> },
+      {
+        value: METADATA_PANE,
+        label: "Metadata",
+        // A reader has nothing to act on there, so the dot is a manager's alone;
+        // and the waiting version's own page pins nothing there to point at.
+        dot: manageHref && waitingNumber !== null && version.state !== "candidate" ? `Version ${waitingNumber} is waiting` : undefined,
+        content: <PdfMetadataPanel>{metadata}</PdfMetadataPanel>,
+      },
       { value: COLLAB_PANE, label: "Collab", content: <PdfCollabPanel /> },
     ],
-    [panel, metadata, outline, activeOutlineId, jumpToOutlineNode, panelOpen, activePane, handle],
+    [panel, metadata, outline, activeOutlineId, jumpToOutlineNode, panelOpen, activePane, handle, manageHref, waitingNumber, version.state],
   );
 
   return (
@@ -1215,6 +1239,11 @@ export default function PdfAnnotationSurface({
               <span style={{ color: "var(--error)", fontSize: "0.75rem", alignSelf: "center" }}>
                 {linkError.message}
               </span>
+            )}
+            {waitingLine && (
+              <p className={styles.popoverNote} data-testid="pdf-popover-waiting">
+                {waitingLine}
+              </p>
             )}
           </div>
         )}

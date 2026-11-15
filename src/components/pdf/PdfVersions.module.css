@@ -276,3 +276,17 @@
 .gone p + p {
   margin-top: 0.6rem;
 }
+
+/* §14, "What the viewer keeps" — a waiting version, pinned above the list. */
+.waiting {
+  margin: 0.4rem 0 0.6rem;
+  padding: 0.5rem 0.7rem;
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.waiting p + p {
+  margin-top: 0.25rem;
+}

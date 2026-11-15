@@ -191,6 +191,9 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
   // A page map's numbers and the version it is from are kept to the manager.
   // The map itself reaches every reader's viewer, which carries links with it
   // (`linkVersions`); what it found, in numbers, is its managers' to read.
+  // Whether a version has one (`hasMap`) is sent to everyone: a waiting
+  // version's pinned box and the selection popover's line say it to every
+  // reader, since it decides what becomes of their own notes (§14).
   const sent = (version: FileVersionSummary): FileVersionSummary => (manageHref ? version : { ...version, baseNumber: null, map: null });
   const listed = versions.map(sent);
 
@@ -251,7 +254,7 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
             isPrivate={file.visibility === "PRIVATE"}
           />,
           // Listed once a file has a second version, for every reader alike: its only version needs no list.
-          versions.length > 1 && <PdfVersionList key="versions" slug={file.slug} versions={listed} shownId={shown.id} />,
+          versions.length > 1 && <PdfVersionList key="versions" slug={file.slug} versions={listed} shownId={shown.id} manageHref={manageHref} />,
         ]}
       />
       {/* docs/ANCHORED_LINKS.md — the open-link tray, a self-fetching

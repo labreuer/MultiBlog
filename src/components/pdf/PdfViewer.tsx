@@ -90,6 +90,12 @@ export type PdfPane = {
   value: string;
   /** The tab's text, and the pane's accessible name. */
   label: string;
+  /**
+   * What a dot beside the tab's text stands for, as its tooltip and its
+   * accessible name; no dot where absent. The Metadata tab's, while a version
+   * waits, for a manager (docs/PDF.md §14, "What the viewer keeps").
+   */
+  dot?: string;
   content: ReactNode;
 };
 
@@ -659,6 +665,7 @@ export default function PdfViewer({
                   onClick={() => onSelectPane?.(pane.value)}
                 >
                   {pane.label}
+                  {pane.dot && <span className={styles.tabDot} role="img" aria-label={pane.dot} title={pane.dot} data-testid={`pdf-tab-dot-${pane.value}`} />}
                 </button>
               ))}
             </div>

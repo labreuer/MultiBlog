@@ -214,7 +214,21 @@
   box-shadow: 0 2px 8px var(--shadow-color);
   padding: 0.25rem;
   display: flex;
+  flex-wrap: wrap;
   gap: 0.25rem;
+}
+
+/* The muted line under the popover's buttons while a version waits
+   (docs/PDF.md §14, "What the viewer keeps"). A row of its own, and no wider
+   than the buttons ask for or a short line's width: `contain: inline-size`
+   keeps its text from widening the popover to one long line. */
+.popoverNote {
+  flex-basis: 100%;
+  contain: inline-size;
+  min-width: min(17rem, 80vw);
+  padding: 0.15rem 0.5rem 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
 }
 
 .selectionPopover button {
