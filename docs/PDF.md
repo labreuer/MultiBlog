@@ -1669,23 +1669,22 @@ Three rules hold throughout:
       than the latest names it in its group.
 - **`PdfMetadataPanel` lists the versions**, once a file has a second, each with its state,
   who uploaded it and when, who promoted it and when, a download link and a link to its page
-  (`PdfVersionList`). To whoever may manage the file it also gives the upload
-  (`PdfVersionUploader`), a candidate's promotion and abandoning (`PdfCandidateActions`),
-  and, for each earlier version:
-  - the number of posted notes and of minted link parts still on it (`postedNotesByVersion`
-    and `partsOn`), with the bulk carry where it has either (`PdfCarryActions`; Moving a
-    note forward);
-  - a link to its map page, with the number of questions open on its map;
-  - each carry that moved notes to it, under the version it moved them to: when it ran, how
-    many it moved, and whether its moves are shown, with the control that shows or hides
-    them together (`PdfCarryRecord`, from `carriesOf`).
-
-  A manager has the list on a file with one version too, since it holds the upload. None of
-  that half reaches another reader's page: the page sends it only where `canUserManageFile`
-  holds (`VersionManage`), and leaves each version's base and its map's numbers out of the
-  summaries it sends anyone else. The map itself is in every reader's page, since the viewer
-  carries links with it (Links into the file). Versions are in no listing of files, since
-  they are not files.
+  (`PdfVersionList`). It is the same list for every reader, a manager included. Versions are
+  in no listing of files, since they are not files.
+  - **What a manager does with versions is on the file's manage page** (§14, "What the page
+    holds", item 6), which the pane links at its top for a manager alone: the upload
+    (`PdfVersionUploader`), a candidate's promotion and abandoning (`PdfCandidateActions`),
+    and, for each earlier version:
+    - the number of posted notes and of minted link parts still on it (`postedNotesByVersion`
+      and `mintedPartsByVersion`), with the bulk carry where it has either (`PdfCarryActions`;
+      Moving a note forward);
+    - a link to its map page, with the number of questions open on its map;
+    - each carry that moved notes to it, under the version it moved them to: when it ran, how
+      many it moved, and whether its moves are shown, with the control that shows or hides
+      them together (`PdfCarryRecord`, from `carriesOf`).
+  - **The viewer computes none of it.** Each version's base and its map's numbers are left
+    out of the summaries a page sends anyone who may not manage the file. The map itself is in
+    every reader's page, since the viewer carries links with it (Links into the file).
 - **MCP's `read` takes `/pdf/<slug>/v/<n>`**, and the latest without it. Its byte route
   (`/api/mcp/files/<id>`) takes no hash. It serves the latest version's bytes, and with
   `?v=<n>` that version's.
@@ -1781,24 +1780,25 @@ share"), so the checks are the same ones.
     bytes alone they would be answered for a day with a candidate that is gone.
 - **It makes a candidate and nothing more.** It builds no map and promotes nothing. Saying
   that two versions hold the same text, and making one the latest, stay a person's acts on
-  the candidate's page (Open).
+  the file's manage page (Open).
 
-What follows holds through either route, but for the first, which is the uploader's page
+What follows holds through either route, but for the first, which is the manage page's
 alone: MCP's upload is asked for no kind and asks for no map.
 
-- **The uploader says which kind of new version it is**, by which of two buttons opens the
-  file picker: "Upload a better copy" or "Upload a revised text" (`PdfVersionUploader`). For
-  a better copy the uploader's page asks for the page map as soon as the upload has answered
-  (`buildVersionMap`; Matching the pages), so the candidate's page can show what would
-  carry. For a revised text nothing more runs. The answer itself is not stored. What is there
-  afterwards is a candidate with a page map or one without, and a manager may ask for the
-  map later, on the version's map page. The map is a request of its own either way, since
-  building one can take longer than an upload should wait.
+- **The uploader says which kind of new version it is**, by which of two boxes on the file's
+  manage page it is chosen in or dropped on: "A better copy" or "A revised text"
+  (`PdfVersionUploader`; §14, item 6). For a better copy the page asks for the page map as
+  soon as the upload has answered (`POST /api/files/versions/<id>/map`; Matching the pages),
+  so the candidate's card can show what would carry. For a revised text nothing more runs.
+  The answer itself is not stored. What is there afterwards is a candidate with a page map
+  or one without, and a manager may ask for the map later, on the candidate's card or its
+  map page. The map is a request of its own either way, since building one can take longer
+  than an upload should wait.
   - **The upload answers the candidate's id** (`versionId`) beside its number, which is what
     the map's request names.
-  - **A map that fails to build is not reported at the upload.** The candidate is there
-    whatever became of its map, and its page offers to build one.
-  - **A success takes the uploader to the candidate's own page**, by a full load.
+  - **A map that fails to build is said on the candidate's card**, which offers to build one
+    again. The candidate is there whatever became of its map.
+  - **A success stays on the manage page**, which refreshes and shows the candidate's card.
 - **Bytes identical to the latest version's** answer "unchanged" and write nothing. That is
   asked under the file row's lock, so bytes a promotion has just made the latest are
   unchanged too.
@@ -1810,15 +1810,16 @@ alone: MCP's upload is asked for no kind and asks for no map.
   version holds make a new file, since the file found would show other bytes.
 - **Whether bytes are still referenced** is counted over the `file_version` rows that hold
   them and are not abandoned, a deleted file's included.
-- **The candidate's page shows its managers what a promotion would do**, beside the banner
-  every reader gets (`PdfCandidateActions`, in the banner and on the candidate's row of the
-  version list; `candidateFactsFor`, `src/lib/file-version-candidate.ts`):
+- **The candidate's card on the manage page shows its managers what a promotion would do**
+  (`PdfCandidateActions`; `candidateFactsFor`, `src/lib/file-version-candidate.ts`). The
+  candidate's own page in the viewer, where it is looked at first, says in its banner that
+  it is not yet the latest, and links its managers to the card:
   - **the page map**, where it has one, in numbers: sheets paired, removed and unmapped, and
-    the runs of sheets with a question open, with a link to where they are answered
-    (Matching the pages);
+    the runs of sheets with a question open, with the map itself under the card, sheet by
+    sheet, where they are answered (§14, "A version's page map, sheet by sheet");
   - **what would carry**, where it has a map, worked out when it is asked for and not
     stored: how many posted notes and link parts place themselves, from which versions, and
-    which would stay. Without a map the page offers to build one;
+    which would stay. Without a map the card offers to build one;
   - **a warning when the candidate has no usable labels**: every citation of the file takes
     its page as a sheet number of the latest version (Links into the file). A scan from a
     pipeline that can write `/PageLabels` is better given them before it is uploaded;
@@ -1835,15 +1836,15 @@ alone: MCP's upload is asked for no kind and asks for no map.
 
   And of how it does so:
 
-  - **What would carry is asked for after the page mounts** (`previewPromotionCarry`), once
-    for the two places `PdfCandidateActions` mounts, since working it out reads sheets and
-    takes seconds.
+  - **What would carry is asked for after the card mounts**, of a Route Handler (`GET
+    /api/files/versions/<id>/promotion-carry`), since working it out reads sheets and takes
+    seconds. It is asked again whenever the map changes: built, or a run of it answered or
+    un-paired (§14, item 6).
   - **A refusal comes back as an answer, not a throw** (`promoteVersion`, `abandonVersion`,
     `src/app/actions/files.ts`): a production build hides a thrown error's message from the
     browser, and "that version was abandoned" is what the manager needs to read.
-  - **A success reloads the page in full**, since the viewer is behind `ssr: false`
-    (CLAUDE.md) and the address then means something else: the latest's own page, or the
-    page of an abandoned version.
+  - **A success refreshes the manage page**, which is server-rendered behind no `ssr: false`
+    boundary, so the refresh shows the file's versions as they now are.
 - **Abandoning** a candidate (`abandonFileVersion`, `src/lib/file-manage.ts`) marks its row,
   and deletes its page text and its bytes, unless another row holds them. The row keeps its
   labels and its page map, so a link written against it can still find its sheet (Links into
@@ -1888,7 +1889,7 @@ The row records who stored it and when, and the carry that did, where one did (V
   `parsePageMap`, a sheet's counterpart in either direction (`counterpartOf`,
   `counterpartBack`), the carrying of a sheet through the maps between two versions
   (`mapsJoin`, `carrySheet`), the answer to a run of sheets (`answerRun`), the numbers a
-  candidate's page shows (`pageMapNumbers`) and what the integrity check reports
+  candidate's card shows (`pageMapNumbers`) and what the integrity check reports
   (`pageMapFaults`).
 - `src/lib/pdf-page-map-pairing.ts` is the rules that pair the sheets (`pairSheets`), pure.
 - `src/lib/pdf-page-map-build.ts` is the server's half: what reads a version's sheets
@@ -1913,8 +1914,9 @@ which sheets of each side are blank.
 **A map is stored by a deliberate act, and once**:
 
 - the upload of a better copy;
-- a manager's asking for it, on a candidate's page or on the map page of any version that
-  has none (`buildFileVersionMap`, `src/lib/file-manage.ts`);
+- a manager's asking for it, on a candidate's card or on the map page of any version that
+  has none (`buildFileVersionMap`, `src/lib/file-manage.ts`, through `POST
+  /api/files/versions/<id>/map`);
 - a bulk carry that is run, for each version on its way that has none (Moving a note
   forward).
 
@@ -1935,19 +1937,29 @@ what a carry would do stores none: it works on maps it builds and throws away
     So building one there, and a carry that would, are refused, and the integrity check
     names the version (`map-unreadable`).
 - **A deleted file takes none**, and no answer to a run, as it takes no promotion.
+- **An abandoned version takes none.** The working-out refuses one (`workOutPageMap`), and
+  `storePageMap` checks again under the file row's lock, which abandoning holds: the first
+  check can pass a moment before the abandoning deletes the version's page text, and the map
+  would then be worked out from no text and stored on a version that links stamped with it
+  are carried through.
 
 **The map's page is `/pdf/<slug>/v/<n>/map`**, for whoever may manage the file. A reader
 who may read the file and not manage it is shown "Forbidden" there
 (`pageMapViewFor`, `src/lib/pdf-page-map-view.ts`). It shows:
 
+- **a link back to the file's manage page**, which is where it is reached from;
 - **where there is no map**, what building one means, and the button that builds it
   (`PdfMapActions`);
 - **the map in numbers**, with who stored it and when, and whether a carry did;
 - **the bulk carry**, below a promoted version's numbers, started on the map's base. A
-  candidate's map page says that its promotion carries, from its own page;
+  candidate's map page says that its promotion carries, from the manage page;
 - **every sheet of the base in rows**, each run of sheets one row with its question's card:
   the sheets proposed beside what they would replace, and its answer or the two buttons
   that give one (A run of sheets, below; §14, "A version's page map, sheet by sheet").
+
+An act there refreshes the page, which is server-rendered: the rows and the numbers change
+in place. The bulk carry is keyed on the map's answers, so after an answer it offers its
+first step again, since what it showed was worked out through the map as it stood.
 
 It is built from each version's stored page text, at the current text version where the
 version has it and at the greatest it has otherwise, as the fragment check reads (a skeleton
@@ -2071,8 +2083,9 @@ What follows holds for both:
   to 311 are one run, accepted in one act where sheet by sheet would take three hundred.
 - **The question is asked of whoever may manage the file.** It is on the version's map page,
   which shows the run once, as one row: for the first question, the sheets the alignment
-  gives, each with the sheet its label gives under it. The version list links there and
-  counts the questions open.
+  gives, each with the sheet its label gives under it. A candidate's is also under its card
+  on the file's manage page, and the manage page links each version's map page with the
+  count of its questions open.
 - **Any manager may answer at any time**: while the version is a candidate, and after its
   promotion, which closes nothing. An answer that paired the sheets can be taken back
   (below).
@@ -2497,8 +2510,9 @@ and nothing offers a destination but the latest.
 **The bulk carry** moves forward everything that places itself.
 
 - **It is an action.** A candidate with a page map offers it, and its promotion runs it when
-  asked to (Promotion). It stays available afterwards in the version list and below a
-  promoted version's map, for what is still on an earlier version (`PdfCarryActions`).
+  asked to (Promotion). It stays available afterwards on the file's manage page, under each
+  earlier version, and below a promoted version's map, for what is still on an earlier
+  version (`PdfCarryActions`).
 - **Whoever may manage the file runs it**, and it moves everyone's posted notes and the parts
   of everyone's minted links. Otherwise a corrected scan would leave every other author's
   notes behind until each of them acted.
@@ -2517,11 +2531,11 @@ and nothing offers a destination but the latest.
   a revised text followed it, and what is on it or before it waits for its authors.
   - **At a promotion** it is offered only where the candidate has a map, and builds none
     (`previewCarryAtPromotion`).
-  - **From the version list** a manager starts it on one earlier version, and it first builds
+  - **From the manage page** a manager starts it on one earlier version, and it first builds
     the map of every version from there forward that has none (`previewCarryFromVersion`,
     `carryFromVersion`). Starting it on a version that a revised text followed is that
     manager's judgement that the two hold the same text after all. It shows what would carry
-    before it stores a map or moves a note, as a candidate's page does, since nothing in the
+    before it stores a map or moves a note, as a candidate's card does, since nothing in the
     app undoes either (The history of moves, below).
     - **It is refused where a map it meant to store was stored by someone else meanwhile.**
       Its placements went through the map it worked out, which is not the one that stands.
@@ -2538,12 +2552,12 @@ and nothing offers a destination but the latest.
   place themselves, from which versions, how many would stay, and the maps it would store.
   After: how many it moved, how many stayed on each version, and how many it skipped, notes
   and parts counted together.
-  - **From the version list or a map's page the answer stays where it was asked for**, with a
-    button that reloads the page, since the notes drawn there have changed.
-  - **At a promotion the answer outlives the page that asked.** The promotion re-renders the
-    page as the latest and the candidate's banner is gone, so the answer is kept in
-    `sessionStorage` across the reload and shown once on the latest's page, to that manager
-    (`PdfCarryOutcome`).
+  - **From the manage page or a map's page the answer stays where it was asked for**, with a
+    button that refreshes the page to show what is where now. The refresh can take the
+    carry's own control away, with the notes it counted, so it waits for that click.
+  - **At a promotion the answer is held by the manage page's versions section**, which stays
+    mounted across the refresh that takes the candidate's card away, and is shown there
+    until it is dismissed. The latest's page in the viewer reports nothing.
 - **It changes nothing else on a row**: not a note's `editedAt`, and not a link's.
 
 **A selective move** is one note, moved by a person who judges that it still applies.
@@ -2581,8 +2595,7 @@ and nothing offers a destination but the latest.
   refused before anything is read**, and again by the write under its lock.
 - **Its move is shown by default.**
 - **The page then loads its notes again**, through `loadPdfAnnotationEntries` or a full
-  reload, as it does after a carry from the version list or from an accepted run of sheets.
-  A `router.refresh()` alone is lost behind the viewer's `ssr: false` (CLAUDE.md).
+  reload. A `router.refresh()` alone is lost behind the viewer's `ssr: false` (CLAUDE.md).
 - **A moved part of the open link reloads the tray's store too.** The store holds its parts
   as it loaded them, each with its version, and the surface draws a part by that version.
   Left as it was, the store would keep the part off the latest's sheets until a reload.
@@ -2829,7 +2842,7 @@ then refuses. Then one transaction, the file row locked:
 4. `updatedAt`, and `updatedByUserId` set to the promoter.
 
 A note captured on the outgoing version after the placements were worked out stays there. Its
-own check passed, since its version was still the latest. The version list counts it among
+own check passed, since its version was still the latest. The manage page counts it among
 the notes still on that version, and the next carry moves it.
 
 Nothing else changes. The file's id, slug, title, visibility, owners, tags, references and
@@ -3077,7 +3090,7 @@ revisions, and its printed pages are the same in each.
     nothing to say so.
 - **A file without usable labels** takes a citation's page as a sheet number of the latest
   version (`sheetsLabelled`). So a version that moves its sheets misdirects the citations of
-  it that name a page and no passage, and the candidate's page warns of that (The upload).
+  it that name a page and no passage, and the candidate's card warns of that (The upload).
   They are not carried through the page maps as an unstamped link is. A `sheet=` is a sheet by
   definition, and the maps carry it exactly. A locator is a printed page, read as a sheet only
   for want of labels, so the maps would carry a guess forward. Labels on the new version are
@@ -3452,7 +3465,9 @@ test while each file has one version. So four specs make second versions:
   and the links.
 - **`e2e/pdf-version-upload.spec.ts`**: a fixture and a second with other text. On the
   first, a word is annotated and a `sheet=` link and a `p=` link are written. The second is
-  uploaded and promoted. The spec checks:
+  uploaded and promoted from the file's manage page. The spec checks:
+  - the upload staying on the manage page and showing the candidate's card, the candidate's
+    own page linking its manager there, and nothing of that to a reader;
   - before the promotion, `/pdf/<slug>` and `/pdf/<slug>/v/1` showing the first bytes and
     `/pdf/<slug>/v/2` the second, to a reader who can't manage the file;
   - an annotation refused on the candidate, and a note with no target written there and
@@ -3490,8 +3505,8 @@ test while each file has one version. So four specs make second versions:
   five tests, each its own file:
   - **the links**: the pages matched at the upload, the stored map's blank sheets, which
     are the blank-sheet read's own answer (the sheet the better copy gained is one, and
-    neither copy's plate is), what the candidate's page says of the
-    map, the map's page refused to a reader who can't manage the file, where a `sheet=`
+    neither copy's plate is), what the candidate's card on the manage page says of the
+    map and the map drawn under it, the map's page refused to a reader who can't manage the file, where a `sheet=`
     link and a `p=` link written against the first copy land, the banner saying how each
     was read, a link to the removed sheet carried by its words or opening version 1, a link
     carried backwards on version 1's own address, MCP's `read` and its write check reading
@@ -3500,13 +3515,13 @@ test while each file has one version. So four specs make second versions:
   - **the notes**: on the first copy, by two users, a word annotated, the changed word
     annotated, a passage given an anchored link, a rectangle annotated and replied to, a
     draft, and a part of a link not yet minted. The second is uploaded as a better copy and
-    promoted with the carry. The test checks what the candidate's page says would carry;
-    after it, the highlights on `/pdf/<slug>`, both users' among them, the changed word's
+    promoted with the carry. The test checks what the candidate's card says would carry and,
+    after the refresh that takes the card away, what the carry did; after it, the highlights on `/pdf/<slug>`, both users' among them, the changed word's
     note with its new quote, the rectangle and its reply where the fit puts them, and no
     sign of a move on any card; the draft and the unminted part still on version 1, the
     draft listed in its author's private notes on the latest's page and the part not drawn
     there; two notes posted on version 1 after the promotion and one of them marked "stays
-    here", with a second carry from the version list showing what it would do, moving the
+    here", with a second carry from the manage page showing what it would do, moving the
     other and leaving the marked one; and the carry's moves shown once a manager shows
     them. **It then undoes the first carry in SQL**, by the recipe above, and compares
     every anchor's row with what it was before the carry;
@@ -3557,7 +3572,7 @@ rename it, re-slug it, change its visibility and its **owners**, delete and rest
 for a PDF upload, promote, abandon and carry its versions. The viewer goes back to being a
 reading surface.
 
-**Built so far** (Build order, items 1 and 2):
+**Built so far** (Build order, items 1 to 3):
 
 - **the page without versions**: the address and the gate, the file's facts, its title,
   address, visibility and owners, delete and restore, the actions that answer, the write
@@ -3565,12 +3580,16 @@ reading surface.
   file took, `/files`' Manage column and a non-PDF's title cell, and the viewer's "Manage
   this file" link;
 - **the map sheet by sheet**, on the map page: the rows, the strip, "Questions only" and the
-  question cards in words (A version's page map, sheet by sheet), with their buttons still
-  reloading the page.
+  question cards in words (A version's page map, sheet by sheet);
+- **the versions**, here (item 6 below): the two drop boxes, a candidate's card with its map
+  under it, the carries, the two Route Handlers, and what the section holds across a
+  refresh; `storePageMap`'s check under the lock; and the viewer's Metadata pane cut down to
+  its reading half, a candidate's banner and the map page linking here, and the latest's
+  page no longer reporting a carry (What the viewer keeps).
 
-Everything else about versions (item 6 below, the map under a candidate's card, What the
-viewer keeps but that link) is still planned, and §13's management half is still in the
-viewer's Metadata pane.
+Still planned is what the viewer gains (What the viewer keeps, **Planned**): the waiting
+version pinned for every reader, a manager's line under it, the Metadata tab's dot and the
+selection popover's line.
 
 ### The address and the gate
 
@@ -3698,13 +3717,14 @@ Top to bottom, each a section of its own:
      who made the last one. On a PRIVATE file it is also who can read it (the same TODO.md
      item, item 5).
 6. **Versions.** A file of any other format has its one version here, with its download,
-   and nothing else. For a PDF, everything §13 put in the Metadata pane for a manager moves
-   here: the upload of a new version (`PdfVersionUploader`), a candidate's promotion and
+   and nothing else. For a PDF, everything §13 gives a manager about its versions is here
+   (`FileVersionsSection`, `src/app/files/[slug]/manage/versions.tsx`, over
+   `managedVersionsOf`): the upload of a new version (`PdfVersionUploader`), a candidate's promotion and
    abandoning with what a promotion would do (`PdfCandidateActions` and `candidateFacts`),
    the notes and link parts still on each earlier version with the carry that moves them
    (`PdfCarryActions`), each carry's moves shown or hidden (`PdfCarryRecord`), what a
-   promotion's carry did (`PdfCarryOutcome`'s facts, from the action's own answer), and each
-   version's page map with a link to its map page. Each version links to its own page in the
+   promotion's carry did (from the action's own answer), and each version's page map with a
+   link to its map page. Each version links to its own page in the
    viewer, which is where a candidate is looked at before it is promoted. A candidate's map
    is shown under its card sheet by sheet (A version's page map, sheet by sheet, below).
    - **The two upload options are drop targets as well as buttons** (`useFileDrop`). "A
@@ -3721,18 +3741,20 @@ Top to bottom, each a section of its own:
      boxes. While a candidate waits or the file is deleted, the boxes take no drop and say
      why.
    - **This page is server-rendered and behind no `ssr: false` boundary**, so after an act
-     `router.refresh()` delivers the new state, and the full reloads the viewer's
-     uploader and candidate actions need (CLAUDE.md's `router.refresh()` entry) are not
-     needed here. An upload stays on this page and shows the new candidate.
+     `router.refresh()` delivers the new state, and no act needs the full reload that a
+     surface behind one does (CLAUDE.md's `router.refresh()` entry). An upload stays on this
+     page and shows the new candidate. A carry's answer, from a carry started on an earlier
+     version, stays until its manager asks for the refresh, which can take the carry's own
+     control away with the notes it counted.
    - **What outlives a refresh is held by the section, never by a card the refresh takes
      away.** The section's client component is keyed on the file and stays mounted across
      every refresh. It holds:
      - **what a promotion's carry did.** The promotion's own refresh removes the candidate's
-       card with the candidate it was about, which is why the viewer's banner hands that
-       answer to the next page through `sessionStorage` (`keepCarryOutcome`). Here the
-       section shows it, and `keepCarryOutcome` goes with the banner's `PdfCarryOutcome`;
+       card with the candidate it was about. The section shows it until it is dismissed,
+       and nothing is kept in the browser's storage;
      - **that a map build is running**, which the upload box starts and the candidate's
-       card reports, the first replaced by the second while the build runs.
+       card reports, the first replaced by the second while the build runs. A build that
+       fails is said on the card, which offers it again.
    - **The work nobody is waiting on goes through Route Handlers, not server actions**:
      building a page map, which starts by itself after a better copy's upload, and the
      preview of a promotion's carry (`previewPromotionCarry`), which runs when a
@@ -3750,11 +3772,11 @@ Top to bottom, each a section of its own:
          the carry would move (`previewCarryAtPromotion`). It stores nothing and answers
          `Cache-Control: no-store`.
 
-       The actions they replace (`buildVersionMap`, `previewPromotionCarry`) go, and the
-       map page's "Match the pages" asks the first handler too.
-     - **Each handler is a wrapper, as an action is**: the session's `Actor` handed to the
-       same function in `src/lib/file-manage.ts` or `src/lib/file-anchor-move.ts`, which
-       holds the gate. A signed-out request is answered 401, as `PUT /api/files/<id>` is,
+       Neither is a server action, and the map page's "Match the pages" asks the first
+       handler too. The browser's half of both is `src/lib/file-version-requests.ts`.
+     - **Each handler is a wrapper, as an action is** (`versionHandler`,
+       `src/lib/file-version-handlers.ts`): the session's `Actor` handed to the same function
+       in `src/lib/file-manage.ts` or `src/lib/file-anchor-move.ts`, which holds the gate. A signed-out request is answered 401, as `PUT /api/files/<id>` is,
        and never redirected. A refusal is its `ApiError`'s status with its message as
        `{ error }`, and anything else a 500 with a line that says to reload.
      - **A handler revalidates nothing the page then sees**, so the page calls
@@ -3765,20 +3787,19 @@ Top to bottom, each a section of its own:
        Nothing stored says a build is running, so a page opened meanwhile offers the button,
        and a second build started from it is wasted work and no fault: a map is written only
        where the version has none (`writePageMapIfNone`). A promotion made during a build
-       is one without the carry, and the map is then stored on a promoted version, as one
-       asked for later is.
+       is one without the carry, which the card says while it runs, and the map is then
+       stored on a promoted version, as one asked for later is.
      - **A version abandoned during a build gets no map.** Abandon is beside the running
        build on this page. `storePageMap` checks that the version is not abandoned before it
        reads, and checks again under the file row's lock, which abandoning holds, storing
        nothing where it now is. The first check alone can pass a moment before the
        abandoning deletes the version's page text. The map is then worked out from no
        text, and stored on a version that links stamped with it are carried through. Read
-       from `storePageMap` and not reproduced.
+       from `storePageMap` and not reproduced, so no test stages it.
      - **A preview is asked for again when what it read has changed**: after an answer to a
-       run, and after a build. `PdfCandidateActions` keeps one asking per version for as
-       long as the page is open, which holds only while every act reloads the page, and
-       here none does. The card asks by the version and the map's stored answers, so an
-       answered run is a new asking.
+       run, and after a build. The card asks by the version and the map's stored answers
+       (`candidateMapKey`), so an answered run is a new asking, and keeps one asking per
+       state of the map for as long as the page is open.
      - **A handler can stream the count of sheets read**, as lines of JSON ending in the
        answer, which a server action can't. The read of each version's sheets would take a
        progress callback for it. Until then the wait shows its steps without a count.
@@ -3837,9 +3858,8 @@ title, a file needs an owner.
 ### A version's page map, sheet by sheet
 
 The map page (`/pdf/<slug>/v/<n>/map`) draws a version's map as a list of rows
-(`PdfPageMapList`, `src/components/pdf/`). **Planned:** a candidate with a page map shows
-the whole map under its card on this page, from the same component, so the two never
-disagree.
+(`PdfPageMapList`, `src/components/pdf/`). A candidate with a page map shows the whole map
+under its card on this page, from the same component, so the two never disagree.
 
 **Three pieces draw it.** `pageMapRows` (`src/lib/pdf-page-map-rows.ts`) turns a `PageMap`
 into the rows, and is pure and browser-safe, with a unit test beside it.
@@ -3924,9 +3944,10 @@ of state, "Questions only".
 - **"Questions only"** hides every row but the questions, for a map with many stretches: the
   runs open or left unmatched. A run paired by an answer is no longer one, until it is
   un-paired.
-- **On the map page an answer reloads the page.** **Planned:** under a candidate's card on
-  this page, answering a question changes its row in place, and the numbers and the carry
-  preview above it.
+- **An answer refreshes the page it is on**, and changes its row in place with no
+  navigation: under a candidate's card here, the numbers and the carry preview above it
+  too; on the map page, the numbers, and the bulk carry, which is keyed on the map's answers
+  and so starts over.
 
 **A question's card says what is going on, in words, and offers two choices.** The labels'
 pairing is never a column beside the text's, which would read as a third option, and it
@@ -3976,11 +3997,24 @@ never is one:
 ### What the viewer keeps
 
 - **The Metadata pane** keeps the tags, the references and the version list as every reader
-  sees it: each version's state, who uploaded and promoted it and when, its own page and its
-  download. A manager also gets one "Manage this file" link at the top of the pane.
+  sees it (`PdfVersionList`): each version's state, who uploaded and promoted it and when,
+  its own page and its download. A manager also gets one "Manage this file" link at the top
+  of the pane.
   - **The list is shown once a file has a second version, to a manager as to any reader.**
-    A manager of a one-version file is shown it today for the upload it holds, and the
-    upload is on this page.
+    The upload, which once gave a manager the list on a one-version file, is on this page.
+- **The latest's page reports no promotion's carry.** A promotion is made from this page,
+  which reports its own outcome.
+- **`reading.tsx` computes none of the manager's numbers** (`notesOn`, `partsOn`, `carries`,
+  `candidateFacts`), since nothing on the page shows them. It asks only whether the viewer
+  may manage the file, for the link (`manageHref`), and keeps each version's base and its
+  map's numbers out of the summaries it sends anyone who may not (`sent`).
+- **A candidate's banner** says the version is not yet the latest, and links its managers to
+  this page, where it is promoted or abandoned. This is where it is looked at first.
+- **The note worklist stays** (`PdfNoteWorklist`, "Moving a note forward"). Moving one note
+  is its author's act, made against the sheets, never a manager's.
+
+**Planned** (Build order, item 4):
+
 - **A waiting version is pinned at the top of the list, for every reader**: "Version 3 is
   waiting to replace version 2", then whether its pages are matched, who uploaded it and
   when, and a link to its page.
@@ -4000,7 +4034,8 @@ never is one:
     They are not kept from a reader's browser, since the pairing it holds marks each sheet
     without a counterpart as removed or unmapped.
   - **A manager gets one more line under it**: the count of its questions still open, and a
-    link to this page to review and promote it.
+    link to this page to review and promote it. That count is in the waiting version's
+    summary, which a manager is sent whole.
 - **The Metadata tab's label carries a dot while a version waits, for a manager alone.** A
   reader has nothing to act on there.
 - **The selection popover keeps its buttons**, and while a version waits it adds one muted
@@ -4017,17 +4052,6 @@ never is one:
     version 2 unless the pages are matched." From the latest that is the waiting version's
     own map, which can still be built, before the promotion or after it. From an earlier
     version it is every map between the two.
-- **The latest's page no longer reports a promotion's carry** (`PdfCarryOutcome`, mounted by
-  `PdfVersionBanner` for the manager who promoted). A promotion is made from this page, which
-  reports its own outcome.
-- **`reading.tsx` stops computing `notesOn`, `partsOn`, `carries` and `candidateFacts`**,
-  since nothing on the page shows them. Those are queries every manager's view runs today.
-  What a manager is sent besides the link is the waiting version's open questions, which
-  its version summary already holds.
-- **A candidate's banner** still says the version is not yet the latest, and links its
-  managers to this page, where it is promoted or abandoned.
-- **The note worklist stays** (`PdfNoteWorklist`, "Moving a note forward"). Moving one note
-  is its author's act, made against the sheets, never a manager's.
 
 ### `/files`
 
@@ -4069,7 +4093,7 @@ One PR at a time:
    cards reworded, and `pageMapViewFor` reading the words of a `labels` run and which
    sheets have no text. It depends on nothing of the manage page, and its buttons still
    reload the page.
-3. **The versions move**: the section here with its drop targets and what it holds across
+3. **The versions move** (built): the section here with its drop targets and what it holds across
    a refresh, the two Route Handlers and the actions they replace, `storePageMap`'s check
    under the lock that the version is not abandoned, the map's component under a
    candidate's card with its answers changing in place, the Metadata pane cut down to its
@@ -4138,7 +4162,7 @@ A new `e2e/file-manage.spec.ts`:
 - a `.docx`'s page, with no upload offered;
 - a file dropped on each upload box makes that kind of version (a page map is asked for,
   or not), and two files, a `.docx` and a drop beside the boxes are each refused with
-  nothing sent;
+  nothing sent (built);
 - in `e2e/pdf-page-map.spec.ts`, on the map page (built): a fixture map with a row of each
   kind, the rows in the base's order, every sheet of the base and every sheet of the
   version in exactly one row, a matched stretch with a sheet without text and a pair whose
@@ -4147,8 +4171,9 @@ A new `e2e/file-manage.spec.ts`:
   text and of one the labels gave nothing; and the map of an abandoned version drawn with
   no words and nothing said about text;
 - under a candidate's card on this page, a question answered changes its row, the numbers
-  and the preview with no navigation, which the spec checks by counting the page's
-  navigations;
+  and the preview with no navigation (built, in `e2e/pdf-page-map.spec.ts`), which the spec
+  checks by a mark left on the page's window: a refresh keeps it, and a load clears it.
+  Counting navigations can't tell the two apart, since a refresh updates the history;
 - while a version waits, on `/pdf/<slug>`: a reader sees it pinned with its pages matched
   or not matched and is sent none of the map's numbers (the version's `map` and `baseNumber`
   are null in what the page was sent; the pairing in `linkVersions` is there for every
@@ -4160,9 +4185,10 @@ A new `e2e/file-manage.spec.ts`:
   version's own page;
 - a title saved while a page map is building is saved at once, without waiting for the
   build; the candidate's card says the build is running and shows the map when it answers,
-  with no reload; and a signed-out request to either handler answers 401;
+  with no reload; and a signed-out request to either handler answers 401 (built: the spec
+  holds the build's request in the browser until the title is saved);
 - a promotion with the carry says on this page what the carry did, after the refresh that
-  takes the candidate's card away.
+  takes the candidate's card away (built, in `e2e/pdf-better-copy.spec.ts`).
 
 A unit test beside the function that turns a `PageMap` into the list's rows, which is pure
 (`npm run test:unit`; `src/lib/pdf-page-map-rows.test.ts`, built). The maps that matter
