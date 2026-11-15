@@ -105,7 +105,7 @@ These are estimates from reading the code, in lines of code excluding comments.
 | Annotations | The predicates; both captures; the collab helpers; `seedAnnotationYdoc`; `edit-grace.ts`; the `annotation-data.ts` loaders | ~550–600 from `src/app/actions/annotations.ts`: the post and settle core, draft creation, edit begin/finish/cancel, delete/restore, history. The core's helpers (`settleAnnotationBody`, `writeSettledBody`, `parentSettledMark`, `postFileAnnotation`) are private but already take identity | Markdown → annotation body (~35); seeding a body from JSON, with its Yjs client registered (~15); an attributed `/admin/annotation-replace` that refuses a read-only token (~35); a container's threads, or every readable container's, filtered, ordered and paged (~80); what and where each annotation is, on a read, and a lost mark's passage at its version (~65) (§9) |
 | Anchored links | `anchoredLinkForViewer`, `anchoredLinkLandingFor`, the delete and rename predicates, `normalizeLinkName` | ~190 from `src/app/actions/anchored-links.ts`: `canUserLinkTarget`, `resolveCaptureStamp`, the part capture inside `addAnchoredLinkPart`, the mint preconditions, rename, delete | Minting one or more links in one transaction (~50); reading a link, its doc parts resolved (~50); "links into this target" (~55), lifted out of `/links`' page |
 | Tags | `canUserTagTarget`, `canUserRemoveAssignment`, the role floors, the `tag-data.ts` reads, `browseTag` | ~150 from `src/app/actions/tags.ts`: `writeWholeObjectTags`, the `createTag` core, the apply gate, untag | Search's tag filter, and tags on every read (~40); tag slug history (~30) (§11) |
-| PDFs | The file predicates, `storeUploadStream`, `extractPdf`, `storedPageText`, `claimFileSlug`; `extractPageItems` and `quadsForRange` for server-side quads ([PDF_QUADS.md](PDF_QUADS.md)); `resolvePassage`, and `FragmentChecker` for fragment links ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)) | The upload route after its session check, role check included, into `ingestUpload` (§8); the byte route's body, out of `/api/files/[id]/[hash]` (§5); `setFileDeleted`'s restore-and-rename; `buildQuote`, with `normaliseNeedle` for its fallback, out of the `"use client"` `pdf-anchor-capture.ts` into an isomorphic module | Page labels, read as ranges; the outline, with its depth (~70); a fragment link read as its passage (~30); the quote locator, with `resolveAll` exported for every occurrence (§8); checking a page's items against its stored text before computing quads (~15); changing a file's owners, which nothing does today (~40) (§12) |
+| PDFs | The file predicates, `storeUploadStream`, `extractPdf`, `storedPageText`, `claimFileSlug`; `extractPageItems` and `quadsForRange` for server-side quads ([PDF_QUADS.md](PDF_QUADS.md)); `resolvePassage`, and `FragmentChecker` for fragment links ([PDF_FRAGMENT_LINKS.md](PDF_FRAGMENT_LINKS.md)) | The upload route after its session check, role check included, into `ingestUpload` (§8); the byte route's body, out of `/api/files/[id]/[hash]` (§5); `setFileDeleted`'s restore-and-rename; `buildQuote`, with `normaliseNeedle` for its fallback, out of the `"use client"` `pdf-anchor-capture.ts` into an isomorphic module | Page labels, read as ranges; the outline, with its depth (~70); a fragment link read as its passage (~30); the quote locator, with `resolveAll` exported for every occurrence (§8); checking a page's items against its stored text before computing quads (~15); changing a file's owners (~40) (§12) |
 | Cross-cutting | — | — | Tokens and scopes (~200); the actor, with an adapter for each shape identity takes (~60); idempotency, with `api_write` (~80); byte grants, and an audience on the ydoc token (~65); the quote resolver, with the matcher's new entry points, passages named by their ends, and a capture over a built node (~230) (§7); the MCP layer: the tools, `read`'s URL resolution and the byte routes (~600) |
 
 The totals:
@@ -1885,9 +1885,14 @@ checks read access to the container. The UI checks that only when the draft is c
   - **`manage` changes them** (`setFileOwners`, `src/lib/file-manage.ts`), under
     `setDocByline`'s rules read for a file: the actor can manage it, everyone added is in
     `FILE_MANAGER_ROLES`, at least one owner remains, a removal takes `allowRemovals`, and the
-    change is one transaction. Nothing in the UI changes them. For a PDF its uploader owns
-    alone, that is the one way to let Claude read it, or the notes on it, short of making it
-    SHARED; nothing adds Claude as an owner by default.
+    change is one transaction, the file row locked. The browser's other front door is the
+    file's manage page ([PDF.md](PDF.md) §14), which also passes `expected`, the list its edit
+    started from, so a list changed meanwhile is refused; `manage` passes none. For a PDF its
+    uploader owns alone, adding Claude as an owner is the one way to let Claude read it, or the
+    notes on it, short of making it SHARED; nothing adds Claude as an owner by default.
+  - **A deleted file's slug can't be changed**, by `manage` or the page: `setFileSlug`
+    refuses it ("This file is deleted, and its url can't be changed until it is restored").
+    `manage` restores before it sets a slug, so one call that does both still works.
 - **A user lookup**, `find_users`, matches byline-eligible users by name or slug, or one user
   by exact email. It returns id, slug and name: enough to set a byline without exposing the
   user table. A nameless account's slug is made from its email, so it is returned only to the
@@ -2183,7 +2188,7 @@ comment's writer and the post's moderators. So a hit never leads to `not_found`.
 | `tag` · `untag` | write | Apply a term, minting it when it is new, to anything but a published or scheduled post; remove one's own assignment, or anyone's as ADMIN/EDITOR (§11) |
 | `create_ref` | write | A work added to the reference library from its CSL-JSON record, with its PDF as `file` if given; `duplicate`, with the key to cite, for one the library holds by DOI or ISBN ([CITATIONS.md](CITATIONS.md)) |
 | `update_ref` | write | A work's record replaced whole, by its key: its key, abbreviation, PDF and citations kept and the citations relabelled; `duplicate` for a DOI or ISBN another work holds, and `conflict` for a deleted work, never restored ([CITATIONS.md](CITATIONS.md), "Replacing a record") |
-| `manage` | manage | A doc's or file's visibility, slug, byline or owners, and whether a doc is a record; tagging a published or scheduled post; deleting or restoring a doc, file, annotation or link |
+| `manage` | manage | A doc's or file's visibility, slug, byline or owners, and whether a doc is a record; tagging a published or scheduled post; deleting or restoring a doc, file, annotation or link. A deleted file's slug is refused until it is restored (§12) |
 
 Uploading, downloading and exporting go through §5's byte routes, not through a tool's
 arguments: `upload` and `download` answer only with a route's URL.

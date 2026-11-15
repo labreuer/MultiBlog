@@ -3602,7 +3602,17 @@ export async function setTestFileOwners(fileId: string, emails: string[]): Promi
   ]);
 }
 
+/** A file's slug, its past ones oldest first, and whether it is deleted — server truth for the manage page's specs. */
+export async function getFileSlugFacts(fileId: string): Promise<{ slug: string; past: string[]; deleted: boolean } | null> {
+  const file = await prismaIncludingDeleted.storedFile.findUnique({
+    where: { id: fileId },
+    select: { slug: true, deletedByUserId: true, slugHistory: { orderBy: { createdAt: "asc" }, select: { slug: true } } },
+  });
+  return file ? { slug: file.slug, past: file.slugHistory.map((row) => row.slug), deleted: file.deletedByUserId !== null } : null;
+}
+
 const handlers = {
+  getFileSlugFacts,
   setTestFileOwners,
   getUploadFacts,
   getFileAnnotationQuads,

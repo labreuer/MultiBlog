@@ -11,7 +11,7 @@ import { pageMapNumbers, parsePageMap, type PageMapNumbers } from "@/lib/pdf-pag
 // (`VERSION_WRITE_TIMEOUTS`, file-ingest.ts, which imports nothing from here).
 const VERSION_WRITE_TIMEOUTS = { maxWait: 30_000, timeout: 60_000 } as const;
 import { canUserManageFile } from "@/lib/file-authz";
-import { changeFileSlug, freeFileSlugFor } from "@/lib/file-slug";
+import { changeFileSlug, dropPastSlugsTakenMeanwhile, freeFileSlugFor, revertFileSlug as revertFileSlugInDb } from "@/lib/file-slug";
 import { FILE_MANAGER_ROLES } from "@/lib/role-checks";
 import { ApiError, forbidden, invalid } from "@/lib/api/errors";
 import type { DocVisibility } from "@/generated/prisma/enums";
@@ -53,18 +53,33 @@ export async function setFileTitle(actor: Actor, fileId: string, title: string):
   return trimmed;
 }
 
-/** Renames a file's slug, the old one kept in its history; returns the slug it now has. */
-export async function setFileSlug(actor: Actor, fileId: string, slug: string): Promise<string> {
-  await requireManageable(actor, fileId);
+/** A slug function's own refusals (taken, gone, deleted) as a conflict; anything else rethrown as the fault it is. */
+async function slugChange(run: () => Promise<string>): Promise<string> {
   try {
-    return await changeFileSlug(fileId, slug, actor.userId);
+    return await run();
   } catch (err) {
-    // changeFileSlug's own refusals (taken, gone) are plain Errors written
-    // for the reader. Anything else, a Prisma rejection included, is a
-    // fault, and its message is no answer to give.
+    // changeFileSlug's and revertFileSlug's own refusals are plain Errors
+    // written for the reader. Anything else, a Prisma rejection included, is
+    // a fault, and its message is no answer to give.
     if (err instanceof Error && err.name === "Error") throw new ApiError("conflict", err.message);
     throw err;
   }
+}
+
+/**
+ * Renames a file's slug, the old one kept in its history; returns the slug it
+ * now has. **Refused for a deleted file** (`changeFileSlug`), which MCP's
+ * `manage` reaches by restoring first in the same call.
+ */
+export async function setFileSlug(actor: Actor, fileId: string, slug: string): Promise<string> {
+  await requireManageable(actor, fileId);
+  return slugChange(() => changeFileSlug(fileId, slug, actor.userId));
+}
+
+/** Puts a file's slug back to its most recent past one, and returns it; refused for a deleted file, as a change is. */
+export async function revertFileSlugAs(actor: Actor, fileId: string): Promise<string> {
+  await requireManageable(actor, fileId);
+  return slugChange(() => revertFileSlugInDb(fileId, actor.userId));
 }
 
 /**
@@ -73,13 +88,19 @@ export async function setFileSlug(actor: Actor, fileId: string, slug: string): P
  * it adds is a live account in `FILE_MANAGER_ROLES`, and someone already on
  * it stays eligible to stay; at least one owner remains; a removal takes
  * `allowRemovals`, since on a PRIVATE file the owners are who can read it;
- * one transaction.
+ * one transaction, the file row locked.
+ *
+ * **`expected`** is the list, in order, the caller's edit started from: a
+ * list that differs from it by the time the row is locked is refused rather
+ * than overwritten, as `setDocByline` refuses a byline. The manage page
+ * passes it; MCP's `manage` doesn't. It is compared with every owner the file
+ * has, a deleted account's included.
  */
 export async function setFileOwners(
   actor: Actor,
   fileId: string,
   orderedUserIds: readonly string[],
-  opts: { allowRemovals?: boolean } = {},
+  opts: { allowRemovals?: boolean; expected?: readonly string[] } = {},
 ): Promise<void> {
   await requireManageable(actor, fileId);
   const wanted = [...new Set(orderedUserIds)];
@@ -87,7 +108,13 @@ export async function setFileOwners(
   if (wanted.length !== orderedUserIds.length) throw invalid("An owner list names each person once.");
 
   await prisma.$transaction(async (tx) => {
-    const current = new Set((await tx.fileOwner.findMany({ where: { fileId }, select: { userId: true } })).map((o) => o.userId));
+    await lockFileRow(tx, fileId);
+    const owners = (await tx.fileOwner.findMany({ where: { fileId }, orderBy: { ownerOrder: "asc" }, select: { userId: true } })).map((o) => o.userId);
+    const { expected } = opts;
+    if (expected && (expected.length !== owners.length || expected.some((id, i) => id !== owners[i]))) {
+      throw new ApiError("conflict", "This file's owner list changed since you started editing it.");
+    }
+    const current = new Set(owners);
     const added = wanted.filter((id) => !current.has(id));
     const users = await tx.user.findMany({ where: { id: { in: added } }, select: { id: true, role: true } });
     const eligible = new Set(users.filter((u) => FILE_MANAGER_ROLES.includes(u.role)).map((u) => u.id));
@@ -114,7 +141,8 @@ export async function setFileOwners(
 }
 
 /**
- * Soft-deletes or restores, and — on the way back — settles the slug.
+ * Soft-deletes or restores, and — on the way back — settles the slug and drops
+ * each past slug a live file took meanwhile (`dropPastSlugsTakenMeanwhile`).
  *
  * Deleting a file releases its url (`file_slug_live_key` is unique only among
  * live files, src/lib/file-slug.ts), which is the point: the reason to delete a
@@ -138,6 +166,7 @@ export async function setFileDeleted(
   }
   const slug = await prismaIncludingDeleted.$transaction(async (tx) => {
     const claimed = await freeFileSlugFor(tx, fileId, file.slug);
+    await dropPastSlugsTakenMeanwhile(tx, fileId);
     await tx.storedFile.update({
       where: { id: fileId },
       data: { deletedByUserId: null, deletedAt: null, updatedByUserId: actor.userId, slug: claimed },

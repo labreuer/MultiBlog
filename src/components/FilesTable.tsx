@@ -75,6 +75,8 @@ export type FileRow = {
   slug: string;
   title: string;
   filename: string;
+  /** Whether the latest version is a PDF, which is what has a viewer at /pdf/<slug>. */
+  isPdf: boolean;
   /** The Owner(s) cell — file_metrics' string_agg of admin initials, already joined. */
   owners: string;
   visibility: DocVisibility;
@@ -115,6 +117,13 @@ const SORTABLE_KEYS = [
   "deletedAt",
   "deleted",
 ] as const;
+
+/** Where a row's title leads: a PDF's viewer; otherwise its manage page for a manager and its download for anyone else. */
+function titleTarget(row: FileRow): { href: string; download: boolean } {
+  if (row.isPdf) return { href: `/pdf/${row.slug}`, download: false };
+  if (row.canManage) return { href: `/files/${row.id}/manage`, download: false };
+  return { href: `/files/${row.slug}/download`, download: true };
+}
 
 export default function FilesTable({
   rows,
@@ -173,16 +182,31 @@ export default function FilesTable({
   const columnBodies: Record<AdminColumnKey<"files">, ColumnBody<FileRow>> = {
     title: {
       sortKey: "title",
-      // Links by slug, not id — unlike /docs, whose /doc/[slug] route resolves
-      // an id too (resolveDocParam). /pdf/[slug] takes a slug only, so the id
-      // would 404.
+      // A PDF's title opens its viewer, by slug, not id — unlike /docs, whose
+      // /doc/[slug] route resolves an id too (resolveDocParam). /pdf/[slug]
+      // takes a slug only, so the id would 404. A file of any other format has
+      // no viewer, so its title leads a manager to its manage page and anyone
+      // else to its download. The click beside the link goes the same way.
       cellProps: (row) => ({
         className: styles.titleCell,
         onClick: (e) => {
-          if (!(e.target instanceof Element) || !e.target.closest("a")) router.push(`/pdf/${row.slug}`);
+          if (e.target instanceof Element && e.target.closest("a")) return;
+          const target = titleTarget(row);
+          if (target.download) window.location.assign(target.href);
+          else router.push(target.href);
         },
       }),
-      cell: (row) => <Link href={`/pdf/${row.slug}`}>{row.title}</Link>,
+      cell: (row) => {
+        const target = titleTarget(row);
+        // The download is a Route Handler answering bytes, never a page for the router to fetch.
+        return target.download ? <a href={target.href}>{row.title}</a> : <Link href={target.href}>{row.title}</Link>;
+      },
+    },
+    manage: {
+      // No sort key: what it would sort by is this viewer's right to each row,
+      // which is no property of the file — the exception /docs' Edit is too.
+      // A deleted row has one, since the page opens a deleted file to restore it.
+      cell: (row) => row.canManage && <Link href={`/files/${row.id}/manage`}>manage</Link>,
     },
     filename: {
       sortKey: "filename",
@@ -435,13 +459,14 @@ export default function FilesTable({
         ]}
         notes={
           <p style={{ marginTop: 8 }}>
-            Every column here sorts. <strong>Owner(s)</strong> and <strong>Annotations</strong> go through the{" "}
+            Every column here sorts but <strong>Manage</strong>, whose link is on the rows you may manage.{" "}
+            <strong>Owner(s)</strong> and <strong>Annotations</strong> go through the{" "}
             <code>file_metrics</code> view — the initials joined in SQL across a file&apos;s owners, and a count that
             excludes deleted and still-private draft annotations, neither of which a plain <code>ORDER BY</code> could
             name. <strong>Tags</strong> sorts through a view of its own, <code>file_tag_summary</code>, by the
             terms&apos; names in order, untagged files last. <strong>Size</strong> sorts on the raw byte count even though it prints rounded, and{" "}
             <strong>Pages</strong> and Size are both stored columns recorded once at upload, so sorting by either costs
-            no more than sorting by a date. <strong>Tags</strong>, <strong>Slug</strong>, <strong>Updated</strong>,{" "}
+            no more than sorting by a date. <strong>Manage</strong>, <strong>Tags</strong>, <strong>Slug</strong>, <strong>Updated</strong>,{" "}
             <strong>Updated by</strong> and <strong>Deleted at</strong> are hidden by default (Columns picker, above).
             This listing shows every <strong>SHARED</strong> file to an ADMIN or EDITOR, plus the{" "}
             <strong>PRIVATE</strong> files you own — so an AUTHOR sees only their own. ADMIN accounts also

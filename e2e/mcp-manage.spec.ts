@@ -161,3 +161,24 @@ test("manage a file's owners, an annotation, a link, and a published post's tags
     await agent.dispose();
   }
 });
+
+// docs/PDF.md §14: a deleted file's slug names nothing until the restore
+// settles it, so `setFileSlug` refuses one; `manage` restores before it sets a
+// slug, so one call asking for both does both.
+test("manage refuses a deleted file's slug, and one call that restores it and sets a slug does both", async ({ request }) => {
+  const agent = await createAgent(request, { scopes: ["READ", "WRITE", "MANAGE"], person: true });
+  const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, pages: [["A page to delete and bring back."]] });
+  try {
+    await setTestFileOwners(file.id, [ADMIN_EMAIL, agent.user.email]);
+    expect((await agent.call("manage", { target: file.id, delete: true })).result.changed).toEqual(["deleted"]);
+    const refused = await agent.call("manage", { target: file.id, slug: `${file.slug}-elsewhere` });
+    expect(refused.error.code).toBe("conflict");
+    expect(refused.error.message).toBe("This file is deleted, and its url can't be changed until it is restored.");
+    const both = await agent.call("manage", { target: file.id, restore: true, slug: `${file.slug}-back` });
+    expect(both.isError, JSON.stringify(both.error)).toBe(false);
+    expect(both.result).toMatchObject({ changed: ["restored", "slug"], url: `/pdf/${file.slug}-back` });
+  } finally {
+    await deleteTestFile(file.id);
+    await agent.dispose();
+  }
+});

@@ -610,7 +610,15 @@ What can't be undone, in the functions both front doors call (the actions in
    target, captured quote and version stamp go with it. Every page that carries the link keeps
    it, now without that passage.
 4. **A file's title.** `setFileTitle` (`src/lib/file-manage.ts`) overwrites `stored_file.title`
-   and keeps only `updated_by_user_id`.
+   and keeps only `updated_by_user_id`. MCP reaches it through `rename_file`, and the browser
+   from the file's manage page (docs/PDF.md §14).
+5. **A file's owners.** `setFileOwners` (`src/lib/file-manage.ts`) deletes the `file_owner`
+   rows of whoever was taken off and rewrites every `owner_order`, and keeps only the file's
+   `updated_by_user_id`. Neither `edit_link` nor `rename_file` reaches it: MCP changes owners
+   through `manage`, and the browser from the file's manage page (docs/PDF.md §14). On
+   a PRIVATE file the owners are who can read it, so nothing says afterwards who had access,
+   who took it away or when. `setDocByline` (`src/lib/doc-manage.ts`) keeps as little for a
+   doc's byline.
 
 **What done looks like:**
 
@@ -621,7 +629,9 @@ What can't be undone, in the functions both front doors call (the actions in
 - **Revertible.**
   - A removed part of a minted link is soft-deleted, with `deleted_at` and the user who removed
     it, and can be restored to its place with its anchor and quote intact.
-  - A name and an order are restored from the history, and so is a file's title.
+  - A name and an order are restored from the history, and so are a file's title and its
+    owner list. Putting someone back on a PRIVATE file's list gives their access back, so
+    that restore is a manager's act and asks as a removal does.
   - Undoing is offered in the UI (the `/links` table, the file's page) and through MCP, as
     `edit_doc` reverts an edit (MCP.md §6).
 - **Then the forced prompt goes.** `edit_link` and `rename_file` lose `requiresUserInteraction`,

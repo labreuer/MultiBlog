@@ -18,6 +18,7 @@ import { staffDisplayNameOf } from "@/lib/display-name";
 import { rowsWithParents } from "@/lib/rows-with-parents";
 import { parseTagList } from "@/lib/tag-data";
 import { codeDefaultColumns } from "@/lib/admin-table-columns";
+import { isPdfContentType } from "@/lib/file-format";
 
 export const metadata: Metadata = { title: "Files" };
 
@@ -159,7 +160,7 @@ export default async function FilesPage({
         title: true,
         // What the bytes decide is the latest version's (docs/PDF.md §13).
         currentVersionId: true,
-        currentVersion: { select: { filename: true, pageCount: true, byteSize: true } },
+        currentVersion: { select: { filename: true, contentType: true, pageCount: true, byteSize: true } },
         visibility: true,
         createdAt: true,
         updatedAt: true,
@@ -192,6 +193,8 @@ export default async function FilesPage({
       slug: file.slug,
       title: file.title,
       filename: latest.filename,
+      // Whether the title opens a viewer: a file of any other format has none.
+      isPdf: isPdfContentType(latest.contentType),
       // NULL only when the file has no owners — same empty cell either way.
       owners: file.metrics?.owners ?? "",
       visibility: file.visibility,

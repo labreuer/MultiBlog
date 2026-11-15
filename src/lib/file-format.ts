@@ -114,3 +114,13 @@ export function titleFromFilename(filename: string, kind: UploadKind | null): st
   if (!format) return filename;
   return filename.slice(0, -format.extension.length) || filename;
 }
+
+/** "PDF" or "Word (.docx)" for a stored version's `Content-Type`, or the type itself for one this table doesn't name. */
+export function formatLabelForContentType(contentType: string): string {
+  return FORMATS.find((f) => f.contentType === contentType)?.label ?? contentType;
+}
+
+/** Whether a stored version is a PDF, which is what decides that a file has a viewer (`/pdf/<slug>`) and not only a download. */
+export function isPdfContentType(contentType: string): boolean {
+  return contentType === contentTypeForKind("pdf");
+}

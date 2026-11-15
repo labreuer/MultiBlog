@@ -51,6 +51,10 @@ export const ADMIN_TABLE_COLUMNS = {
   ],
   files: [
     { key: "title", label: "Title (view)" },
+    // docs/PDF.md §14 — a link to the file's manage page, /docs' Edit for a
+    // file. Hidden by default, unlike Edit, since the title cell already
+    // leads a manager to the file.
+    { key: "manage", label: "Manage", defaultHidden: true },
     { key: "filename", label: "Filename (download)" },
     { key: "owners", label: "Owner(s)" },
     { key: "visibility", label: "Visibility" },

@@ -4999,3 +4999,11 @@ promotion, abandoning) and a link names its version with `v=`; a version's pages
 with its base's and links are carried through that map; a bulk carry moves forward the
 notes that place themselves, and a note's author moves one at a time or marks it as staying.
 Known gaps: §13's "Open".
+
+## 34. A file's manage page
+
+Planned 2026-11-14: one page per file, `/files/<id>/manage`, where its managers rename and
+re-slug it, change its visibility and its owners (in the browser for the first time), delete
+and restore it, and for a PDF handle its versions, which leave the viewer's Metadata pane.
+Built 2026-11-14: the page without versions, the first of four PRs. **Plan and what is built:
+[docs/PDF.md](docs/PDF.md) §14.**

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { canUserManageFile, canUserReadFile } from "@/lib/file-authz";
 import { resolveFileParam } from "@/lib/file-slug";
@@ -256,6 +257,12 @@ export async function PdfReading({ slug, versionNumber, sel }: { slug: string; v
         ownDrafts={ownDrafts}
         anchoredLink={anchoredLink}
         metadata={[
+          // docs/PDF.md §14 — where whoever may manage the file does so; by id, as every link to that page is.
+          manage && (
+            <p key="manage" className={styles.manageLink}>
+              <Link href={`/files/${file.id}/manage`}>Manage this file</Link>
+            </p>
+          ),
           <TagChips key="tags" target={{ kind: "file", id: file.id }} />,
           // docs/CITATIONS.md, "A work's PDF": the references this is the PDF of, and for a writer the picker.
           <FileReferencesPanel

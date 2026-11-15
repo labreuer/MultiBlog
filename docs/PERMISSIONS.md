@@ -289,7 +289,7 @@ structural difference:
 |---|---|
 | Read `/doc/[slug]` | Read `/pdf/[slug]` and `/files/[slug]`, download via `/files/[slug]/download`, fetch bytes from `/api/files/…` |
 | Edit `/doc/[slug]/edit` | **No equivalent** — a file has no editable content |
-| Visibility / owners / slug / delete | `canUserManageFile` (`src/lib/file-manage.ts`); owners change only through the MCP server's `manage` (docs/MCP.md §12) |
+| Visibility / owners / slug / delete | `canUserManageFile` (`src/lib/file-manage.ts`), on the file's manage page (`/files/<id>/manage`, docs/PDF.md §14), which opens a deleted file to restore it, and through the MCP server's `manage` (docs/MCP.md §12). A deleted file's slug can't be changed until it is restored |
 | Listed in `/docs` (+ ADMIN "Show all docs") | Listed in `/files` (+ ADMIN "Show all files") |
 | Annotate | Annotate — same `Annotation` row, same DRAFT privacy, same delete rule (`setAnnotationDeleted`) |
 | Collab connection | Presence only, and **always read-only** (`/api/file/[id]/token`) |
@@ -770,7 +770,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Read / edit a doc; the two `where`-clause equivalents | `src/lib/doc-authz.ts` |
 | Read / manage a file; its `where`-clause equivalent | `src/lib/file-authz.ts` |
 | `/files` row scoping + the "Show all files" override | `src/app/files/page.tsx` |
-| File mutations (visibility, title, slug, delete; a version's promotion and abandoning) | `src/app/actions/files.ts` |
+| File mutations (visibility, title, slug, owners, delete; a version's promotion and abandoning) | `src/app/actions/files.ts` |
 | Who owns a file (`file_owner`, the doc tables' `doc_author`) | `prisma/schema.prisma`'s `FileOwner` |
 | File bytes: who may download | `src/app/api/files/[id]/[hash]/route.ts` |
 | File presence token (always read-only) | `src/app/api/file/[id]/token/route.ts` |

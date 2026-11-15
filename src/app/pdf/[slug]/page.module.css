@@ -8,3 +8,9 @@
   font-family: sans-serif;
   text-align: center;
 }
+
+/* docs/PDF.md §14 — a manager's link to the file's manage page, the first line of the Metadata pane. */
+.manageLink {
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+}
