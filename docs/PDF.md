@@ -3567,29 +3567,10 @@ test while each file has one version. So four specs make second versions:
 
 ## 14. A file's manage page
 
-**Partly built.** One page per file where its managers do everything managing it involves:
-rename it, re-slug it, change its visibility and its **owners**, delete and restore it, and
-for a PDF upload, promote, abandon and carry its versions. The viewer goes back to being a
-reading surface.
-
-**Built so far** (Build order, items 1 to 3):
-
-- **the page without versions**: the address and the gate, the file's facts, its title,
-  address, visibility and owners, delete and restore, the actions that answer, the write
-  layer's refusal of a new slug for a deleted file, the restore's drop of past slugs a live
-  file took, `/files`' Manage column and a non-PDF's title cell, and the viewer's "Manage
-  this file" link;
-- **the map sheet by sheet**, on the map page: the rows, the strip, "Questions only" and the
-  question cards in words (A version's page map, sheet by sheet);
-- **the versions**, here (item 6 below): the two drop boxes, a candidate's card with its map
-  under it, the carries, the two Route Handlers, and what the section holds across a
-  refresh; `storePageMap`'s check under the lock; and the viewer's Metadata pane cut down to
-  its reading half, a candidate's banner and the map page linking here, and the latest's
-  page no longer reporting a carry (What the viewer keeps).
-
-Still planned is what the viewer gains (What the viewer keeps, **Planned**): the waiting
-version pinned for every reader, a manager's line under it, the Metadata tab's dot and the
-selection popover's line.
+One page per file where its managers do everything managing it involves: rename it,
+re-slug it, change its visibility and its **owners**, delete and restore it, and for a PDF
+upload, promote, abandon and carry its versions. The viewer is a reading surface, which
+tells every reader when a version waits to replace the latest (What the viewer keeps).
 
 ### The address and the gate
 
@@ -3998,10 +3979,10 @@ never is one:
 
 - **The Metadata pane** keeps the tags, the references and the version list as every reader
   sees it (`PdfVersionList`): each version's state, who uploaded and promoted it and when,
-  its own page and its download. A manager also gets one "Manage this file" link at the top
-  of the pane.
+  its own page and its download, with a waiting version pinned above the list (below). A
+  manager also gets one "Manage this file" link at the top of the pane.
   - **The list is shown once a file has a second version, to a manager as to any reader.**
-    The upload, which once gave a manager the list on a one-version file, is on this page.
+    The upload is on this page, so a one-version file has nothing to list.
 - **The latest's page reports no promotion's carry.** A promotion is made from this page,
   which reports its own outcome.
 - **`reading.tsx` computes none of the manager's numbers** (`notesOn`, `partsOn`, `carries`,
@@ -4013,11 +3994,11 @@ never is one:
 - **The note worklist stays** (`PdfNoteWorklist`, "Moving a note forward"). Moving one note
   is its author's act, made against the sheets, never a manager's.
 
-**Planned** (Build order, item 4):
-
 - **A waiting version is pinned at the top of the list, for every reader**: "Version 3 is
   waiting to replace version 2", then whether its pages are matched, who uploaded it and
-  when, and a link to its page.
+  when, and a link to its page (`WaitingVersion` in `PdfVersionList`). The version it
+  replaces is the latest, which is also the base its map is from: a candidate is uploaded
+  over the latest, and a file has one at a time.
   - **It names both versions by number, never "this one".** The pane is on every version's
     page, an earlier version's included, and the words are the same on each. The waiting
     version's own page pins nothing: its banner says as much, and the link would lead to
@@ -4027,19 +4008,24 @@ never is one:
     is stored nowhere, and a map is what the box leaves behind. Read back as "a better
     copy" or "a revised text", a better copy whose map is still building, or failed to
     build, would be called a revised text.
-  - **Readers are sent whether the waiting version has a page map**, beside the pairing
-    itself, which every reader's viewer already holds to carry links with (`linkVersionsOf`).
+  - **Readers are sent whether the waiting version has a page map** (`hasMap`, on every
+    version's summary), beside the pairing itself, which every reader's viewer already holds
+    to carry links with (`linkVersionsOf`).
     It decides what becomes of a reader's own notes. The map's numbers stay out of what a
     reader's page says: `sent` in `reading.tsx` withholds them from the version's summary.
     They are not kept from a reader's browser, since the pairing it holds marks each sheet
     without a counterpart as removed or unmapped.
   - **A manager gets one more line under it**: the count of its questions still open, and a
     link to this page to review and promote it. That count is in the waiting version's
-    summary, which a manager is sent whole.
-- **The Metadata tab's label carries a dot while a version waits, for a manager alone.** A
-  reader has nothing to act on there.
+    summary, which a manager is sent whole. A waiting version with no map has no count,
+    only the link.
+- **The Metadata tab's label carries a dot while a version waits, for a manager alone**
+  (`PdfPane`'s `dot`, named "Version 3 is waiting" as its tooltip and accessible name). A
+  reader has nothing to act on there. The waiting version's own page has no dot, since it
+  pins nothing for the dot to point at.
 - **The selection popover keeps its buttons**, and while a version waits it adds one muted
-  line under them, saying what becomes of the note or link part about to be made. The line
+  line under them (`waitingLine` in `PdfAnnotationSurface`), saying what becomes of the
+  note or link part about to be made. The line
   names the version shown: the latest, or on its own page an earlier one, which takes
   notes too. A waiting version's page takes no capture (`assertCaptureVersion`) and has no
   line.
@@ -4077,56 +4063,9 @@ never is one:
   `onClick` that takes a click beside the link. A row is sent whether its latest version is
   a PDF, from that version's `contentType` (`isPdfContentType`).
 
-### Build order
-
-One PR at a time:
-
-1. **The page without versions**: the address and gate, the file's facts, title, address,
-   visibility, owners with `setFileOwners`' `expected` and lock, delete and restore; the
-   actions that answer; the write layer's refusal of a new slug for a deleted file, with
-   the revert moved into it; the restore dropping the past slugs a live file took;
-   `/files`' Manage column and the title cell of a non-PDF; and the "Manage this file"
-   link in the viewer's Metadata pane, without which a PDF's page is reached only through
-   a column hidden by default. This is where owners first become editable in the browser.
-2. **The map sheet by sheet** (built), on the map page as it stands: the list in rows
-   (stretches, runs and added sheets) with its strip and "Questions only", the question
-   cards reworded, and `pageMapViewFor` reading the words of a `labels` run and which
-   sheets have no text. It depends on nothing of the manage page, and its buttons still
-   reload the page.
-3. **The versions move** (built): the section here with its drop targets and what it holds across
-   a refresh, the two Route Handlers and the actions they replace, `storePageMap`'s check
-   under the lock that the version is not abandoned, the map's component under a
-   candidate's card with its answers changing in place, the Metadata pane cut down to its
-   reading half and its list shown from a second version on, the candidate's banner and
-   the map page linking here, the latest's page no longer reporting a carry, and the e2e
-   specs that drive versions moved to this page (`pdf-versions`, `pdf-version-upload`,
-   `pdf-better-copy`, `pdf-revised-text`). The races `e2e/pdf-version-upload.spec.ts`
-   stages (§0) are the write layer's and move unchanged. **The viewer's management half goes in the PR that
-   adds this one**, so a version's acts have one place from the start.
-4. **What the viewer gains**: the waiting version pinned for every reader with whether its
-   pages are matched, a manager's line under it, the Metadata tab's dot, and the
-   selection popover's line on each page that takes a capture.
-
-Each PR updates the docs it makes untrue, in the same PR:
-
-- **docs/PERMISSIONS.md**, where it changes a row: "owners change only through the MCP
-  server's `manage`", and the version table's "See the version list's management half".
-- **docs/MCP.md**, where it describes `manage` (§12, §15), which gains a refusal: a slug
-  for a deleted file.
-- **§13**, wherever it says a manager's act is in the Metadata pane or on a version's page:
-  the version list's management half (Addresses), where an upload goes and the full reloads
-  after it and after a candidate's acts (The upload), the map page's own description and
-  its buttons (Matching the pages), and what the latest's page reports after a promotion
-  with the carry (Moving a note forward).
-- **TODO.md**, "`edit_link` and `rename_file` can't be audited or undone": its items 4 and
-  5 say which front doors change a file's title and its owners.
-- **CLAUDE.md**, whose row for this file says what its sections hold.
-- **This section**, which becomes what is built: "Planned" and "Not built" go, and so does
-  every sentence that says how things stood before.
-
 ### Checks and tests
 
-A new `e2e/file-manage.spec.ts`:
+In `e2e/file-manage.spec.ts` unless another spec is named:
 
 - a hand-over by an AUTHOR: an owner adds a second person and takes themselves off in one
   save, lands on `/pdf/<slug>` for a SHARED PDF and on `/files` for a PRIVATE one or a
@@ -4152,7 +4091,7 @@ A new `e2e/file-manage.spec.ts`:
   is no longer among its past ones, and the upload's own slug changes without a fault;
 - a manager's "Manage this file" link in the viewer's Metadata pane, and none for a reader
   who may not manage;
-- in `e2e/mcp-files.spec.ts`: `manage` with a slug for a deleted file is refused in those
+- in `e2e/mcp-manage.spec.ts`: `manage` with a slug for a deleted file is refused in those
   words, and one call that restores it and sets a slug does both;
 - `/files`' Manage column: hidden until chosen in the column picker, then a "manage" link on
   each row the viewer can manage, a deleted one included, and none on the others;
@@ -4162,8 +4101,8 @@ A new `e2e/file-manage.spec.ts`:
 - a `.docx`'s page, with no upload offered;
 - a file dropped on each upload box makes that kind of version (a page map is asked for,
   or not), and two files, a `.docx` and a drop beside the boxes are each refused with
-  nothing sent (built);
-- in `e2e/pdf-page-map.spec.ts`, on the map page (built): a fixture map with a row of each
+  nothing sent;
+- in `e2e/pdf-page-map.spec.ts`, on the map page: a fixture map with a row of each
   kind, the rows in the base's order, every sheet of the base and every sheet of the
   version in exactly one row, a matched stretch with a sheet without text and a pair whose
   page numbers differ still one row with both counted; the strip and "Questions only"; a
@@ -4171,27 +4110,28 @@ A new `e2e/file-manage.spec.ts`:
   text and of one the labels gave nothing; and the map of an abandoned version drawn with
   no words and nothing said about text;
 - under a candidate's card on this page, a question answered changes its row, the numbers
-  and the preview with no navigation (built, in `e2e/pdf-page-map.spec.ts`), which the spec
+  and the preview with no navigation (in `e2e/pdf-page-map.spec.ts`), which the spec
   checks by a mark left on the page's window: a refresh keeps it, and a load clears it.
   Counting navigations can't tell the two apart, since a refresh updates the history;
-- while a version waits, on `/pdf/<slug>`: a reader sees it pinned with its pages matched
-  or not matched and is sent none of the map's numbers (the version's `map` and `baseNumber`
-  are null in what the page was sent; the pairing in `linkVersions` is there for every
-  reader), a manager also sees its open questions and the tab's dot, and the popover's line
-  reads as the version has a map or not;
-- on an earlier version's own page while a version waits: the pinned box in the same words,
-  naming both versions by number, and the popover's line naming the earlier version, as
-  page maps join it to the waiting one or don't; and nothing pinned on the waiting
-  version's own page;
+- in `e2e/pdf-waiting-version.spec.ts`, while a version waits, on `/pdf/<slug>`: a reader
+  sees it pinned with its pages matched or not matched and is sent none of the map's
+  numbers (no `openRuns` and no `baseNumber` in the HTML the reader's page is answered
+  with, where `hasMap` and the pairing in `linkVersions` are), a manager also sees its open
+  questions and the tab's dot, and the popover's line reads as the version has a map or
+  not;
+- in the same spec, on an earlier version's own page while a version waits: the pinned box
+  in the same words, naming both versions by number, and the popover's line naming the
+  earlier version, as page maps join it to the waiting one or don't; and on the waiting
+  version's own page nothing pinned, no dot and no line;
 - a title saved while a page map is building is saved at once, without waiting for the
   build; the candidate's card says the build is running and shows the map when it answers,
-  with no reload; and a signed-out request to either handler answers 401 (built: the spec
+  with no reload; and a signed-out request to either handler answers 401 (the spec
   holds the build's request in the browser until the title is saved);
 - a promotion with the carry says on this page what the carry did, after the refresh that
-  takes the candidate's card away (built, in `e2e/pdf-better-copy.spec.ts`).
+  takes the candidate's card away (in `e2e/pdf-better-copy.spec.ts`).
 
 A unit test beside the function that turns a `PageMap` into the list's rows, which is pure
-(`npm run test:unit`; `src/lib/pdf-page-map-rows.test.ts`, built). The maps that matter
+(`npm run test:unit`; `src/lib/pdf-page-map-rows.test.ts`). The maps that matter
 here are ones no fixture PDF produces on demand:
 
 - a run whose proposed sheets are not consecutive is one row, its sheets listed;

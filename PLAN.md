@@ -5007,4 +5007,5 @@ re-slug it, change its visibility and its owners (in the browser for the first t
 and restore it, and for a PDF handle its versions, which leave the viewer's Metadata pane.
 Built 2026-11-14: the page without versions, the first of four PRs. Built 2026-11-14: the map
 sheet by sheet, the second. Built 2026-11-15: the versions moved to the page, the third.
+Built 2026-11-15: what the viewer gains, the fourth and last.
 **Plan and what is built: [docs/PDF.md](docs/PDF.md) §14.**
