@@ -1998,12 +1998,17 @@ export async function addTestReferenceAlias(key: string, alias: string): Promise
  * Reads a test PDF's page labels and outline and stores them, as a first
  * read of the file does (pdf-metadata.ts). A test PDF is made with neither
  * stored, where a real one has them once read: `[]` for a PDF with no labels.
+ * Of its latest version, or of the one named.
  */
-export async function fillTestFileMetadata(fileId: string): Promise<string[] | null> {
+export async function fillTestFileMetadata(fileId: string, versionId?: string): Promise<string[] | null> {
   const owner = await prisma.fileOwner.findFirst({ where: { fileId }, select: { user: { select: { email: true } } } });
   if (!owner) throw new Error(`fillTestFileMetadata: no file ${fileId}.`);
   assertSafe(owner.user.email);
-  return (await pdfMetadata(await latestVersionIdOf(fileId)))?.pageLabels ?? null;
+  // The latest unless another of its versions is named: a candidate is read only once someone opens it.
+  if (versionId !== undefined && !(await prisma.fileVersion.findFirst({ where: { id: versionId, fileId }, select: { id: true } }))) {
+    throw new Error(`fillTestFileMetadata: no version ${versionId} of file ${fileId}.`);
+  }
+  return (await pdfMetadata(versionId ?? (await latestVersionIdOf(fileId))))?.pageLabels ?? null;
 }
 
 /** Ties a test reference to a file, or unties it: the state the reference pickers leave, set directly. */

@@ -3,10 +3,10 @@ import { notFound, redirect } from "next/navigation";
 import LocalTime from "@/components/LocalTime";
 import PdfCarryActions from "@/components/pdf/PdfCarryActions";
 import PdfMapActions from "@/components/pdf/PdfMapActions";
+import PdfPageMapList from "@/components/pdf/PdfPageMapList";
 import { canUserManageFile } from "@/lib/file-authz";
 import { parseVersionNumber, pdfMapPath, pdfPath } from "@/lib/file-version";
-import { formatPageName } from "@/lib/pdf-open-params";
-import { pageMapViewFor, type MapRunView } from "@/lib/pdf-page-map-view";
+import { pageMapViewFor } from "@/lib/pdf-page-map-view";
 import { titleWhenOk } from "@/lib/route-access";
 import { signInPath } from "@/lib/sign-in-redirect";
 import { loadFileVersionForRead, readingTitle } from "../../../reading";
@@ -16,10 +16,12 @@ import styles from "./page.module.css";
 // `/pdf/<slug>/v/<n>/map`: how its sheets pair with those of the version it
 // was uploaded over, which were removed and which no rule could place, and
 // the questions its runs of sheets raise, each answered here. Where the
-// version has no map, this is where one is asked for.
+// version has no map, this is where one is asked for. The map itself is
+// drawn sheet by sheet, by the component the file's manage page will draw it
+// with too (`PdfPageMapList`; §14, "A version's page map, sheet by sheet").
 //
 // **Below a promoted version's map is the bulk carry** (§13, "Moving a note
-// forward"): accepting a run of sheets moves no note, and gives the notes on
+// forward"): pairing a run of sheets moves no note, and gives the notes on
 // those sheets a place to be carried to. The carry is started on the version
 // this map is from, shows what it would move, and is run from here. A
 // candidate's notes are carried by its promotion, from its own page.
@@ -29,8 +31,9 @@ import styles from "./page.module.css";
 // isn't given. It reads the same gate the version's own page does first, so
 // a file its reader can't see answers as that page does.
 //
-// A sheet's link is a plain `<a>`, never a `<Link>`: it carries a fragment,
-// which a client navigation would leave on the path (CLAUDE.md, Gotchas).
+// A version's link is a plain `<a>`, never a `<Link>`, as every sheet's in
+// the list is: a fragment a client navigation brought would be left on the
+// path (CLAUDE.md, Gotchas).
 
 type Params = { params: Promise<{ slug: string; n: string }> };
 
@@ -40,13 +43,6 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   if (versionNumber === null) return {};
   return titleWhenOk(await loadFileVersionForRead(slug, versionNumber), ({ file, shown }) => `Page map: ${readingTitle(file, shown)}`);
 }
-
-const span = ([first, last]: [number, number]) => (first === last ? `${first}` : `${first}–${last}`);
-
-const QUESTION: Record<MapRunView["kind"], string> = {
-  labels: "Pair these sheets as their text does, where their labels pair them otherwise?",
-  place: "Pair these sheets by their place, where their text is too unlike to say?",
-};
 
 export default async function PdfVersionMapPage({ params }: Params) {
   const { slug, n } = await params;
@@ -74,8 +70,6 @@ export default async function PdfVersionMapPage({ params }: Params) {
   if (!view) notFound();
 
   const own = (number: number) => pdfPath(file.slug, { number, isLatest: false }, { own: true });
-  // Written as every link into a file is (`formatPageName`), stamped with its version: a map is of a file with two at least.
-  const sheetLink = (number: number, sheet: number) => <a href={`${own(number)}#${formatPageName({ sheet, stamp: number })}`}>{sheet}</a>;
   const base = view.baseNumber;
 
   return (
@@ -124,85 +118,12 @@ export default async function PdfVersionMapPage({ params }: Params) {
             </p>
           </section>
 
-          {view.map.runs.length > 0 && (
-            <section>
-              <h2>Questions</h2>
-              {view.map.runs.map((run) => {
-                const first = run.rows[0];
-                const last = run.rows[run.rows.length - 1];
-                return (
-                  <article key={run.index} className={styles.run} data-testid="pdf-map-run" data-run-state={run.state}>
-                    <h3>
-                      {run.rows.length === 1 ? `Sheet ${first.baseSheet}` : `Sheets ${first.baseSheet}–${last.baseSheet}`} of version {base}
-                    </h3>
-                    <p>{QUESTION[run.kind]}</p>
-                    <p className={styles.quiet}>
-                      {run.state === "open" && "Nobody has answered. Until someone accepts, these sheets are unmapped."}
-                      {run.state === "accepted" && (
-                        <>
-                          Accepted{run.answeredBy && ` by ${run.answeredBy}`}
-                          {run.answeredAt && (
-                            <>
-                              , <LocalTime value={run.answeredAt} />
-                            </>
-                          )}
-                          . The sheets are paired as proposed, and that stays.
-                        </>
-                      )}
-                      {run.state === "declined" && (
-                        <>
-                          Declined{run.answeredBy && ` by ${run.answeredBy}`}
-                          {run.answeredAt && (
-                            <>
-                              , <LocalTime value={run.answeredAt} />
-                            </>
-                          )}
-                          . The sheets are unmapped. It may still be accepted.
-                        </>
-                      )}
-                    </p>
-                    <div className={styles.rows}>
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Version {base}</th>
-                            {run.kind === "labels" && <th>By its label</th>}
-                            <th>{run.kind === "labels" ? "By its text" : "By its place"}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {run.rows.map((row) => (
-                            <tr key={row.baseSheet}>
-                              <td>
-                                sheet {sheetLink(base, row.baseSheet)}
-                                {row.baseLabel && ` (${row.baseLabel})`}
-                                {row.baseText !== null && <span className={styles.excerpt}>{row.baseText || "(no text)"}</span>}
-                              </td>
-                              {run.kind === "labels" && <td>{row.byLabel === null ? "none" : <>sheet {sheetLink(view.number, row.byLabel)}</>}</td>}
-                              <td>
-                                sheet {sheetLink(view.number, row.proposed)}
-                                {row.proposedLabel && ` (${row.proposedLabel})`}
-                                {run.kind === "place" && row.labelAgrees && <em> The labels agree.</em>}
-                                {row.proposedText !== null && <span className={styles.excerpt}>{row.proposedText || "(no text)"}</span>}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {run.state !== "accepted" && <PdfMapActions versionId={view.versionId} run={{ index: run.index, declined: run.state === "declined" }} />}
-                  </article>
-                );
-              })}
-            </section>
-          )}
-
           {view.baseVersionId !== null && view.latestNumber !== null && (view.state === "latest" || view.state === "earlier") && (
             <section data-testid="pdf-map-carry">
               <h2>Notes</h2>
               <p className={styles.quiet}>
                 A page map moves no note. A carry moves forward every posted note and minted link part on version {base} that places itself through it, and
-                shows what it would do first. Run again after a run of sheets is accepted, it takes the notes those sheets now reach.
+                shows what it would do first. Run again after a run of sheets is paired, it takes the notes those sheets now reach.
               </p>
               <PdfCarryActions versionId={view.baseVersionId} number={base} latestNumber={view.latestNumber} />
             </section>
@@ -213,31 +134,7 @@ export default async function PdfVersionMapPage({ params }: Params) {
             </p>
           )}
 
-          <section>
-            <h2>The sheets</h2>
-            {view.map.paired.length > 0 && (
-              <p data-testid="pdf-map-paired">
-                Paired:{" "}
-                {view.map.paired.map((pair, index) => (
-                  <span key={pair.from[0]}>
-                    {index > 0 && "; "}
-                    {span(pair.from)} → {span(pair.to)}
-                  </span>
-                ))}
-                .
-              </p>
-            )}
-            {view.map.removed.length > 0 && (
-              <p data-testid="pdf-map-removed">
-                Removed, with nothing in their place in version {view.number}: {view.map.removed.map(span).join(", ")}.
-              </p>
-            )}
-            {view.map.unmapped.length > 0 && (
-              <p data-testid="pdf-map-unmapped">
-                Unmapped, where sheets of version {view.number} stand and none is known to be it: {view.map.unmapped.map(span).join(", ")}.
-              </p>
-            )}
-          </section>
+          <PdfPageMapList slug={file.slug} number={view.number} baseNumber={base} versionId={view.versionId} map={view.map} />
         </>
       )}
     </main>

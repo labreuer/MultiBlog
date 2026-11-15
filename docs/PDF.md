@@ -1895,6 +1895,9 @@ The row records who stored it and when, and the carry that did, where one did (V
   (`sheetFactsOf`), works a map out and stores nothing (`workOutPageMap`), and stores one
   (`storePageMap`, `storeRunAnswer`).
 
+What draws a map on its page (`pdf-page-map-rows.ts`, `pdf-page-map-view.ts`) is §14's, "A
+version's page map, sheet by sheet".
+
 **The value is `{ from, to, sheets, runs, blank }`** (`PageMap`): how many sheets the base
 and the version have; for each sheet of the base, the sheet of the version it is, or that it
 is removed or unmapped; the questions asked about runs of sheets, each with its answer; and
@@ -1940,10 +1943,11 @@ who may read the file and not manage it is shown "Forbidden" there
 - **where there is no map**, what building one means, and the button that builds it
   (`PdfMapActions`);
 - **the map in numbers**, with who stored it and when, and whether a carry did;
-- **each run of sheets with its question**, the sheets proposed beside what they would
-  replace, and its answer or the two buttons that give one (A run of sheets, below);
-- **the bulk carry**, below a promoted version's map, started on the map's base. A
-  candidate's map page says that its promotion carries, from its own page.
+- **the bulk carry**, below a promoted version's numbers, started on the map's base. A
+  candidate's map page says that its promotion carries, from its own page;
+- **every sheet of the base in rows**, each run of sheets one row with its question's card:
+  the sheets proposed beside what they would replace, and its answer or the two buttons
+  that give one (A run of sheets, below; §14, "A version's page map, sheet by sheet").
 
 It is built from each version's stored page text, at the current text version where the
 version has it and at the greatest it has otherwise, as the fragment check reads (a skeleton
@@ -2066,18 +2070,39 @@ What follows holds for both:
   one, and each pair's text disagrees. The alignment pairs every sheet with itself. Sheets 12
   to 311 are one run, accepted in one act where sheet by sheet would take three hundred.
 - **The question is asked of whoever may manage the file.** It is on the version's map page,
-  which shows the run once: for the first question, the sheets the labels give beside those
-  the alignment gives. The version list links there and counts the questions open.
+  which shows the run once, as one row: for the first question, the sheets the alignment
+  gives, each with the sheet its label gives under it. The version list links there and
+  counts the questions open.
 - **Any manager may answer at any time**: while the version is a candidate, and after its
-  promotion, which closes nothing.
+  promotion, which closes nothing. An answer that paired the sheets can be taken back
+  (below).
 - **Until one accepts, the run's sheets are unmapped.** The proposal is kept in the map beside
   each sheet, marked as not accepted, and the map's readers treat such a sheet as unmapped.
   Declining leaves them so and takes the question off the list of open ones. A declined run
   may still be accepted later.
-- **Accepting writes the proposed sheets into the map**, and stays: an accepted run is not
-  declined afterwards, since notes and links have gone through it. A sheet inside a stretch
-  of shifted labels that the alignment gives no counterpart is asked about by its place, as
-  a run of the second kind, or stays unmapped where rule 6 proposes nothing.
+- **Accepting writes the proposed sheets into the map.** A sheet inside a stretch of shifted
+  labels that the alignment gives no counterpart is asked about by its place, as a run of
+  the second kind, or stays unmapped where rule 6 proposes nothing.
+- **An accepted run can be un-paired**, by any manager, while the version is a candidate or
+  after its promotion (`unpairFileVersionMapRun`, through `storeRunUnpairing`; `unpairRun`
+  is the rule). Its sheets are unmapped again, its answer is gone, and it is an open
+  question, asked as it was before anyone answered. It is not declined: a declined run is
+  an answer, and un-pairing takes the answer back.
+  - **It moves nothing back.** A note or a link part a carry moved through the run's pairs
+    is on the later version by its own target, which no map is read for, and stays where it
+    was moved. Undoing those moves is a move back, which nothing in the app makes (Open).
+  - **What changes is where a link is carried**: one written against the base to those
+    sheets is carried from then on only where its words are found (Links into the file),
+    and the next carry places the notes on them by their quotes alone.
+  - **The confirmation counts what stays**: the notes and link parts a bulk carry moved
+    through the run's pairs, read from the history of moves (`carriedThroughRuns`,
+    `src/lib/pdf-page-map-view.ts`). A move counts where it reached this version or one
+    uploaded over it, from a version before it, and its sheet, carried to the map's base,
+    is one of the run's. A move one person made of one note is that person's judgment and
+    isn't counted.
+  - **Nothing records the un-pairing**: the map keeps no answer for the run, so who paired
+    it and who took that back are both gone from it. The history of moves still says who
+    carried what through it.
 - **An answer is written with the file row locked**, onto the map as it then reads
   (`answerFileVersionMapRun`, through `storeRunAnswer`; `answerRun` is the rule). The map is
   one value, so two managers answering two runs would otherwise each write the whole of it,
@@ -3532,13 +3557,20 @@ rename it, re-slug it, change its visibility and its **owners**, delete and rest
 for a PDF upload, promote, abandon and carry its versions. The viewer goes back to being a
 reading surface.
 
-**Built so far: the page without versions** (Build order, item 1): the address and the
-gate, the file's facts, its title, address, visibility and owners, delete and restore, the
-actions that answer, the write layer's refusal of a new slug for a deleted file, the
-restore's drop of past slugs a live file took, `/files`' Manage column and a non-PDF's title
-cell, and the viewer's "Manage this file" link. Everything about versions (item 6 below, A
-version's page map, What the viewer keeps but that link) is still planned, and §13's
-management half is still in the viewer's Metadata pane.
+**Built so far** (Build order, items 1 and 2):
+
+- **the page without versions**: the address and the gate, the file's facts, its title,
+  address, visibility and owners, delete and restore, the actions that answer, the write
+  layer's refusal of a new slug for a deleted file, the restore's drop of past slugs a live
+  file took, `/files`' Manage column and a non-PDF's title cell, and the viewer's "Manage
+  this file" link;
+- **the map sheet by sheet**, on the map page: the rows, the strip, "Questions only" and the
+  question cards in words (A version's page map, sheet by sheet), with their buttons still
+  reloading the page.
+
+Everything else about versions (item 6 below, the map under a candidate's card, What the
+viewer keeps but that link) is still planned, and §13's management half is still in the
+viewer's Metadata pane.
 
 ### The address and the gate
 
@@ -3804,9 +3836,17 @@ title, a file needs an owner.
 
 ### A version's page map, sheet by sheet
 
-A candidate with a page map shows the whole map under its card. The map page
-(`/pdf/<slug>/v/<n>/map`) draws the same list from the same component, so the two never
+The map page (`/pdf/<slug>/v/<n>/map`) draws a version's map as a list of rows
+(`PdfPageMapList`, `src/components/pdf/`). **Planned:** a candidate with a page map shows
+the whole map under its card on this page, from the same component, so the two never
 disagree.
+
+**Three pieces draw it.** `pageMapRows` (`src/lib/pdf-page-map-rows.ts`) turns a `PageMap`
+into the rows, and is pure and browser-safe, with a unit test beside it.
+`pageMapViewFor` (`src/lib/pdf-page-map-view.ts`) reads what the rows and the cards need
+besides the map: each version's labels, which sheets have text, the words of each run's
+sheets and who answered. `PdfPageMapList` draws them, a client component for its one piece
+of state, "Questions only".
 
 - **Every sheet of the base, in order, in rows.** A row is a stretch or a run: its sheets
   on the base, an arrow, its sheets on the version, how many, and a line saying what it is.
@@ -3816,7 +3856,7 @@ disagree.
     - removed: sheets of the base with nothing in their place (`REMOVED`);
     - unmatched with no proposal: `UNMAPPED` sheets.
   - **A run is one row, whole**: a question, open or left unmatched, whose card is in the
-    row (below), or sheets paired by an answer, with who answered and when. A run has one
+    row (below), or sheets paired by an answer, whose card says who answered and when. A run has one
     answer, so nothing splits it. Its sheets of the base are consecutive. The sheets it
     proposes need not be, since the alignment that proposes them can pass over a sheet of
     the version (`pairSheets` collects them one at a time). The row gives the version's
@@ -3829,6 +3869,12 @@ disagree.
       first**, and comes first of all where it begins at the version's first sheet.
       "Between the rows it falls between" has no answer for every map: the labels pair
       sheets in whatever order they give (rule 1), so two pairs can cross.
+- **Each row names its printed pages beside its sheets**, on each side: "36–60 (pp. 3–27) →
+  41–65 (pp. 3–27)", "— → 40 (p. 2)" (`pagesOf`). They are read from the first and the last
+  of the row's sheets that has a label, and only where that version's labels are usable
+  (`usablePageLabels`, each version on its own), since a sheet's number is otherwise all a
+  page number would say. They are what says an added sheet is a page the base's scan lacks,
+  and the strip's segments name them too.
 - **A matched stretch that moved says so**: "1 sheet earlier in version 3". A change of
   offset starts a new stretch, so a boundary between two matched rows marks where sheets
   were inserted or dropped.
@@ -3839,16 +3885,20 @@ disagree.
   aligned as of one the labels gave. It says how many of its sheets have no text. Showing
   the rule itself would take a field on the map, and every map stored before that field
   existed would have none to show.
-  - **Neither fact splits a stretch.** They are counts on its row: "300 sheets. Their page
-    numbers agree on 296, and 4 have no text." Split on them, a scan with a blank verso
+  - **Neither fact splits a stretch.** They are counts on its row: "300 sheets … Their page
+    numbers agree on 296, and 4 have a sheet without text." A pair has a sheet without
+    text where either of its two has none. Split on them, a scan with a blank verso
     before each chapter would be dozens of rows, and a boundary between two matched rows
     would no longer mark an insertion or a drop.
   - **Page numbers agree on a pair** where both sheets have a label and the two are the
-    same, trimmed and in any case, as rule 1 reads them. Where either version has no
-    usable labels (`usablePageLabels`), a row says nothing of page numbers.
+    same, trimmed and in any case, as rule 1 reads them. **They differ** where both have
+    one and the two aren't the same, or where one sheet has a label and the other none.
+    Two sheets without a label neither agree nor differ. Where either version has no usable
+    labels (`usablePageLabels`), a row says nothing of page numbers.
   - **"No text" is read as which sheets have none, never as their text**: one query per
     version for the `pageIndex` of the rows of `file_page_text` that hold a letter or a
-    digit, at the text version `sheetTextsOf` reads. Every other sheet of the version has
+    digit, at the text version `sheetTextsOf` reads (`sheetsWithTextOf`,
+    `src/lib/pdf-page-map-build.ts`). Every other sheet of the version has
     no text, one with no row included: `sheetFactsOf` reads a missing row as empty. The
     list is drawn on every load of the manage page and again after each save there, and
     two books' text is megabytes.
@@ -3860,8 +3910,9 @@ disagree.
       `blank` lists don't answer it: a blank sheet has no text *and* draws nothing, so a
       scanned plate without OCR is not in them.
   - **An abandoned version has no rows of `file_page_text`** (abandoning deletes them) and
-    may keep its map. Its side of the list says nothing about text, and its question cards
-    show no words.
+    may keep its map. Its list says nothing about text on either side, and its question
+    cards show no words, its base's included: a count of the base's sheets without text
+    would read as a claim about pairs whose other half is unknown.
 - **Expanding a matched stretch lists its pairs**, `16 → 16 … 120 → 120`: the first and last
   few with a count between, and, where they are few, the pairs between whose page numbers
   disagree or that have a sheet without text. Each pair links to that sheet in the viewer,
@@ -3870,13 +3921,16 @@ disagree.
   sheets and never too narrow to click, coloured by kind. An added stretch has no sheet of
   the base, and is a mark between two segments. A segment scrolls to its row. Colour is
   never the only sign, since each row's line says its kind in words.
-- **"Questions only"** hides every row but the questions, for a map with many stretches.
-- **Answering a question changes its row in place**, and the numbers and the carry preview
-  above it.
+- **"Questions only"** hides every row but the questions, for a map with many stretches: the
+  runs open or left unmatched. A run paired by an answer is no longer one, until it is
+  un-paired.
+- **On the map page an answer reloads the page.** **Planned:** under a candidate's card on
+  this page, answering a question changes its row in place, and the numbers and the carry
+  preview above it.
 
-**A question's card says what is going on, in words, and offers two choices.** The map
-page's table today puts the labels' pairing in a column beside the text's, which reads as
-a third option, and it never is one:
+**A question's card says what is going on, in words, and offers two choices.** The labels'
+pairing is never a column beside the text's, which would read as a third option, and it
+never is one:
 
 - **A `labels` run**: "By their printed page numbers, these sheets would go to sheets 15–16
   of version 3. The words there are a different page's. The words are on sheets 14–15."
@@ -3885,28 +3939,39 @@ a third option, and it never is one:
   disagree.
   - **That is true of a sheet whose label gave it another sheet and whose words refused
     it. A `labels` run can hold three other kinds of sheet**, and each sheet's line is
-    read from the run's `byLabel` for it and from which sheets have no text:
+    read from the run's `byLabel` for it and from which sheets have text to compare, by the
+    matcher's own test (`hasRunsToCompare`) over the words the card reads
+    (`RunSheetLine`):
     - a sheet without text, or whose label's sheet has none, lost its label's pairing
       with the sheets around it (rule 2's neighbours), and no words disagreed: "It has no
       text to compare, and goes with the sheets around it";
     - a sheet the labels gave nothing (`byLabel` null) is in the run because its place is
       counted from a sheet in question: "Placed by counting from the sheets around it";
     - a sheet proposed the very sheet its label gives says that its page number agrees.
-  - **The card's opening sentence counts only the sheets whose label gave another sheet**,
-    and names them as ranges where they are consecutive. A run with none opens with the
-    other sentence: "These sheets stand between sheets whose pairing is in question, and
-    are placed by counting from them."
+    - On an abandoned version, which sheets have text isn't known, so a sheet whose label
+      gave it another says that alone.
+  - **The card's opening sentence counts only the sheets whose label gave another sheet and
+    whose words refused it**, and names them as ranges where they are consecutive. A run
+    with none opens with the other sentence: "These sheets stand between sheets whose
+    pairing is in question, and are placed by counting from them." On an abandoned version
+    it counts every sheet whose label gave another, and says the map proposes the others
+    "from their words", which is all that is known.
 - **A `place` run**: its words are too unlike any sheet's to pair it unasked. The card names
   the sheet that stands in its place, and whether its page number agrees.
 - **Two columns**: the sheet of the base and the proposed sheet, each with its page label
   and its opening words.
-- **A `labels` run's card needs words `pageMapViewFor` doesn't read today**: it loads text
-  for the sheets of a `place` run alone. It reads them for both kinds: each sheet of the
-  base, the sheet proposed for it, and for a `labels` run the sheet its label gives.
+- **The card reads words for both kinds of run**: each sheet of the base, the sheet proposed
+  for it, and for a `labels` run the sheet its label gives (`pageMapViewFor`).
 - **Each button says what it does and costs.** "Pair them by their words" (or "by their
-  place") carries the links and notes on those sheets, and can't be undone. "Leave them
+  place") carries links to those sheets to the sheets proposed, and lets a carry move the
+  notes on them: pairing moves no note itself (§13, "A run of sheets"). "Leave them
   unmatched" carries a link to them only where its words are found, and leaves a note on
-  them where it is until its author moves it. A run left unmatched can still be paired.
+  them where it is until its author moves it. A run left unmatched can still be paired, and
+  its card then offers that one button.
+- **A run paired by an answer offers "Un-pair them"**, which asks first and says what it
+  costs: that links to those sheets are then carried only by their words, and how many
+  notes and link parts a carry moved through them, which stay where they were moved (§13,
+  "A run of sheets").
 
 ### What the viewer keeps
 
@@ -3999,11 +4064,11 @@ One PR at a time:
    `/files`' Manage column and the title cell of a non-PDF; and the "Manage this file"
    link in the viewer's Metadata pane, without which a PDF's page is reached only through
    a column hidden by default. This is where owners first become editable in the browser.
-2. **The map sheet by sheet**, on the map page as it stands: the list in rows (stretches,
-   runs and added sheets) with its strip and "Questions only", the question cards
-   reworded, and `pageMapViewFor` reading the words of a `labels` run and which sheets have
-   no text. It depends on nothing of the manage page, and its buttons still reload the
-   page.
+2. **The map sheet by sheet** (built), on the map page as it stands: the list in rows
+   (stretches, runs and added sheets) with its strip and "Questions only", the question
+   cards reworded, and `pageMapViewFor` reading the words of a `labels` run and which
+   sheets have no text. It depends on nothing of the manage page, and its buttons still
+   reload the page.
 3. **The versions move**: the section here with its drop targets and what it holds across
    a refresh, the two Route Handlers and the actions they replace, `storePageMap`'s check
    under the lock that the version is not abandoned, the map's component under a
@@ -4074,14 +4139,16 @@ A new `e2e/file-manage.spec.ts`:
 - a file dropped on each upload box makes that kind of version (a page map is asked for,
   or not), and two files, a `.docx` and a drop beside the boxes are each refused with
   nothing sent;
-- a fixture map with a row of each kind: the rows in the base's order, every sheet of the
-  base and every sheet of the version in exactly one row, a matched stretch with a sheet
-  without text and a pair whose page numbers disagree still one row with both counted; a
-  question answered changes its row, the numbers and the preview with no navigation, which
-  the spec checks by counting the page's navigations;
-- a `labels` run's card showing the words of each sheet, with the line of a sheet without
-  text and of one the labels gave nothing, and the map of an abandoned version drawn with
+- in `e2e/pdf-page-map.spec.ts`, on the map page (built): a fixture map with a row of each
+  kind, the rows in the base's order, every sheet of the base and every sheet of the
+  version in exactly one row, a matched stretch with a sheet without text and a pair whose
+  page numbers differ still one row with both counted; the strip and "Questions only"; a
+  `labels` run's card showing the words of each sheet, with the line of a sheet without
+  text and of one the labels gave nothing; and the map of an abandoned version drawn with
   no words and nothing said about text;
+- under a candidate's card on this page, a question answered changes its row, the numbers
+  and the preview with no navigation, which the spec checks by counting the page's
+  navigations;
 - while a version waits, on `/pdf/<slug>`: a reader sees it pinned with its pages matched
   or not matched and is sent none of the map's numbers (the version's `map` and `baseNumber`
   are null in what the page was sent; the pairing in `linkVersions` is there for every
@@ -4098,8 +4165,8 @@ A new `e2e/file-manage.spec.ts`:
   takes the candidate's card away.
 
 A unit test beside the function that turns a `PageMap` into the list's rows, which is pure
-(`npm run test:unit`). The maps that matter here are ones no fixture PDF produces on
-demand:
+(`npm run test:unit`; `src/lib/pdf-page-map-rows.test.ts`, built). The maps that matter
+here are ones no fixture PDF produces on demand:
 
 - a run whose proposed sheets are not consecutive is one row, its sheets listed;
 - a sheet proposed by an open run, or by a declined one, is in that run's row and in no

@@ -2,7 +2,7 @@ import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/pr
 import { lockFileHash, lockFileRow } from "@/lib/file-version-data";
 import { deleteBytesIfUnreferenced } from "@/lib/file-storage";
 import { newCarryId, planCarry, writeCarry, type CarryPlan, type CarryResult } from "@/lib/file-anchor-move";
-import { storePageMap, storeRunAnswer } from "@/lib/pdf-page-map-build";
+import { storePageMap, storeRunAnswer, storeRunUnpairing } from "@/lib/pdf-page-map-build";
 import { pageMapNumbers, parsePageMap, type PageMapNumbers } from "@/lib/pdf-page-map";
 
 // How long a version's write may wait for the file row or a hash: Prisma's
@@ -333,5 +333,19 @@ export async function answerFileVersionMapRun(
   const version = await requireManageableVersion(actor, versionId);
   if (!Number.isInteger(runIndex) || runIndex < 0) throw invalid("That isn't one of this page map's questions.");
   const { map } = await storeRunAnswer(versionId, runIndex, accepted, { userId: actor.userId });
+  return { slug: version.slug, number: version.number, numbers: pageMapNumbers(map) };
+}
+
+/**
+ * Un-pairs a run of a version's map that a manager paired (docs/PDF.md §13,
+ * "A run of sheets"): its sheets are unmapped again and it is an open
+ * question. A note or a link part a carry moved through its pairs stays where
+ * it was moved; a link to those sheets is carried from then on only by its
+ * words. A manager's act, as an answer is.
+ */
+export async function unpairFileVersionMapRun(actor: Actor, versionId: string, runIndex: number): Promise<{ slug: string; number: number; numbers: PageMapNumbers }> {
+  const version = await requireManageableVersion(actor, versionId);
+  if (!Number.isInteger(runIndex) || runIndex < 0) throw invalid("That isn't one of this page map's questions.");
+  const { map } = await storeRunUnpairing(versionId, runIndex);
   return { slug: version.slug, number: version.number, numbers: pageMapNumbers(map) };
 }
