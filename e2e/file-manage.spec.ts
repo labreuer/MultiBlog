@@ -1,10 +1,12 @@
 import { test, expect, gotoOk } from "./fixtures";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import {
   ADMIN_EMAIL,
   TEST_PASSWORD,
+  abandonTestVersion,
   createTestFile,
   deleteTestFile,
+  getFileVersionFacts,
   getFileSlugFacts,
   getUploadFacts,
   renameTestFileSlug,
@@ -12,11 +14,18 @@ import {
   uniqueTitle,
 } from "./db";
 import { buildTestDocx } from "../scripts/make-test-docx";
+import { buildTestPdf } from "../scripts/make-test-pdf";
+import { token } from "./pdf-version-helpers";
 
-// docs/PDF.md §14 — a file's manage page, /files/<id>/manage, without its
-// versions: the gate and the address, the file's title, slug, visibility and
-// owners, delete and restore, the refusals in their own words, /files' Manage
-// column and the viewer's link here. The default `page` is the shared admin's.
+// docs/PDF.md §14 — a file's manage page, /files/<id>/manage: the gate and
+// the address, the file's title, slug, visibility and owners, delete and
+// restore, the refusals in their own words, /files' Manage column and the
+// viewer's link here, and its versions section's own behaviour: the two drop
+// boxes, a map build that runs beside the page's other saves, and the two
+// Route Handlers' refusal of a signed-out request. The specs that drive
+// versions through this page are e2e/pdf-version-upload, pdf-better-copy and
+// pdf-revised-text; a candidate's map under its card is e2e/pdf-page-map's.
+// The default `page` is the shared admin's.
 
 const region = (page: Page, name: string) => page.getByRole("region", { name, exact: true });
 const manage = (fileId: string) => `/files/${fileId}/manage`;
@@ -38,6 +47,46 @@ async function uploadDocx(page: Page, title: string): Promise<string> {
   return (JSON.parse(result.body) as { id: string }).id;
 }
 
+/** A PDF's bytes as a page can hold them. */
+type Dropped = { name: string; type: string; data: number[] };
+
+const pdfFile = (name: string, pages: string[][]): Dropped => ({ name, type: "application/pdf", data: Array.from(buildTestPdf(pages)) });
+
+/**
+ * Drops files on `target` as a browser would: dragenter, dragover and drop,
+ * each carrying one DataTransfer that holds them. Dispatched, since
+ * Playwright's own drag carries no files.
+ */
+async function dropFiles(target: Locator, files: Dropped[]): Promise<void> {
+  const transfer = await target.page().evaluateHandle((held) => {
+    const dt = new DataTransfer();
+    for (const file of held) dt.items.add(new File([new Uint8Array(file.data)], file.name, { type: file.type }));
+    return dt;
+  }, files);
+  for (const type of ["dragenter", "dragover", "drop"]) await target.dispatchEvent(type, { dataTransfer: transfer });
+}
+
+/** Counts the requests this page sends whose method and url match. */
+function watch(page: Page, matches: (method: string, url: string) => boolean) {
+  const seen = { requests: 0 };
+  page.on("request", (request) => {
+    if (matches(request.method(), request.url())) seen.requests += 1;
+  });
+  return seen;
+}
+
+/**
+ * Leaves a mark on the page's window, which only a load of the page clears:
+ * `router.refresh()` and the history updates it makes keep it, so it tells a
+ * refresh from a reload where counting navigations can't.
+ */
+async function markWindow(page: Page): Promise<() => Promise<boolean>> {
+  await page.evaluate(() => {
+    (window as unknown as { __stillHere?: boolean }).__stillHere = true;
+  });
+  return () => page.evaluate(() => (window as unknown as { __stillHere?: boolean }).__stillHere === true);
+}
+
 /** On the owners section: adds `name` and takes the viewer off, without saving. */
 async function handOver(page: Page, name: string): Promise<void> {
   const owners = region(page, "Owners");
@@ -57,10 +106,15 @@ test.describe("a file's manage page", () => {
       await gotoOk(page, "/files");
       const docxTitle = uniqueTitle("handed docx");
       docxId = await uploadDocx(page, docxTitle);
-      // A .docx's page: the format said, a download to read it by, and nothing about versions.
+      // A .docx's page: the format said, a download to read it by, and its one version with no upload.
       await gotoOk(page, manage(docxId));
       await expect(region(page, "The file")).toContainText("Word (.docx)");
       await expect(region(page, "The file").getByRole("link", { name: "Download it" })).toHaveAttribute("href", /\/download$/);
+      // Its versions section: its one version with its download, and no upload.
+      const docxVersions = region(page, "Versions");
+      await expect(docxVersions.getByTestId("pdf-version-list").getByRole("listitem")).toHaveCount(1);
+      await expect(docxVersions.getByRole("link", { name: `${docxTitle}.docx` })).toHaveAttribute("href", /\/download$/);
+      await expect(docxVersions.getByTestId("pdf-version-uploader")).toHaveCount(0);
       // Made SHARED from here, by its owner: nothing to confirm.
       await region(page, "Visibility").getByRole("radio", { name: /^SHARED/ }).check();
       await region(page, "Visibility").getByRole("button", { name: "Save" }).click();
@@ -377,6 +431,122 @@ test.describe("signed out", () => {
       await page.waitForURL((url) => url.pathname === manage(file.id));
       await expect(region(page, "Owners")).toBeVisible();
     } finally {
+      await deleteTestFile(file.id);
+    }
+  });
+});
+
+test.describe("a file's versions on its manage page", () => {
+  test("a file dropped on each box makes that kind of version, and what can't be one is refused with nothing sent", async ({ page }) => {
+    test.setTimeout(180_000);
+    const tag = token();
+    const pages = [[`The opening sheet of the dropped book ${tag}.`, "It says what the book is about."], [`The closing sheet ${tag}.`, "It ends the book."]];
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages });
+    const seen = watch(page, (method, url) => method === "PUT" && url.includes(`/api/files/${file.id}?`));
+    const maps = watch(page, (method, url) => method === "POST" && url.includes("/api/files/versions/") && url.endsWith("/map"));
+    try {
+      await gotoOk(page, manage(file.id));
+      const section = page.getByTestId("file-versions");
+      const better = page.getByTestId("pdf-upload-better-copy-box");
+      const revised = page.getByTestId("pdf-upload-revised-text-box");
+      const refusal = section.getByTestId("pdf-upload-error");
+
+      // ---- refused before anything is sent -----------------------------------
+      await dropFiles(better, [pdfFile("one.pdf", pages), pdfFile("two.pdf", pages)]);
+      await expect(refusal).toHaveText("One version at a time: choose or drop a single PDF.");
+      await dropFiles(revised, [{ name: "notes.docx", type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", data: Array.from(buildTestDocx(["Not a PDF."])) }]);
+      await expect(refusal).toHaveText("A new version of a PDF is a PDF.");
+      // Beside the boxes: the default is prevented, and the line asks for a box.
+      await dropFiles(section.getByRole("heading", { name: "Versions" }), [pdfFile("beside.pdf", pages)]);
+      await expect(refusal).toHaveText("Drop the PDF on one of the two boxes, so it says which kind of version it is.");
+      await expect(page).toHaveURL(new RegExp(`${manage(file.id)}$`));
+      expect(seen.requests).toBe(0);
+      expect((await getFileVersionFacts(file.id)).length).toBe(1);
+
+      // ---- a revised text: a candidate, and no map asked for -----------------
+      await dropFiles(revised, [pdfFile("revised.pdf", [[`A revised opening ${tag}.`, "Its argument has changed."], [`A revised close ${tag}.`]])]);
+      const card = section.getByTestId("pdf-candidate-actions");
+      await expect(card.getByTestId("pdf-candidate-no-map")).toBeVisible({ timeout: 60_000 });
+      expect(seen.requests).toBe(1);
+      expect(maps.requests).toBe(0);
+      let versions = await getFileVersionFacts(file.id);
+      expect(versions[1]).toMatchObject({ number: 2, state: "candidate", pageMap: null });
+      // While it waits, the boxes take no drop and say why.
+      await expect(section.getByTestId("pdf-upload-refused")).toContainText("Version 2 is waiting");
+      await dropFiles(better, [pdfFile("another.pdf", pages)]);
+      expect(seen.requests).toBe(1);
+      expect(await abandonTestVersion(versions[1].id, ADMIN_EMAIL)).toMatchObject({ ok: true });
+
+      // ---- a better copy: its pages are matched, with no reload -------------
+      await gotoOk(page, manage(file.id));
+      const stillHere = await markWindow(page);
+      await dropFiles(better, [pdfFile("better.pdf", [[...pages[0], "A corrected line."], pages[1]])]);
+      await expect(card.getByTestId("pdf-candidate-map")).toContainText("2 sheets paired", { timeout: 90_000 });
+      expect(maps.requests).toBe(1);
+      expect(await stillHere()).toBe(true);
+      versions = await getFileVersionFacts(file.id);
+      expect(versions[2]).toMatchObject({ number: 3, state: "candidate", baseNumber: 1 });
+      expect(versions[2].pageMap).not.toBeNull();
+    } finally {
+      await deleteTestFile(file.id);
+    }
+  });
+
+  test("a title saved while a page map is building is saved at once, and the card shows the map when the build answers", async ({ page, browser }) => {
+    test.setTimeout(180_000);
+    const tag = token();
+    const pages = [[`The first sheet of the held build ${tag}.`, "Its words are its own."], [`The second sheet ${tag}.`, "And these."]];
+    const file = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages });
+    // The build's request is held in the browser until the title is saved, so it is still open while the save is made.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/files/versions/*/map", async (route) => {
+      await held;
+      await route.continue();
+    });
+    try {
+      await gotoOk(page, manage(file.id));
+      const chooser = page.waitForEvent("filechooser");
+      await page.getByTestId("pdf-upload-better-copy").click();
+      await (await chooser).setFiles({ name: "better.pdf", mimeType: "application/pdf", buffer: Buffer.from(buildTestPdf([[...pages[0], "Corrected."], pages[1]])) });
+      const card = page.getByTestId("pdf-candidate-actions");
+      // The card reports the build the upload started.
+      await expect(card.getByTestId("pdf-candidate-build-map")).toHaveText("Matching its pages…", { timeout: 60_000 });
+      await expect(card.getByTestId("pdf-candidate-build-map")).toBeDisabled();
+      const stillHere = await markWindow(page);
+
+      // A title saved meanwhile is saved at once.
+      const title = region(page, "Title");
+      const renamed = `${file.title} (renamed during a build)`;
+      await title.getByLabel("Title").fill(renamed);
+      await title.getByRole("button", { name: "Save" }).click();
+      await expect(title.getByText("Saved.")).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(renamed);
+      // And the build is still running.
+      await expect(card.getByTestId("pdf-candidate-build-map")).toHaveText("Matching its pages…");
+
+      release();
+      await expect(card.getByTestId("pdf-candidate-map")).toContainText("2 sheets paired", { timeout: 60_000 });
+      await expect(page.getByTestId("pdf-map-list")).toBeVisible();
+      expect(await stillHere()).toBe(true);
+
+      // A signed-out request to either handler is answered 401, never redirected.
+      const versionId = (await getFileVersionFacts(file.id))[1].id;
+      const anon = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+      try {
+        const built = await anon.request.post(`/api/files/versions/${versionId}/map`, { maxRedirects: 0 });
+        expect(built.status()).toBe(401);
+        const preview = await anon.request.get(`/api/files/versions/${versionId}/promotion-carry`, { maxRedirects: 0 });
+        expect(preview.status()).toBe(401);
+        // Signed in, the preview stores nothing and says so to every cache.
+        const asked = await page.request.get(`/api/files/versions/${versionId}/promotion-carry`);
+        expect(asked.status()).toBe(200);
+        expect(asked.headers()["cache-control"]).toContain("no-store");
+      } finally {
+        await anon.close();
+      }
+    } finally {
+      await page.unroute("**/api/files/versions/*/map");
       await deleteTestFile(file.id);
     }
   });

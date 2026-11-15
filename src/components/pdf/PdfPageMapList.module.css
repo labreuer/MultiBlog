@@ -7,6 +7,12 @@
   margin: 1.6rem 0 0.6rem;
 }
 
+/* Under a candidate's card on the file's manage page. */
+.list h3 {
+  font-size: 0.95rem;
+  margin: 1rem 0 0.5rem;
+}
+
 /* One segment per row, as wide as its sheets and never too narrow to click.
    It wraps where the segments can't all fit at their least width. */
 .strip {

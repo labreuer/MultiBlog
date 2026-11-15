@@ -4,7 +4,9 @@ import { token } from "./pdf-version-helpers";
 import type { TestPageLabelRange } from "../scripts/make-test-pdf";
 
 // docs/PDF.md §14, "A version's page map, sheet by sheet" — the map page's
-// list of rows and a question's card. No fixture PDF makes the pairing rules
+// list of rows and a question's card, and the same list under a waiting
+// version's card on its file's manage page, where an answer changes it in
+// place. No fixture PDF makes the pairing rules
 // produce a row of every kind on demand, so the map is written by hand
 // (`makeVersionFault`'s "map"), onto two real versions with real text and
 // labels: what the page reads besides the map is what an upload stores.
@@ -180,6 +182,50 @@ test.describe("a version's page map, sheet by sheet", () => {
         "label-other",
       ]);
       await expect(card).toContainText("By their printed page numbers, sheets 5, 7 of version 1 would go to sheets 5, 8 of version 2. The map proposes sheets 4, 7, from their words.");
+    } finally {
+      await deleteTestFile(file.id);
+    }
+  });
+
+  test("under a candidate's card on the manage page, an answer changes its row, the numbers and the carry preview with no navigation", async ({ page }) => {
+    test.setTimeout(120_000);
+    const tag = token();
+    const file: TestFile = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED", pages: basePages(tag), pageLabels: BASE_LABELS, inked: [3, 7] });
+    try {
+      await fillTestFileMetadata(file.id);
+      const version = await addTestFileVersion(file.id, { pages: versionPages(tag), pageLabels: VERSION_LABELS, promote: false });
+      await fillTestFileMetadata(file.id, version.id);
+      await makeVersionFault({ fault: "map", versionId: version.id, map: MAP });
+
+      await signIn(page, ADMIN_EMAIL);
+      await gotoOk(page, `/files/${file.id}/manage`);
+      // A mark only a load of the page clears: a refresh, and the history updates it makes, keep it.
+      await page.evaluate(() => {
+        (window as unknown as { __stillHere?: boolean }).__stillHere = true;
+      });
+      let previews = 0;
+      page.on("request", (request) => {
+        if (request.url().endsWith(`/api/files/versions/${version.id}/promotion-carry`)) previews += 1;
+      });
+
+      const card = page.getByTestId("pdf-candidate-actions");
+      await expect(card.getByTestId("pdf-candidate-map")).toContainText("4 sheets paired, 1 removed and 4 unmapped. 1 question about a run of sheets is open");
+      await expect(card.getByTestId("pdf-candidate-carry")).toHaveAttribute("data-carry-state", "ready", { timeout: 60_000 });
+      const asked = previews;
+      // The same list as the map page's, under the card.
+      const rows = page.getByTestId("pdf-map-row");
+      await expect(rows).toHaveCount(7);
+      const run = rows.nth(2).getByTestId("pdf-map-run");
+      await expect(run).toHaveAttribute("data-run-state", "open");
+
+      await run.getByTestId("pdf-map-accept").click();
+      await expect(run).toHaveAttribute("data-run-state", "accepted", { timeout: 30_000 });
+      await expect(card.getByTestId("pdf-candidate-map")).toContainText("7 sheets paired, 1 removed and 1 unmapped.");
+      await expect(card.getByTestId("pdf-candidate-map")).not.toContainText("open");
+      // The preview read the map, so it is asked again.
+      await expect.poll(() => previews, { timeout: 30_000 }).toBeGreaterThan(asked);
+      await expect(card.getByTestId("pdf-candidate-carry")).toHaveAttribute("data-carry-state", "ready", { timeout: 60_000 });
+      expect(await page.evaluate(() => (window as unknown as { __stillHere?: boolean }).__stillHere)).toBe(true);
     } finally {
       await deleteTestFile(file.id);
     }

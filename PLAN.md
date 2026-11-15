@@ -5005,5 +5005,6 @@ Known gaps: §13's "Open".
 Planned 2026-11-14: one page per file, `/files/<id>/manage`, where its managers rename and
 re-slug it, change its visibility and its owners (in the browser for the first time), delete
 and restore it, and for a PDF handle its versions, which leave the viewer's Metadata pane.
-Built 2026-11-14: the page without versions, the first of four PRs. **Plan and what is built:
-[docs/PDF.md](docs/PDF.md) §14.**
+Built 2026-11-14: the page without versions, the first of four PRs. Built 2026-11-14: the map
+sheet by sheet, the second. Built 2026-11-15: the versions moved to the page, the third.
+**Plan and what is built: [docs/PDF.md](docs/PDF.md) §14.**

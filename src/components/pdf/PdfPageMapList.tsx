@@ -16,7 +16,8 @@ import styles from "./PdfPageMapList.module.css";
 // is going on in words, with its two choices.
 //
 // One component, so that every page drawing a map draws the same list: the
-// map page now, and a candidate's card on the file's manage page.
+// map page, and a candidate's card on the file's manage page. On either, an
+// answer to a question refreshes the page, and its row changes in place.
 //
 // A sheet's link is a plain `<a>`, never a `<Link>`: it carries a fragment,
 // which a client navigation would leave on the path (CLAUDE.md, Gotchas).
@@ -28,6 +29,10 @@ type Props = {
   baseNumber: number;
   versionId: string;
   map: NonNullable<PageMapView["map"]>;
+  /** The list's heading: an h2 on the map page, an h3 under a candidate's card. */
+  heading?: "h2" | "h3";
+  /** Whether each sheet links to the viewer: not on a deleted file's page, where `/pdf/<slug>` is a 404 or another file's. */
+  linked?: boolean;
 };
 
 /** How many pairs a matched stretch lists at each end when expanded. */
@@ -59,12 +64,11 @@ function rowSheets(row: MapRow): number {
 /** A run that is still a question: open, or left unmatched, which can still be paired. */
 const isQuestion = (row: MapRow, runs: readonly MapRunView[]) => row.kind === "run" && runs[row.run].state !== "accepted";
 
-export default function PdfPageMapList({ slug, number, baseNumber, versionId, map }: Props) {
+export default function PdfPageMapList({ slug, number, baseNumber, versionId, map, heading: Heading = "h2", linked = true }: Props) {
   const [questionsOnly, setQuestionsOnly] = useState(false);
   // Written as every link into a file is (`formatPageName`), stamped with its version: a map is of a file with two at least.
-  const sheetLink = (version: number, sheet: number): ReactNode => (
-    <a href={`${pdfPath(slug, { number: version, isLatest: false }, { own: true })}#${formatPageName({ sheet, stamp: version })}`}>{sheet}</a>
-  );
+  const sheetLink = (version: number, sheet: number): ReactNode =>
+    linked ? <a href={`${pdfPath(slug, { number: version, isLatest: false }, { own: true })}#${formatPageName({ sheet, stamp: version })}`}>{sheet}</a> : sheet;
   const spanLinks = (version: number, [first, last]: [number, number]): ReactNode =>
     first === last ? (
       sheetLink(version, first)
@@ -92,7 +96,7 @@ export default function PdfPageMapList({ slug, number, baseNumber, versionId, ma
 
   return (
     <section className={styles.list} data-testid="pdf-map-list">
-      <h2>The sheets</h2>
+      <Heading>The sheets</Heading>
       <nav className={styles.strip} aria-label={`Every sheet of version ${baseNumber}, by row`} data-testid="pdf-map-strip">
         {map.rows.map((row, index) => {
           const kind = row.kind === "run" ? `run-${map.runs[row.run].state}` : row.kind;
