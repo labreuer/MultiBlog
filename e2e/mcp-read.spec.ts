@@ -346,9 +346,11 @@ test("read's bound is the client's: a claude-ai token's stays under claude.ai's 
   // inline up to 100,000 characters and reads none of Claude Code's _meta, so
   // a claude-ai token's whole:true and ranges stop at 95,000, where Claude
   // Code's stop at 200,000. The doc is about 116,000 characters, between the
-  // two.
+  // two. A chatgpt token's stop at the default 40,000 (§21, "Which clients"),
+  // so neither its description nor its note offers whole:true.
   const claudeAi = await createAgent(request, { scopes: ["READ"], client: "CLAUDE_AI" });
   const claudeCode = await createAgent(request, { scopes: ["READ"], client: "CLAUDE_CODE" });
+  const chatgpt = await createAgent(request, { scopes: ["READ"], client: "CHATGPT" });
   const filler = "Filler words that make a long doc long, sentence after sentence, for the bound. ".repeat(20);
   const doc = await createTestDoc({
     authorEmail: ADMIN_EMAIL,
@@ -362,6 +364,7 @@ test("read's bound is the client's: a claude-ai token's stays under claude.ai's 
   try {
     expect(await description(claudeAi.secret)).toContain("whole:true for up to 95,000.");
     expect(await description(claudeCode.secret)).toContain("whole:true for up to 200,000.");
+    expect(await description(chatgpt.secret)).not.toContain("whole:true");
 
     const fromClaudeCode = await claudeCode.call("read", { url: `/doc/${doc.slug}`, whole: true });
     expect(fromClaudeCode.result.kind).toBe("doc");
@@ -383,10 +386,18 @@ test("read's bound is the client's: a claude-ai token's stays under claude.ai's 
     const allOfIt = await claudeCode.call("read", { url: `/doc/${doc.slug}`, from: 1 });
     expect(allOfIt.result.to).toBe(140);
     expect(allOfIt.result).not.toHaveProperty("next");
+
+    const fromChatgpt = await chatgpt.call("read", { url: `/doc/${doc.slug}` });
+    expect(fromChatgpt.result).not.toHaveProperty("markdown");
+    expect(String(fromChatgpt.result.note)).toBe("Longer than 40000 characters: read it by section or by blocks.");
+    const chatgptRanged = await chatgpt.call("read", { url: `/doc/${doc.slug}`, from: 1 });
+    expect(chatgptRanged.size).toBeLessThanOrEqual(40_000);
+    expect(chatgptRanged.result.next).toBe(Number(chatgptRanged.result.to) + 1);
   } finally {
     await deleteTestDoc(doc.id);
     await claudeAi.dispose();
     await claudeCode.dispose();
+    await chatgpt.dispose();
   }
 });
 

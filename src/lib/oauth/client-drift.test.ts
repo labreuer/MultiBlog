@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { documentDrift, type DriftFinding, type FetchedDocument } from "./client-drift";
-import { CLAUDE_AI_METADATA, CLAUDE_CODE_METADATA, PINNED_CLIENTS } from "./pinned-clients";
+import { CHATGPT_METADATA, CLAUDE_AI_METADATA, CLAUDE_CODE_METADATA, PINNED_CLIENTS } from "./pinned-clients";
 
 // docs/MCP.md §21, "Which clients" — the drift check's comparison: what is a
 // warning, what is a note, and what isn't the document at all.
@@ -72,4 +72,25 @@ test("an answer that isn't the document is a warning, a redirect included, and o
   // A 403 that isn't Cloudflare's challenge is an answer.
   assert.deepEqual(levels(documentDrift(CLAUDE_AI_METADATA, answered("Forbidden", 403))), ["warning"]);
   assert.deepEqual(levels(documentDrift(CLAUDE_AI_METADATA, { kind: "unreachable", reason: "timed out" })), ["note"]);
+});
+
+test("every pin is a client this server can take as public, under a client_id of its own", () => {
+  // The token endpoint verifies no client authentication: a pin that can't use `none` can't be one.
+  for (const { document } of PINNED_CLIENTS) {
+    const methods = document.token_endpoint_auth_methods_supported ?? [document.token_endpoint_auth_method];
+    assert.ok(methods.includes("none"), document.client_id);
+  }
+  const ids = PINNED_CLIENTS.map(({ document }) => document.client_id);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test("ChatGPT's pinned key is compared as any field is, and its methods losing none is a warning", () => {
+  const moved = documentDrift(CHATGPT_METADATA, answered({ ...CHATGPT_METADATA, jwks_uri: "https://chatgpt.com/oauth/keys.json" }));
+  assert.deepEqual(levels(moved), ["note"]);
+  const confidential = documentDrift(CHATGPT_METADATA, answered({ ...CHATGPT_METADATA, token_endpoint_auth_methods_supported: ["private_key_jwt"] }));
+  assert.deepEqual(levels(confidential), ["warning"]);
+  assert.match(confidential[0].message, /^token_endpoint_auth_methods_supported /);
+  // On a pin without the list, the list appearing is a warning too.
+  const appeared = documentDrift(CLAUDE_AI_METADATA, answered({ ...CLAUDE_AI_METADATA, token_endpoint_auth_methods_supported: ["none"] }));
+  assert.deepEqual(levels(appeared), ["warning"]);
 });

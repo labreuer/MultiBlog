@@ -34,7 +34,7 @@ export type CardToken = {
   state: Exclude<TokenState, { kind: "revoked" }>;
 };
 
-const HEADER_CLIENTS: Record<ApiTokenClient, string> = { CLAUDE_CODE: "Claude Code", CLAUDE_AI: "claude.ai", OTHER: "other" };
+const HEADER_CLIENTS: Record<ApiTokenClient, string> = { CLAUDE_CODE: "Claude Code", CLAUDE_AI: "claude.ai", CHATGPT: "ChatGPT", OTHER: "other" };
 
 const PINNED_NAMES = new Map<string, string>(PINNED_CLIENTS.map(({ document }) => [document.client_id, document.client_name]));
 

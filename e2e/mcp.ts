@@ -116,7 +116,7 @@ export async function createAgent(
   request: APIRequestContext,
   opts: {
     scopes?: ("READ" | "WRITE" | "MANAGE")[];
-    client?: "CLAUDE_CODE" | "CLAUDE_AI" | "OTHER";
+    client?: "CLAUDE_CODE" | "CLAUDE_AI" | "CHATGPT" | "OTHER";
     issuerEmail?: string;
     name?: string;
     person?: boolean;

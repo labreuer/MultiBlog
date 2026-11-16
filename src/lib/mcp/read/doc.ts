@@ -226,9 +226,11 @@ export async function readDoc(
     outline: outlineOf(state.blocks, { depth: args.depth ?? (automatic ? 1 : undefined) }),
     ...(automatic
       ? {
-          note: args.whole
-            ? `Longer than ${maxChars} characters: read it by section or by blocks.`
-            : `Longer than ${DEFAULT_READ_CHARS} characters: read the sections you need, or pass whole:true for up to ${maxChars}.`,
+          // A bound no larger than the default (a chatgpt token's) has no whole:true to offer.
+          note:
+            args.whole || maxChars <= DEFAULT_READ_CHARS
+              ? `Longer than ${maxChars} characters: read it by section or by blocks.`
+              : `Longer than ${DEFAULT_READ_CHARS} characters: read the sections you need, or pass whole:true for up to ${maxChars}.`,
         }
       : {}),
     ...more,

@@ -89,8 +89,19 @@ export const MAX_READ_CHARS = 200_000;
  * note, and the rest only for the reply it arrived in.
  */
 export const CLAUDE_AI_READ_CHARS = 95_000;
+/**
+ * A `chatgpt` token's bound in place of `MAX_READ_CHARS` (§21, "Which
+ * clients"): the default bound, so `whole: true` and a range return no more
+ * than a plain read does. ChatGPT cuts a result to a budget it doesn't
+ * publish, silently and at a line boundary, so the model never learns what
+ * it lost; a read that stops at the bound says where to continue. Not
+ * measured: raise it once a connection shows what arrives whole.
+ */
+export const CHATGPT_READ_CHARS = DEFAULT_READ_CHARS;
 
 /** What `whole: true` and a range may return, for a token issued for `client`. */
 export function readBoundFor(client: ApiTokenClient): number {
-  return client === "CLAUDE_AI" ? CLAUDE_AI_READ_CHARS : MAX_READ_CHARS;
+  if (client === "CLAUDE_AI") return CLAUDE_AI_READ_CHARS;
+  if (client === "CHATGPT") return CHATGPT_READ_CHARS;
+  return MAX_READ_CHARS;
 }

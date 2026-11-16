@@ -42,6 +42,10 @@ import { createAgent, mcpRequest } from "./mcp";
 const CLAUDE = "https://claude.ai/oauth/mcp-oauth-client-metadata";
 const CLAUDE_CALLBACK = "https://claude.ai/api/mcp/auth_callback";
 const CLAUDE_CODE = "https://claude.ai/oauth/claude-code-client-metadata";
+const CHATGPT = "https://chatgpt.com/oauth/client.json";
+const CHATGPT_CALLBACK = "https://chatgpt.com/connector_platform_oauth_redirect";
+const ANTIGRAVITY = "https://antigravity.google/oauth/client-metadata.json";
+const ANTIGRAVITY_CALLBACK = "https://antigravity.google/oauth-callback";
 const STATE = "e2e-state";
 /** Past the two minutes a rotated refresh token is answered as a retry. */
 const PAST_THE_RETRY_WINDOW = 3 * 60_000;
@@ -580,6 +584,58 @@ test("Claude Code's identity takes a loopback redirect on any port, warns of it,
       expect(refused.status()).toBe(200);
       expect(await refused.text()).toContain(message);
     }
+  } finally {
+    await deleteTestUser(bot.email);
+  }
+});
+
+test("ChatGPT's identity connects as chatgpt and replaces its last one; Antigravity's connects as other and doesn't", async ({ page, request }) => {
+  // MCP.md §21, "Which clients": both are pinned like Claude's. A chatgpt
+  // connection's read stops at the default bound, so its description offers
+  // no whole:true, and a new one replaces the bot's last, as a claude.ai
+  // connection's does. Antigravity's is `other`: one person may sign in from
+  // more than one machine.
+  const d = await discover(request);
+  const bot = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: ADMIN_EMAIL });
+  const readDescription = async (accessToken: string) => {
+    const listed = await mcpRequest(request, accessToken, "tools/list");
+    return (listed.body.result?.tools as { name: string; description: string }[]).find((tool) => tool.name === "multiblog_read")!.description;
+  };
+  const through = async (clientId: string, redirectUri: string): Promise<OAuthTokens> => {
+    const { verifier, challenge } = pkce();
+    const as = { client_id: clientId, redirect_uri: redirectUri };
+    const res = await decide(request, d, { ...authorizeFields(d, challenge, as), bot: bot.id, write: "1", decision: "approve" });
+    expect(res.status()).toBe(303);
+    const code = callback(d, res.headers()["location"], redirectUri).get("code");
+    const redeemed = await redeem(request, d, { client_id: clientId, code: code!, code_verifier: verifier });
+    expect(redeemed.status()).toBe(200);
+    return OAuthTokensSchema.parse(await redeemed.json());
+  };
+  try {
+    await page.goto(authorizeUrl(d, pkce().challenge, { client_id: CHATGPT, redirect_uri: CHATGPT_CALLBACK }));
+    await expect(page.getByRole("heading", { name: "Connect ChatGPT" })).toBeVisible();
+    await expect(page.getByText("Its identity is published by chatgpt.com")).toBeVisible();
+
+    const first = await through(CHATGPT, CHATGPT_CALLBACK);
+    expect(await toolNames(request, first.access_token)).toContain("multiblog_create_doc");
+    expect(await readDescription(first.access_token)).not.toContain("whole:true");
+    // It refreshes under its own client_id, as a public client: nothing but PKCE was ever asked of it.
+    const next = await request.post(d.token, { form: { grant_type: "refresh_token", client_id: CHATGPT, refresh_token: first.refresh_token! } });
+    expect(next.status()).toBe(200);
+
+    await page.goto(authorizeUrl(d, pkce().challenge, { client_id: CHATGPT, redirect_uri: CHATGPT_CALLBACK }));
+    await expect(page.getByText(`Approving as ${bot.name} replaces it`)).toBeVisible();
+    const second = await through(CHATGPT, CHATGPT_CALLBACK);
+    expect(await callStatus(request, OAuthTokensSchema.parse(await next.json()).access_token)).toBe(401);
+    expect(await callStatus(request, second.access_token)).toBe(200);
+
+    const agy = await through(ANTIGRAVITY, ANTIGRAVITY_CALLBACK);
+    expect(await readDescription(agy.access_token)).toContain("whole:true for up to 200,000");
+    const agyAgain = await through(ANTIGRAVITY, ANTIGRAVITY_CALLBACK);
+    expect(await callStatus(request, agy.access_token)).toBe(200);
+    expect(await callStatus(request, agyAgain.access_token)).toBe(200);
+    // Neither replaced the other's: ChatGPT's connection is still live.
+    expect(await callStatus(request, second.access_token)).toBe(200);
   } finally {
     await deleteTestUser(bot.email);
   }

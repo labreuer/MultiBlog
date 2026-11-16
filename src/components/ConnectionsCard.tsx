@@ -46,8 +46,8 @@ export default function ConnectionsCard({ tokens }: { tokens: CardToken[] }) {
     <>
       <p>
         AI agents you&rsquo;ve connected and the account each one works as: yours or one of your bots. To connect
-        claude.ai, add a custom connector there with the URL <code>{mcpEndpointUrl().href}</code>, and approve it on
-        the page it opens here. Revoking stops at the next action an agent attempts.
+        claude.ai, ChatGPT or Google Antigravity, add the URL <code>{mcpEndpointUrl().href}</code> there as a custom
+        MCP server, and approve it on the page it opens here. Revoking stops at the next action an agent attempts.
       </p>
       {tokens.length === 0 ? (
         <p className={`${styles.muted} ${styles.empty}`}>Nothing is connected.</p>
