@@ -163,8 +163,9 @@ function writeBib(record: ExportRecord, style: "bibtex" | "biblatex"): string {
   // character outside ASCII, which is what biber and Pandoc read. (`asciiOnly` off would
   // escape nothing at all, `&` and `%` included.)
   const lost = style === "bibtex" ? lostByTex : (char: string) => /[^\x00-\x7f]/.test(char);
-  // A page range's en dash is left to the writer, which writes it `--`, every reader's range.
-  const { value, restore } = marked(data, lost, new Set(["page"]));
+  // A range's en dash, in pages or issues, is left to the writer, which writes it `--`,
+  // every reader's range.
+  const { value, restore } = marked(data, lost, new Set(["page", "issue"]));
   let entry = restore(format(style, value));
 
   const arxiv = arxivOf(record.data);

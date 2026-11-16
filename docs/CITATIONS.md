@@ -533,6 +533,11 @@ post's labels, and a republish refreshes both.
   `entryParts`): authors, year, title, then the container or publisher. A whole work's title is
   in italics, a part's in quotation marks. The title links to the reference's page, which is
   public, so a post's reader can follow it as a doc's can.
+  - **An edition is named**, since a different edition is a different record (Step 3). A whole
+    work's follows its title, `Kant. 2nd ed. Tübingen: Mohr.`; a part's is its container's and
+    is named with it, `In Essays, ed. Hooper, W., 2nd ed., p. 7.` A number or an ordinal (`2`,
+    `2nd`, `second`) is written "2nd ed." and "second ed."; anything else as written, since
+    "Rev. ed." and "2. Aufl." say what they are already.
 - **Where it is shown.**
   - The reading view and side-by-side render it on the server with their static first paint
     (`StaticBibliography`).
@@ -749,6 +754,10 @@ export that is read, so the refusal says which, not just "That isn't BibTeX, RIS
       Crossref writes them, and its `&lt;i&gt;` is italics it meant.
   - Rejected: taking all markup out on the way in. A species' name, or a book's title inside an
     article's, would lose its italics in every entry and every download.
+- **A range is written with an en dash**: a hyphen or two in `page`, and between numerals in
+  `issue`, `8(1–2)`, where an issue's name, "Spring-Summer", keeps its hyphen. A stored record
+  is read through the same parse (`cslOf`), so one stored with a hyphen shows the dash too. The
+  BibTeX writers write both ranges `--`.
 - **Dates keep their month and day** from every format, as CSL-JSON's already do.
 - **The size limit measures the record after its fields are chosen**, not the input, since
   Crossref's CSL-JSON is mostly its list of cited works. DOI lookup (Later) needs this too.
@@ -1000,8 +1009,9 @@ reference's record with another, each through `replaceReference` (`reference-wri
     web page's site and a case's reporter. For biber, and for Pandoc, which reads a `.bib` file
     as biblatex.
     - **Every character outside ASCII stays as UTF-8**, by the same markers, put in place of
-      all of them: what biber and Pandoc read, and what a biblatex file holds. But for a page
-      range, left to the writer, which writes its en dash `--`, every reader's range.
+      all of them: what biber and Pandoc read, and what a biblatex file holds. But for a range
+      of pages or issues, left to the writer, which writes its en dash `--`, every reader's
+      range.
     - **A quotation mark inside a title is braced with its word.** The writer braces a title's
       capitalised words, in this file and in BibTeX's, and takes a mark beside one into the
       braces: `{A {“Black} {Box”} of {Stakeholder} {Thinking}}`. Pandoc then prints the marks
@@ -1545,7 +1555,8 @@ refuse every open tab to close that gap, so there is none.
   - each form with its delimiters, its narrative and author-suppressed shapes, a page range,
     numbering, the `short` disambiguation, and the fallback for a reference without `short`;
   - the bibliography's entry format, its order and leads in each form, its numbers matching the
-    labels', and what it leaves out or strikes through;
+    labels', and what it leaves out or strikes through; an edition, by number, ordinal or as
+    written; an issue range's en dash;
   - a bare `@word`: a known key makes a chip, an unknown one is refused, and `\@`, an email address
     and code stay text;
   - the identity rule for a citation of several works, and an edit adding a work keeping the

@@ -92,6 +92,14 @@ test("a title's & and % are escaped for LaTeX, and a character with no TeX stays
   assert.match(biblatex, /pages = \{635--641\}/);
 });
 
+test("a range of issues is written as TeX's range, as pages are, and read back with its en dash", async () => {
+  const issues: ExportRecord = { key: "issues", data: { ...article.data, issue: "1–2" } };
+  for (const format of ["bibtex", "biblatex"] as const) {
+    assert.match(writeReferences([issues], format), /number = \{1--2\}/, format);
+    assert.equal((await roundTrip(issues, format)).data.issue, "1–2", format);
+  }
+});
+
 test("both particles: non-dropping from BibTeX and biblatex, and from RIS one in the family name and one after the given name", async () => {
   for (const format of ["bibtex", "biblatex"] as const) {
     assert.deepEqual((await roundTrip(particles, format)).data.author, [
