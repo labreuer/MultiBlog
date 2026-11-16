@@ -2106,10 +2106,13 @@ enum ApiScope {
 // CLAUDE_CODE token lists the tools that force a prompt, since Claude Code is
 // the one client documented to honor the flag; the token decides rather than
 // the request, because a stateless server sees the client's name only in
-// `initialize`.
+// `initialize`. CHATGPT is ChatGPT's connections, which get a read bound of
+// their own and replace each other as CLAUDE_AI's do (docs/MCP.md §21,
+// "Which clients").
 enum ApiTokenClient {
   CLAUDE_CODE
   CLAUDE_AI
+  CHATGPT
   OTHER
 
   @@map("api_token_client")

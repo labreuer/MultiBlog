@@ -8,7 +8,8 @@ import type { BlockSpan } from "@/lib/doc-text";
 import { defineTool, type McpContext, type ToolResult } from "../tool";
 import { parse, readableDocByParam, readableFileBySlug, refuseRef } from "../resolve";
 import { isViewerFragment } from "../url";
-import { MAX_READ_CHARS, readBoundFor, readInput, type ReadArgs } from "../read/args";
+import { DEFAULT_READ_CHARS, MAX_READ_CHARS, readBoundFor, readInput, type ReadArgs } from "../read/args";
+import type { ApiTokenClient } from "@/generated/prisma/enums";
 import { readDoc } from "../read/doc";
 import { readPdf } from "../read/pdf";
 import { allThreads, annotationByFragment, containerThreads, oneThread } from "../read/threads";
@@ -129,12 +130,21 @@ async function readFileRef(ctx: McpContext, slug: string, fragment: string, args
   );
 }
 
+/**
+ * How far whole:true lifts a read, for `client`: nothing to say where its
+ * bound is the default's, as a `chatgpt` token's is (§21, "Which clients").
+ */
+function wholeClause(client: ApiTokenClient): string {
+  const bound = readBoundFor(client);
+  return bound > DEFAULT_READ_CHARS ? `, or pass whole:true for up to ${bound.toLocaleString("en-US")}` : "";
+}
+
 export const readTool = defineTool({
   name: "read",
   scope: "READ",
   // The bound whole:true lifts a read to is the token's client's (§21).
   description: (_who, client) =>
-    `Read or open anything in MultiBlog by its URL — a doc, a PDF page or passage, a file, an annotation thread, a link, a post and its comments, a tag, an author — or an annotation by its id. Cite what you use by its URL. Dates are UTC, to the day or the minute, so an evening's edit can show as the next day. A doc comes whole up to 40,000 characters; a longer one answers with its outline (headings, block numbers, section sizes), and you then read the sections you need, by heading or a run of blocks, or pass whole:true for up to ${readBoundFor(client).toLocaleString("en-US")}. Each read carries \`version\`: send it back with a quote you anchor, or, on a doc you can edit, ask what changed \`since\` it. format:"text" gives text a quote can be copied from exactly. around:<quote> answers whether and where a quote really is, with the passage around it. include adds a doc's or PDF's annotation threads (filtered under threads, e.g. awaiting:true for the notes waiting on you) or the links into it, or a post's comments. Reads in one turn run in parallel, so ask for several at once.`,
+    `Read or open anything in MultiBlog by its URL — a doc, a PDF page or passage, a file, an annotation thread, a link, a post and its comments, a tag, an author — or an annotation by its id. Cite what you use by its URL. Dates are UTC, to the day or the minute, so an evening's edit can show as the next day. A doc comes whole up to 40,000 characters; a longer one answers with its outline (headings, block numbers, section sizes), and you then read the sections you need, by heading or a run of blocks${wholeClause(client)}. Each read carries \`version\`: send it back with a quote you anchor, or, on a doc you can edit, ask what changed \`since\` it. format:"text" gives text a quote can be copied from exactly. around:<quote> answers whether and where a quote really is, with the passage around it. include adds a doc's or PDF's annotation threads (filtered under threads, e.g. awaiting:true for the notes waiting on you) or the links into it, or a post's comments. Reads in one turn run in parallel, so ask for several at once.`,
   input: readInput,
   output: z.looseObject({ kind: z.string().optional() }),
   readOnly: true,

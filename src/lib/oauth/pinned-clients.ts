@@ -1,11 +1,12 @@
-// docs/MCP.md §21, "Which clients" — the two published identities this server
-// knows, as their client ID metadata documents (CIMD) served them. **Pinned,
+// docs/MCP.md §21, "Which clients" — the published identities this server
+// knows, as their client ID metadata documents (CIMD) served them: Claude's,
+// Claude Code's, ChatGPT's and Google Antigravity's. **Pinned,
 // not fetched**: a request naming either URL is answered from the constant
 // here, so the authorize path makes no outbound request and nobody can make
 // the server fetch a URL of their choosing. The two are an allowlist: any
 // other URL is an unknown client.
 //
-// The cost is that Anthropic can change a document. `scripts/check-oauth-clients.ts`
+// The cost is that a client's maker can change its document. `scripts/check-oauth-clients.ts`
 // fetches each and compares it with its pin (`documentDrift`, client-drift.ts),
 // and `deploy/deploy.sh` runs it on every deploy; a change is then an edit
 // here. Pure, with no database, so that script and the unit tests can load it.
@@ -19,7 +20,19 @@ export type ClientMetadataDocument = {
   grant_types: readonly string[];
   response_types: readonly string[];
   token_endpoint_auth_method: string;
+  /** ChatGPT's alone: the methods it can use, of which it picks one this server lists. */
+  token_endpoint_auth_methods_supported?: readonly string[];
+  token_endpoint_auth_signing_alg?: string;
+  jwks_uri?: string;
+  logo_uri?: string;
 };
+
+/**
+ * The `api_token.client` a client's connections get: never CLAUDE_CODE
+ * (§21, "Whose account"). CLAUDE_AI and CHATGPT each decide a read bound and
+ * that a new connection replaces the last; OTHER decides neither.
+ */
+export type OauthClientKind = "CLAUDE_AI" | "CHATGPT" | "OTHER";
 
 /**
  * Claude's identity, as https://claude.ai/oauth/mcp-oauth-client-metadata
@@ -62,10 +75,66 @@ export const CLAUDE_CODE_METADATA = {
   token_endpoint_auth_method: "none",
 } as const satisfies ClientMetadataDocument;
 
+/**
+ * ChatGPT's identity, as https://chatgpt.com/oauth/client.json served it on
+ * 2026-11-16: the one ChatGPT presents when the authorization server meets
+ * RFC 9207's issuer identification, which this one does (`iss` on every
+ * response, and the metadata's issuer exactly the resource's
+ * `authorization_servers`). Otherwise ChatGPT would use a per-connection
+ * `https://chatgpt.com/oauth/<callback_id>/client.json` and redirect URI,
+ * which no pin could name.
+ *
+ * **A public client here, though its document names a key.** It lists `none`
+ * and `private_key_jwt` among the methods it can use and picks one that the
+ * server's metadata lists, which is `none` alone, so PKCE is the proof on its
+ * code as on every other client's. Its singular `token_endpoint_auth_method`
+ * is the older field, kept for clients that read only that one. Should the
+ * plural list ever drop `none`, the drift check warns, and the token endpoint
+ * would have to verify an assertion against `jwks_uri` (§21, Open).
+ *
+ * Its `jwt-bearer` grant is one this server doesn't offer, as Claude's is.
+ */
+export const CHATGPT_METADATA = {
+  client_id: "https://chatgpt.com/oauth/client.json",
+  client_name: "ChatGPT",
+  client_uri: "https://chatgpt.com/",
+  redirect_uris: ["https://chatgpt.com/connector_platform_oauth_redirect"],
+  grant_types: ["authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:jwt-bearer"],
+  response_types: ["code"],
+  token_endpoint_auth_method: "private_key_jwt",
+  token_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
+  token_endpoint_auth_signing_alg: "RS256",
+  jwks_uri: "https://chatgpt.com/oauth/jwks.json",
+  logo_uri: "https://persistent.oaistatic.com/sonic/misc/openai-logo.png",
+} as const satisfies ClientMetadataDocument;
+
+/**
+ * Google Antigravity's identity, as
+ * https://antigravity.google/oauth/client-metadata.json served it on
+ * 2026-11-16: what its app, IDE and CLI (`agy`) use, the way a free Google
+ * account reaches Gemini with an MCP server. Its redirect URI is a hosted
+ * page that shows the code for the person to paste back into Antigravity.
+ *
+ * **Its connections are `other`, and don't replace each other**: one person
+ * may sign in from more than one machine, as with Claude Code.
+ */
+export const ANTIGRAVITY_METADATA = {
+  client_id: "https://antigravity.google/oauth/client-metadata.json",
+  client_name: "Google Antigravity",
+  client_uri: "https://antigravity.google",
+  redirect_uris: ["https://antigravity.google/oauth-callback"],
+  grant_types: ["authorization_code", "refresh_token"],
+  response_types: ["code"],
+  token_endpoint_auth_method: "none",
+  logo_uri: "https://antigravity.google/assets/image/brand/antigravity-icon__full-color.png",
+} as const satisfies ClientMetadataDocument;
+
 /** A pinned identity, and the `api_token.client` its connections get. */
-export type PinnedClient = { document: ClientMetadataDocument; kind: "CLAUDE_AI" | "OTHER" };
+export type PinnedClient = { document: ClientMetadataDocument; kind: OauthClientKind };
 
 export const PINNED_CLIENTS: readonly PinnedClient[] = [
   { document: CLAUDE_AI_METADATA, kind: "CLAUDE_AI" },
   { document: CLAUDE_CODE_METADATA, kind: "OTHER" },
+  { document: CHATGPT_METADATA, kind: "CHATGPT" },
+  { document: ANTIGRAVITY_METADATA, kind: "OTHER" },
 ];

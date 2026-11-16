@@ -28,13 +28,24 @@ export type FetchedDocument =
  * The fields the server acts on: who the client is, where a code may go, how
  * it authenticates at the token endpoint, and what it may ask for. Lists
  * among them are compared as sets, since the server acts on none's order.
+ * `token_endpoint_auth_methods_supported` is ChatGPT's alone, and its `none`
+ * is what makes ChatGPT a public client here; on a pin without it, the field
+ * appearing is a warning too.
  */
-const ACTED_ON = ["client_id", "redirect_uris", "token_endpoint_auth_method", "grant_types", "response_types"] as const;
+const ACTED_ON = [
+  "client_id",
+  "redirect_uris",
+  "token_endpoint_auth_method",
+  "token_endpoint_auth_methods_supported",
+  "grant_types",
+  "response_types",
+] as const;
 
 /**
- * Either of these appearing names a key, which would announce Claude
- * becoming a confidential client: the token endpoint would then have to
- * verify `private_key_jwt` against it (§21, Open).
+ * Either of these appearing on a pin that has neither names a key, which
+ * would announce the client becoming a confidential one: the token endpoint
+ * would then have to verify `private_key_jwt` against it (§21, Open). A key
+ * already pinned, ChatGPT's, is compared as any other field is.
  */
 const KEY_FIELDS = ["jwks_uri", "jwks"] as const;
 
@@ -93,6 +104,8 @@ export function documentDrift(pinned: Readonly<Record<string, unknown>>, fetched
   for (const field of KEY_FIELDS) {
     if (published[field] !== undefined && pinned[field] === undefined) {
       warnings.push({ level: "warning", message: `${field} has appeared, which names a key: the client may have become a confidential one.` });
+    } else if (pinned[field] !== undefined && comparable(field, pinned[field]) !== comparable(field, published[field])) {
+      notes.push({ level: "note", message: `${field} is ${shown(published[field])}; the pin has ${shown(pinned[field])}.` });
     }
   }
   const compared: readonly string[] = [...ACTED_ON, ...KEY_FIELDS];

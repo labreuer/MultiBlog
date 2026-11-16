@@ -3,18 +3,22 @@
 //
 // Usage:
 //   npx tsx scripts/oauth-client.ts --name=<name> --redirect-uri=<uri> [--redirect-uri=<uri> …]
-//       --kind=claude-ai|other
+//       --kind=claude-ai|chatgpt|other
 //   npx tsx scripts/oauth-client.ts --list
 //   npx tsx scripts/oauth-client.ts --revoke=<client_id>
 //
-// **Two uses.** `--kind=claude-ai` is claude.ai's fallback: its connector
+// **Three uses.** `--kind=claude-ai` is claude.ai's fallback: its connector
 // dialog's "Use your own OAuth client" takes the client_id printed here, with
 // the secret left blank, which keeps claude.ai connecting should its published
 // identity stop matching the pin (scripts/check-oauth-clients.ts says when).
 // Its redirect URI is claude.ai's callback, https://claude.ai/api/mcp/auth_callback,
 // and a new connection through it replaces the bot's last one, as the pinned
-// identity's does. `--kind=other` is anything else a person wants to connect,
-// such as the MCP Inspector while testing.
+// identity's does. `--kind=chatgpt` is ChatGPT's fallback in the same way: its
+// connector's advanced OAuth settings take a user-defined client's id, with the
+// secret left blank and token authentication set to none, and its redirect URI
+// is https://chatgpt.com/connector_platform_oauth_redirect. `--kind=other` is
+// anything else a person wants to connect, such as the MCP Inspector while
+// testing.
 //
 // **Every client is public**: there is no secret to print, and PKCE is the
 // proof on each code. A redirect URI is refused unless it is absolute, has no
@@ -22,7 +26,7 @@
 // on any port (src/lib/oauth/authorize-request.ts's `redirectUriRefusal`).
 //
 // **Revoking a client revokes its connections**, in the same transaction. The
-// two pinned identities, Claude's and Claude Code's, are listed beside the
+// pinned identities are listed beside the
 // rows and can't be revoked: they are constants in the code
 // (src/lib/oauth/pinned-clients.ts).
 
@@ -34,7 +38,7 @@ import { PINNED_CLIENTS } from "../src/lib/oauth/pinned-clients";
 function usage(message?: string): never {
   if (message) console.error(message);
   console.error(
-    "Usage: npx tsx scripts/oauth-client.ts --name=<name> --redirect-uri=<uri> [--redirect-uri=<uri> …] --kind=claude-ai|other\n" +
+    "Usage: npx tsx scripts/oauth-client.ts --name=<name> --redirect-uri=<uri> [--redirect-uri=<uri> …] --kind=claude-ai|chatgpt|other\n" +
       "       npx tsx scripts/oauth-client.ts --list\n" +
       "       npx tsx scripts/oauth-client.ts --revoke=<client_id>",
   );
@@ -50,7 +54,7 @@ function flag(name: string): string | undefined {
   return flags(name)[0];
 }
 
-const KINDS = { "claude-ai": "CLAUDE_AI", other: "OTHER" } as const;
+const KINDS = { "claude-ai": "CLAUDE_AI", chatgpt: "CHATGPT", other: "OTHER" } as const;
 
 async function main() {
   const revoke = flag("revoke");

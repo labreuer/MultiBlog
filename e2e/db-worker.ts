@@ -3424,7 +3424,7 @@ export async function lapseTestConnection(refreshToken: string): Promise<void> {
  * the script's rule. Its name starts with the suite's title prefix, which is
  * what `deleteTestOauthClient` deletes by. Returns its client_id.
  */
-export async function createTestOauthClient(opts: { name: string; redirectUris: string[]; kind: "CLAUDE_AI" | "OTHER" }): Promise<string> {
+export async function createTestOauthClient(opts: { name: string; redirectUris: string[]; kind: "CLAUDE_AI" | "CHATGPT" | "OTHER" }): Promise<string> {
   if (!opts.name.startsWith(E2E_TITLE_PREFIX)) throw new Error(`createTestOauthClient: a test client's name starts with "${E2E_TITLE_PREFIX}".`);
   return registerClient(opts);
 }

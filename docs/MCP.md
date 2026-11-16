@@ -153,10 +153,11 @@ the rules are:
 - **The issuer is part of the token.** `created_by_user_id` is who issued it: for a person's
   own token, that person; for a bot's, the person the bot works for. It decides who else
   `write` may give access to (below).
-- **So is the client it was issued for.** `client` is `claude-code`, `claude-ai` or `other`,
-  set at issue: by the script's `--client`, which defaults to `other`, or by an OAuth
+- **So is the client it was issued for.** `client` is `claude-code`, `claude-ai`, `chatgpt` or
+  `other`, set at issue: by the script's `--client`, which defaults to `other`, or by an OAuth
   connection, which is `claude-ai` for Claude's published identity or a client registered by
-  hand as claude.ai's, and `other` for any other client (§21). Only a `claude-code` token lists
+  hand as claude.ai's, `chatgpt` for ChatGPT's in the same two ways, and `other` for any other
+  client (§21). Only a `claude-code` token lists
   the tools that force a prompt, since Claude Code is the one client documented to honor the
   flag (§15). The token decides rather than the request, because a stateless server sees the
   client's `clientInfo` only in `initialize`, never in the `tools/list` and `tools/call` that
@@ -2395,6 +2396,48 @@ model. OAuth is §21's.
   reads there, and the lean results (§4) are all that keeps a sweep affordable.
 - **Research has called no connector**, in any trial (§21, Open).
 
+**ChatGPT:**
+
+- **A connection acts as a bot of its own**, made on `/users` as claude.ai's is, and named for
+  ChatGPT, so that what ChatGPT writes carries its name and not Claude's. The consent page
+  offers every bot that works for the person, Claude's included.
+- **The server is added on ChatGPT's web site**, not its desktop app: chatgpt.com/plugins, then
+  **+**, then "Add custom MCP server", with the URL the Connections card gives and OAuth as its
+  authentication, leaving the advanced settings at the client document ChatGPT finds on its
+  own (§21, "Which clients"). Where the option is missing, the Developer mode toggle at
+  chatgpt.com/settings/security has brought it. The connection then follows the account into
+  ChatGPT's mobile apps.
+- **OpenAI's help center and its developer docs disagree on who may connect**, the first
+  naming Business, Enterprise and Edu, with Pro reading only, the second and its staff
+  everyone, Plus included, with writes. Plus accounts have been reported writing through a
+  custom server since 2026-08.
+- **A tool with `readOnlyHint` runs unasked**; every other tool asks first, and the person may
+  approve or deny one for the rest of a conversation. Deep research calls only the reads.
+- **A call has a minute.** ChatGPT has retried one that ran past it.
+- **`read` stops at 40,000 characters**, whole or ranged (§21, "Which clients").
+- **After a deploy that changes the tools**, the person refreshes the plugin in ChatGPT and
+  starts a new chat.
+- **The byte routes are out of reach**: ChatGPT has no shell to send curl from, so `download`
+  and `upload` serve it nothing.
+
+**Google Antigravity (Gemini):**
+
+- **A connection acts as a bot of its own**, named for Gemini, as ChatGPT's does.
+- **The server is one entry in `~/.gemini/config/mcp_config.json`**, which Antigravity's app,
+  IDE and CLI share, with no `oauth.clientId`, so that Antigravity presents its published
+  identity (§21, "Which clients"):
+
+  ```json
+  { "mcpServers": { "multiblog": { "serverUrl": "<APP_URL>/api/mcp" } } }
+  ```
+
+  Authenticating opens the consent page. Once approved, Antigravity's hosted callback shows a
+  code, which the person pastes back into Antigravity.
+- **Antigravity 1.5.8 or later**: earlier versions dropped a public client's connection after
+  an hour, failing to refresh it.
+- **Its MCP tools ask before every call** until allowed with `mcp(multiblog/*)` in its
+  permissions. Its documentation says nothing of a tool's hints.
+
 ## 17. Existing gaps the MCP server must not inherit
 
 The MCP server avoids every one by construction, and building it fixed three in the UI's paths
@@ -2754,7 +2797,7 @@ code beside each says why as well.
   the e2e fixtures both call.
 - **The drift check compares the acted-on lists as sets**, since the server acts on none's
   order. It exits 1 on a warning, for a run by hand; `deploy.sh` ignores the status.
-- **`oauth-client.ts --list` shows the two pins beside the rows**, and `--revoke` refuses a
+- **`oauth-client.ts --list` shows the pins beside the rows**, and `--revoke` refuses a
   pin. A redirect URI with a private-use scheme (`com.example.app:/callback`) passes: it is
   absolute, and the rule names only plain `http`. A client's name is at most 100 characters,
   since the page shows it whole.
@@ -2827,7 +2870,8 @@ a sandboxed command is refused the token's file. Research calls no connector (Op
 claude.ai's custom connectors authenticate with OAuth, short of a request-header beta
 that serves for a trial and not as a connection (§5), so this makes MultiBlog an OAuth
 authorization server for its own MCP endpoint, as small a one as claude.ai needs and the MCP
-authorization spec allows.
+authorization spec allows. ChatGPT and Google Antigravity connect through the same server,
+each by a published identity pinned beside Claude's ("Which clients"), and §16 says how.
 It is written to the spec's newest revision, 2026-07-28, and to what claude.ai does as a
 client: Anthropic documents that under claude.com/docs/connectors/building, and server logs
 posted to `anthropics/claude-ai-mcp` fill in the rest. Three trials check each point the plan
@@ -3011,8 +3055,9 @@ the reads, for Research, is designed and not built ("The read-only endpoint").
     endpoint", below).
   - **Never `manage`** (§3): the page doesn't offer it, and no metadata lists it.
 - **The client is `claude-ai` for Claude's published identity**, and for a client registered by
-  hand as claude.ai's fallback (`--kind=claude-ai`, "Which clients", below). It is `other` for
-  anything else. OAuth never issues a `claude-code` token, since a client's claim to be Claude
+  hand as claude.ai's fallback (`--kind=claude-ai`, "Which clients", below). It is `chatgpt` for
+  ChatGPT's, the same two ways (`--kind=chatgpt`), and `other` for anything else, Google
+  Antigravity's identity included. OAuth never issues a `claude-code` token, since a client's claim to be Claude
   Code rests on a loopback redirect, which any program on the machine can answer. So no
   connection lists `edit_link` or `rename_file`, which stay a `claude-code` token's ("What else
   changes for claude.ai", below), and `manage` is outside every connection's scopes.
@@ -3026,7 +3071,7 @@ A request names its client by `client_id`, and an unknown one is refused before 
 **Every client is public**: none has a secret. PKCE is the proof on the code, and rotation
 guards the refresh token. The metadata lists `none` as the only authentication method at the
 token endpoint, which is also what makes claude.ai choose its published identity (below). There
-are three kinds:
+are five kinds:
 
 - **Claude's published identity**, a client ID metadata document (CIMD), which the spec
   prefers. Its `client_id` is `https://claude.ai/oauth/mcp-oauth-client-metadata`: a public
@@ -3044,19 +3089,20 @@ are three kinds:
       that on purpose. The client-metadata draft allows it: its newest revision lets an
       authorization server register a client's URL ahead of time instead of fetching the
       document on each request, and asks only that the document be fetched when that is done
-      (draft -02, §7.2), as both pins were.
-    - **The two pins are an allowlist.** `client_id_metadata_document_supported` tells every
-      client that a URL may serve as its `client_id`, but any URL other than these two is an
-      unknown client. The draft lets an authorization server keep a trust policy of its own,
+      (draft -02, §7.2), as each pin was.
+    - **The pins are an allowlist.** `client_id_metadata_document_supported` tells every
+      client that a URL may serve as its `client_id`, but any URL other than the pinned ones is
+      an unknown client. The draft lets an authorization server keep a trust policy of its own,
       and this is one.
-    - The cost is that Anthropic can change the document. `scripts/check-oauth-clients.ts`
+    - The cost is that a client's maker can change its document. `scripts/check-oauth-clients.ts`
       fetches each pinned document and compares it with the constant, and a change is then a
-      one-line edit. The change that would matter most is Claude becoming a confidential
-      client (Open, below).
+      one-line edit. The change that would matter most is a client becoming a confidential
+      one (Open, below).
     - **It compares only what the server acts on**: `client_id`, `redirect_uris`,
-      `token_endpoint_auth_method`, `grant_types` and `response_types`, and a `jwks_uri` or
-      `jwks` appearing, which would announce the switch to a confidential client. A difference
-      there is a warning. A difference anywhere else, a reworded `client_name` or a new
+      `token_endpoint_auth_method`, `token_endpoint_auth_methods_supported` (ChatGPT's alone),
+      `grant_types` and `response_types`, and a `jwks_uri` or `jwks` appearing on a pin that has
+      neither, which would announce the switch to a confidential client. A difference there is
+      a warning. A key already pinned, ChatGPT's, changing is a note. A difference anywhere else, a reworded `client_name` or a new
       `logo_uri` or `tos_uri`, is a note. Compared whole, every cosmetic edit would raise the
       warning, and a warning that keeps proving false gets skimmed past.
     - **An answer that isn't the document is a warning too**, a 404 say, since the URL is the
@@ -3089,21 +3135,63 @@ are three kinds:
     - A sandboxed command can read that file by default. So the settings that keep §5's token
       file from the model deny it too, in `sandbox.credentials` and a Read deny rule.
     - Whether a sandboxed command can read the macOS Keychain isn't documented.
+- **ChatGPT's published identity**, `https://chatgpt.com/oauth/client.json`, pinned the same way
+  and checked by the same script. Its one redirect URI is
+  `https://chatgpt.com/connector_platform_oauth_redirect`. Its connections are `chatgpt`.
+  - **ChatGPT presents this `client_id` only to a server that meets RFC 9207's issuer
+    identification**: `authorization_response_iss_parameter_supported` in the metadata, the
+    metadata's `issuer` exactly the resource's `authorization_servers`, and `iss` on every
+    authorization response, success or error. Discovery meets all three. A server that didn't
+    would be given a per-connection `https://chatgpt.com/oauth/<callback_id>/client.json` and
+    redirect URI instead, which no pin could name.
+  - **A public client here, though its document names a key.** It lists `none` and
+    `private_key_jwt` among the methods it can use, in `token_endpoint_auth_methods_supported`,
+    and picks one the metadata lists, which is `none` alone. Its singular
+    `token_endpoint_auth_method`, `private_key_jwt`, is the older field. The token endpoint
+    verifies no client authentication, so the list's `none` is what the pin rests on, and the
+    drift check warns should it go (Open, below).
+  - **A new connection replaces the bot's last one**, as a claude.ai connection's does ("The
+    token endpoint", below), and the consent page says so before Approve. ChatGPT is a web
+    service holding one connection per account, as claude.ai is.
+  - **Its `read` is bounded at the default, 40,000 characters**, whole and ranged alike, so
+    `read`'s description and its note offer no `whole: true`. ChatGPT cuts a result to a
+    budget it doesn't publish, silently and at a line boundary, so the model never learns what
+    it lost, where a read stopped at the bound says where to go on. The bound is not measured:
+    it is raised once a connection shows what arrives whole.
+- **Google Antigravity's published identity**,
+  `https://antigravity.google/oauth/client-metadata.json`, pinned and checked the same way. Its
+  app, its IDE and its CLI (`agy`) use it, and it is the way a Google account with no paid plan
+  reaches Gemini with an MCP server, Gemini CLI having stopped serving free accounts on
+  2026-06-18. Its one redirect URI is `https://antigravity.google/oauth-callback`, a hosted page
+  that shows the code for the person to paste back into Antigravity.
+  - **Its connections are `other`, and don't replace each other**: one person may sign in from
+    more than one machine, as with Claude Code's identity.
+  - **Antigravity tries a manually configured `oauth.clientId` first, then a client document,
+    then dynamic registration.** With no `clientId` configured, it presents this identity,
+    because the metadata sets `client_id_metadata_document_supported`.
 - **Clients registered by hand**, with `scripts/oauth-client.ts --name=… --redirect-uri=…
-  --kind=claude-ai|other`: a row in `oauth_client`, listed and revoked by the same script.
+  --kind=claude-ai|chatgpt|other`: a row in `oauth_client`, listed and revoked by the same script.
   - **The script refuses a redirect URI** that isn't absolute, that has a fragment, or that is
     plain `http` on any host but a loopback address, as OAuth 2.1 and the MCP spec require. A
     code sent over plain `http` to another machine can be read on the way.
   - **claude.ai's fallback.** Its "Use your own OAuth client" option takes such a client's id
     with the secret left blank. That keeps claude.ai connecting if its published identity
     stops matching the pin before the pin is fixed.
+  - **ChatGPT's fallback**, the same way: `--kind=chatgpt`, with ChatGPT's redirect URI. In the
+    connector's advanced OAuth settings, the client is user-defined, its id that client's, the
+    secret blank, the token endpoint's authentication `none`, and OIDC off.
   - **Anything else a person wants to connect**, such as the MCP Inspector while testing.
   - **Revoking a client revokes its connections.**
-- **No dynamic client registration.** claude.ai doesn't need it, and the 2026-07-28 revision
+- **No dynamic client registration.** Neither claude.ai, ChatGPT nor Antigravity needs it,
+  since each prefers a client document, and the 2026-07-28 revision
   deprecates it in favour of CIMD. An open endpoint that writes a row per request would need a
-  rate limit, pruning and a policy on redirect URIs of its own, for nothing the three kinds
-  above don't already cover; claude.ai registers anew on every connection. The metadata lists
-  no `registration_endpoint`.
+  rate limit, pruning and a policy on redirect URIs of its own, for nothing the kinds above
+  don't already cover; claude.ai registers anew on every connection. The metadata lists no
+  `registration_endpoint`.
+  - **So the Gemini app's custom apps can't connect.** Google's guide for them calls
+    registration "required, even when CIMD is supported", and asks for a client secret and
+    for refresh tokens that don't rotate besides, three departures from this section for a
+    client limited to some accounts in one country. Antigravity is how Gemini connects.
 - **So Claude Code has three ways in, all allowed:**
   - **The header (§5)**, for a research project of one's own. Its token is one the operator
     issues, it can carry `manage` for a person's own token, and nothing in it depends on the
@@ -4394,11 +4482,13 @@ Each step ships as §18's phases did: with specs, unit tests and `npm run check`
    appeared ("The slice trial", "The full trial"). Nothing in this server decides it. If it does start calling
    connectors, which of a tool's settings hold there decides whether the read-only endpoint is
    built ("The read-only endpoint").
-3. **Claude as a confidential client**, should Anthropic make it one. Its documentation says
-   that dynamic registration and a client document both register Claude as a public client. A
-   confidential Claude's document would name a key, and the token endpoint would verify
-   `private_key_jwt` against it (`jose`'s `createRemoteJWKSet`, from the pinned `jwks_uri`).
-   The drift check is what announces the change.
+3. **A pinned client as a confidential one**, should its maker make it one. Anthropic's
+   documentation says that dynamic registration and a client document both register Claude as
+   a public client. A confidential Claude's document would name a key, and the token endpoint
+   would verify `private_key_jwt` against it (`jose`'s `createRemoteJWKSet`, from the pinned
+   `jwks_uri`). ChatGPT's document names a key already, and is public here only because its
+   `token_endpoint_auth_methods_supported` lists `none`. The drift check is what announces
+   either change.
 4. **A revocation endpoint** (RFC 7009), if claude.ai turns out to call one when a connector
    is disconnected or removed. Disconnecting sent nothing in the refresh trial, but the metadata
    lists no revocation endpoint, so that says nothing about whether claude.ai would call one.
