@@ -144,6 +144,10 @@ is the script's, a connection the consent page's.
   hand. A header token shows the client it was issued for, marked "header
   token". The Account column says "you" for your own tokens and names the bot
   otherwise.
+- **A line above the table says when an ADMIN has turned connections off for the
+  viewer** (`user.mcp_allowed`, docs/MCP.md §21 "Connections turned off for an
+  account"). Every row has stopped working then, with nothing revoked, and
+  nothing else on the page would say why.
 - **Revoke** is an inline Yes/No (`RevokeTokenButton`), and its action re-derives
   from the session that the viewer is the token's account or issuer
   (`revokeToken`). The token stops at its next call, a connection's refresh

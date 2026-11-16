@@ -461,6 +461,12 @@ export const repointTestBot = (...args: Parameters<DbHandlers["repointTestBot"]>
 export const setTestUserRoleAsAdmin = (...args: Parameters<DbHandlers["setTestUserRoleAsAdmin"]>) =>
   call("setTestUserRoleAsAdmin", ...args);
 export const requireTestInvitable = (...args: Parameters<DbHandlers["requireTestInvitable"]>) => call("requireTestInvitable", ...args);
+export const setTestBotAgent = (...args: Parameters<DbHandlers["setTestBotAgent"]>) => call("setTestBotAgent", ...args);
+export const setTestMcpAllowed = (...args: Parameters<DbHandlers["setTestMcpAllowed"]>) => call("setTestMcpAllowed", ...args);
+export const orphanTestBot = (...args: Parameters<DbHandlers["orphanTestBot"]>) => call("orphanTestBot", ...args);
+export const setTestPasswordHashInSql = (...args: Parameters<DbHandlers["setTestPasswordHashInSql"]>) =>
+  call("setTestPasswordHashInSql", ...args);
+export const getTestAccountFacts = (...args: Parameters<DbHandlers["getTestAccountFacts"]>) => call("getTestAccountFacts", ...args);
 export const getTestBotFacts = (...args: Parameters<DbHandlers["getTestBotFacts"]>) => call("getTestBotFacts", ...args);
 export const softDeleteTestUser = (...args: Parameters<DbHandlers["softDeleteTestUser"]>) =>
   call("softDeleteTestUser", ...args);

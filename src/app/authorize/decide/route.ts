@@ -61,6 +61,11 @@ export async function POST(request: Request): Promise<Response> {
     return seeOther(authorizationResponseUrl(approved.redirectUri, issuer(), { error: "access_denied", state: approved.state }));
   }
 
+  // §3's check refuses every token a person issues while their connections
+  // are turned off, so the page offers them nothing (§21, "Connections turned
+  // off for an account"); this is the answer to a form posted all the same.
+  if (!person.mcpAllowed) return refused(403, "An ADMIN has turned connections off for your account.");
+
   const botId = form.get("bot");
   if (!botId || !(await worksFor(botId, person))) return refused(403, "That account doesn't work for you.");
 

@@ -16,8 +16,10 @@ import { appUrl } from "@/lib/app-url";
 import { SITE_TITLE } from "@/lib/site-config";
 import { softDeleteUser } from "@/lib/user-delete";
 import { scheduleMentionRefresh } from "@/lib/entity-chips/refresh";
-import { createBot as createBotAs, moveBot, requireBotRole, requireInvitable } from "@/lib/bots";
+import { createBot as createBotAs, moveBot, requireBotRole, requireInvitable, restoreAccount, setBotAgent } from "@/lib/bots";
+import { parseAgent } from "@/lib/bot-rules";
 import { actorFromSessionUser, type Actor } from "@/lib/actor";
+import { ApiError } from "@/lib/api/errors";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -48,18 +50,73 @@ export async function updateUserRole(userId: string, role: Role): Promise<void> 
   revalidatePath("/users");
 }
 
-// docs/MCP.md §21, "Whose account" — the bodies are src/lib/bots.ts's, which
-// the e2e fixtures share; these add the session and the revalidation.
-export async function createBot(name: string, personId: string, role: Role): Promise<{ id: string; email: string }> {
-  const bot = await createBotAs(await adminActor(), { name: String(name), personId: String(personId), role });
-  revalidatePath("/users");
-  return { id: bot.id, email: bot.email };
+/** A bot action's refusal, as a value: what `refusalOf` answers in place of a result. */
+export type Refused = { error: string };
+
+/**
+ * Runs a bot write and **returns** its refusal rather than throwing it. Next
+ * replaces the message of an error thrown out of a server action in
+ * production with a digest, and these refusals are sentences an ADMIN has to
+ * read: which bot already holds an agent, why a person can't have this bot.
+ * Only an `ApiError` is returned, the operation layer's refusal, written to
+ * be read by whoever tripped it; anything else still throws, and is still
+ * redacted (src/lib/bulk-result.ts has the same rule, and why).
+ */
+async function refusalOf<T>(run: () => Promise<T>): Promise<T | Refused> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.message };
+    throw err;
+  }
 }
 
-export async function updateUserWorksFor(userId: string, personId: string): Promise<{ revoked: number }> {
-  const result = await moveBot(await adminActor(), userId, String(personId));
+// docs/MCP.md §21, "Whose account" — the bodies are src/lib/bots.ts's, which
+// the e2e fixtures share; these add the session and the revalidation.
+export async function createBot(name: string, personId: string, role: Role, agent: string | null = null): Promise<{ id: string; email: string } | Refused> {
+  const actor = await adminActor();
+  return refusalOf(async () => {
+    const bot = await createBotAs(actor, { name: String(name), personId: String(personId), role, agent: agentOf(agent) });
+    revalidatePath("/users");
+    return { id: bot.id, email: bot.email };
+  });
+}
+
+/** An agent as a form sends it: its key, or nothing for none. Anything else is refused, not read as none. */
+function agentOf(value: string | null) {
+  if (value === null || value === "") return null;
+  const agent = parseAgent(value);
+  if (agent === null) throw new Error("Invalid agent.");
+  return agent;
+}
+
+/** Changes the agent a bot is for, or clears it with an empty value (docs/MCP.md §21, "A bot's agent"). */
+export async function updateUserAgent(userId: string, agent: string | null): Promise<Refused | null> {
+  const actor = await adminActor();
+  return refusalOf(async () => {
+    await setBotAgent(actor, String(userId), agentOf(agent));
+    revalidatePath("/users");
+    return null;
+  });
+}
+
+// docs/MCP.md §21, "Connections turned off for an account" — an ADMIN's
+// alone. §3's check reads the column on every call, so this stops the
+// account's tokens, and a person's bots', at their next one, and revokes
+// nothing: set again, the same tokens work.
+export async function updateUserMcpAllowed(userId: string, mcpAllowed: boolean): Promise<void> {
+  await requireAdmin();
+  await prisma.user.update({ where: { id: userId }, data: { mcpAllowed: mcpAllowed === true } });
   revalidatePath("/users");
-  return result;
+}
+
+export async function updateUserWorksFor(userId: string, personId: string): Promise<{ revoked: number } | Refused> {
+  const actor = await adminActor();
+  return refusalOf(async () => {
+    const result = await moveBot(actor, userId, String(personId));
+    revalidatePath("/users");
+    return result;
+  });
 }
 
 export async function updateUserModerationPolicy(userId: string, moderationPolicy: ModerationPolicy): Promise<void> {
@@ -285,10 +342,16 @@ export async function deleteUser(userId: string): Promise<void> {
   revalidatePath("/users");
 }
 
-export async function restoreUser(userId: string): Promise<void> {
-  await requireAdmin();
-  await prisma.user.update({ where: { id: userId }, data: { deletedByUserId: null, deletedAt: null } });
-  revalidatePath("/users");
+// The body is src/lib/bots.ts's, which refuses a bot whose person has made
+// a new one for its agent since (docs/MCP.md §21, "A bot's agent"). That
+// refusal names the new bot, so it is returned (`refusalOf`).
+export async function restoreUser(userId: string): Promise<Refused | null> {
+  const actor = await adminActor();
+  return refusalOf(async () => {
+    await restoreAccount(actor, String(userId));
+    revalidatePath("/users");
+    return null;
+  });
 }
 
 // Bulk actions (PLAN.md §16g). Each delegates to the single-row action, so
@@ -301,7 +364,12 @@ export async function bulkDeleteUsers(userIds: string[]): Promise<BulkResult> {
 }
 
 export async function bulkRestoreUsers(userIds: string[]): Promise<BulkResult> {
-  return settleBulk(userIds, (id) => restoreUser(id));
+  // settleBulk reports a thrown ApiError's own message per row, so here the
+  // body is called as it is, not through restoreUser's returned refusal.
+  const actor = await adminActor();
+  const result = await settleBulk(userIds, (id) => restoreAccount(actor, String(id)));
+  revalidatePath("/users");
+  return result;
 }
 
 export async function bulkSetUserRole(userIds: string[], role: Role): Promise<BulkResult> {

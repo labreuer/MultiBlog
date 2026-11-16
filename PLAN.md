@@ -5016,5 +5016,6 @@ Planned 2026-11-16: each AI client names its agent (Claude, ChatGPT, Antigravity
 records its agent in `user.agent`, and the consent page puts first the person's bot for the
 asking client's agent, warns beside another agent's, and makes one on Approve for an AUTHOR or
 above who has none. An ADMIN turns connections off for an account in `user.mcp_allowed`. Two
-steps: accounts, then clients and the consent page. **Plan: [docs/MCP.md](docs/MCP.md) §21,
-"Planned: a bot made when a connection is approved".**
+steps: accounts, then clients and the consent page. Built 2026-11-16: accounts, the first.
+**Plan and what is built: [docs/MCP.md](docs/MCP.md) §21, "Planned: a bot made when a
+connection is approved".**

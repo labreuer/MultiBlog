@@ -2,18 +2,21 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { Role } from "@/generated/prisma/enums";
-import { botRolesFor } from "@/lib/bot-rules";
+import type { Agent, Role } from "@/generated/prisma/enums";
+import { AGENTS, AGENT_KEYS, botRolesFor } from "@/lib/bot-rules";
 import { createBot } from "@/app/actions/users";
 import { CellError } from "@/components/table/TableControls";
 import { personLabel, type BotPerson } from "@/components/UsersTable";
 import styles from "./NewBotForm.module.css";
 
 // docs/MCP.md §21, "Whose account" — /users' way to make a bot: a name, the
-// person it works for, and a role no higher than theirs. Only the people a
-// bot may work for are offered, and only the roles it may have under the one
-// chosen; createBot (src/lib/bots.ts) holds it to the same rules regardless.
-// Its address is made from its slug, `<slug>@multiblog.invalid`.
+// person it works for, a role no higher than theirs, and optionally the
+// agent it is for. Only the people a bot may work for are offered, and only
+// the roles it may have under the one chosen; createBot (src/lib/bots.ts)
+// holds it to the same rules regardless, and refuses a second bot for an
+// agent its person already has one for. Its address is made from its slug,
+// `<slug>@multiblog.invalid`. A bot made here keeps the name it is given;
+// with an agent, its initials are that agent's.
 
 /** Claude's account is an AUTHOR (docs/MCP.md §3), so a bot starts as one where its person allows. */
 const DEFAULT_ROLE: Role = "AUTHOR";
@@ -24,6 +27,7 @@ export default function NewBotForm({ people }: { people: BotPerson[] }) {
   const [name, setName] = useState("");
   const [personId, setPersonId] = useState("");
   const [role, setRole] = useState<Role>(DEFAULT_ROLE);
+  const [agent, setAgent] = useState<Agent | "">("");
   const [error, setError] = useState<string | null>(null);
   const [made, setMade] = useState<string | null>(null);
 
@@ -40,7 +44,12 @@ export default function NewBotForm({ people }: { people: BotPerson[] }) {
     setMade(null);
     startTransition(async () => {
       try {
-        const bot = await createBot(name, person.id, chosen);
+        const bot = await createBot(name, person.id, chosen, agent || null);
+        // A refusal is returned, not thrown, so that its sentence survives a production build.
+        if ("error" in bot) {
+          setError(bot.error);
+          return;
+        }
         setMade(`${name.trim()} (${bot.email}), working for ${personLabel(person)}`);
         setName("");
         router.refresh();
@@ -55,7 +64,9 @@ export default function NewBotForm({ people }: { people: BotPerson[] }) {
       <summary className={styles.summary}>+ New bot</summary>
       <p className={styles.lead}>
         A bot is an AI agent&apos;s account, such as Claude&apos;s. It has no password and works for one person, who
-        issues its tokens and approves its connections; it can rank no higher than they do (docs/MCP.md §21).
+        issues its tokens and approves its connections; it can rank no higher than they do (docs/MCP.md §21). A bot
+        may be for one agent, which is the bot a connection from that agent is offered first, and a person has one
+        bot per agent.
       </p>
       {people.length === 0 ? (
         <p className={styles.lead}>No account can have a bot yet: a bot works only for someone with a password who isn&apos;t a COMMENTER.</p>
@@ -84,6 +95,17 @@ export default function NewBotForm({ people }: { people: BotPerson[] }) {
               {roles.map((r) => (
                 <option key={r} value={r}>
                   {r}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.field}>
+            Agent
+            <select value={agent} onChange={(e) => setAgent(e.target.value as Agent | "")}>
+              <option value="">none</option>
+              {AGENT_KEYS.map((key) => (
+                <option key={key} value={key}>
+                  {AGENTS[key].name}
                 </option>
               ))}
             </select>

@@ -97,6 +97,11 @@ export const ADMIN_TABLE_COLUMNS = {
     // A bot's person (docs/MCP.md §21, "Whose account"), defaulted hidden
     // like the invites: it is blank on every person's row.
     { key: "worksFor", label: "Works for", defaultHidden: true },
+    // The agent a bot is for ("A bot's agent"), hidden for the same reason,
+    // and whether connections are on for the account ("Connections turned
+    // off for an account"), a checkbox on every row as Listed contributor is.
+    { key: "agent", label: "Agent", defaultHidden: true },
+    { key: "mcpAllowed", label: "MCP", defaultHidden: true },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
   ],
   comments: [

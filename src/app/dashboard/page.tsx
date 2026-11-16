@@ -52,6 +52,9 @@ export default async function DashboardPage() {
       contributorOrder: true,
       orcid: true,
       website: true,
+      // Whether an ADMIN has connections turned off for this account
+      // (docs/DASHBOARD.md "Connections").
+      mcpAllowed: true,
       // Hash only — never the bytes (PLAN.md §17n).
       avatar: { select: { hash: true } },
     },
@@ -259,7 +262,7 @@ export default async function DashboardPage() {
             <h2>Connections</h2>
           </summary>
           <div className={styles.cardBody}>
-            <ConnectionsCard tokens={tokens} />
+            <ConnectionsCard tokens={tokens} connectionsOff={contributor?.mcpAllowed === false} />
           </div>
         </details>
       )}

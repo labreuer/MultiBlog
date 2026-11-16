@@ -675,7 +675,8 @@ works for one person (`user.works_for_user_id`), who issues every token it holds
 
 | | ADMIN | EDITOR | AUTHOR | AUTHORIZED | COMMENTER |
 |---|---|---|---|---|---|
-| Make a bot, or move one to another person, on `/users` | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Make a bot, move one to another person, or change the agent it is for, on `/users` | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Turn connections off for an account, a person's or a bot's, on `/users` | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Have a bot, and so connect an agent through OAuth | ✅ | ✅ | ✅ | ✅ | ❌ |
 | The highest role a bot of theirs may have | ADMIN | EDITOR | AUTHOR | AUTHORIZED | — |
 | See the Connections card on `/dashboard` | ✅ | ✅ | ✅ | ✅ | only when it lists a token |
@@ -688,12 +689,23 @@ works for one person (`user.works_for_user_id`), who issues every token it holds
   refuses the promotion, and the check below refuses the bot's tokens while it does, so
   demoting the person takes effect at the bot's next call.
 - **Moving a bot to another person revokes the tokens the previous person issued for it.**
+- **A bot may be for one agent** (`user.agent`: Claude, ChatGPT or Antigravity), **and a person
+  has one live bot per agent**, by a partial unique index. Making a bot, changing its agent,
+  moving it and restoring it are each refused when they would make a second, naming the bot
+  that holds the agent. An account with an agent has no password, by a CHECK, and is never
+  invited (MCP.md §21, "A bot's agent").
+- **Connections are on for every account until an ADMIN turns them off** (`user.mcp_allowed`).
+  Off for a person, no token of theirs works and none of their bots', and the consent page
+  offers them nothing; off for a bot, that bot's alone. Nothing is revoked, so the same tokens
+  work once it is on again (MCP.md §21, "Connections turned off for an account").
 
 **The check, on every call:**
 
 - **A token is accepted only from its account's person**: a person's own, or the person a bot
   works for, while the bot ranks no higher than them and they aren't a COMMENTER (MCP.md §21,
   "Whose account"). The script refuses at issue a token the check would refuse.
+- **A token is refused while its account or its issuer has connections turned off**, a header
+  token as much as a connection, from its next call.
 - **A token is refused once its account or its issuer is deleted**, and soft-deleting an
   account revokes the tokens it holds and the ones it issued in the same transaction. Every
   token also expires, a year after issue unless the script is told otherwise (MCP.md §3).
@@ -814,10 +826,12 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Publishing needs doc-edit as well as post-edit | `publishPostFromDoc`/`schedulePostFromDoc` in `src/app/actions/posts.ts`; `/api/doc/[id]/replay` |
 | What the post editor shows when only one of those holds | `src/app/post/[id]/edit/page.tsx`'s two doc gates, rendered by `PostPublisher`'s `selectedEditable` |
 | Who may revoke an API token on `/dashboard` (its account or its issuer) | `revokeToken` in `src/lib/api/token-card.ts`, wrapped by `src/app/actions/api-tokens.ts` |
-| A token's issuer, and a bot's rank against its person, on every call and at issue | `tokenRefusal` in `src/lib/bot-rules.ts`, applied by `authenticate` and `issueApiToken` in `src/lib/api/tokens.ts` |
+| A token's issuer, connections turned off for its account or its issuer, and a bot's rank against its person, on every call and at issue | `tokenRefusal` in `src/lib/bot-rules.ts`, applied by `authenticate` and `issueApiToken` in `src/lib/api/tokens.ts` |
 | Which tools a token lists (scopes, client, bot) | `toolsFor` in `src/lib/mcp/server.ts` |
 | Making and moving a bot (ADMIN only; no password; the role a bot may have) | `createBot` / `moveBot` in `src/lib/bots.ts`, `botRoleRefusal` in `src/lib/bot-rules.ts`, wrapped by `src/app/actions/users.ts` |
-| Which bots the consent page offers, and the decision's re-check | `botsFor` / `worksFor` in `src/lib/oauth/consent.ts` |
+| One live bot per agent per person: making a bot, changing its agent, moving it, restoring it | `createBot` / `setBotAgent` / `moveBot` / `restoreAccount` in `src/lib/bots.ts`, over the index `user_agent_per_person_key` |
+| Turning connections off for an account (ADMIN only) | `updateUserMcpAllowed` in `src/app/actions/users.ts` |
+| Which bots the consent page offers, and the decision's re-check, each by the whole token rule | `botsFor` / `worksFor` in `src/lib/oauth/consent.ts` |
 | Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |
 
 `e2e/tags.spec.ts` pins the tag table's load-bearing rows — the signed-out reader

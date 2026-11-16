@@ -204,9 +204,10 @@ the rules are:
     a live collab connection is checked only once ([PERMISSIONS.md](PERMISSIONS.md)). A
     deletion or a demotion therefore takes effect on the token's very next call.
   - §21 adds a step: a token's issuer must be its account's person,
-    `works_for_user_id ?? the account's own id`, whichever way the token was issued; and a
-    bot's token is refused while its person is a COMMENTER or the bot outranks them. §21 also
-    lists `manage` to no bot's token, whatever its scopes.
+    `works_for_user_id ?? the account's own id`, whichever way the token was issued; a token
+    is refused while an ADMIN has connections turned off for its account or its issuer
+    (`user.mcp_allowed`); and a bot's token is refused while its person is a COMMENTER or the
+    bot outranks them. §21 also lists `manage` to no bot's token, whatever its scopes.
 - **Soft-deleting a user revokes their tokens**, in the same transaction. `deleteUser`
   (`src/app/actions/users.ts`) calls `softDeleteUser` (`src/lib/user-delete.ts`), one
   transaction; `bulkDeleteUsers` calls it once per user and needs nothing of its own. Restoring the account
@@ -2758,14 +2759,18 @@ code beside each says why as well.
 **Bot accounts** (§21, step 8)
 
 - **The rule is one pure function**, `tokenRefusal` (`src/lib/bot-rules.ts`, unit-tested):
-  the issuer a token must have, then a bot's role against its person's. §3's check applies it
-  on every call, and **`issueApiToken` applies it at issue**, rather than the script alone, so
-  the script and the e2e fixture share the refusal.
-- **Redeeming a code refuses a bot that has come to outrank its person**, as well as one that
-  no longer works for them. The plan named only §3's check, which would refuse every call
-  such a connection made.
+  the issuer a token must have, then whether connections are turned off for either account,
+  then a bot's role against its person's. §3's check applies it on every call, and
+  **`issueApiToken` applies it at issue**, rather than the script alone, so the script and the
+  e2e fixture share the refusal. `tokenRefusalOf` is the same rule with its reason, for the
+  consent page's sentences.
+- **Redeeming a code refuses a bot the check has come to refuse**, one that outranks its
+  person or has connections turned off for it or them, as well as one that no longer works
+  for them. The plan named only §3's check, which would refuse every call such a connection
+  made.
 - **The consent page leaves out a bot the check would refuse**: one ranked above the person
-  signed in, and every bot of a COMMENTER. The decision refuses the same bots.
+  signed in, one with connections turned off, and every bot of a COMMENTER. The decision
+  refuses the same bots. Each asks the whole rule, never the rank rule by itself.
 - **Only a promotion is refused.** A bot's role cell offers its own role and every one below
   it, and above that only what its person allows. Demoting a bot or a person never is, since a
   person demoted below their bot stops its tokens at the check.
@@ -2819,11 +2824,15 @@ code beside each says why as well.
   until it goes 90 days unused, or until it is revoked under Connections on the dashboard. That
   is said in words, not a link, since every link off the page abandons the flow. The scope
   boxes name what each scope's tools do.
-- **A person with nothing to connect as is told why**, in one of three sentences, with Cancel
-  alone: a COMMENTER, who can't have a bot; a person whose bots all outrank them, named, with
-  what an ADMIN can change; and a person with no bot, told that an ADMIN makes one, or, when
-  they are an ADMIN, pointed to `/users`. `botsFor` returns the refused bots beside the
+- **A person with nothing to connect as is told why**, in one of four sentences, with Cancel
+  alone: a person an ADMIN has turned connections off for, whatever bots they have; a
+  COMMENTER, who can't have a bot; a person whose bots are all refused, named, each with its
+  reason (it outranks them, or connections are turned off for it) and what an ADMIN can
+  change; and a person with no bot, told that an ADMIN makes one, or, when they are an ADMIN,
+  pointed to `/users`. `botsFor` returns the refused bots, each with its reason, beside the
   offered ones for this.
+  - **A refused bot is named when the person's other bots are offered too**, above the list,
+    so a bot missing from it is accounted for.
 - **Claude Code's connections don't replace each other**, as a claude.ai client's do
   (`replacesConnections`): its kind is `other`, and each `/mcp` sign-in is a connection of its
   own, which lapses with its refresh token.
@@ -2996,6 +3005,8 @@ the reads, for Research, is designed and not built ("The read-only endpoint").
   - **§3's check refuses a bot's token while either holds**, so demoting a person takes effect
     on their bot's next call, as demoting the bot itself does. The check reads both rows
     already.
+- **An ADMIN can turn connections off for an account**, a person's or a bot's, and §3's check
+  then refuses its tokens ("Connections turned off for an account", below).
 - **Why one person.** A bot reads whatever any list names it on (§12). Two people using one
   Claude, by any route, would each read through it what the other's Claude had written, since
   Claude is on both bylines. The issuer also decides who `write` may put on a byline (§12). A
@@ -3013,10 +3024,11 @@ the reads, for Research, is designed and not built ("The read-only endpoint").
     Claude Code is issued for "Claude (Alice)", with Alice as its issuer, exactly as her OAuth
     connection would be.
 - **The web interface makes bots.** An ADMIN, on `/users`, creates one: a name, its person,
-  and a role no higher than theirs. It can later give the bot another person, and the person is
-  a column of the table, the one thing about tokens that page touches. A bot made for an AUTHOR
-  or above when they approve a connection is planned ("Planned: a bot made when a connection is
-  approved", below).
+  a role no higher than theirs, and optionally the agent it is for ("A bot's agent", below). It
+  can later give the bot another person or another agent, and each is a column of the table,
+  beside the one that turns connections off. A bot made for an AUTHOR or above when they
+  approve a connection is planned ("Planned: a bot made when a connection is approved",
+  below).
   - **There is no script for it.** The interface does every bot task, and the one task that
     needs a shell, issuing a header token, already has `create-api-token.ts`.
   - **The rules live in `src/lib/`**, in a function taking an `Actor`, with the action as its
@@ -3327,7 +3339,9 @@ This is what claude.ai reads before it opens the consent page.
      person's own computer;
    - who is signed in, with a way to switch;
    - the bots that work for them, to choose from, or a sentence saying there are none and that
-     an ADMIN makes one;
+     an ADMIN makes one; and the bots it can't offer, by name, each with its reason;
+   - for a person an ADMIN has turned connections off for, a sentence saying so in the list's
+     place, with Cancel alone;
    - which endpoint the connection is for, the full one or the read-only one;
    - the scopes, with `read` alone chosen ("Whose account");
    - for Claude's identity, beside each bot that already has a connection through it to this
@@ -3342,7 +3356,8 @@ This is what claude.ai reads before it opens the consent page.
 - **It trusts nothing the form sends.**
   - It refuses an `Origin` that isn't `APP_URL`'s.
   - It re-parses every parameter through the page's own parse.
-  - It re-checks that the bot works for the person signed in.
+  - It re-checks that the bot works for the person signed in, by §3's whole rule, and
+    refuses a person whose connections are turned off before it looks at the bot.
   - A cross-site post carries no session to begin with, since Auth.js's cookie is
     `SameSite=Lax`.
 - **Approving mints a code**: 32 random bytes, kept as its SHA-256 in
@@ -4497,7 +4512,8 @@ Each step ships as §18's phases did: with specs, unit tests and `npm run check`
 
 ### Planned: a bot made when a connection is approved
 
-**Status: planned 2026-11-16, nothing built.** A connection acts as a bot ("Whose account"),
+**Status: the first of its two steps is built, and the second is planned** ("Build order",
+below, says which is which). A connection acts as a bot ("Whose account"),
 and only an ADMIN makes one, on `/users`. So a person with no bot meets a dead end on the
 consent page, and a person with bots is offered every one of them, whichever client asks: a
 ChatGPT connection can approve as the Claude bot, and what it writes then carries Claude's
@@ -4513,6 +4529,15 @@ longer an ADMIN's alone to make, an ADMIN can turn connections off for an accoun
 
 It is built in two steps, accounts first and then clients and the consent page ("Build
 order", below).
+
+**Built so far**, the first step: `user.agent` with its index and its CHECK, and
+`user.mcp_allowed`; each agent's name and initials (`AGENTS`, `src/lib/bot-rules.ts`);
+`/users`' Agent field, Agent and MCP columns and four refusals (`createBot`, `setBotAgent`,
+`moveBot` and `restoreAccount`, `src/lib/bots.ts`); the flag in §3's check, which the consent
+page, the decision and the code's redemption all ask; the consent page's sentence and the
+Connections card's line; and the fixtures' rules. Of what follows, "A bot's agent" and
+"Connections turned off for an account" are as built. Nothing reads a bot's agent yet, so the
+consent page offers what it offered before, and no client has an agent.
 
 #### Which agent a client is
 
@@ -4632,6 +4657,12 @@ order", below).
     sentence naming that bot.
   - **Each also catches the index's refusal** (`P2002`), for the write that slips in between
     the read and the update, asks again, and refuses the same way.
+  - **The actions return the refusal; they don't throw it** (`refusalOf`,
+    `src/app/actions/users.ts`). Next replaces the message of an error thrown out of a server
+    action in a production build, so a thrown one would reach the ADMIN as a generic sentence
+    with no bot named. Only an `ApiError` is returned, and the table throws it again in the
+    browser, where it keeps its words (`orRefused`). The same holds for a refused move's
+    other reasons, a COMMENTER or a person the bot would outrank.
   - **Restoring moves into `src/lib/bots.ts`** for a row that is a bot, with `restoreUser` as
     its wrapper, and the e2e fixture `restoreTestUser` calls it, as `createTestBot` calls
     `createBot`. An ADMIN who wants the old bot back deletes the new one first: a deleted
@@ -4830,8 +4861,8 @@ COMMENTER it is unchanged.
 Two steps, each with its specs, unit tests and `npm run check`. Each deploys on its own, and
 the first changes nothing a person sees until an ADMIN uses what it adds to `/users`.
 
-1. **Accounts.** One migration: the enum `Agent`, `user.agent`, `user.mcp_allowed`, the index
-   and the CHECK. With it:
+1. **Accounts. Built.** One migration (`bot_agents`): the enum `Agent`, `user.agent`,
+   `user.mcp_allowed`, the index and the CHECK. With it:
    - each agent's name and initials, in `src/lib/bot-rules.ts`;
    - `/users`: the form's Agent field, the Agent and MCP columns, the four refusals, the
      restore moved into `src/lib/bots.ts`, and `requireInvitable`;
@@ -4843,7 +4874,7 @@ the first changes nothing a person sees until an ADMIN uses what it adds to `/us
 
    **Each instance's bots are then given their agents**, on `/users`, once this step has
    deployed there ("A bot's agent", above). Nothing is run by hand in a deploy.
-2. **Clients and the consent page.** One migration: `oauth_client.agent`, filled from each
+2. **Clients and the consent page. Planned.** One migration: `oauth_client.agent`, filled from each
    row's kind. With it:
    - the pinned clients' agents, and `--agent`;
    - the page's order, its lines and the new-bot option;

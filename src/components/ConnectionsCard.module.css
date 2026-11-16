@@ -32,6 +32,13 @@
   margin-top: 0.5rem;
 }
 
+/* Connections turned off for the viewer: why every row has stopped working. */
+.off {
+  margin-top: 0.75rem;
+  padding-left: 0.6rem;
+  border-left: 3px solid var(--warning);
+}
+
 .heading {
   margin: 1.25rem 0 0.25rem;
   font-size: 1rem;

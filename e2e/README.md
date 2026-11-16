@@ -608,6 +608,27 @@ the admin account.
   it fails. Delete them by hand, then run again:
   `DELETE FROM reference r USING "user" u WHERE u.id = r.created_by_id AND
   u.email LIKE 'e2e-%@example.com' AND r.key ~ '^e2e[a-z0-9-]{4,}';`
+- **A bot's agent, and connections turned off, are never the shared admin's**
+  (docs/MCP.md §21, "Testing"). A person has one live bot per agent, and
+  nearly every spec's bots work for the admin, across workers, so an agent
+  there is state the workers share, and the admin's `mcp_allowed` would stop
+  every other worker's calls. `createTestBot` makes a bot with no agent unless
+  asked, and it, `setTestBotAgent`, `moveTestBot` and `setTestMcpAllowed`
+  each refuse the admin. A spec that needs either makes a person of its own
+  and signs in as them (`signedInAt` in `mcp-oauth.spec.ts`).
+  - **Soft-delete a bot that has an agent with its own person as the
+    deleter**: `softDeleteTestUser(bot.email, personEmail)`. Setup
+    hard-deletes the admin at the start of every run, which nulls
+    `deleted_by_user_id` on whatever the admin deleted. A bot brought back to
+    life that way beside the new one its person made since is two live bots
+    for one agent, the index refuses the delete, and the next run can't
+    start.
+  - **`deleteTestUser` deletes an account's bots before the account**, deleted
+    ones included, so a test's bots are gone with their person even when
+    nothing deleted them by name. A bot whose person must be gone is made by
+    `orphanTestBot`, which clears its person and deletes no one.
+  - **`restoreTestUser` restores through `restoreAccount`** (`src/lib/bots.ts`),
+    as the admin, so a spec's restore meets the refusal `/users`' does.
 
 ## Why the DB helpers run in a child process
 

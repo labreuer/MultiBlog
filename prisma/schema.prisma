@@ -103,6 +103,19 @@ enum SelectorKind {
   @@map("selector_kind")
 }
 
+// docs/MCP.md §21, "A bot's agent" — the AI agent a bot is for, which decides
+// the name a bot made at Approve carries and which bot the consent page puts
+// first. Not the client's kind (`ApiTokenClient`), which decides a token's
+// tools and whether a connection replaces the last: Claude Code's kind is
+// OTHER and its agent is Claude.
+enum Agent {
+  CLAUDE
+  CHATGPT
+  ANTIGRAVITY
+
+  @@map("agent")
+}
+
 model User {
   id               String           @id @default(cuid())
   email            String           @unique
@@ -139,6 +152,19 @@ model User {
   // (oauth_slice) keeps a bot from having a password: sign-in is by password
   // alone, so a password is what makes an account a person's.
   worksForUserId String? @map("works_for_user_id")
+
+  // docs/MCP.md §21, "A bot's agent" — the agent a bot is for, null on every
+  // person. **One live bot per agent per person**, by a partial unique index
+  // in the migrations (`user_agent_per_person_key`, over `works_for_user_id`
+  // and `agent` WHERE `agent IS NOT NULL AND deleted_by_user_id IS NULL`),
+  // which Prisma has no DSL for; a hand-written CHECK beside it keeps an
+  // account with an agent from having a password.
+  agent Agent?
+
+  // docs/MCP.md §21, "Connections turned off for an account" — cleared by an
+  // ADMIN on /users. §3's check refuses a token while its account or its
+  // issuer has it off, so clearing a person's stops their bots' tokens too.
+  mcpAllowed Boolean @default(true) @map("mcp_allowed")
 
   avatar                 UserAvatar?
   accounts               Account[]
