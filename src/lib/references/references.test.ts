@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { citedNames, keyBaseOf, parseCslItem, readCsl, yearOf, type CslData } from "./csl";
+import { citedNames, cslOf, keyBaseOf, parseCslItem, readCsl, yearOf, type CslData } from "./csl";
 import { entryText, referenceEntry } from "./entry";
 import { identifiersOf, normalizeDoi, normalizeIsbn } from "./identifiers";
 
@@ -139,4 +139,33 @@ test("a bibliography entry: authors, year, title, then where it appeared", () =>
   assert.equal(referenceEntry(read({ type: "chapter", title: "A Part", "container-title": "A Whole" })).titleIsContainer, false);
   assert.equal(referenceEntry(read({ type: "chapter", title: "A Part" })).titleIsContainer, true);
   assert.equal(entryText(read({ type: "post-weblog", title: "A Post", "container-title": "A Blog", issued: { "date-parts": [[2020]] } })), "“A Post.” (2020). A Blog.");
+});
+
+test("an entry names a work's edition: after a whole work's title, with a part's container", () => {
+  const book = (edition: string, more: Partial<CslData> = {}) =>
+    entryText(read({ type: "book", title: "Kant", author: [{ family: "Becher", given: "Erich" }], issued: { "date-parts": [[2001]] }, edition, ...more }));
+  assert.equal(book("2", { publisher: "Mohr", "publisher-place": "Tübingen" }), "Becher, E. (2001). Kant. 2nd ed. Tübingen: Mohr.");
+  // With nothing after it, its own full stop ends the entry.
+  assert.equal(book("2"), "Becher, E. (2001). Kant. 2nd ed.");
+  assert.deepEqual(["1", "3", "11", "12", "13", "21", "102", "112"].map((n) => book(n).split(". ").at(-1)), ["1st ed.", "3rd ed.", "11th ed.", "12th ed.", "13th ed.", "21st ed.", "102nd ed.", "112th ed."]);
+  assert.equal(book("2ND"), "Becher, E. (2001). Kant. 2nd ed.");
+  assert.equal(book("second"), "Becher, E. (2001). Kant. Second ed.");
+  // Anything else as written, which already says what it is.
+  assert.equal(book("Rev. ed.", { publisher: "Mohr" }), "Becher, E. (2001). Kant. Rev. ed. Mohr.");
+  assert.equal(book("2. Aufl.", { publisher: "Mohr" }), "Becher, E. (2001). Kant. 2. Aufl. Mohr.");
+  assert.equal(book("Revised and expanded"), "Becher, E. (2001). Kant. Revised and expanded.");
+  assert.equal(book("  "), "Becher, E. (2001). Kant.");
+  // A chapter's edition is its book's.
+  assert.equal(
+    entryText(read({ type: "chapter", title: "Is It True?", author: [{ family: "Lewis", given: "C. S." }], editor: [{ family: "Hooper", given: "Walter" }], "container-title": "Essays", edition: "2", page: "7", publisher: "Collins" })),
+    "Lewis, C. S. (n.d.). “Is It True?” In Essays, ed. Hooper, W., 2nd ed., p. 7. Collins.",
+  );
+});
+
+test("a range of issues takes an en dash, as a range of pages does; an issue's name keeps its hyphen", () => {
+  const issue = (value: string) => cslOf({ type: "article-journal", title: "T", "container-title": "J", volume: "8", issue: value })!;
+  assert.equal(issue("1-2").issue, "1–2");
+  assert.equal(issue("1 -- 2").issue, "1–2");
+  assert.equal(issue("Spring-Summer").issue, "Spring-Summer");
+  assert.equal(entryText(issue("1-2")), "“T.” (n.d.). J 8(1–2).");
 });

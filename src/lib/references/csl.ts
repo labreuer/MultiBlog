@@ -405,8 +405,10 @@ export function parseCslItem(raw: unknown, options: { decode?: boolean } = {}): 
     const value = plainText(raw[legacy], field, reading);
     if (value !== undefined && item[field] === undefined) item[field] = value;
   }
-  // A page range is written with an en dash, as every label writes one.
+  // A page range is written with an en dash, as every label writes one, and so is a
+  // range of issues, "1–2". Only between numerals in an issue, which can be a name.
   if (item.page) item.page = item.page.replace(/\s*-{1,2}\s*/g, "–");
+  if (item.issue) item.issue = item.issue.replace(/(\d)\s*-{1,2}\s*(?=\d)/g, "$1–");
   for (const field of NAME_FIELDS) {
     const value = names(raw[field], field, reading);
     if (value) item[field] = value;

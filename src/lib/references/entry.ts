@@ -60,19 +60,54 @@ export function isPart(item: Pick<CslItem, "container-title">): boolean {
   return Boolean(item["container-title"]?.text);
 }
 
+const ORDINAL_WORDS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"];
+
+/** 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st. */
+function ordinal(n: number): string {
+  const teen = n % 100 >= 11 && n % 100 <= 13;
+  const suffix = teen ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th");
+  return `${n}${suffix}`;
+}
+
+/**
+ * An edition as an entry names it: a number or an ordinal, `2`, `2nd` or
+ * `second`, as "2nd ed." and "second ed."; anything else as written, since
+ * "Rev. ed." and "2. Aufl." say what they are already. "" for none.
+ */
+function editionText(edition: string | undefined): string {
+  const text = edition?.trim() ?? "";
+  if (/^\d+$/.test(text)) return Number(text) > 0 ? `${ordinal(Number(text))} ed.` : "";
+  if (/^\d+(?:st|nd|rd|th)$/i.test(text)) return `${text.toLowerCase()} ed.`;
+  if (ORDINAL_WORDS.includes(text.toLowerCase())) return `${text.toLowerCase()} ed.`;
+  return text;
+}
+
+/** A sentence's full stop, unless it already ends in one, inside a closing quotation mark or not. */
+const stopAfter = (text: string) => (/[.?!]”?$/.test(text) ? "" : ".");
+
+const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/** Sentences joined with a full stop between them, unless one already ends in one: "2nd ed. London: Faber". */
+const sentences = (pieces: string[]) => pieces.reduce((joined, piece) => (joined ? `${joined}${stopAfter(joined)} ${piece}` : piece), "");
+
 export function referenceEntry(item: CslItem): ReferenceEntry {
   const year = yearOf(item);
   const part = isPart(item);
   const edited = !item.author?.length && (item.editor?.length ?? 0) > 0;
   const authors = nameList(creatorsOf(item));
   const title: MarkedText = item.title ?? plainMarked("");
+  const edition = editionText(item.edition);
 
   const pieces: string[] = [];
   if (part) {
     // A chapter names its book's editors, when the chapter itself has authors.
     const editors = item.type === "chapter" && item.author?.length && item.editor?.length ? `, ed. ${nameList(item.editor)}` : "";
     const where = [item.volume ? ` ${item.volume}` : "", item.issue ? `(${item.issue})` : ""].join("");
-    pieces.push(`${item.type === "chapter" ? "In " : ""}${item["container-title"]!.text}${editors}${where}${item.page ? `, ${item.page.includes("–") ? "pp." : "p."} ${item.page}` : ""}`);
+    // A part's edition is its container's, so it is named with the container: "In Essays, 2nd ed., p. 7".
+    pieces.push(`${item.type === "chapter" ? "In " : ""}${item["container-title"]!.text}${editors}${where}${edition ? `, ${edition}` : ""}${item.page ? `, ${item.page.includes("–") ? "pp." : "p."} ${item.page}` : ""}`);
+  } else if (edition) {
+    // A whole work's edition follows its title, before where it was published.
+    pieces.push(capitalized(edition));
   }
   const publisher = [item["publisher-place"], item.publisher].filter(Boolean).join(": ");
   if (publisher) pieces.push(publisher);
@@ -84,7 +119,7 @@ export function referenceEntry(item: CslItem): ReferenceEntry {
     title: title.text,
     ...(marked ? { titleRuns: title.runs } : {}),
     titleIsContainer: !part,
-    source: pieces.join(". "),
+    source: sentences(pieces),
   };
 }
 
@@ -94,9 +129,6 @@ export function referenceEntry(item: CslItem): ReferenceEntry {
  * whole work, an italic run inside it then roman, and quoted for a part.
  */
 export type EntryPart = { text: string; title?: true; runs?: TitleRun[] };
-
-/** A sentence's full stop, unless it already ends in one, inside a closing quotation mark or not. */
-const stopAfter = (text: string) => (/[.?!]”?$/.test(text) ? "" : ".");
 
 /** The title's runs as drawn: italic for a whole work, quoted with its stop inside for a part. */
 function drawnTitle(entry: ReferenceEntry): TitleRun[] {
