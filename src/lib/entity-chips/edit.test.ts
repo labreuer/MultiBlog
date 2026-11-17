@@ -173,6 +173,11 @@ test("refused: a mention sent back as its name in plain words", () => {
   }
 });
 
+test("refused: a mention sent back as its name in a code block, which is merged without a word diff", () => {
+  const result = planEdits(DOC, [replace("Ask @Ada Lovelace about the engine today.", md("```\nAsk Ada Lovelace about the engine today.\n```"))], options);
+  assert.ok(!result.ok && result.refusal.code === "chip_as_text", JSON.stringify(result));
+});
+
 test("not refused: the same name typed somewhere the mention wasn't", () => {
   const { next } = plan([replace("A second paragraph.", md("A second paragraph, about Ada Lovelace."))]);
   assert.deepEqual(chips(next), ["i1:u1"]);

@@ -4,7 +4,8 @@ import * as Y from "yjs";
 import { prosemirrorToYXmlFragment, yXmlFragmentToProsemirrorJSON } from "y-prosemirror";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { pmDocContentSchema } from "./tiptap-schema";
-import { markNew, planEdits, type EditSpec } from "./doc-edit";
+import { markNew, mergeDoc, planEdits, type EditSpec } from "./doc-edit";
+import { TooLargeToMerge } from "./diff";
 import { writeBackDoc } from "./doc-edit-yjs";
 import { markdownToBlocks, markdownToText } from "./markdown-import";
 
@@ -256,4 +257,73 @@ test("bold and linked code keep both marks through an edit to their paragraph", 
     ["wf_1", "link,code,authorHighlight"],
     ["npm", "bold,code,authorHighlight"],
   ]);
+});
+
+// The size guards (docs/MCP.md §6, "Size guards"): a code block is taken
+// whole, and an edit past any cap is refused with nothing to write.
+
+const tooLarge = (result: ReturnType<typeof planEdits>) =>
+  !result.ok && result.refusal.code === "invalid" && /too large/.test(result.refusal.message);
+
+test("a code block is merged by taking the new block whole, however long", () => {
+  const code = (text: string) => ({ type: "codeBlock", attrs: { language: "ts" }, content: [{ type: "text", text }] });
+  const short = doc(p("Before."), code("npm run check"));
+  const { next } = plan(short, [{ kind: "replace", target: { quote: "check" }, blocks: md("test") }]);
+  assert.ok(next.child(1).eq(schema.nodeFromJSON(code("npm run test"))));
+
+  // Past the word diff's cap even after trimming, which a code block never meets.
+  const words = Array.from({ length: 2500 }, (_, i) => `word${i}`);
+  const long = doc(code(words.join(" ")));
+  const edited = ["first", ...words.slice(1, -1), "last"].join(" ");
+  const { next: longNext } = plan(long, [{ kind: "replaceBlock", text: words.join(" "), block: code(edited) }]);
+  assert.equal(longNext.child(0).textContent, edited);
+});
+
+test("an edit past the word diff's cap is refused", () => {
+  const sentence = Array.from({ length: 1200 }, (_, i) => `word${i}`).join(" ");
+  const d = doc(p({ text: sentence, author: LUKE }));
+  const result = planEdits(
+    d,
+    [{ kind: "replace", target: { quote: sentence }, blocks: md(sentence.replace("word0 ", "first ").replace(" word1199", " last")) }],
+    options,
+  );
+  assert.ok(tooLarge(result), JSON.stringify(!result.ok && result.refusal));
+});
+
+test("an edit past the alignment's cap is refused", () => {
+  // Edits at both ends of a long doc leave no equal ends to trim: 5,002 × 5,002 cells.
+  const d = doc(...Array.from({ length: 5002 }, (_, i) => p(`Paragraph ${i}.`)));
+  const result = planEdits(
+    d,
+    [
+      { kind: "replace", target: { quote: "Paragraph 0." }, blocks: md("First.") },
+      { kind: "replace", target: { quote: "Paragraph 5001." }, blocks: md("Last.") },
+    ],
+    options,
+  );
+  assert.ok(tooLarge(result));
+});
+
+test("an edit past the pairing cap is refused: a marked passage replaced from Markdown has nothing to anchor on", () => {
+  const texts = Array.from({ length: 1001 }, (_, i) => `Paragraph number ${i} says something.`);
+  const d = doc(...texts.map((text) => p({ text, author: LUKE })));
+  const replace: EditSpec = {
+    kind: "replace",
+    target: { start: "Paragraph number 0 says", end: "number 1000 says something." },
+    blocks: md(texts.join("\n\n")),
+  };
+  assert.ok(tooLarge(planEdits(d, [replace], options)));
+  // mergeDoc, edit_note's merge, throws for its caller to refuse.
+  assert.throws(() => mergeDoc(d, doc(...texts.map((text) => p(text))), options), TooLargeToMerge);
+});
+
+test("the write-back never refuses: past a cap it aligns as a read does, and still writes the plan", () => {
+  const texts = Array.from({ length: 1001 }, (_, i) => `Paragraph number ${i} says something.`);
+  const d = doc(...texts.map((text) => p({ text, author: LUKE })));
+  const next = doc(...texts.map((text) => p({ text, author: CLAUDE })));
+  const ydoc = ydocOf(d);
+  const fragment = ydoc.getXmlFragment("default");
+  ydoc.transact(() => writeBackDoc(fragment, d, next));
+  assert.deepEqual(schema.nodeFromJSON(yXmlFragmentToProsemirrorJSON(fragment)).toJSON(), next.toJSON());
+  ydoc.destroy();
 });

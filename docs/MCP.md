@@ -937,9 +937,52 @@ Then it makes the edit inside one `transact` on the live document:
 
 So the words that survive an edit keep their marks: an annotation's highlight, a link, a
 person's author color. The update holds only the edited spans, so a person's edits elsewhere
-are never part of it. `diffText` builds a table of every pair of words, which is fine for a
-paragraph or a section; an edit spanning more than a few thousand words takes a linear-space
-diff instead.
+are never part of it.
+
+**Size guards.** The alignment and the word diff each build a table that grows with the square
+of what they compare, and every changed block is one pair however long it is, a table's or a
+list's text joined into one string. Unguarded, one cell edited in a 400×5 table would build a
+word-diff table of ~2 GB, enough to take a 2 GB server down. So the engine (`src/lib/diff.ts`,
+`src/lib/block-align.ts`) bounds every caller: `changes since`, an edit, reverting one,
+`edit_note`'s merge, post history (`/post/[id]/history/[eventId]`), which diffs two whole
+texts with `diffText`, and carrying a PDF's notes to its next version, which diffs two sheets'
+text with it (docs/PDF.md §13, "Placing each anchor").
+
+- **Three things are cheaper and answer the same.** `pairGap` counts each block's words once,
+  where it re-tokenized both blocks of every pair it scored; the alignment's table is a
+  `Uint16Array`; and a textblock that allows no marks, a code block, is merged by taking the new
+  block whole, since there are no marks to carry over. A unit test compares the alignment with
+  the one from before on a seeded random table of inputs.
+- **Three caps change an answer when they bite**, at sizes where the engine would cost seconds
+  or hundreds of megabytes:
+  - **the word diff, at 4M cells** (old tokens times new, about 2,000 a side). A pair over it
+    first has its shared start and end trimmed, and is diffed if that brings it under; the trim
+    can change at most which of several equal words counts as the unchanged one;
+  - **the alignment, at 25M cells** once its equal ends are trimmed (5,000 blocks a side);
+  - **pairing, at 1M pairs summed over every gap.** A cap per gap wouldn't bound the total,
+    since shared empty paragraphs split two unrelated runs of blocks into gaps that each pass
+    one. A 1×1 gap is paired without being scored, so it counts for nothing.
+- **A read past a cap shows less detail.** Past the word diff's, a pair's changed middle is
+  removed and added whole; past the alignment's, everything between the equal ends is; past
+  pairing's, every gap larger than 1×1 is left unpaired, and the 1×1 gaps stay paired. The
+  reads are `changes since`, revert's summaries of its hunks, and post history, which meets
+  only the first.
+- **An edit past a cap is refused and writes nothing**, with `invalid` and a message saying
+  it is too large to merge and should be made in smaller pieces: merging with less detail would
+  lose the marks the merge exists to keep. An edit is all-or-nothing already, so a refusal
+  loses nothing. The edits are the endpoint's planning, `edit_note`'s merge, and revert's
+  alignment, which decides its hunks. A PDF sheet's diff refuses too, since a carry writes
+  anchors and a middle removed and added whole would carry a quote onto all of it: past the
+  cap, nothing on that sheet places itself by the diff. An edit meets the pairing cap soonest: it keys blocks by
+  their JSON, marks included, so a marked passage replaced from Markdown has nothing identical
+  to anchor on, and replacing a thousand paragraphs makes one gap of a million pairs.
+- **The write-back never refuses.** It runs inside a Yjs transaction, which a throw would leave
+  half-written, and planning has already passed the same blocks. If it meets a cap anyway, it
+  aligns as a read does, which loses nothing there, since a block it writes whole carries the
+  marks the merge gave it.
+
+The numbers are first guesses from development machines; TODO.md, "The diff engine's size
+guards are first guesses", lists what tuning them would take.
 
 **A note stays on a passage the edit rewrites**, as it does when a person rewrites it. The
 `annotation` mark is inclusive, ProseMirror's default, and typed text takes the marks of what it

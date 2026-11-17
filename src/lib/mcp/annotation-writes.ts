@@ -15,6 +15,7 @@ import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
 import { canUserEditAnnotationBody } from "@/lib/annotation-authz";
 import { STALE_EDIT_SESSION_MS } from "@/lib/edit-grace";
 import { chipMergeFor, mergeDoc } from "@/lib/doc-edit";
+import { TooLargeToMerge } from "@/lib/diff";
 import { viewerOf } from "@/lib/actor";
 import * as Y from "yjs";
 import { captureAnchorInNode } from "@/lib/anchors/capture";
@@ -344,11 +345,17 @@ export async function editAnnotationFor(ctx: McpContext, input: { id: string; bo
   // The merge keeps a mention the new text still names, instance id and all,
   // and says when one came back as its label in plain words.
   const chipMerge = chipMergeFor(oldNode, nextNode, chipLabels(settledBody.proseJson, await chipInputsForBody(settledBody.proseJson)));
-  const merged = mergeDoc(oldNode, nextNode, {
-    schema: pmAnnotationContentSchema,
-    authorId: writers.size >= 2 ? ctx.actor.userId : null,
-    chipMerge,
-  });
+  let merged: PMNode;
+  try {
+    merged = mergeDoc(oldNode, nextNode, {
+      schema: pmAnnotationContentSchema,
+      authorId: writers.size >= 2 ? ctx.actor.userId : null,
+      chipMerge,
+    });
+  } catch (err) {
+    if (err instanceof TooLargeToMerge) throw invalid(err.message);
+    throw err;
+  }
   if (chipMerge.asText.length > 0) {
     const labels = [...new Set(chipMerge.asText)];
     throw new ApiError(

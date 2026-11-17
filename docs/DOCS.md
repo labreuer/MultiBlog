@@ -17,6 +17,7 @@ What it does not repeat, because another file owns it:
 | [MARGIN_NOTES.md](MARGIN_NOTES.md) | The rail beside a doc's text, in the reading view and the editor. |
 | [TABLES.md](TABLES.md) | Tables inside a doc. |
 | PLAN.md §14 | `/side-by-side` and doc links, which join two docs. |
+| [FORKS.md](FORKS.md) | Forks of a doc, and diffs of two docs or of one doc at two versions: a plan. |
 | PLAN.md §15 | Posts as snapshots of docs — a post is published *from* a doc, and `/post/[id]/edit` reads a doc's history. |
 | PLAN.md §16 | The admin-table kit `/docs` is one instance of. |
 

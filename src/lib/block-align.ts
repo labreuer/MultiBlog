@@ -1,4 +1,4 @@
-import { diffText } from "./diff";
+import { diffText, TooLargeToMerge, type CapMode } from "./diff";
 
 // docs/MCP.md §6 — pairing two versions of a run of blocks, and the word diff
 // within each pair. One alignment for three callers: a read of what changed
@@ -11,28 +11,31 @@ import { diffText } from "./diff";
 /** One step of an alignment: a pair, an old block with no counterpart (deleted), or a new one (added). */
 export type AlignedPair = { old: number | null; new: number | null };
 
-/** The words of a text, case folded, for telling how alike two blocks are. */
-function wordsOf(text: string): string[] {
-  return [...text.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)].map((m) => m[0]);
+/** A text's words, case folded and counted, for telling how alike two blocks are. */
+type Words = { text: string; counts: Map<string, number>; total: number };
+
+function wordsOf(text: string): Words {
+  const counts = new Map<string, number>();
+  let total = 0;
+  for (const [word] of text.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)) {
+    counts.set(word, (counts.get(word) ?? 0) + 1);
+    total++;
+  }
+  return { text, counts, total };
+}
+
+function similarityOf(a: Words, b: Words): number {
+  if (a.total === 0 && b.total === 0) return a.text === b.text ? 1 : 0.5;
+  if (a.total === 0 || b.total === 0) return 0;
+  const [fewer, more] = a.counts.size <= b.counts.size ? [a, b] : [b, a];
+  let shared = 0;
+  for (const [word, count] of fewer.counts) shared += Math.min(count, more.counts.get(word) ?? 0);
+  return (2 * shared) / (a.total + b.total);
 }
 
 /** How alike two texts are: the Dice coefficient of their word multisets, 0 to 1. */
 export function similarity(a: string, b: string): number {
-  const wa = wordsOf(a);
-  const wb = wordsOf(b);
-  if (wa.length === 0 && wb.length === 0) return a === b ? 1 : 0.5;
-  if (wa.length === 0 || wb.length === 0) return 0;
-  const counts = new Map<string, number>();
-  for (const w of wa) counts.set(w, (counts.get(w) ?? 0) + 1);
-  let shared = 0;
-  for (const w of wb) {
-    const n = counts.get(w) ?? 0;
-    if (n > 0) {
-      shared++;
-      counts.set(w, n - 1);
-    }
-  }
-  return (2 * shared) / (wa.length + wb.length);
+  return similarityOf(wordsOf(a), wordsOf(b));
 }
 
 /** Below this, two blocks in a gap are a deletion and an addition rather than a rewrite of one another. */
@@ -44,12 +47,19 @@ const PAIRING_THRESHOLD = 0.3;
  * similarity), so a block inserted between two rewritten ones is an addition
  * rather than the cause of every later pairing sliding one block over. A pair
  * less alike than the threshold is left as a deletion and an addition.
+ *
+ * Every block is scored against every block across the gap, so each block's
+ * words are counted once, not once per pair.
  */
 function pairGap(a: readonly string[], b: readonly string[]): [number | null, number | null][] {
   if (a.length === 0) return b.map((_, j) => [null, j]);
   if (b.length === 0) return a.map((_, i) => [i, null]);
   if (a.length === 1 && b.length === 1) return [[0, 0]];
-  const sim = a.map((x) => b.map((y) => similarity(x, y)));
+  const wordsB = b.map(wordsOf);
+  const sim = a.map((x) => {
+    const words = wordsOf(x);
+    return wordsB.map((y) => similarityOf(words, y));
+  });
   const best: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
   for (let i = a.length - 1; i >= 0; i--) {
     for (let j = b.length - 1; j >= 0; j--) {
@@ -74,6 +84,30 @@ function pairGap(a: readonly string[], b: readonly string[]): [number | null, nu
   return out;
 }
 
+/** A gap left unpaired: its old blocks deleted, then its new ones added. */
+function unpaired(oldCount: number, newCount: number): [number | null, number | null][] {
+  return [
+    ...Array.from({ length: oldCount }, (_, i): [number | null, number | null] => [i, null]),
+    ...Array.from({ length: newCount }, (_, j): [number | null, number | null] => [null, j]),
+  ];
+}
+
+/**
+ * The alignment's cap, in table cells once the equal ends are trimmed: 5,000
+ * blocks a side, 50 MB as a `Uint16Array`. Under it the shorter side has at
+ * most 5,000 blocks, so no entry of the table, a common subsequence's length,
+ * can pass 65,535.
+ */
+export const ALIGNMENT_MAX_CELLS = 25_000_000;
+
+/**
+ * Pairing's cap: the pairs `pairGap` scores, summed over every gap, since
+ * shared empty paragraphs can split two unrelated runs of blocks into gaps
+ * that each pass a cap per gap. A 1×1 gap is paired without being scored, so
+ * it counts for nothing.
+ */
+export const PAIRING_MAX_PAIRS = 1_000_000;
+
 /**
  * Pairs `oldTexts` with `newTexts`, by index. Blocks whose key is identical
  * anchor the alignment (a longest common subsequence over whole blocks; the
@@ -87,11 +121,17 @@ function pairGap(a: readonly string[], b: readonly string[]): [number | null, nu
  *
  * Equal ends are taken first, so a long doc with an edit in the middle costs
  * a table over the middle only.
+ *
+ * Two caps bound the rest. Past `ALIGNMENT_MAX_CELLS`, a read gets everything
+ * between the equal ends deleted and added; past `PAIRING_MAX_PAIRS`, every
+ * gap larger than 1×1 is left unpaired. An edit past either throws
+ * `TooLargeToMerge`.
  */
 export function alignBlocks(
   oldTexts: readonly string[],
   newTexts: readonly string[],
   keys?: { old: readonly string[]; new: readonly string[] },
+  mode: CapMode = "read",
 ): AlignedPair[] {
   const oldKeys = keys?.old ?? oldTexts;
   const newKeys = keys?.new ?? newTexts;
@@ -110,43 +150,69 @@ export function alignBlocks(
   const b = newKeys.slice(head, newKeys.length - tail);
   const n = a.length;
   const m = b.length;
-  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-    }
-  }
 
   const pairs: AlignedPair[] = [];
   for (let k = 0; k < head; k++) pairs.push({ old: k, new: k });
+  const push = (gap: [number | null, number | null][], i: number, j: number) => {
+    for (const [x, y] of gap) pairs.push({ old: x === null ? null : head + i + x, new: y === null ? null : head + j + y });
+  };
+  const finish = () => {
+    for (let k = 0; k < tail; k++) pairs.push({ old: oldKeys.length - tail + k, new: newKeys.length - tail + k });
+    return pairs;
+  };
 
-  // The anchors, then the gaps between them paired by likeness.
+  if (n * m > ALIGNMENT_MAX_CELLS) {
+    if (mode === "edit") throw new TooLargeToMerge();
+    push(unpaired(n, m), 0, 0);
+    return finish();
+  }
+
+  const width = m + 1;
+  const dp = new Uint16Array((n + 1) * width);
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      const at = i * width + j;
+      dp[at] = a[i] === b[j] ? dp[at + width + 1] + 1 : Math.max(dp[at + width], dp[at + 1]);
+    }
+  }
+
+  // The anchors, each after the gap before it, and the gap after the last.
+  const gaps: { i: number; iEnd: number; j: number; jEnd: number }[] = [];
   let i = 0;
   let j = 0;
-  const flushGap = (iEnd: number, jEnd: number) => {
-    const gap = pairGap(oldTexts.slice(head + i, head + iEnd), newTexts.slice(head + j, head + jEnd));
-    for (const [x, y] of gap) pairs.push({ old: x === null ? null : head + i + x, new: y === null ? null : head + j + y });
-    i = iEnd;
-    j = jEnd;
-  };
   let ii = 0;
   let jj = 0;
   while (ii < n && jj < m) {
     if (a[ii] === b[jj]) {
-      flushGap(ii, jj);
-      pairs.push({ old: head + ii, new: head + jj });
+      gaps.push({ i, iEnd: ii, j, jEnd: jj });
       i = ++ii;
       j = ++jj;
-    } else if (dp[ii + 1][jj] >= dp[ii][jj + 1]) {
+    } else if (dp[(ii + 1) * width + jj] >= dp[ii * width + jj + 1]) {
       ii++;
     } else {
       jj++;
     }
   }
-  flushGap(n, m);
+  gaps.push({ i, iEnd: n, j, jEnd: m });
 
-  for (let k = 0; k < tail; k++) pairs.push({ old: oldKeys.length - tail + k, new: newKeys.length - tail + k });
-  return pairs;
+  const scored = (gap: (typeof gaps)[number]) => {
+    const cells = (gap.iEnd - gap.i) * (gap.jEnd - gap.j);
+    return cells > 1 ? cells : 0;
+  };
+  const tooMany = gaps.reduce((sum, gap) => sum + scored(gap), 0) > PAIRING_MAX_PAIRS;
+  if (tooMany && mode === "edit") throw new TooLargeToMerge();
+
+  for (const [k, gap] of gaps.entries()) {
+    push(
+      tooMany && scored(gap) > 0
+        ? unpaired(gap.iEnd - gap.i, gap.jEnd - gap.j)
+        : pairGap(oldTexts.slice(head + gap.i, head + gap.iEnd), newTexts.slice(head + gap.j, head + gap.jEnd)),
+      gap.i,
+      gap.j,
+    );
+    if (k < gaps.length - 1) pairs.push({ old: head + gap.iEnd, new: head + gap.jEnd });
+  }
+  return finish();
 }
 
 /** A word diff's runs: equal text, or text removed and text added, in order. */
