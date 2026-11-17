@@ -1070,6 +1070,54 @@ only their own refusals.
 
 ---
 
+## `/users`' cells show a thrown refusal as React's generic sentence in production
+
+**Status:** found 2026-11-16 while building docs/MCP.md §21's bot agents. That work returned the
+bot cells' and the Role cell's refusals. The rest of `/users` still throws.
+
+A production build replaces the message of an error thrown out of a server action. The cell
+that catches it reads "An error occurred in the Server Components render. The specific message
+is omitted in production builds to avoid leaking sensitive details…", and the reason reaches
+only the journal, under a digest. Dev shows the real message, and so does `npm run e2e:dev`.
+Only `npm run e2e`'s production build sees the difference.
+
+These still throw, and an ADMIN can reach each from the page:
+
+- **ORCID iD and Website** (`updateUserOrcid`, `updateUserWebsite`). Only the server validates
+  them, so a mistyped ORCID iD or a URL without `http(s)` reads as the generic sentence.
+  `TextFieldCell`'s comment says it "just displays whatever error comes back".
+- **Delete on the ADMIN's own row** (`deleteUser`'s "You can't delete your own account."). The
+  button isn't disabled there.
+- **Send invite, when mail fails** (`sendUserInvite`'s "Couldn't send the invite: …"). The
+  failure is the one thing the ADMIN needs to read, and it is the part redacted.
+- **A user's url on `/users/[id]/slug`** (`updateUserSlug`, `revertUserSlug`): "already in use"
+  and "reserved". `SlugManager` serves posts and docs the same way, through `updatePostSlug` and
+  `updateDocSlug`, so the same holds on their slug pages. Files return their answer instead
+  (`answered`, from `FileAnswer`).
+
+Initials and contributor order also throw, but their cells refuse an empty value or a fraction
+before calling, so only a forged call reaches the server's sentence. Moderation policy, colour
+and rows per page are selects or a picker that offer only valid values.
+
+**What the fix is.** It is the one `/users`' bot cells already use. The action returns an
+`ApiError`'s message through `refusalOf` (`src/app/actions/users.ts`), and the cell throws it
+again with `orRefused` (`src/components/UsersTable.tsx`), keeping its catch. The plain
+`Error`s become `invalid(...)`/`forbidden(...)`, since `refusalOf` passes on only an
+`ApiError`. Where a bulk action delegates to the single-row action (`deleteUser` here), it calls
+a throwing body instead, as `bulkSetUserRole` calls `setUserRole`. A returned refusal would
+otherwise count as done in `settleBulk`.
+
+- **Three copies of the pattern exist already**: `refusalOf` here, `answering` in
+  `src/app/actions/files.ts` and its twin in `note-moves.ts`. One helper in `src/lib/` would
+  serve all three before a fourth appears.
+- **The class is wider than `/users`.** `files.ts`'s comment says `/files`' cells "keep the
+  throwing actions above, which they catch as every admin table's cells do". Which of those
+  can throw a sentence a person needs is unaudited.
+- **Each fix wants a spec on the production target**, as `e2e/users-bots.spec.ts`'s refusals
+  have, since nothing else sees the difference.
+
+---
+
 ## `/users/[id]/slug` still hangs off the plural table (PLAN.md §3d)
 
 On 2026-09-15 a post's own pages moved from `/posts/[id]/…` to `/post/[id]/…`, and PLAN.md
