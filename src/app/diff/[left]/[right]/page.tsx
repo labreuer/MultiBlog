@@ -6,7 +6,7 @@ import { gated, titleWhenOk } from "@/lib/route-access";
 import { canUserReadDoc, canUserSeeDocHistory, canUserSeeDocVersion } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { isDocVersion, loadDocStateAt, loadDocStateNow } from "@/lib/doc-state";
-import { diffPath, parseDiffSide, sideOrder, type DiffSide, type SideOrder } from "@/lib/diff-side";
+import { diffPath, parseDiffSide, pastForkPoint, sideOrder, type DiffSide, type PairLineage, type SideOrder } from "@/lib/diff-side";
 import type { DiffBlock } from "@/lib/doc-diff";
 import { SCRUB_PARAM } from "@/lib/scrub-url";
 import { signInPath } from "@/lib/sign-in-redirect";
@@ -21,7 +21,36 @@ import styles from "./page.module.css";
 // compares them, in a worker (`DocDiff`). It opens no collab connection, and
 // a side with no version is the doc as it was when the page loaded.
 
-const DOC_SELECT = { id: true, slug: true, title: true, visibility: true, deletedByUserId: true } as const;
+const DOC_SELECT = {
+  id: true,
+  slug: true,
+  title: true,
+  visibility: true,
+  deletedByUserId: true,
+  // Whether one side was forked from the other, for "Which side is later".
+  forkedFromDocId: true,
+  forkedFromUpdateId: true,
+} as const;
+
+type PairDoc = { id: string; forkedFromDocId: string | null; forkedFromUpdateId: bigint | null };
+
+/**
+ * Which of the pair's two docs was forked from the other, if either was. One
+ * generation only (docs/FORKS.md, "Which side is later"). Both docs have
+ * passed the gate by the time this is read, so it names nothing the viewer
+ * can't read. `parentNow` is filled in once the sides are loaded.
+ */
+function pairLineage(left: PairDoc, right: PairDoc): Omit<PairLineage, "parentNow"> | null {
+  for (const [fork, parent] of [
+    [left, right],
+    [right, left],
+  ] as const) {
+    if (fork.forkedFromDocId === parent.id && fork.forkedFromUpdateId !== null) {
+      return { parentDocId: parent.id, forkDocId: fork.id, forkPoint: fork.forkedFromUpdateId };
+    }
+  }
+  return null;
+}
 
 /**
  * The pair gate, in the order docs/FORKS.md's "Who may see one" gives:
@@ -70,13 +99,21 @@ const loadDiffPair = gated(async (user, left: string, right: string) => {
   return {
     left: { side: leftSide, doc: leftDoc, history: leftHistory },
     right: { side: rightSide, doc: rightDoc, history: rightHistory },
+    lineage: leftDoc.id === rightDoc.id ? null : pairLineage(leftDoc, rightDoc),
   };
 });
 
 type GatedSide = { side: DiffSide; doc: { id: string; slug: string; title: string }; history: boolean };
 
 type LoadedSide =
-  | { ok: true; title: string; blocks: DiffBlock[]; at: Date | null }
+  | {
+      ok: true;
+      title: string;
+      blocks: DiffBlock[];
+      at: Date | null;
+      /** The update a side with no version was read at; null for a side at a version, which names its own. */
+      nowVersion: bigint | null;
+    }
   /** The store was unavailable, or the ydoc didn't decode under the doc schema. */
   | { ok: false };
 
@@ -91,15 +128,18 @@ type LoadedSide =
  */
 async function loadSide({ side, doc }: GatedSide): Promise<LoadedSide> {
   try {
-    const [state, row] = await Promise.all([
-      side.updateId === null ? loadDocStateNow(doc.id) : loadDocStateAt(doc.id, side.updateId),
+    const [now, at, row] = await Promise.all([
+      side.updateId === null ? loadDocStateNow(doc.id) : null,
+      side.updateId === null ? null : loadDocStateAt(doc.id, side.updateId),
       side.updateId === null ? null : prisma.ydocUpdate.findUnique({ where: { id: side.updateId }, select: { createdAt: true } }),
     ]);
+    const state = (now ?? at)!;
     return {
       ok: true,
       title: docTitleOrFallback(state.title),
       blocks: state.blocks.map((block) => ({ text: block.text, type: block.node.type.name, heading: block.heading !== null })),
       at: row?.createdAt ?? null,
+      nowVersion: now?.version ?? null,
     };
   } catch (err) {
     console.error(`[diff] couldn't read doc ${doc.id}${side.updateId === null ? "" : ` at ${side.updateId}`}:`, err);
@@ -197,7 +237,13 @@ export default async function DiffPage({ params }: { params: Promise<{ left: str
   const { left: leftGated, right: rightGated } = access.value;
   const loadedAt = new Date();
   const [leftLoaded, rightLoaded] = await Promise.all([loadSide(leftGated), loadSide(rightGated)]);
-  const order = sideOrder(leftGated.side, rightGated.side);
+  // A fork and its parent: where the parent's side stands against the fork
+  // point decides whether the pair has an order. A parent's side with no
+  // version stands at the update it was just read at.
+  const parentLoaded = access.value.lineage?.parentDocId === leftGated.doc.id ? leftLoaded : rightLoaded;
+  const lineage = access.value.lineage && { ...access.value.lineage, parentNow: parentLoaded.ok ? parentLoaded.nowVersion : null };
+  const order = sideOrder(leftGated.side, rightGated.side, lineage);
+  const diverged = pastForkPoint(leftGated.side, rightGated.side, lineage);
   const labels = order ? ORDER_LABELS[order] : null;
   const swapped = diffPath(rightGated.side, leftGated.side);
 
@@ -215,6 +261,11 @@ export default async function DiffPage({ params }: { params: Promise<{ left: str
         <p className={styles.orderNote} data-kind="later-on-left">
           The later version is on the left, so text marked removed was added since, and text marked added was removed.{" "}
           <Link href={swapped}>Swap sides</Link>
+        </p>
+      )}
+      {diverged && (
+        <p className={styles.orderNote} data-kind="both-changed">
+          Both sides have changed since the fork was made.
         </p>
       )}
       {leftLoaded.ok && rightLoaded.ok && <DocDiff left={leftLoaded.blocks} right={rightLoaded.blocks} />}
