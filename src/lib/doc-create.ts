@@ -3,7 +3,8 @@ import { TiptapTransformer } from "@hocuspocus/transformer";
 import type { JSONContent } from "@tiptap/core";
 import type { Schema } from "@tiptap/pm/model";
 import { prisma } from "@/lib/prisma";
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
+import type { DocVisibility } from "@/generated/prisma/enums";
 import { uniqueDocSlug } from "@/lib/doc-slug";
 import { slugify } from "@/lib/slug";
 import { isUniqueViolationOn } from "@/lib/unique-violation";
@@ -17,6 +18,8 @@ import {
 } from "@/lib/tiptap-schema";
 import { markNew } from "@/lib/doc-edit";
 import { docCacheFromYdoc } from "@/lib/doc-content";
+import { setChipStyle } from "@/lib/entity-chips/settings";
+import type { ChipStyles } from "@/lib/entity-chips/types";
 import { ydocStore, encodeYdocState } from "../../server/ydoc-store";
 
 // Creating a doc's row, and creating a doc seeded with content. Plain server
@@ -119,6 +122,17 @@ export type CreateDocOptions = {
   record?: boolean;
   /** What the importer matches its source to this doc by: a chat's id, a summary's file name. */
   importKey?: string;
+  /** Who may read the doc; `PRIVATE` when absent. The caller checks the value: nothing here does. */
+  visibility?: DocVisibility;
+  /** A fork's parent and the parent's update it was copied at (docs/FORKS.md); only `forkDoc` passes one. */
+  forkedFrom?: { docId: string; updateId: bigint };
+  /**
+   * The seed's choice of form per chip kind (docs/ENTITY_CHIPS.md, "Styling"),
+   * which a fork takes from its parent so its labels read as the parent's
+   * did. Written into the seed's settings map, and so into the row's
+   * `chip_styles` beside the body labelled under it.
+   */
+  chipStyles?: ChipStyles;
 };
 
 // The doc a Markdown import creates: `body` is the parse's (markdownToDocContent),
@@ -136,6 +150,12 @@ export type CreateDocOptions = {
 // The seed's Yjs clients are registered in its `clients` map as the creator,
 // as an annotation's seed is, so the replay view names who wrote the first
 // text.
+//
+// The row's `chip_styles` is written here with `prose_json`, both from
+// `docCacheFromYdoc`, and not left for the first store: a doc nobody has
+// edited has had none, and with the column null the reading view's static
+// body would label a styled seed's chips in the default style, and a label
+// refresh would write `prose_json` in it.
 export async function createDocWithContent(userId: string, title: string, body: JSONContent, opts: CreateDocOptions = {}) {
   const author = opts.author ?? null;
   const seed = new Y.Doc();
@@ -162,6 +182,9 @@ export async function createDocWithContent(userId: string, title: string, body: 
   }
   const clients = seed.getMap<string>("clients");
   for (const clientId of clientIds) clients.set(String(clientId), userId);
+  // Before the seed is encoded and its cache read, so both hold the styles.
+  // A kind this build doesn't know is left out, as setChipStyle refuses it.
+  for (const [kind, style] of Object.entries(opts.chipStyles ?? {})) setChipStyle(seed, kind, style);
   const { ydoc, stateVector } = encodeYdocState(seed);
   const cached = await docCacheFromYdoc(seed);
   seed.destroy();
@@ -180,9 +203,13 @@ export async function createDocWithContent(userId: string, title: string, body: 
             title: cached.title,
             createdByUserId: userId,
             updatedByUserId: userId,
+            visibility: opts.visibility ?? "PRIVATE",
             proseJson: cached.proseJson as Prisma.InputJsonValue,
+            chipStyles: cached.chipStyles ? (cached.chipStyles as Prisma.InputJsonValue) : Prisma.DbNull,
             record: opts.record === true,
             importKey: opts.importKey ?? null,
+            forkedFromDocId: opts.forkedFrom?.docId ?? null,
+            forkedFromUpdateId: opts.forkedFrom?.updateId ?? null,
             authors: { create: byline.map((authorId, bylineOrder) => ({ userId: authorId, bylineOrder })) },
           },
           select: { id: true, slug: true },
