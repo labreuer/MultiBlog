@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { uniqueDocSlug } from "@/lib/doc-slug";
 import { slugify } from "@/lib/slug";
+import { isUniqueViolationOn } from "@/lib/unique-violation";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import {
   docContentExtensions,
@@ -44,9 +45,7 @@ async function insertDocRowSluggedById(userId: string, title: string) {
 }
 
 function isSlugTaken(err: unknown): boolean {
-  const code = (err as { code?: unknown })?.code;
-  const target = (err as { meta?: { target?: unknown } })?.meta?.target;
-  return code === "P2002" && (Array.isArray(target) ? target.includes("slug") : target === "slug");
+  return isUniqueViolationOn(err, "slug");
 }
 
 // `title` is the Doc.title *column* only, and every caller passes what its

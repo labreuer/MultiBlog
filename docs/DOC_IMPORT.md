@@ -222,7 +222,9 @@ Two edges:
 - **Two imports of same-named docs landing together** can compute the same candidate, because
   `uniqueDocSlug` reads outside the insert. The loser gets a `P2002` on `Doc.slug` and asks
   again; by then the winner's row is visible, so it takes the `-2`. Bounded at three attempts
-  and then the cuid, so it always terminates.
+  and then the cuid, so it always terminates. The `P2002` is recognised by the columns the
+  driver adapter parses from Postgres's message (`isUniqueViolationOn`,
+  `src/lib/unique-violation.ts`), since Prisma 7.9 sets no `meta.target` on an adapter's error.
 
 The action redirects to `/doc/<slug>/edit` rather than `/doc/<id>/edit`. Both resolve —
 `resolveDocParam` tries id first, then slug (DOCS.md, "Routes") — so this is only about which URL the
