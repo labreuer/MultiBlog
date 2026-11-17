@@ -452,6 +452,59 @@ All five instances run main with all of it. Not yet done:
   `maxRequestBodySize` of 8 MiB, which holds that much text however a client escapes it (six
   bytes a character at worst).
 
+## Who may see a doc's history
+
+**Status:** open question, left to the permissions redesign. The rule in force is an interim
+one, behind one predicate (docs/FORKS.md, "Who may see a doc's history").
+
+A doc's past states are its editors': `canUserSeeDocHistory` in `src/lib/doc-authz.ts` is
+`canUserEditDoc`'s answer. It decides the reading view's scrub bar and its replay route, MCP's
+`since`, and a diff's versions, and will decide forking at a version. A reader with
+`canViewDocs` sees a `SHARED` doc only as it is now, and a diff of two docs as they are now.
+The rule changes in the predicate and its filter form, `docsWithVisibleHistoryWhere`, and at no
+call site.
+
+What the redesign should weigh:
+
+- **Text that was never shown.** A doc drafted `PRIVATE` and later made `SHARED` carries its
+  drafts in its log, so opening history to readers opens the drafts too. No record says when a
+  doc's visibility changed, so a rule of "history since it became readable" would need one.
+- **What readers saw anyway.** Every state since a doc went `SHARED` was readable live by the
+  same readers, so for those states the rule withholds only what they missed.
+- **A fork's first state.** It is the parent's text at the fork point, which the fork's creator
+  chose to copy. FORKS.md plans it as an exception for the fork's editors, in diffs alone; a
+  rule could count it as part of the fork for its readers too.
+- **MCP's two reads outside the rule.** Anchoring rebuilds a doc at the version an agent sends
+  with a quote (MCP.md §7) and checks only that the version is in the doc's log: a reader
+  can't read old text that way, but can learn whether a quote of their own once matched.
+  Reading a thread whose note's mark has left the doc gives the passage the note was on
+  (`passageAtStamp`), to any reader of the thread: old text, no more than the note marked.
+- **`/post/[id]/edit`'s bar.** It fetches the same replay route to pick a version to publish,
+  which is its editors' act and stays on `canUserEditDoc`. A rule that took history from a
+  doc's editors would have to change that page with it.
+
+PERMISSIONS.md's "See history" and "Diff at a version" rows state the rule as it stands.
+
+## `?at=` is ignored for a reader without the scrub bar, and says nothing
+
+**Status:** not fixed. What to do depends on "Who may see a doc's history", above.
+
+`/doc/[slug]?at=<update id>` opens the reading view frozen at that revision, but only through
+`DocScrubBar`, which mounts only for a viewer who may see the doc's history (`canSeeHistory` in
+`src/components/DocView.tsx`). Anyone else gets the live text, with nothing to say it isn't the
+revision the link named. A link to a revision is usually one somebody was sent, which is why
+`/doc/[slug]` keeps `?at=` through sign-in. So the person likeliest to follow one is the person
+least likely to have the bar.
+
+It affects any shared `?at=` link. It also shapes two things in docs/FORKS.md: a diff's header
+links its side at `?at=` only for a viewer who may see that doc's history, and a fork's "Forked
+from" line links its parent as it is now, not at the fork point.
+
+- **If history stays with editors**, the page should say the revision isn't available to this
+  reader: a line above the text, and no freeze.
+- **If readers get history**, the page can freeze for them too, rendered on the server from
+  `loadDocStateAt`, with no scrub bar.
+
 ## The diff engine's size guards are first guesses
 
 **Status:** decided 2026-10-22, in the wiki plan's final review, and carried into
@@ -488,6 +541,34 @@ What the first set leaves:
   the result.
 - **`since` past a cap.** Its answer grows, with whole blocks removed and added where a word
   diff was. Saying the change is too large to show might serve a model better.
+- **The diff page's deadline.** `DIFF_DEADLINE_MS` (`src/lib/doc-diff.ts`) is three seconds, a
+  guess: past it the page stops diffing word by word and shows each remaining changed pair
+  whole (docs/FORKS.md, "Where the comparing is done"). It is counted from the start of
+  `diffRows`, alignment included, and the alignment can't be interrupted, so a slow device can
+  spend all of it there and get no word diffs at all. Nothing has measured how long real pairs
+  of docs take, on any device.
+- **The engine on a phone.** The diff page runs the engine in the reader's browser, in a
+  worker, under the same caps as the server. The alignment's cap allows a 25M-cell
+  `Uint16Array`, 50 MB, and the word diff's a 4M-cell table, in a tab that an old phone may
+  give far less memory than a server has. Measure the engine's time and peak memory at each
+  cap on the oldest phone the baseline claims (`npx tsx scripts/remote-console.ts`), and lower
+  the worker's caps, apart from the server's, if a tab dies or the deadline always bites.
+
+## The diff page's worker has not run in a real Safari
+
+**Status:** not tried. `src/lib/doc-diff.worker.ts` is the first worker the repo makes itself
+(docs/FORKS.md, "Where the comparing is done"), a module worker built by
+`new Worker(new URL(…), { type: "module" })`.
+
+A production build serves it to Chromium, Firefox and Playwright's WebKit build, and it answers
+in each. Playwright's WebKit is neither desktop Safari nor iOS Safari (e2e/README.md, "Firefox
+and WebKit"), and what the worker's bundle assumes of the engine underneath is exactly what
+those differ in. A browser where it can't start shows "Couldn't compare these two texts in
+this browser", with no diff.
+
+- **Next:** open a diff of two versions on a real Safari (e2e/MACOS.md) and on the oldest
+  iPhone and iPad the baseline claims (`npx tsx scripts/remote-console.ts`), and read
+  `data-state` on the island: `done`, or `failed`.
 
 ## The claude.ai trial: what to undo
 
@@ -751,32 +832,6 @@ use instead. That fix doesn't carry over as it is:
 - **There is no id to retry with.** `read` and `tag` take a comment only by its card URL,
   though a post's read lists each comment's `id`. Let both take a comment's id, then name the
   ids in the refusal.
-
-## Two scrub-position tests fail on the dev target (`e2e/doc.spec.ts`)
-
-**Status:** found 2026-10-11 on `~/git/MultiBlog-claude` (`npm run e2e:dev`, one worker,
-against a `next dev` running since 2026-10-10). Not caused by that day's `/admin` token
-change: they fail the same way with the previous server code. Every production-build run in
-the session scratchpads passes them, on chromium, firefox and webkit, through 2026-10-10.
-
-- **Tests:** "the scrub position in the URL › a URL naming a position opens frozen at it,
-  without waiting to be touched", and "› 'at this revision' links to the revision, and seeks
-  in place once the bar is loaded".
-- **Symptom:** `/doc/<slug>?at=<update id>` opens on the live doc. The slider sits at its far
-  end, and the "Switch to live view" button never appears in 15s. The sibling test that
-  focuses and drags the bar passes, so the history loads; what fails is the eager load
-  `?at=` is meant to start.
-- **Next:**
-  1. Run the two on a production build
-     (`npm run e2e -- e2e/doc.spec.ts -g "scrub position"`) to confirm it's dev-only. Restart
-     `dev:all` afterwards (CLAUDE.md: the build writes into the dev server's `.next`).
-  2. Rerun on a fresh dev server (`npm run stop:all`, remove `.next`, `npm run dev:all`), to
-     rule out one that had been running for a day.
-  3. If it survives both, look at how `?at=` reaches the bar on first render under
-     `next dev`. `src/app/doc/[slug]/page.tsx` validates it, `DocView.tsx` passes it on, and
-     `DocScrubBar.tsx` activates from an effect. Dev-only double effects are a suspect.
-  4. If it's dev-only for good, have the two tests say so (skipped on the dev target, with
-     the reason) rather than leaving two known failures in every `e2e:dev` run.
 
 ## Read rules restated with a difference from the rule (docs/FULLTEXT.md §2)
 

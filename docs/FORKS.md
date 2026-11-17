@@ -1,8 +1,10 @@
 # Forks and diffs — a doc's copies, and what changed between two texts
 
-**Status: planned, 2026-11-16. The engine's size guards are built (Build order, item 1); the
-diffs and forks are not.** This file is the plan, and it becomes the as-built account section
-by section as the build lands. PLAN.md §36 points here.
+**Status: partly built. The engine's size guards and the diffs are built (Build order, items 1
+and 2); forks, and sliders on the diff page, are planned.** Everything under "Diffs" and "Who
+may see a doc's history" is the as-built account, but for the parts that say they come with
+forks and the section headed "Planned"; "Forks" is the plan.
+PLAN.md §36 points here.
 
 A **fork** is a new doc seeded from another doc's text at one version, which records where it
 came from. A **diff** shows two texts side by side, word by word: two docs, or one doc at two
@@ -38,21 +40,20 @@ state of it but the current one, is its editors', with one exception for forks.
 - **One predicate, `canUserSeeDocHistory(userId, role, docId)`** in `src/lib/doc-authz.ts`, is
   `canUserEditDoc`'s answer for now. That is everyone on the doc's byline whose role may manage
   docs (ADMIN, EDITOR, AUTHOR), and an ADMIN or EDITOR on any `SHARED` doc. A byline member whose
-  role can't (AUTHORIZED, COMMENTER) sees no history, as today.
+  role can't (AUTHORIZED, COMMENTER) sees no history.
 - **Every check that shows a doc's history goes through it**: the scrub bar's replay route
   (`/api/doc/[id]/replay`), the doc page's choice to mount the scrub bar, MCP's `since`
-  (`src/lib/mcp/read/doc.ts`), a diff's versions, and forking at a version. The first three ask
-  `canUserEditDoc` directly today, and move onto the predicate with no change in behaviour, so
-  the redesign replaces the predicate and its filter form rather than five call sites.
+  (`src/lib/mcp/read/doc.ts`) and a diff's versions, and forking at a version will. So the
+  redesign replaces the predicate and its filter form rather than five call sites.
 - **The predicate has a filter form beside it, `docsWithVisibleHistoryWhere(userId, role)`**, as
   `readableDocsWhere` is beside `canUserReadDoc`: the same rule as a `where` on `Doc`, and null
   for a viewer who sees no doc's history. A check that asks about several docs at once goes
   through it, in one query: the fork-point exception (below), and the family lines' diff links
   ("A doc's family").
-- **The doc page's `canEdit` becomes two values.** Today the one boolean decides the title's
-  link to the editor, the scrub bar, the room left for it (`containerScrubbable`) and
-  `DocScrubProvider`'s `hasScrubBar`. The link keeps `canEdit`; the other three take the
-  predicate's answer, as a prop of its own on `DocView`.
+- **The doc page asks two questions.** `canEdit` decides the title's link to the editor and
+  the posts line. The predicate's answer decides the scrub bar, the room left for it
+  (`containerScrubbable`) and `DocScrubProvider`'s `hasScrubBar`, and is a prop of its own on
+  `DocView`, `canSeeHistory`.
 - **Three checks stay on `canUserEditDoc`, since each is an edit.** `/post/[id]/edit` asks it to
   choose between the scrub bar's replay and the post's stored `proseJson`: the bar there picks
   the version to publish, and publishing from a doc is its editors' (CLAUDE.md, "A post's byline
@@ -65,25 +66,26 @@ state of it but the current one, is its editors', with one exception for forks.
   rebuilds the doc at the note's stamp and gives the passage the note was on
   (`passageAtStamp`, `src/lib/mcp/read/threads.ts`), to any reader of the thread: old text, and
   no more of it than the note marked. The redesign weighs both (below).
-- **The exception: a fork point is not history to the fork's editors.** A diff may show
+- **The exception, which comes with forks: a fork point is not history to the fork's
+  editors.** A diff may show
   `<parent>@<X>` to a viewer who may see the history of a live fork of that parent whose
   `forked_from_update_id` is X, and who can read the parent now, as any diff demands. The
   parent at X is that fork's first state, which its editors can already reach on its own scrub
   bar, so the exception shows them nothing they don't already hold. It is what lets an AUTHOR
   who forked a doc they can't edit see what its author changed since.
-- **`canUserSeeDocVersion(userId, role, docId, version)`** holds both: the predicate, or a live
-  fork of the doc, forked at that version, among the docs whose history the viewer may see,
-  which is one query through the filter form however many forks were made at that version. Its
-  answer depends only on forks the viewer may already see into, so it tells them nothing about
-  the parent's log that those forks don't.
+- **`canUserSeeDocVersion(userId, role, docId, version)`** is what a diff asks of each
+  version, and is the predicate alone until forks exist. With forks it holds both: the
+  predicate, or a live fork of the doc, forked at that version, among the docs whose history
+  the viewer may see, which is one query through the filter form however many forks were made
+  at that version. Its answer depends only on forks the viewer may already see into, so it
+  tells them nothing about the parent's log that those forks don't.
 - **The exception is for diffs alone.** The parent's scrub bar, its `since` and forking it at a
   version stay its editors'.
 
-Whether readers should see more, and from when, is the redesign's question. The `wiki`
-branch's TODO.md entry "Who may see a doc's history", which PR 2 brings over, says what it
-should weigh: drafts written while a doc was `PRIVATE`, which no record dates; the states
-readers saw live anyway; and MCP's anchoring, which checks a quote against any version in a
-doc's log.
+Whether readers should see more, and from when, is the redesign's question. TODO.md's "Who
+may see a doc's history" says what it should weigh: drafts written while a doc was `PRIVATE`,
+which no record dates; the states readers saw live anyway; and MCP's anchoring, which checks a
+quote against any version in a doc's log.
 
 ## Diffs
 
@@ -91,7 +93,7 @@ doc's log.
 
 **`/diff/<left>/<right>` shows a word diff from its left side to its right**: what the left
 has and the right lacks is shown as removed, and what the right has and the left lacks as
-added. **Either side may be the older.** The links this plan makes put the older one on the
+added. **Either side may be the older.** The scrub bar's links put the older one on the
 left, the route asks for no order, and "Swap sides" gives the other reading. The server
 decides who may see it and reads each side; the reader's browser compares them ("Where the
 comparing is done"). The page opens no `Y.Doc` in the browser, so the same doc may be on both
@@ -196,8 +198,7 @@ well as an id. In order:
 3. **if either side is unreadable, so is the page**: Forbidden, as side-by-side answers, and
    the title answers the same way rather than naming half a pair;
 4. **a version needs `canUserSeeDocVersion`, checked before the version itself** ("Who may see
-   a doc's history"). A reader who may see neither the doc's history nor a fork of it made at
-   that version gets Forbidden, whatever the id;
+   a doc's history"). A reader it refuses gets Forbidden, whatever the id;
 5. **then a version that isn't in its doc's log is a 404** (`isDocVersion`), never quietly
    replaced by "now". In the other order, Forbidden against 404 would tell a reader without the
    history which ids are in the log. MCP's anchoring tells an agent that already ("Who may see
@@ -209,9 +210,10 @@ The page catches both, once the gate has passed. It keeps the header of a side i
 Under the other doc's current title it says "Couldn't read this doc's text", with a link to
 reload, and it shows no rows.
 
-A COMMENTER, and anyone signed out, gets no diffs: `canUserReadDoc` refuses them every doc.
-PERMISSIONS.md gains two rows per table: "Diff, as they are now" (read both) and "Diff at a
-version" (see that doc's history, or the history of a fork of it made at that version).
+A COMMENTER gets no diffs, since `canUserReadDoc` refuses them every doc, and someone signed
+out is sent to sign in. PERMISSIONS.md has two rows per table: "Diff, as it is now" (read both
+sides) and "Diff at a version" (see that doc's history; with forks, or the history of a fork of
+it made at that version).
 
 ### What is compared
 
@@ -222,6 +224,9 @@ version" (see that doc's history, or the history of a fork of it made at that ve
   is each side's own, since it is in the ydoc (`chipStylesOf`). So a doc whose mentions went
   from names to initials between two versions shows every one of them as changed, which is
   how the two texts read.
+- **Only the body, never the title.** Two versions that differ in their title alone read "No
+  differences". Each header gives its side's title as of that side, so a changed title shows
+  there and nowhere in the rows.
 - **Text runs only.** Bold, a link's target, or a paragraph becoming a heading with the same
   text is not shown as a change. A heading is styled as one on each side.
 - **A table, a list or a code block is one block**, its text joined, so one cell changed is
@@ -256,18 +261,18 @@ opposite.
 - **The same doc on both sides has an order**: the lower update id is the earlier, and a side
   with no version is later than any version. Two sides at one version have none, and the page
   says "No differences".
-- **A fork and its parent at or before the fork point have one**, from PR 3: the parent's side
-  is the earlier, whichever version the fork is at.
+- **A fork and its parent at or before the fork point will have one**, with forks: the
+  parent's side is the earlier, whichever version the fork is at.
 - **No other pair has one**: two unrelated docs, or a fork and its parent past the fork point,
   where each has changed since. A chain through a grandparent isn't followed. It can pass
   through a doc the viewer can't read, and a label would tell them the two sides are related
   through it.
 
-`sideOrder(left, right, lineage)` in `src/lib/diff-side.ts` answers it, pure, with a unit
-table: the left is the earlier, the right is, or the pair has no order.
+`sideOrder(left, right)` in `src/lib/diff-side.ts` answers it, pure, with a unit table: the
+left is the earlier, the right is, or the pair has no order. With forks it takes the pair's
+lineage as a third argument.
 
-**How the page shows it is not decided, and is decided by trying it.** What is built to be
-tried:
+**How the page shows it:**
 
 - **Each header carries "Earlier" or "Later"** beside its time when the pair has an order, and
   nothing when it has none, so that "in order" and "no order" look different.
@@ -276,15 +281,15 @@ tried:
   "Swap sides" beside it.
 - **Rows keep their colours and wording whatever the order.** Removed is always what the left
   has and the right lacks, so a swapped pair shows the same rows mirrored.
-- **From PR 3, a fork and its parent past the fork point get a line**: "Both sides have changed
-  since the fork was made," so that the diff isn't read as what the fork changed.
 
-**The build stops twice for this choice, and asks.** In PR 2, once the route shows a real
-pair's headers and rows, and before the scrub bar's additions: Luke is given a URL on the dev
-server for a pair in order, the same pair swapped, and two unrelated docs. In PR 3, once the
-family lines' links exist: the fork against its fork point both ways round, and against its
-parent after both have changed. Nothing more is built on the headers, and no spec is written
-for them, until he has chosen at each stop. What he chooses replaces the list above.
+**How a fork and its parent are shown is not decided, and is decided by trying it.** What PR 3
+builds to be tried: the labels above for a fork against its fork point, and for a fork and its
+parent past the fork point a line, "Both sides have changed since the fork was made," so that
+the diff isn't read as what the fork changed. **That build stops for the choice, and asks**,
+once the family lines' links exist: Luke is given the fork against its fork point both ways
+round, and against its parent after both have changed. Nothing more is built on the headers
+for a fork, and no spec is written for them, until he has chosen. What he chooses replaces
+this paragraph.
 
 ### Where the comparing is done
 
@@ -315,10 +320,11 @@ with a doc's length, and the work that grows with its square costs the reader wh
 
 **A deadline bounds the time, and the engine's caps bound the memory.** `diffRows` takes a
 deadline and a clock, the clock passed in so that the function stays pure and its unit test
-sets the time. It checks between changed pairs. Past the deadline, a first guess of three
-seconds, the remaining changed pairs are shown whole, the old block deleted and the new one
-added, and the page says where: "From here on, changed blocks are shown whole: this diff was
-taking too long to show word by word." A deadline means the same on a phone as on a desktop,
+sets the time. It checks between changed pairs. Past the deadline (`DIFF_DEADLINE_MS`, a first
+guess of three seconds), each remaining changed pair is not diffed: it stays one `changed` row
+with its two blocks side by side, the old one marked removed whole and the new one added whole
+(`whole`). A note row above the first of them says where: "From here on, changed blocks are
+shown whole: this diff was taking too long to show word by word." A deadline means the same on a phone as on a desktop,
 which a count of cells doesn't. It can't interrupt the alignment, which is one call, so the
 alignment's cap bounds that. The page needs no total over its word diffs: each pair's table is
 capped and dropped before the next is built.
@@ -330,8 +336,9 @@ between them, come back as everything between them removed and added. So the eng
 functions take an optional `onCap` when they read, called with the cap's name when one bites,
 and `diffRows` passes it:
 
-- **a row whose word diff was capped** says "Too long to compare word by word: everything
-  between its first change and its last is shown whole";
+- **a row whose word diff was capped** stays one `changed` row (`capped`), under a note row
+  that says "Too long to compare word by word: everything between its first change and its
+  last is shown whole";
 - **a diff whose alignment or pairing was capped** says above its rows that some blocks are
   shown removed and added without being matched to each other.
 
@@ -343,9 +350,10 @@ and `diffRows` passes it:
 `diff.ts` exports them again for its callers. The worker's bundle is then `doc-diff.ts`,
 `block-align.ts` and `diff-text.ts`.
 
-**It is the first worker the repo makes itself**; the PDF viewer's is pdfjs's own. So PR 2
-starts with the worker alone, answering in a production build and in a real Safari, before
-anything is built on it ("Build order").
+**It is the first worker the repo makes itself**; the PDF viewer's is pdfjs's own. A
+production build serves it to Chromium, to Firefox and to Playwright's WebKit build, where it
+answers. A real Safari has not been tried (TODO.md, "The diff page's worker has not run in a
+real Safari").
 
 ### The engine's size guards
 
@@ -372,11 +380,11 @@ included, as MCP.md §6's "Size guards" sets out:
   which carries a file's notes to its next version, refuses as an edit does, since a carry
   writes anchors (PDF.md §13, "Placing each anchor").
 
-**The caps are the engine's constants, and the worker will run them as the server does.** They
+**The caps are the engine's constants, and the worker runs them as the server does.** They
 are first guesses from development machines, and TODO.md's "The diff engine's size guards are
-first guesses" lists what tuning them takes, among it a total over a request's word diffs, for
-`since`. PR 2 adds two items to it: the deadline's length, and the engine's time and memory on
-the oldest phone the baseline claims, which has less memory than a server.
+first guesses" lists what tuning them takes: among it a total over a request's word diffs, for
+`since`, the deadline's length, and the engine's time and memory on the oldest phone the
+baseline claims, which has less memory than a server.
 
 **A version costs one replay on the server**, the one `since` already pays:
 `materializeYdocAt` starts from the newest `ydoc_snapshot` at or before it, or from row #1. A
@@ -387,37 +395,90 @@ leaves no snapshot on its parent ("The function").
 
 ### Choosing two versions on the scrub bar
 
-**The scrub bar gains a pin, two links and a note** once its history has loaded (`LoadedScrubBar`,
+**The scrub bar has a pin, two links and a note** once its history has loaded (`LoadedScrubBar`,
 `src/components/DocScrubBar.tsx`). So they are for whoever may see the doc's history, the only
 viewers it mounts for:
 
 - **"Diff with now"**, while the slider is off the live end: `/diff/<doc>@<here>/<doc>`.
-- **"Pin this version"** keeps the slider's position as the reader scrubs on, shown as a tick
-  on the track and a line naming it ("Pinned: update 12 of 40, <time> · Unpin").
+- **"Pin this version"**, whenever the slider is not on the pin, keeps the slider's position
+  as the reader scrubs on, shown as a tick on the track and a line naming it ("Pinned: update
+  12 of 40, <time> · Unpin"). Pinning again moves the pin.
 - **"Diff pinned → here"**, once the slider is off the pin, with the older of the two on the
   left whichever was pinned. Either may be the live end, a side with no `@`, which in the diff
   means the doc as it is when the diff loads, not the head the bar loaded.
 
+Both links are built with `diffPath` (`src/lib/diff-side.ts`).
+
 **The pin is the tab's, not the URL's.** `?at=` stays one position, under
 `src/lib/scrub-url.ts`'s rules unchanged, and a URL naming two positions is the diff's own. The
-links are ordinary navigations, and Back returns to the bar at its `?at=`, unpinned. The
-position line is formatted in the browser from fetched data, which the hydration rule allows
-(CLAUDE.md, "Never call `toLocaleString()`").
+position line and the pinned line are formatted in the browser from fetched data, which the
+hydration rule allows (CLAUDE.md, "Never call `toLocaleString()`").
+
+**The links are plain `<a>`s, and Back returns to the bar at its `?at=`, unpinned.** A
+`<Link>` would not get there: Next's router keeps the page it rendered for the address the
+reader arrived at, and `?at=` is written with `replaceState` afterwards, so Back from a client
+navigation restores a page whose bar never loaded, under a URL that names a position. A click
+on either link writes `?at=` first, since the URL trails the slider by its debounce and
+leaving the page drops a write still waiting.
 
 **The bar says when changes have come in, and does nothing more live.** Its history is the
 replay it fetched (`/api/doc/[id]/replay`), while the reading view's tap goes on receiving
 updates, so the slider's last position stands for the doc as it was when the history loaded.
 Once the tap reports a change after that, the bar says "Changes have come in since this
-history loaded; reload to include them." Nothing is replayed or diffed again. The count starts
-only once the tap has synced, since it applies an update on its own handshake as well as on a
-real edit (DOCS.md, "The reading view"). The note is the one live part of this plan, and it
-can be left out without changing anything else.
+history loaded; reload to include them." Nothing is replayed or diffed again. The tap reports
+through `useLiveDocContent`'s `onLiveUpdate`, which is called for each Yjs update it applies
+once it has synced, frozen or not, and never for its own handshake, which applies an update as
+a real edit does (DOCS.md, "The reading view"). `DocView` hands the bar those reports as a
+subscription, not as state, so a remote keystroke re-renders nothing but the bar, once. The
+note is the one live part of this page, and it can be left out without changing anything
+else.
 
 ### From side-by-side
 
-**`/side-by-side/<a>/<b>` gets a "Diff" link** to `/diff/<a's id>/<b's id>`, rendered by its
-page above `SideBySideView`, so no side-by-side component changes. Its gate already demands
+**`/side-by-side/<a>/<b>` has a "Diff" link** to `/diff/<a's id>/<b's id>`, rendered by its
+page above `SideBySideView`, so no side-by-side component knows of it. Its gate already demands
 both docs be readable, which is all the diff of two "now" sides asks.
+
+### Planned: sliders on the diff page
+
+**A side whose history the viewer may see gets a slider under its header**, and the rows follow
+it. The scrub bar's pin chooses two versions before any diff is shown; a slider changes one
+while the diff is on the page, which is how a reader finds the version a paragraph came in at.
+Both stay: the pin and its links are how a reader gets here from a doc, and the sliders are
+what they do once here.
+
+- **Who gets one is `canUserSeeDocHistory`, per side**, which `loadDiffPair` already asks for a
+  side at a version, and here asks for a side with none too. A side that fails it keeps its
+  header and has no slider. From forks on, a parent a fork's editor sees through the fork-point
+  exception has none: the exception is one version.
+- **One slider a side, for one doc at two versions too.** A single track with two thumbs suits
+  that case alone, and two docs have two histories. The sliders may cross: the headers' "Earlier"
+  and "Later" and the line above the rows already follow the order ("Which side is later").
+- **A side's history is the replay the doc page's bar fetches** (`/api/doc/[id]/replay`), walked
+  with `useReplayScrub`, and fetched when its slider is first used, so that opening a diff
+  costs what it does without them. The same doc on both sides is fetched once.
+- **A moved side's blocks are built in the browser**, on the page's thread, from the replayed
+  state: `docBlocks` over its node with its chips' labels, which is what `DocState.blocks` is
+  on the server. The labels come through `useChipInputs`, as the reading view's do. The worker
+  is still sent `DiffBlock[]` and still imports the engine alone.
+- **Each move starts the worker again** and ends the one before it, after a short debounce. The
+  deadline and the caps apply to each run as they do to the first.
+- **The address follows the sliders** once they settle, written with `replaceState` as `?at=`
+  is, so that the diff on the page is the diff its address names. A slider at the live end
+  writes a side with no `@`, which is the doc as it was when its history was fetched.
+- **Still no collab connection.** A side's last position is the head its replay held, and
+  nothing arrives after it.
+
+**The cost is a second way to turn a version into blocks**, and it is the reason this is a
+change to the page's loading and not only to its header. The server builds a side's blocks
+when the address is loaded; the browser builds them when a slider moves. If the two differ, the
+diff a reader slid to is not the one its address shows on reload. So the block-building step is
+one function both call, and a test compares the two paths' blocks for a doc with entity chips
+at several versions.
+
+**The replay is the whole log**, every update's bytes, for each side with a slider that is
+used, which is what the doc page's bar downloads too. A reader who never touches a slider
+downloads none of it.
 
 ## Forks
 
@@ -680,7 +741,7 @@ its own before forks go out.
 
 ## Build order
 
-**Three PRs, one at a time**, each branched from main once the last has merged.
+**Four PRs, one at a time**, each branched from main once the last has merged.
 
 1. **The engine's size guards — built.** `b6126e5` ported. MCP.md §6 has "Size guards", and
    TODO.md the entry on tuning them. The branch's unit tests came with it:
@@ -689,20 +750,17 @@ its own before forks go out.
    didn't are covered beside them: a code block's merge keeps the `chip_as_text` check
    (`entity-chips/edit.test.ts`), and a PDF sheet's diff refuses past the word diff's cap
    (`pdf-quote-carry.test.ts`, PDF.md §13). No UI and no migration.
-2. **Diffs.** `canUserSeeDocHistory`, its filter form and `canUserSeeDocVersion` first, with the
-   three existing checks moved onto the first and no change in behaviour; `canUserSeeDocVersion`
-   is the predicate alone until forks exist. Then the worker alone, answering in a production
-   build and in a real Safari; `diff-text.ts` taken out of `diff.ts`; the engine's `onCap`;
-   `diff-side.ts` and `doc-diff.ts` with their unit tests, a capped pair's row among them;
-   `loadDocStateNow`; the route, its gate and `DocDiff`; **a stop, for
-   how the page shows which side is later** ("Which side is later"); the scrub bar's pin, links and
-   note; side-by-side's link.
-   PERMISSIONS.md's diff rows, and its "Replay history" rows pointed at the predicate; DOCS.md's
-   "The reading view" gains the scrub bar's links; TODO.md gains "Who may see a doc's history",
-   rewritten around the interim rule, and "`?at=` is ignored for a reader without the scrub
-   bar, and says nothing", both from the branch and pointed here. CLAUDE.md, the history
-   trigger (below). TODO.md's size-guards entry gains the deadline and the phone.
-   `e2e/doc-diff.spec.ts`. No migration.
+2. **Diffs — built.** `canUserSeeDocHistory`, its filter form and `canUserSeeDocVersion`, with
+   the replay route, the doc page and `since` on the first; `canUserSeeDocVersion` is the
+   predicate alone until forks exist. `diff-text.ts` apart from `diff.ts`; the engine's
+   `onCap`; `diff-side.ts` and `doc-diff.ts` with their unit tests, a capped pair's row among
+   them; the worker; `loadDocStateNow`; the route, its gate and `DocDiff`; the scrub bar's pin,
+   links and note; side-by-side's link.
+   PERMISSIONS.md has the diff rows, and its "Replay history" rows name the predicate; DOCS.md's
+   "The reading view" has the scrub bar's links; TODO.md has "Who may see a doc's history",
+   "`?at=` is ignored for a reader without the scrub bar, and says nothing" and the worker's
+   untried Safari, and its size-guards entry the deadline and the phone. CLAUDE.md has the
+   history trigger (below). `e2e/doc-diff.spec.ts`. No migration.
 3. **Forks.** The duplicate-slug fix first, then the migration, `doc-fork.ts` and
    `fork-seed.ts`, `createDocWithContent`'s options, the scrub bar's position getter, the
    Actions menu and the Fork dialog, the family lines with their diff links, `sideOrder`'s fork
@@ -711,11 +769,17 @@ its own before forks go out.
    PERMISSIONS.md's fork rows; TODO.md gains "A snapshot at a fork point" ("The function");
    CLAUDE.md, the strip trigger (below); `e2e/doc-fork.spec.ts`.
    If it reviews better as two, it splits at the family lines.
+4. **Sliders on the diff page** ("Planned: sliders on the diff page"). It needs item 2 alone,
+   so it can be built before item 3. The shared block-building function and its parity test
+   first; then the sliders, the worker's restart and the address. DOCS.md and this file's
+   "Diffs" gain it as built; `e2e/doc-diff.spec.ts` gains a slid side's rows and the address
+   it leaves. No migration.
 
-**Each PR deploys once it merges**, so the feature reaches an instance in three steps, and the
+**Each PR deploys once it merges**, so the feature reaches an instance in four steps, and the
 diffs work there before forks do.
 
-**CLAUDE.md's triggers**, each a sentence and a pointer to docs/FORKS.md:
+**CLAUDE.md's triggers**, each a sentence and a pointer to docs/FORKS.md. The first is there;
+the second lands with PR 3:
 
 - **at PR 2:** showing a doc's history is checked through `canUserSeeDocHistory`, and a version
   through `canUserSeeDocVersion`, never through `canUserEditDoc` directly, and before
@@ -724,13 +788,18 @@ diffs work there before forks do.
 - **at PR 3:** the `annotation` strip in `forkSeed` is the only guard against copying a
   parent's notes, since the doc schema accepts the mark.
 
-**Testing** ports what `e2e/wiki.spec.ts` checks of forks and diffs, without addresses. Diffs:
-every check of rows waits for the island to mark itself done; a foreign version and one past the
-bound are 404s, a version is Forbidden to a reader without the history, a deleted side is a 404,
-the same doc on both sides is a 200, the scrub bar's links carry the right sides, a diff with
-now asked for while a socket is still typing has the pinned version's text on the left and the
-later text on the right, and a fork ending in a heading, opened in the editor, gains the
-trailing paragraph and the diff leaves it out. Forks: a reader forks the latest, an editor forks
+**Testing** ports what `e2e/wiki.spec.ts` checks of forks and diffs, without addresses.
+Diffs, in `e2e/doc-diff.spec.ts`: every check of rows waits for the island to mark itself done;
+a foreign version and one past the bound are 404s, a version is Forbidden to a reader without
+the history, whatever the id, a deleted side is a 404, the same doc on both sides is a 200, the
+headers say Earlier and Later for a pair in order, the later-on-left line shows when it is
+swapped, and neither shows for two unrelated docs; the scrub bar's links carry the right
+sides, and Back from one returns to the bar at its position, unpinned; side-by-side's link
+names its pair by id; a diff with now asked for while a socket is still typing has the
+scrubbed-to version's text on the left and the later text on the right, and the bar says
+changes have come in; and a doc ending in a heading, opened in the editor, gains the trailing
+paragraph and the diff leaves it out. With forks that last check is also made of a fork. Forks:
+a reader forks the latest, an editor forks
 at the version the scrub bar is on, a reader's version is refused, a deleted parent is not
 found and an unreadable one is Forbidden, a visibility that is neither value is refused, the parent
 has no more `ydoc_snapshot` rows after a fork than before it,
@@ -796,6 +865,8 @@ Made here:
   ("A doc as it is now").
 - **The diff page opens no collab connection**; the scrub bar's note that changes have come in
   is the one live part ("No collab connection").
+- **Two ways to choose a diff's versions, and both are kept**: the scrub bar's pin on the doc,
+  and sliders on the diff page ("Planned: sliders on the diff page").
 - **A fork writes nothing to its parent**: no snapshot at the fork point, whose costs fall on
   the parent and whose saving is small where measured ("The function").
 - **"Publish as blog post" moves into an Actions menu**, beside "Fork…", which the wiki later
@@ -803,9 +874,9 @@ Made here:
 
 ## Open
 
-Nothing blocks the build's start. **One choice is made during it**: how the diff page shows
-which side is later, tried at two stops ("Which side is later"). Who should see more of a
-doc's history is left to the permissions redesign.
+Nothing blocks PR 3's start. **One choice is made during it**: how the diff page shows a fork
+against its parent, tried at its stop ("Which side is later"). Who should see more of a doc's
+history is left to the permissions redesign.
 
 ## Deferred
 

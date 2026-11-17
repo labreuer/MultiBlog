@@ -5025,4 +5025,6 @@ the consent page, the second and last. **Plan and what is built:
 Planned 2026-11-16: a fork is a new doc seeded from another doc's text at one version, which
 records where it came from, and a diff shows two docs, or one doc at two versions chosen on the
 scrub bar, word by word. Both are taken from the `wiki` branch without the wiki, which adds its
-addresses on top when it is rebuilt. **Plan: [docs/FORKS.md](docs/FORKS.md).**
+addresses on top when it is rebuilt. Built 2026-11-17: the diffs, at `/diff/<left>/<right>`,
+with the scrub bar's pin and links and side-by-side's link. Forks are not built. **Plan and
+what is built: [docs/FORKS.md](docs/FORKS.md).**

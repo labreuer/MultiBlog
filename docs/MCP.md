@@ -737,10 +737,10 @@ read returned, or an annotation's (§9).
 - **How.** It is the edit endpoint's alignment (below) run as a read: the doc rebuilt once at
   `version`, as anchoring rebuilds it (§7), its blocks aligned with the doc as read, and a
   word-level diff within each pair. The `version` is validated as an anchor's is.
-- **Who may ask: the doc's editors.** It shows the doc's history, and history is
-  `canUserEditDoc`'s, as the reading view's scrub bar is (`/api/doc/[id]/replay`;
-  PERMISSIONS.md). A reader who can't edit the doc is refused with `forbidden`, whatever
-  version they send.
+- **Who may ask: whoever may see the doc's history**, which is its editors
+  (`canUserSeeDocHistory`; FORKS.md, "Who may see a doc's history"), as the reading view's
+  scrub bar is (`/api/doc/[id]/replay`; PERMISSIONS.md). A reader it refuses gets
+  `forbidden`, whatever version they send.
 - **What it is for.** A client catches up on a long doc without reading all of it again, and
   sees how a passage has changed since a note on it was made.
 

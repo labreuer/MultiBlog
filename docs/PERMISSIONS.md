@@ -69,7 +69,7 @@ doc-independent, so it is callable directly but unreachable through the UI.
 | Read `/doc/[slug]` | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Edit `/doc/[slug]/edit` | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Collab connection | write | write | write | ✗ | ✗ |
-| Replay history (the scrub bar; MCP's `since`) | ✅ | ✅ | ✅ | ❌ | ❌ |
+| See history (`canUserSeeDocHistory`: the scrub bar; MCP's `since`) | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Visibility / byline / slug / delete | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Listed in `/docs` | ✅ | ✅ | ✅ | — | — |
 | Edit link in `/docs` | ✅ | ✅ | ✅ | — | — |
@@ -79,6 +79,8 @@ doc-independent, so it is callable directly but unreachable through the UI.
 | Listed in `/annotations` | ✅ | ✅ | ✅ | — | — |
 | Create doc link | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Side-by-side | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Diff, as it is now (`/diff`; the other side must be readable too) | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Diff at a version | ✅ | ✅ | ✅ | ❌ | ❌ |
 
 ## 2. PRIVATE & not in `doc_author`
 
@@ -90,7 +92,7 @@ byline, role notwithstanding.
 | Read `/doc/[slug]` | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Edit `/doc/[slug]/edit` | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Collab connection | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Replay history (the scrub bar; MCP's `since`) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| See history (`canUserSeeDocHistory`: the scrub bar; MCP's `since`) | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Visibility / byline / slug / delete | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Listed in `/docs` | ⚠️ | ❌ | ❌ | — | — |
 | Edit link in `/docs` | ❌ | ❌ | ❌ | — | — |
@@ -100,6 +102,8 @@ byline, role notwithstanding.
 | Listed in `/annotations` | ❌ | ❌ | ❌ | — | — |
 | Create doc link | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Side-by-side | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Diff, as it is now (`/diff`; the other side must be readable too) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Diff at a version | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 ## 3. SHARED & in `doc_author`
 
@@ -108,7 +112,7 @@ byline, role notwithstanding.
 | Read `/doc/[slug]` | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Edit `/doc/[slug]/edit` | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Collab connection | write | write | write | read-only | ✗ |
-| Replay history (the scrub bar; MCP's `since`) | ✅ | ✅ | ✅ | ❌ | ❌ |
+| See history (`canUserSeeDocHistory`: the scrub bar; MCP's `since`) | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Visibility / byline / slug / delete | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Listed in `/docs` | ✅ | ✅ | ✅ | — | — |
 | Edit link in `/docs` | ✅ | ✅ | ✅ | — | — |
@@ -118,6 +122,8 @@ byline, role notwithstanding.
 | Listed in `/annotations` | ✅ | ✅ | ✅ | — | — |
 | Create doc link | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Side-by-side | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Diff, as it is now (`/diff`; the other side must be readable too) | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Diff at a version | ✅ | ✅ | ✅ | ❌ | ❌ |
 
 ## 4. SHARED & not in `doc_author`
 
@@ -129,7 +135,7 @@ inconsistencies" below, both of which are visible here.
 | Read `/doc/[slug]` | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Edit `/doc/[slug]/edit` | ✅ | ✅ | **❌** | ❌ | ❌ |
 | Collab connection | write | write | **read-only** | read-only | ✗ |
-| Replay history (the scrub bar; MCP's `since`) | ✅ | ✅ | ❌ | ❌ | ❌ |
+| See history (`canUserSeeDocHistory`: the scrub bar; MCP's `since`) | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Visibility / byline / slug / delete | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Listed in `/docs` | ✅ | ✅ | **❌** | — | — |
 | Edit link in `/docs` | ✅ | ✅ | ❌ | — | — |
@@ -139,6 +145,8 @@ inconsistencies" below, both of which are visible here.
 | Listed in `/annotations` | ✅ | ✅ | **✅** | — | — |
 | Create doc link | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Side-by-side | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Diff, as it is now (`/diff`; the other side must be readable too) | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Diff at a version | ✅ | ✅ | ❌ | ❌ | ❌ |
 
 ## Axis-independent — neither visibility nor byline applies
 
@@ -214,7 +222,7 @@ person coming off a doc's byline must not thereby lose credit for what is alread
 | Edit the title, byline, tags, moderation policy; delete/restore | ✅ |
 | Unpublish / cancel schedule | ✅ (`unpublishPost` takes `canUserEditPost` only) |
 | See the post's published content | ✅ (its stored `proseJson`, server-rendered) |
-| Scrub the doc's history | ❌ `/api/doc/[id]/replay` is `canUserEditDoc`-gated |
+| Scrub the doc's history | ❌ `/api/doc/[id]/replay` is `canUserSeeDocHistory`-gated, which is `canUserEditDoc`'s answer (FORKS.md, "Who may see a doc's history") |
 | Publish / republish / schedule | ❌ `publishPostFromDoc` requires `canUserEditDoc` too |
 | See the doc's tags offered for carrying across | only if `canUserReadDoc` (see Tags, below) |
 | Reach the doc itself | as far as `canUserReadDoc` allows, and no further |
@@ -803,7 +811,8 @@ Re-derive from these rather than trusting the tables after an authz change:
 | `/annotations` row scoping | `src/app/annotations/page.tsx` |
 | `/doc/[slug]` read gate · `/doc/[slug]/edit` edit gate | `src/app/doc/[slug]/page.tsx`, `…/edit/page.tsx` |
 | Collab token: writable vs read-only vs refused | `src/app/api/doc/[id]/token/route.ts` |
-| A doc's history (`canUserEditDoc`): the scrub bar's replay, and MCP's `since` | `src/app/api/doc/[id]/replay/route.ts`; `readDoc` in `src/lib/mcp/read/doc.ts` |
+| A doc's history, any state of it but the current one: the scrub bar's replay and its mounting, MCP's `since`, and a diff's versions (asked before the version is looked for) | `canUserSeeDocHistory`, `docsWithVisibleHistoryWhere` and `canUserSeeDocVersion` in `src/lib/doc-authz.ts`, applied in `src/app/api/doc/[id]/replay/route.ts`, `src/app/doc/[slug]/page.tsx`, `readDoc` in `src/lib/mcp/read/doc.ts` and `loadDiffPair` |
+| The diff route's pair gate | `loadDiffPair` in `src/app/diff/[left]/[right]/page.tsx` |
 | Doc mutations (visibility, byline, slug, record, delete) | `src/lib/doc-manage.ts`, wrapped by `src/app/actions/docs.ts` |
 | File mutations (visibility, title, slug, owners, delete), a version's promotion and abandoning, and the upload of a file or of a version | `src/lib/file-manage.ts`, `src/lib/file-ingest.ts` |
 | Who may upload a new version of a file (its managers, and a bot whose person manages it) | `canUserUploadFileVersion` in `src/lib/file-authz.ts` |
