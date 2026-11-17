@@ -1,6 +1,6 @@
 import { takeRateLimit } from "@/lib/api/rate-limit";
 import { ALL_SCOPES, authenticateTokenId } from "@/lib/api/tokens";
-import { botRoleRefusal } from "@/lib/bot-rules";
+import { tokenRefusal } from "@/lib/bot-rules";
 import type { ApiScope } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { signAccessToken } from "./access-token";
@@ -116,15 +116,19 @@ async function redeemCode(form: URLSearchParams): Promise<TokenAnswer> {
   }
 
   // The bot must still work for the person who approved it, and both be
-  // live: the soft-delete filter leaves a deleted account out. Nor may it
-  // have come to outrank them meanwhile, since §3's check would refuse every
-  // call the connection made.
+  // live: the soft-delete filter leaves a deleted account out. Nor may §3's
+  // check have come to refuse the pair meanwhile, the bot outranking its
+  // person or an ADMIN turning connections off for either: every call the
+  // connection made would be refused. The whole check, not the rank rule
+  // alone, so a code minted before the flag was cleared is refused here.
+  const select = { id: true, role: true, worksForUserId: true, mcpAllowed: true } as const;
   const [bot, issuer] = await Promise.all([
-    prisma.user.findUnique({ where: { id: row.userId }, select: { worksForUserId: true, role: true } }),
-    prisma.user.findUnique({ where: { id: row.issuerId }, select: { id: true, role: true } }),
+    prisma.user.findUnique({ where: { id: row.userId }, select }),
+    prisma.user.findUnique({ where: { id: row.issuerId }, select }),
   ]);
-  if (!bot || !issuer || bot.worksForUserId !== issuer.id || botRoleRefusal(bot.role, issuer.role) !== null) {
-    return invalidGrant("The account no longer works for the person who approved the connection.");
+  // A person's own code is never minted, and `tokenRefusal` would accept one.
+  if (!bot || !issuer || bot.worksForUserId === null || tokenRefusal(bot, issuer) !== null) {
+    return invalidGrant("The account no longer works for the person who approved the connection, or its connections are turned off.");
   }
 
   const now = new Date();

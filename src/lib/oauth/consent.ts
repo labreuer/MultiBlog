@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { ApiScope, Role } from "@/generated/prisma/enums";
 import { auth } from "@/lib/auth";
-import { botRoleRefusal } from "@/lib/bot-rules";
+import { tokenRefusalOf, type TokenRefusal } from "@/lib/bot-rules";
 import { prisma } from "@/lib/prisma";
 import { replacesConnections, type OauthClientInfo } from "./clients";
 import { NEWEST_REFRESH_TOKEN } from "./refresh";
@@ -15,13 +15,22 @@ import { hasLapsed } from "./rotation";
 // shared with Claude. The page offers only the bots that work for whoever is
 // signed in, and that §3's check would accept (src/lib/bot-rules.ts), and
 // that person becomes the connection's issuer.
+//
+// **Each asks §3's whole check, `tokenRefusalOf`, never the rank rule by
+// itself**, so the page offers exactly what the check accepts: a bot that
+// outranks its person is left out, and so is one an ADMIN has turned
+// connections off for, and every bot of a person they are turned off for.
 
 /** How long a code is good for, and it is good once. */
 export const CODE_TTL_MS = 2 * 60_000;
 
 export type Bot = { id: string; name: string | null; slug: string };
 
-export type Person = { id: string; name: string | null; email: string; role: Role };
+/** A bot the page can't offer, with why §3's check would refuse its token. */
+export type RefusedBot = Bot & { reason: TokenRefusal["reason"] };
+
+/** `mcpAllowed` is false while an ADMIN has connections turned off for the account (§21, "Connections turned off for an account"). */
+export type Person = { id: string; name: string | null; email: string; role: Role; mcpAllowed: boolean };
 
 /**
  * Whoever is signed in, if their account is still live. The row is read, not
@@ -32,25 +41,36 @@ export async function signedInPerson(): Promise<Person | null> {
   const session = await auth();
   const id = session?.user?.id;
   if (!id) return null;
-  return prisma.user.findUnique({ where: { id }, select: { id: true, name: true, email: true, role: true } });
+  return prisma.user.findUnique({ where: { id }, select: { id: true, name: true, email: true, role: true, mcpAllowed: true } });
+}
+
+/** `person` as §3's check reads a token's issuer. */
+function issuerOf(person: Person) {
+  return { id: person.id, role: person.role, mcpAllowed: person.mcpAllowed };
 }
 
 /**
  * The live accounts that work for `person`, by name: `offered`, the ones the
- * page offers, and `refused`, the ones §3's check would refuse a token of, so
- * the page can say why it offers none. A bot is refused when it ranks above
- * its person, and every one of a COMMENTER's is. A deleted bot is left out by
- * the soft-delete filter (src/lib/prisma.ts).
+ * page offers, and `refused`, the ones §3's check would refuse a token of,
+ * each with its reason, so the page can name them and say why. A bot is
+ * refused when it ranks above its person or has connections turned off;
+ * every one of a COMMENTER's is, and every one of a person whose own
+ * connections are turned off. A deleted bot is left out by the soft-delete
+ * filter (src/lib/prisma.ts).
  */
-export async function botsFor(person: Person): Promise<{ offered: Bot[]; refused: Bot[] }> {
+export async function botsFor(person: Person): Promise<{ offered: Bot[]; refused: RefusedBot[] }> {
   const bots = await prisma.user.findMany({
     where: { worksForUserId: person.id },
-    select: { id: true, name: true, slug: true, role: true },
+    select: { id: true, name: true, slug: true, role: true, worksForUserId: true, mcpAllowed: true },
     orderBy: [{ name: "asc" }, { slug: "asc" }],
   });
   const offered: Bot[] = [];
-  const refused: Bot[] = [];
-  for (const { id, name, slug, role } of bots) (botRoleRefusal(role, person.role) === null ? offered : refused).push({ id, name, slug });
+  const refused: RefusedBot[] = [];
+  for (const { name, slug, ...account } of bots) {
+    const refusal = tokenRefusalOf(account, issuerOf(person));
+    if (refusal === null) offered.push({ id: account.id, name, slug });
+    else refused.push({ id: account.id, name, slug, reason: refusal.reason });
+  }
   return { offered, refused };
 }
 
@@ -79,8 +99,9 @@ export async function connectedBots(client: OauthClientInfo, personId: string, b
 
 /** Whether `botId` is a live account working for `person`, one `botsFor` would offer. */
 export async function worksFor(botId: string, person: Person): Promise<boolean> {
-  const bot = await prisma.user.findUnique({ where: { id: botId }, select: { worksForUserId: true, role: true } });
-  return bot !== null && bot.worksForUserId === person.id && botRoleRefusal(bot.role, person.role) === null;
+  const bot = await prisma.user.findUnique({ where: { id: botId }, select: { id: true, worksForUserId: true, role: true, mcpAllowed: true } });
+  // A person's own id is refused before the check, which would accept it as their own token's account.
+  return bot !== null && bot.worksForUserId === person.id && tokenRefusalOf(bot, issuerOf(person)) === null;
 }
 
 export function hashCode(code: string): string {

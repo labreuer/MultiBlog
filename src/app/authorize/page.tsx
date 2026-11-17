@@ -13,7 +13,7 @@ import {
 import { signOut } from "@/lib/auth";
 import { findClient } from "@/lib/oauth/clients";
 import LocalTime from "@/components/LocalTime";
-import { botsFor, connectedBots, signedInPerson, type Bot, type Person } from "@/lib/oauth/consent";
+import { botsFor, connectedBots, signedInPerson, type Bot, type Person, type RefusedBot } from "@/lib/oauth/consent";
 import { issuer, mcpEndpointUrl } from "@/lib/oauth/discovery";
 import { signInPath } from "@/lib/sign-in-redirect";
 import { SITE_TITLE } from "@/lib/site-config";
@@ -71,6 +71,9 @@ export default async function AuthorizePage({
   const connected = await connectedBots(request.client, person.id, bots.offered.map((bot) => bot.id));
   const name = request.client.name;
   const host = new URL(request.redirectUri).host;
+  // Nothing is offered to a person whose connections are turned off, whatever
+  // bots they have: §3's check refuses every token they would issue.
+  const canApprove = person.mcpAllowed && bots.offered.length > 0;
   const publisher = clientIdHost(request.client.clientId);
 
   // Signs out and back in, to this same request. A server action, so it
@@ -115,8 +118,9 @@ export default async function AuthorizePage({
           {authorizeParamsOf(params).map(([field, value], i) => (
             <input key={`${field}-${i}`} type="hidden" name={field} value={value} />
           ))}
-          {bots.offered.length > 0 ? (
+          {canApprove ? (
             <>
+              <RefusedBots refused={bots.refused} client={name} />
               <label className={account.field}>
                 Connect as
                 <select name="bot" className={styles.select}>
@@ -165,7 +169,7 @@ export default async function AuthorizePage({
             <NoBot person={person} refused={bots.refused} client={name} />
           )}
           <div className={styles.buttons}>
-            {bots.offered.length > 0 && (
+            {canApprove && (
               <button type="submit" name="decision" value="approve" className={account.button}>
                 Approve
               </button>
@@ -184,8 +188,48 @@ function botName(bot: Bot): string {
   return bot.name ?? bot.slug;
 }
 
-/** Why there is nothing to connect as: a COMMENTER, bots that outrank the person, or no bot at all. */
-function NoBot({ person, refused, client }: { person: Person; refused: Bot[]; client: string }) {
+/**
+ * The bots that work for the person and can't be offered, each group with
+ * its reason: above the list when their other bots are offered, and in the
+ * list's place when none are.
+ */
+function RefusedBots({ refused, client }: { refused: RefusedBot[]; client: string }) {
+  const outranking = refused.filter((bot) => bot.reason === "outranks");
+  const off = refused.filter((bot) => bot.reason === "account-off");
+  return (
+    <>
+      {outranking.length > 0 && (
+        <p className={styles.noBot}>
+          {outranking.map(botName).join(", ")} {outranking.length === 1 ? "works" : "work"}{" "}
+          for you, but a bot can&rsquo;t outrank its person, and {outranking.length === 1 ? "its role is" : "their roles are"} above
+          yours. An ADMIN can lower {outranking.length === 1 ? "its role" : "theirs"} or raise yours, after which you start the connection
+          again from {client}.
+        </p>
+      )}
+      {off.length > 0 && (
+        <p className={styles.noBot}>
+          {off.map(botName).join(", ")} {off.length === 1 ? "works" : "work"}{" "}
+          for you, but an ADMIN has turned connections off for {off.length === 1 ? "it" : "them"}. An ADMIN can turn them on again, after
+          which you start the connection again from {client}.
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * Why there is nothing to connect as: connections turned off for the person,
+ * a COMMENTER, bots §3's check refuses, or no bot at all.
+ */
+function NoBot({ person, refused, client }: { person: Person; refused: RefusedBot[]; client: string }) {
+  if (!person.mcpAllowed) {
+    return (
+      <p className={styles.noBot}>
+        An ADMIN has turned connections off for your account, so {client} can&rsquo;t be connected to it or to a bot
+        that works for you.
+      </p>
+    );
+  }
   if (person.role === "COMMENTER") {
     return (
       <p className={styles.noBot}>
@@ -194,17 +238,7 @@ function NoBot({ person, refused, client }: { person: Person; refused: Bot[]; cl
       </p>
     );
   }
-  if (refused.length > 0) {
-    const one = refused.length === 1;
-    return (
-      <p className={styles.noBot}>
-        {refused.map(botName).join(", ")} {one ? "works" : "work"}{" "}
-        for you, but a bot can&rsquo;t outrank its person, and {one ? "its role is" : "their roles are"} above
-        yours. An ADMIN can lower {one ? "its role" : "theirs"} or raise yours, after which you start the connection
-        again from {client}.
-      </p>
-    );
-  }
+  if (refused.length > 0) return <RefusedBots refused={refused} client={client} />;
   return (
     <p className={styles.noBot}>
       A connection acts as a bot, an account of its own that works for you, so that what {client}{" "}

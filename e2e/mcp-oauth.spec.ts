@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { APIRequestContext, APIResponse } from "@playwright/test";
+import type { APIRequestContext, APIResponse, Browser, BrowserContext, Page } from "@playwright/test";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { OAuthMetadataSchema, OAuthProtectedResourceMetadataSchema, OAuthTokensSchema } from "@modelcontextprotocol/core";
 import { test, expect, openDashboardCard } from "./fixtures";
@@ -15,6 +15,7 @@ import {
   expireTestApiToken,
   lapseTestConnection,
   revokeTestOauthClient,
+  setTestMcpAllowed,
   setTestUserRole,
   uniqueEmail,
   type TestUser,
@@ -159,6 +160,24 @@ async function toolNames(request: APIRequestContext, accessToken: string): Promi
   const listed = await mcpRequest(request, accessToken, "tools/list");
   expect(listed.status).toBe(200);
   return (listed.body.result?.tools as { name: string }[]).map((tool) => tool.name);
+}
+
+/**
+ * A context of its own, signed in as `email` by following `url` through
+ * sign-in, as a person sent to the consent page is. Its `request` carries
+ * that person's session, for a decision posted as them. A spec whose person
+ * must not be the suite's admin uses this: one with an agent's bot, or with
+ * connections turned off (e2e/README.md).
+ */
+async function signedInAt(browser: Browser, email: string, url: string): Promise<{ context: BrowserContext; page: Page }> {
+  const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  const page = await context.newPage();
+  await page.goto(url);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(TEST_PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByText(`(${email})`)).toBeVisible();
+  return { context, page };
 }
 
 test("the documents name the endpoint and this origin, and the 401 points at them", async ({ request }) => {
@@ -718,6 +737,91 @@ test("a person with no bot to connect as is told why, and offered Cancel alone; 
     expect(new URL(page.url()).searchParams.get("code_challenge")).toBe(new URL(url).searchParams.get("code_challenge"));
   } finally {
     await context.close();
+    await deleteTestUser(email);
+  }
+});
+
+test("connections turned off for a bot: the page names it with its reason and still offers the person's other bot", async ({ browser, request }) => {
+  const d = await discover(request);
+  const email = uniqueEmail("oauth-person");
+  await createTestUser({ email, role: "AUTHOR" });
+  const bot = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: email });
+  const other = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: email });
+  const { context, page } = await signedInAt(browser, email, authorizeUrl(d, pkce().challenge));
+  try {
+    const select = page.getByRole("combobox", { name: "Connect as" });
+    await expect(select.locator("option")).toHaveCount(2);
+    const tokens = await connect(context.request, d, bot);
+    expect(await callStatus(request, tokens.access_token)).toBe(200);
+
+    await setTestMcpAllowed(bot.email, false);
+    await page.reload();
+    await expect(page.getByText(`${bot.name} works for you, but an ADMIN has turned connections off for it`)).toBeVisible();
+    await expect(select.locator("option")).toHaveText([other.name]);
+    await expect(page.getByRole("button", { name: "Approve" })).toBeVisible();
+    expect(await callStatus(request, tokens.access_token)).toBe(401);
+    // A form naming it all the same is refused, as a bot that isn't the person's is.
+    const { challenge } = pkce();
+    const posted = await decide(context.request, d, { ...authorizeFields(d, challenge), bot: bot.id, decision: "approve" });
+    expect(posted.status()).toBe(403);
+
+    // Nothing was revoked: turned on again, the same connection works, and refreshes.
+    await setTestMcpAllowed(bot.email, true);
+    expect(await callStatus(request, tokens.access_token)).toBe(200);
+    await refreshed(request, d, tokens.refresh_token);
+  } finally {
+    await context.close();
+    await deleteTestUser(bot.email);
+    await deleteTestUser(other.email);
+    await deleteTestUser(email);
+  }
+});
+
+test("connections turned off for a person: Cancel alone on the page, no decision or earlier code accepted, and the dashboard says why", async ({ browser, request }) => {
+  const d = await discover(request);
+  const email = uniqueEmail("oauth-person");
+  await createTestUser({ email, role: "AUTHOR" });
+  const bot = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: email });
+  const { context, page } = await signedInAt(browser, email, authorizeUrl(d, pkce().challenge));
+  try {
+    await expect(page.getByRole("button", { name: "Approve" })).toBeVisible();
+    const tokens = await connect(context.request, d, bot);
+    expect(await callStatus(request, tokens.access_token)).toBe(200);
+    // A code minted while connections were on, and not yet redeemed.
+    const { verifier, challenge } = pkce();
+    const code = await approve(context.request, d, bot, challenge);
+
+    await setTestMcpAllowed(email, false);
+    await page.reload();
+    await expect(page.getByText("An ADMIN has turned connections off for your account")).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Connect as" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
+
+    // The page not offering Approve proves nothing about a form posted all the same.
+    const posted = await decide(context.request, d, { ...authorizeFields(d, pkce().challenge), bot: bot.id, decision: "approve" });
+    expect(posted.status()).toBe(403);
+    expect(await posted.text()).toContain("turned connections off for your account");
+    // The earlier code, the live connection and its refresh are all refused.
+    expect(await errorOf(await redeem(request, d, { code, code_verifier: verifier }))).toBe("invalid_grant");
+    expect(await callStatus(request, tokens.access_token)).toBe(401);
+    expect(await errorOf(await refresh(request, d, tokens.refresh_token))).toBe("invalid_grant");
+
+    await page.goto("/dashboard");
+    await openDashboardCard(page, "Connections");
+    await expect(page.getByText("An ADMIN has turned connections off for your account. Nothing listed here works")).toBeVisible();
+    await expect(page.getByRole("row").filter({ hasText: bot.name })).toHaveCount(1);
+
+    // Turned on again, the same connection works, and the line is gone.
+    await setTestMcpAllowed(email, true);
+    expect(await callStatus(request, tokens.access_token)).toBe(200);
+    await page.reload();
+    await openDashboardCard(page, "Connections");
+    await expect(page.getByRole("row").filter({ hasText: bot.name })).toHaveCount(1);
+    await expect(page.getByText("An ADMIN has turned connections off for your account")).toHaveCount(0);
+  } finally {
+    await context.close();
+    await deleteTestUser(bot.email);
     await deleteTestUser(email);
   }
 });

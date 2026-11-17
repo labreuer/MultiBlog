@@ -71,6 +71,11 @@ function buildOrderBy(sort: SortColumn<UsersSortKey>[]): Prisma.UserOrderByWithR
       case "worksFor":
         // A person's row has no one to work for, and sorts as a null.
         return { worksFor: { name: { sort: dir, nulls: "last" } } };
+      case "agent":
+        // Null on every person's row, and on a bot that is for no agent.
+        return { agent: { sort: dir, nulls: "last" } };
+      case "mcpAllowed":
+        return { mcpAllowed: dir };
     }
   });
 }
@@ -177,6 +182,8 @@ export default async function UsersPage({
     deletedAt: user.deletedAt,
     deleted: user.deletedByUserId !== null,
     worksFor: user.worksFor,
+    agent: user.agent,
+    mcpAllowed: user.mcpAllowed,
   }));
 
   return (

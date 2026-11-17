@@ -19,6 +19,8 @@ import {
   updateUserWebsite,
   sendUserInvite,
   updateUserWorksFor,
+  updateUserAgent,
+  updateUserMcpAllowed,
   deleteUser,
   restoreUser,
   bulkDeleteUsers,
@@ -26,8 +28,8 @@ import {
   bulkSetUserRole,
   bulkSetUserModerationPolicy,
 } from "@/app/actions/users";
-import { Role, ModerationPolicy } from "@/generated/prisma/enums";
-import { ROLES_BY_RANK, botRoleRefusal, outranks } from "@/lib/bot-rules";
+import { Role, ModerationPolicy, type Agent } from "@/generated/prisma/enums";
+import { AGENTS, AGENT_KEYS, ROLES_BY_RANK, botRoleRefusal, outranks } from "@/lib/bot-rules";
 import { PAGE_SIZE_OPTIONS, sameCols, type PageSize, type TablePrefs } from "@/lib/table-query";
 import { type UsersFilters, buildUsersQueryString } from "@/lib/users-query";
 import { useTableFilters } from "@/components/table/use-table-filters";
@@ -109,7 +111,27 @@ export type UserRow = {
   deleted: boolean;
   /** The person a bot works for; null on a person's row. */
   worksFor: BotPerson | null;
+  /** The agent a bot is for (docs/MCP.md §21, "A bot's agent"); null on a person's row, and on a bot that is for none. */
+  agent: Agent | null;
+  /** False while an ADMIN has connections turned off for the account. */
+  mcpAllowed: boolean;
 };
+
+/**
+ * A bot action's answer, with its refusal thrown here in the browser. The
+ * action returns a refusal rather than throwing it, since Next redacts a
+ * thrown message in production (src/app/actions/users.ts's `refusalOf`);
+ * thrown again on this side it keeps its words, and a cell shows it as it
+ * shows any failure.
+ */
+export async function orRefused<T>(answer: Promise<T | { error: string }>): Promise<T> {
+  const result = await answer;
+  if (result !== null && typeof result === "object" && "error" in result) throw new Error(result.error);
+  return result;
+}
+
+/** The Agent select's options: none, then every agent. A select's value is a string, so none is the empty one. */
+const AGENT_OPTIONS: readonly (Agent | "")[] = ["", ...AGENT_KEYS];
 
 // Every editable cell reports what it's doing through the row's left border
 // (PLAN.md §16f) rather than each owning its own indicator: `onEdit` paints
@@ -486,7 +508,7 @@ function WorksForCell({
     startTransition(async () => {
       try {
         await run(async () => {
-          await updateUserWorksFor(userId, to.id);
+          await orRefused(updateUserWorksFor(userId, to.id));
         });
         router.refresh();
       } catch (err) {
@@ -594,6 +616,8 @@ const SORTABLE_KEYS = [
   "deletedAt",
   "deleted",
   "worksFor",
+  "agent",
+  "mcpAllowed",
 ] as const;
 
 export default function UsersTable({
@@ -664,7 +688,7 @@ export default function UsersTable({
       try {
         await runWithStatus(row.id, async () => {
           if (row.deleted) {
-            await restoreUser(row.id);
+            await orRefused(restoreUser(row.id));
           } else {
             await deleteUser(row.id);
             revealRow(row);
@@ -727,7 +751,9 @@ export default function UsersTable({
         <SelectCell
           value={row.role}
           options={rolesFor(row)}
-          save={(next) => updateUserRole(row.id, next)}
+          save={async (next) => {
+            await orRefused(updateUserRole(row.id, next));
+          }}
           failureMessage="Failed to update role."
           run={(action) => runWithStatus(row.id, action)}
         />
@@ -859,7 +885,8 @@ export default function UsersTable({
         <InviteCell
           userId={row.id}
           email={row.email}
-          disabled={row.deleted || row.worksFor !== null}
+          // An account with an agent has no password either, by a CHECK: a bot, or one whose person is gone.
+          disabled={row.deleted || row.worksFor !== null || row.agent !== null}
           run={(action) => runWithStatus(row.id, action)}
         />
       ),
@@ -885,6 +912,47 @@ export default function UsersTable({
         ) : (
           ""
         ),
+    },
+    // The agent a bot is for (docs/MCP.md §21, "A bot's agent"): a select on
+    // a bot's row, blank on a person's. Changing it leaves the bot's name and
+    // initials alone, each having a cell of its own in the row. An account
+    // with an agent and no person, a bot whose person was hard-deleted,
+    // shows its agent as text: only a bot's can be changed.
+    agent: {
+      sortKey: "agent",
+      cell: (row) =>
+        row.worksFor ? (
+          <SelectCell
+            value={row.agent ?? ""}
+            options={AGENT_OPTIONS}
+            optionLabel={(agent) => (agent === "" ? "none" : AGENTS[agent].name)}
+            disabled={row.deleted}
+            save={async (next) => {
+              await orRefused(updateUserAgent(row.id, next));
+            }}
+            failureMessage="Failed to change the bot's agent."
+            run={(action) => runWithStatus(row.id, action)}
+          />
+        ) : row.agent ? (
+          AGENTS[row.agent].name
+        ) : (
+          ""
+        ),
+    },
+    // Whether connections are on for the account ("Connections turned off
+    // for an account"): cleared, §3's check refuses its tokens, and a
+    // person's bots' with them.
+    mcpAllowed: {
+      sortKey: "mcpAllowed",
+      headerTitle: "Whether AI agents may connect as this account, or as a bot that works for it",
+      cell: (row) => (
+        <CheckboxCell
+          checked={row.mcpAllowed}
+          save={(next) => updateUserMcpAllowed(row.id, next)}
+          failureMessage="Failed to change whether connections are allowed."
+          run={(action) => runWithStatus(row.id, action)}
+        />
+      ),
     },
     // Defaulted hidden (§16l/§16i): the raw timestamp behind the existing
     // Deleted action column's boolean.
@@ -1001,11 +1069,13 @@ export default function UsersTable({
             <strong>Rows/page</strong> is that account&apos;s own default page size for every admin table. A{" "}
             <code>?pageSize=</code> in the URL overrides it for that navigation only, without changing the stored
             preference (PLAN.md §16b). <strong>Deleted at</strong>, <strong>Send invite</strong>,{" "}
-            <strong>Invite URL</strong> and <strong>Works for</strong> are hidden by default (Columns picker,
-            above). The invite URL disappears once that invite is accepted or revoked — re-showing it means
-            sending again. <strong>Works for</strong> is a bot&apos;s person, the one who issues its tokens
-            (docs/MCP.md §21); moving a bot stops the tokens its previous person issued for it, and a bot is
-            never invited.
+            <strong>Invite URL</strong>, <strong>Works for</strong>, <strong>Agent</strong> and <strong>MCP</strong>{" "}
+            are hidden by default (Columns picker, above). The invite URL disappears once that invite is accepted or
+            revoked — re-showing it means sending again. <strong>Works for</strong> is a bot&apos;s person, the one who
+            issues its tokens (docs/MCP.md §21); moving a bot stops the tokens its previous person issued for it, and a
+            bot is never invited. <strong>Agent</strong> is the AI agent a bot is for, and a person has one live bot
+            per agent. Clearing <strong>MCP</strong> stops every token of that account, and of the bots that work for
+            it, at its next call; setting it again brings them back.
           </p>
         }
       />

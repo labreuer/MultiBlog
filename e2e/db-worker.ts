@@ -72,9 +72,9 @@ import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import { issueApiToken } from "@/lib/api/tokens";
 import { softDeleteUser } from "@/lib/user-delete";
-import { createBot, moveBot, requireBotRole, requireInvitable } from "@/lib/bots";
+import { createBot, moveBot, requireBotRole, requireInvitable, restoreAccount, setBotAgent } from "@/lib/bots";
 import { prosemirrorToYXmlFragment } from "y-prosemirror";
-import type { ApiScope, ApiTokenClient } from "@/generated/prisma/enums";
+import type { Agent, ApiScope, ApiTokenClient } from "@/generated/prisma/enums";
 import type { Role, ModerationPolicy, CommentStatus, DocVisibility } from "@/generated/prisma/enums";
 import { Prisma } from "@/generated/prisma/client";
 import { generateToken } from "@/lib/tokens";
@@ -177,6 +177,24 @@ export async function setTestUserRole(email: string, role: Role): Promise<void> 
 
 export async function deleteTestUser(email: string): Promise<void> {
   assertSafe(email);
+  await deleteAccount(email);
+}
+
+/**
+ * `deleteTestUser`'s body, without its address check. **An account's bots go
+ * before it, deleted ones included**, found by their person: hard-deleting a
+ * person sets `works_for_user_id` to null on each bot, after which nothing
+ * ties one to the suite, since a bot made at Approve takes its address from
+ * its person's slug, which need not start with the suite's prefix
+ * (docs/MCP.md §21, "Testing"). They skip the address check for that reason,
+ * their person having passed it.
+ */
+async function deleteAccount(email: string): Promise<void> {
+  const account = await prismaIncludingDeleted.user.findUnique({ where: { email }, select: { id: true } });
+  if (account) {
+    const bots = await prismaIncludingDeleted.user.findMany({ where: { worksForUserId: account.id }, select: { email: true } });
+    for (const bot of bots) await deleteAccount(bot.email);
+  }
   // Commenter.email is unique and its userId FK is optional, so deleting the
   // User alone strands a row that then blocks reusing this address — the same
   // collision scripts/test-user.ts documents. comment.commenter_id is ON
@@ -193,7 +211,7 @@ export async function deleteTestUser(email: string): Promise<void> {
   // authored side needs handling here. Each deleted annotation's own ydoc
   // row (§13a) has to go too, captured before the deleteMany — same "no FK
   // means nothing cascades this" reasoning as deleteTestDoc above.
-  const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  const user = account;
   if (user) {
     const annotationIds = (
       await prisma.annotation.findMany({ where: { userId: user.id }, select: { id: true } })
@@ -3239,7 +3257,9 @@ export async function sweepTestData(): Promise<{
     await prismaIncludingDeleted.tag.delete({ where: { id: tag.id } });
   }
 
-  const staleUsers = await prisma.user.findMany({
+  // Deleted ones included: a spec soft-deletes accounts, and one a crashed
+  // run left deleted is as stale as any other.
+  const staleUsers = await prismaIncludingDeleted.user.findMany({
     where: {
       OR: [
         { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } },
@@ -3320,17 +3340,92 @@ export async function createTestApiToken(opts: {
  * /users holds a real one to: a person with a password who isn't a
  * COMMENTER, and a role no higher than theirs.
  */
-export async function createTestBot(opts: { email: string; worksForEmail: string; name?: string; role?: Role }): Promise<TestUser> {
-  const { email, worksForEmail, name = `E2E Bot ${Math.random().toString(36).slice(2, 7)}`, role = "AUTHOR" } = opts;
+export async function createTestBot(opts: { email: string; worksForEmail: string; name?: string; role?: Role; agent?: Agent }): Promise<TestUser> {
+  const { email, worksForEmail, name = `E2E Bot ${Math.random().toString(36).slice(2, 7)}`, role = "AUTHOR", agent = null } = opts;
   assertSafe(email);
   assertSafe(worksForEmail);
+  // One live bot per agent per person, and nearly every spec's bots work for
+  // the suite's admin, across workers: an agent there is state they share
+  // (docs/MCP.md §21, "Testing"). A spec that needs one makes its own person.
+  if (agent !== null && worksForEmail === ADMIN_EMAIL) {
+    throw new Error("createTestBot: no bot of the suite's admin has an agent; make a person of the spec's own.");
+  }
   await deleteTestUser(email);
   const [person, admin] = await Promise.all([
     prisma.user.findUniqueOrThrow({ where: { email: worksForEmail }, select: { id: true } }),
-    prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL }, select: { id: true, role: true } }),
+    adminActor(),
   ]);
-  const bot = await createBot({ userId: admin.id, role: admin.role }, { name, personId: person.id, role, email });
+  const bot = await createBot(admin, { name, personId: person.id, role, agent, email });
   return { id: bot.id, email, name, role, slug: bot.slug };
+}
+
+/** The suite's admin, as the actor /users' bot actions act as. */
+async function adminActor(): Promise<{ userId: string; role: Role }> {
+  const admin = await prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL }, select: { id: true, role: true } });
+  return { userId: admin.id, role: admin.role };
+}
+
+/** Changes the agent a bot is for, or clears it, as /users' Agent cell does, as the suite's admin. */
+export async function setTestBotAgent(email: string, agent: Agent | null): Promise<void> {
+  assertSafe(email);
+  const [bot, admin] = await Promise.all([prisma.user.findUniqueOrThrow({ where: { email }, select: { id: true, worksFor: { select: { email: true } } } }), adminActor()]);
+  if (agent !== null && bot.worksFor?.email === ADMIN_EMAIL) {
+    throw new Error("setTestBotAgent: no bot of the suite's admin has an agent; make a person of the spec's own.");
+  }
+  await setBotAgent(admin, bot.id, agent);
+}
+
+/**
+ * Turns connections off or on for an account, as /users' MCP checkbox does
+ * (docs/MCP.md §21, "Connections turned off for an account"). Never the
+ * suite's admin: its flag would stop every other worker's calls.
+ */
+export async function setTestMcpAllowed(email: string, allowed: boolean): Promise<void> {
+  assertSafe(email);
+  if (email === ADMIN_EMAIL) throw new Error("setTestMcpAllowed: never the suite's admin, whose tokens every worker uses.");
+  await prismaIncludingDeleted.user.update({ where: { email }, data: { mcpAllowed: allowed } });
+}
+
+/**
+ * Leaves a bot working for no one by a bare UPDATE, as hard-deleting its
+ * person does (`works_for_user_id` is ON DELETE SET NULL), without deleting
+ * the person: `deleteTestUser` takes a person's bots with it.
+ */
+export async function orphanTestBot(email: string): Promise<void> {
+  assertSafe(email);
+  await prismaIncludingDeleted.user.update({ where: { email }, data: { worksForUserId: null } });
+}
+
+/** Sets a password hash in SQL, as nothing in the app can on such an account: for the CHECKs that refuse one. */
+export async function setTestPasswordHashInSql(email: string): Promise<void> {
+  assertSafe(email);
+  await prisma.$executeRaw`UPDATE "user" SET password_hash = 'x' WHERE email = ${email}`;
+}
+
+/** An account as /users shows a bot: its agent, name, initials and slug, whether connections are on, and whether it is deleted. */
+export async function getTestAccountFacts(email: string): Promise<{
+  agent: Agent | null;
+  name: string | null;
+  initials: string;
+  slug: string;
+  mcpAllowed: boolean;
+  deleted: boolean;
+  invites: number;
+}> {
+  assertSafe(email);
+  const user = await prismaIncludingDeleted.user.findUniqueOrThrow({
+    where: { email },
+    select: { agent: true, name: true, adminInitials: true, slug: true, mcpAllowed: true, deletedByUserId: true, _count: { select: { invites: true } } },
+  });
+  return {
+    agent: user.agent,
+    name: user.name,
+    initials: user.adminInitials,
+    slug: user.slug,
+    mcpAllowed: user.mcpAllowed,
+    deleted: user.deletedByUserId !== null,
+    invites: user._count.invites,
+  };
 }
 
 /** Moves a bot to another person as /users' Works for does, as the suite's admin: the previous person's tokens for it are revoked. */
@@ -3338,11 +3433,14 @@ export async function moveTestBot(botEmail: string, personEmail: string): Promis
   assertSafe(botEmail);
   assertSafe(personEmail);
   const [bot, person, admin] = await Promise.all([
-    prisma.user.findUniqueOrThrow({ where: { email: botEmail }, select: { id: true } }),
+    prisma.user.findUniqueOrThrow({ where: { email: botEmail }, select: { id: true, agent: true } }),
     prisma.user.findUniqueOrThrow({ where: { email: personEmail }, select: { id: true } }),
-    prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL }, select: { id: true, role: true } }),
+    adminActor(),
   ]);
-  return moveBot({ userId: admin.id, role: admin.role }, bot.id, person.id);
+  if (bot.agent !== null && personEmail === ADMIN_EMAIL) {
+    throw new Error("moveTestBot: no bot of the suite's admin has an agent; make a person of the spec's own.");
+  }
+  return moveBot(admin, bot.id, person.id);
 }
 
 /**
@@ -3514,10 +3612,15 @@ export async function softDeleteTestUser(email: string, byEmail: string): Promis
   await softDeleteUser(user.id, by.id);
 }
 
-/** Restores an account as /users' Restore does: the row alone, no token comes back. */
+/**
+ * Restores an account through the body /users' Restore runs (src/lib/bots.ts),
+ * as the suite's admin: the row alone, no token comes back, and a bot whose
+ * person has made a new one for its agent since is refused.
+ */
 export async function restoreTestUser(email: string): Promise<void> {
   assertSafe(email);
-  await prismaIncludingDeleted.user.update({ where: { email }, data: { deletedByUserId: null, deletedAt: null } });
+  const [user, admin] = await Promise.all([prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email }, select: { id: true } }), adminActor()]);
+  await restoreAccount(admin, user.id);
 }
 
 /**
@@ -3741,6 +3844,11 @@ const handlers = {
   repointTestBot,
   setTestUserRoleAsAdmin,
   requireTestInvitable,
+  setTestBotAgent,
+  setTestMcpAllowed,
+  orphanTestBot,
+  setTestPasswordHashInSql,
+  getTestAccountFacts,
   getTestBotFacts,
   softDeleteTestUser,
   restoreTestUser,

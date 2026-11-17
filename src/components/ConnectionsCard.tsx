@@ -12,6 +12,10 @@ import styles from "./ConnectionsCard.module.css";
 // instructions. A plain <table>, as Recent docs is: a fixed query with no
 // filters, sort or paging, which is not the admin-table kit's contract.
 //
+// **A line above the table says when connections are turned off for the
+// viewer** (§21, "Connections turned off for an account"): every row has
+// stopped working, and nothing else on /dashboard would say why.
+//
 // **The endpoint is said once, not per row**, while `/api/mcp` is the only
 // one: every row's would be the same. It becomes a column with the
 // read-only endpoint, if that is built (§21, "The read-only endpoint").
@@ -41,7 +45,7 @@ function State({ token }: { token: CardToken }) {
   }
 }
 
-export default function ConnectionsCard({ tokens }: { tokens: CardToken[] }) {
+export default function ConnectionsCard({ tokens, connectionsOff }: { tokens: CardToken[]; connectionsOff: boolean }) {
   return (
     <>
       <p>
@@ -49,6 +53,12 @@ export default function ConnectionsCard({ tokens }: { tokens: CardToken[] }) {
         claude.ai, ChatGPT or Google Antigravity, add the URL <code>{mcpEndpointUrl().href}</code> there as a custom
         MCP server, and approve it on the page it opens here. Revoking stops at the next action an agent attempts.
       </p>
+      {connectionsOff && (
+        <p className={styles.off}>
+          An ADMIN has turned connections off for your account. Nothing listed here works while they are off, and
+          nothing new can be connected; turned on again, what is listed works as before.
+        </p>
+      )}
       {tokens.length === 0 ? (
         <p className={`${styles.muted} ${styles.empty}`}>Nothing is connected.</p>
       ) : (

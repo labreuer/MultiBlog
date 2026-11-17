@@ -58,7 +58,7 @@ export async function issueApiToken(opts: {
 }): Promise<{ secret: string; id: string }> {
   const scopes = ALL_SCOPES.filter((scope) => opts.scopes.includes(scope));
   if (scopes.length === 0) throw new Error("A token needs at least one scope.");
-  const select = { id: true, role: true, worksForUserId: true } as const;
+  const select = { id: true, role: true, worksForUserId: true, mcpAllowed: true } as const;
   const [account, issuer] = await Promise.all([
     prisma.user.findUnique({ where: { id: opts.userId }, select }),
     prisma.user.findUnique({ where: { id: opts.issuerId }, select }),
@@ -160,10 +160,12 @@ export async function authenticateBearer(value: string, endpoint: URL): Promise<
  * the token too: a bot's token acts for its issuer, and an account that is
  * gone has nobody left to act for.
  *
- * **Then the issuer must be the account's person**, and a bot must not
- * outrank them or work for a COMMENTER (`tokenRefusal`, §21, "Whose
- * account"), on the two rows already read. So demoting a person stops their
- * bot's tokens on the next call, as demoting the bot itself does.
+ * **Then the issuer must be the account's person**, neither may have
+ * connections turned off, and a bot must not outrank its person or work for
+ * a COMMENTER (`tokenRefusal`, §21, "Whose account" and "Connections turned
+ * off for an account"), on the two rows already read. So demoting a person,
+ * or an ADMIN clearing their `mcp_allowed`, stops their bot's tokens on the
+ * next call, as doing either to the bot itself does.
  */
 async function authenticate(where: { tokenHash: string } | { id: string }): Promise<AuthenticatedToken | null> {
   const token = await prisma.apiToken.findUnique({
@@ -185,7 +187,7 @@ async function authenticate(where: { tokenHash: string } | { id: string }): Prom
   const now = Date.now();
   if (token.expiresAt !== null && token.expiresAt.getTime() <= now) return null;
 
-  const select = { id: true, name: true, slug: true, role: true, worksForUserId: true } as const;
+  const select = { id: true, name: true, slug: true, role: true, worksForUserId: true, mcpAllowed: true } as const;
   const [user, issuer] = await Promise.all([
     prisma.user.findUnique({ where: { id: token.userId }, select }),
     token.createdByUserId === token.userId
