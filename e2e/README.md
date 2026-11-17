@@ -616,6 +616,10 @@ the admin account.
   asked, and it, `setTestBotAgent`, `moveTestBot` and `setTestMcpAllowed`
   each refuse the admin. A spec that needs either makes a person of its own
   and signs in as them (`signedInAt` in `mcp-oauth.spec.ts`).
+  - **No spec presses Approve on the admin's consent page without choosing a
+    bot.** The first option there, for any client that is an AI agent's, is a
+    new bot, and approving it would give the admin an agent's bot. A spec
+    chooses a bot by its id, or posts one to `/authorize/decide`.
   - **Soft-delete a bot that has an agent with its own person as the
     deleter**: `softDeleteTestUser(bot.email, personEmail)`. Setup
     hard-deletes the admin at the start of every run, which nulls

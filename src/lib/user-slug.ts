@@ -35,6 +35,15 @@ async function userSlugInUse(
   return live !== null || historic !== null;
 }
 
+/**
+ * Whether `slug` is free for a new account: not reserved, nobody's slug,
+ * deleted accounts included, and in nobody's history. For a caller that
+ * picks its own candidates, as a bot made at Approve does (src/lib/bots.ts).
+ */
+export async function isUserSlugFree(slug: string): Promise<boolean> {
+  return !(await userSlugInUse(slug));
+}
+
 // excludeUserId: see uniquePostSlug's excludePostId — omitted for the normal
 // sign-up path, passed by the slug-management page to preview what
 // name/email-derived slug this user would get today.

@@ -66,7 +66,9 @@ export default function NewBotForm({ people }: { people: BotPerson[] }) {
         A bot is an AI agent&apos;s account, such as Claude&apos;s. It has no password and works for one person, who
         issues its tokens and approves its connections; it can rank no higher than they do (docs/MCP.md §21). A bot
         may be for one agent, which is the bot a connection from that agent is offered first, and a person has one
-        bot per agent.
+        bot per agent. An AUTHOR or above with no bot for an agent has one made when they approve a connection from
+        it, so this panel is for the rest: a bot for an AUTHORIZED person, one with another role or name, or one for
+        no agent.
       </p>
       {people.length === 0 ? (
         <p className={styles.lead}>No account can have a bot yet: a bot works only for someone with a password who isn&apos;t a COMMENTER.</p>

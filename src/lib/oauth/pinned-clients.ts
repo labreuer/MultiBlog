@@ -11,6 +11,8 @@
 // and `deploy/deploy.sh` runs it on every deploy; a change is then an edit
 // here. Pure, with no database, so that script and the unit tests can load it.
 
+import type { Agent } from "@/generated/prisma/enums";
+
 /** The fields of a client ID metadata document that the pins carry. */
 export type ClientMetadataDocument = {
   client_id: string;
@@ -129,12 +131,45 @@ export const ANTIGRAVITY_METADATA = {
   logo_uri: "https://antigravity.google/assets/image/brand/antigravity-icon__full-color.png",
 } as const satisfies ClientMetadataDocument;
 
-/** A pinned identity, and the `api_token.client` its connections get. */
-export type PinnedClient = { document: ClientMetadataDocument; kind: OauthClientKind };
+/**
+ * A pinned identity, the `api_token.client` its connections get, and the AI
+ * agent it is (§21, "Which agent a client is").
+ *
+ * **The agent is a field of its own, not the kind.** A kind decides the tools
+ * a token lists and whether a connection replaces the last one; an agent
+ * decides whose name a bot carries, and which bot the consent page puts
+ * first. The two disagree for Claude Code, whose kind is OTHER and whose
+ * agent is Claude, and for Antigravity, an OTHER with an agent of its own.
+ */
+export type PinnedClient = { document: ClientMetadataDocument; kind: OauthClientKind; agent: Agent };
 
 export const PINNED_CLIENTS: readonly PinnedClient[] = [
-  { document: CLAUDE_AI_METADATA, kind: "CLAUDE_AI" },
-  { document: CLAUDE_CODE_METADATA, kind: "OTHER" },
-  { document: CHATGPT_METADATA, kind: "CHATGPT" },
-  { document: ANTIGRAVITY_METADATA, kind: "OTHER" },
+  { document: CLAUDE_AI_METADATA, kind: "CLAUDE_AI", agent: "CLAUDE" },
+  { document: CLAUDE_CODE_METADATA, kind: "OTHER", agent: "CLAUDE" },
+  { document: CHATGPT_METADATA, kind: "CHATGPT", agent: "CHATGPT" },
+  { document: ANTIGRAVITY_METADATA, kind: "OTHER", agent: "ANTIGRAVITY" },
 ];
+
+/**
+ * The agent a client registered by hand has when it is given none: its
+ * kind's, for the two kinds that are one service's fallback, and none for an
+ * OTHER, which is anything a person connects.
+ */
+export function defaultAgentOf(kind: OauthClientKind): Agent | null {
+  if (kind === "CLAUDE_AI") return "CLAUDE";
+  if (kind === "CHATGPT") return "CHATGPT";
+  return null;
+}
+
+/**
+ * Why a client of `kind` can't be `agent`'s, or null if it can. A CLAUDE_AI
+ * or CHATGPT kind sets the read bound and the replacing of a connection for
+ * that one service, so it is that service's agent and no other's. An OTHER
+ * takes any agent, which is how a fallback registered for Antigravity or
+ * Claude Code gets its own.
+ */
+export function agentKindRefusal(kind: OauthClientKind, agent: Agent): string | null {
+  const own = defaultAgentOf(kind);
+  if (own === null || own === agent) return null;
+  return `A ${kind} client is ${own}'s: its kind sets that service's read bound and the replacing of its connections, so it can't be ${agent}'s.`;
+}

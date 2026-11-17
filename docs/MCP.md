@@ -2370,8 +2370,9 @@ model. OAuth is §21's.
 **claude.ai:**
 
 - **A connection acts as one of the person's bots**, never as the person (§21, "Whose
-  account"), so they need a bot first. An ADMIN makes one on `/users`, and the consent page
-  says so to a person with none.
+  account"). An AUTHOR or above with no Claude bot has one made when they approve, named for
+  Claude and their initials (§21, "A bot made when a connection is approved"). An AUTHORIZED
+  person needs an ADMIN to make theirs on `/users`, and the consent page says so.
 - **The connector is added in claude.ai**: a custom connector at the URL the Connections card
   gives, `<APP_URL>/api/mcp` exactly, with Claude's published identity, which claude.ai's dialog
   recommends. Connect opens the consent page on the instance, where the person signs in,
@@ -2399,9 +2400,9 @@ model. OAuth is §21's.
 
 **ChatGPT:**
 
-- **A connection acts as a bot of its own**, made on `/users` as claude.ai's is, and named for
+- **A connection acts as a bot of its own**, made at Approve as claude.ai's is, and named for
   ChatGPT, so that what ChatGPT writes carries its name and not Claude's. The consent page
-  offers every bot that works for the person, Claude's included.
+  lists the person's ChatGPT bot first, and beside Claude's it says whose name that one signs.
 - **The server is added on ChatGPT's web site**, not its desktop app: chatgpt.com/plugins, then
   **+**, then "Add custom MCP server", with the URL the Connections card gives and OAuth as its
   authentication, leaving the advanced settings at the client document ChatGPT finds on its
@@ -2423,7 +2424,9 @@ model. OAuth is §21's.
 
 **Google Antigravity (Gemini):**
 
-- **A connection acts as a bot of its own**, named for Gemini, as ChatGPT's does.
+- **A connection acts as a bot of its own**, named for Antigravity, as ChatGPT's is for
+  ChatGPT. Its person picks the model per conversation, Claude and GPT-OSS among them, so the
+  client's name is the one always true of what writes.
 - **The server is one entry in `~/.gemini/config/mcp_config.json`**, which Antigravity's app,
   IDE and CLI share, with no `oauth.clientId`, so that Antigravity presents its published
   identity (§21, "Which clients"):
@@ -2829,8 +2832,9 @@ code beside each says why as well.
   COMMENTER, who can't have a bot; a person whose bots are all refused, named, each with its
   reason (it outranks them, or connections are turned off for it) and what an ADMIN can
   change; and a person with no bot, told that an ADMIN makes one, or, when they are an ADMIN,
-  pointed to `/users`. `botsFor` returns the refused bots, each with its reason, beside the
-  offered ones for this.
+  pointed to `/users`. That last is an AUTHORIZED person's, or any person's at a client with
+  no agent: an AUTHOR or above at an agent's client is offered a new bot instead. `botsFor`
+  returns the refused bots, each with its reason, beside the offered ones for this.
   - **A refused bot is named when the person's other bots are offered too**, above the list,
     so a bot missing from it is accounted for.
 - **Claude Code's connections don't replace each other**, as a claude.ai client's do
@@ -2979,7 +2983,8 @@ the reads, for Research, is designed and not built ("The read-only endpoint").
     Claude can see as well as what it signs, so the page offers no connection as oneself.
 - **A bot is an AI agent's account.** It works for one person, recorded as
   `user.works_for_user_id`: "the person the bot works for", in §3's words. The consent page
-  offers only the bots that work for whoever is signed in, and that §3's check would accept.
+  offers only the bots that work for whoever is signed in, and that §3's check would accept,
+  and a new one for the asking client's agent when they have none.
   That person becomes the connection's issuer, as `--issued-by` makes them for a script's token.
 - **Only an account with no password may work for someone, and only for an account with one.**
   Sign-in is by password alone (`src/lib/auth.ts`), so a password is what makes an account a
@@ -3010,8 +3015,8 @@ the reads, for Research, is designed and not built ("The read-only endpoint").
 - **Why one person.** A bot reads whatever any list names it on (§12). Two people using one
   Claude, by any route, would each read through it what the other's Claude had written, since
   Claude is on both bylines. The issuer also decides who `write` may put on a byline (§12). A
-  second person who wants Claude gets a second bot ("Claude (Alice)"), and nothing passes
-  between the two unless someone shares it on purpose.
+  second person who wants Claude gets a second bot ("Claude (AB)", named with their initials),
+  and nothing passes between the two unless someone shares it on purpose.
 - **It holds for every token, the header's included**, because §3's one check enforces it:
   - **The check:** a token is accepted only if its issuer is its account's person,
     `works_for_user_id ?? the account's own id`: for a bot's token, the person the bot works
@@ -3021,14 +3026,15 @@ the reads, for Research, is designed and not built ("The read-only endpoint").
   - **At issue:** the script refuses a token that wouldn't pass, so the operator gets an error
     rather than a token that never works.
   - **So each person needs their own bot, whatever the route.** A header token for Alice's
-    Claude Code is issued for "Claude (Alice)", with Alice as its issuer, exactly as her OAuth
+    Claude Code is issued for "Claude (AB)", with Alice as its issuer, exactly as her OAuth
     connection would be.
 - **The web interface makes bots.** An ADMIN, on `/users`, creates one: a name, its person,
   a role no higher than theirs, and optionally the agent it is for ("A bot's agent", below). It
   can later give the bot another person or another agent, and each is a column of the table,
-  beside the one that turns connections off. A bot made for an AUTHOR or above when they
-  approve a connection is planned ("Planned: a bot made when a connection is approved",
-  below).
+  beside the one that turns connections off.
+  - **A person's approval makes one too**: an AUTHOR or above with no bot for the asking
+    client's agent has one made when they approve the connection, the one way a bot is made
+    without an ADMIN ("A bot made when a connection is approved", below).
   - **There is no script for it.** The interface does every bot task, and the one task that
     needs a shell, issuing a header token, already has `create-api-token.ts`.
   - **The rules live in `src/lib/`**, in a function taking an `Actor`, with the action as its
@@ -3184,7 +3190,8 @@ are five kinds:
     then dynamic registration.** With no `clientId` configured, it presents this identity,
     because the metadata sets `client_id_metadata_document_supported`.
 - **Clients registered by hand**, with `scripts/oauth-client.ts --name=… --redirect-uri=…
-  --kind=claude-ai|chatgpt|other`: a row in `oauth_client`, listed and revoked by the same script.
+  --kind=claude-ai|chatgpt|other [--agent=claude|chatgpt|antigravity]`: a row in
+  `oauth_client`, listed and revoked by the same script.
   - **The script refuses a redirect URI** that isn't absolute, that has a fragment, or that is
     plain `http` on any host but a loopback address, as OAuth 2.1 and the MCP spec require. A
     code sent over plain `http` to another machine can be read on the way.
@@ -3196,6 +3203,12 @@ are five kinds:
     secret blank, the token endpoint's authentication `none`, and OIDC off.
   - **Anything else a person wants to connect**, such as the MCP Inspector while testing.
   - **Revoking a client revokes its connections.**
+- **Each client is one AI agent's, or none's.** The four pinned identities are Claude's (both
+  of Anthropic's), ChatGPT's and Antigravity's, and a client registered by hand is the agent
+  its `--agent` names or its kind implies, or no agent's. The agent decides which of a
+  person's bots the consent page lists first and whose name a bot made at Approve carries; the
+  kind above decides neither ("A bot made when a connection is approved", below, "Which agent
+  a client is").
 - **No dynamic client registration.** Neither claude.ai, ChatGPT nor Antigravity needs it,
   since each prefers a client document, and the 2026-07-28 revision
   deprecates it in favour of CIMD. An open endpoint that writes a row per request would need a
@@ -3338,8 +3351,11 @@ This is what claude.ai reads before it opens the consent page.
    - for a loopback redirect URI, the warning that the connection goes to a program on the
      person's own computer;
    - who is signed in, with a way to switch;
-   - the bots that work for them, to choose from, or a sentence saying there are none and that
-     an ADMIN makes one; and the bots it can't offer, by name, each with its reason;
+   - the bots that work for them, to choose from, their bot for the client's agent first, or
+     a new bot for that agent when they have none and are an AUTHOR or above ("A bot made when
+     a connection is approved", below); or a sentence saying there are none and that an ADMIN
+     makes one; and the bots it can't offer, by name, each with its reason;
+   - beside each bot that is another agent's, a line saying whose name it signs;
    - for a person an ADMIN has turned connections off for, a sentence saying so in the list's
      place, with Cancel alone;
    - which endpoint the connection is for, the full one or the read-only one;
@@ -3358,6 +3374,8 @@ This is what claude.ai reads before it opens the consent page.
   - It re-parses every parameter through the page's own parse.
   - It re-checks that the bot works for the person signed in, by §3's whole rule, and
     refuses a person whose connections are turned off before it looks at the bot.
+  - `bot=new` makes the person's bot for the client's agent, which it reads from the
+    re-parsed client and never from the form.
   - A cross-site post carries no session to begin with, since Auth.js's cookie is
     `SameSite=Lax`.
 - **Approving mints a code**: 32 random bytes, kept as its SHA-256 in
@@ -3408,7 +3426,8 @@ errors are RFC 6749 §5.2's.
     - **Claude Code's identity is left alone**, since one person may sign in from more than
       one machine.
     - **One bot connected from two claude.ai accounts keeps only the newer connection.** A
-      person who wants both makes a second bot.
+      person who wants both has a second bot made by an ADMIN, with no agent, since a person
+      has one bot per agent.
   - **It answers with both tokens**, `token_type: "Bearer"`, which OAuth 2.1 requires,
     `expires_in` and the granted `scope`.
   - **A code presented again revokes the row its first use made**, since someone else had it
@@ -4510,34 +4529,22 @@ Each step ships as §18's phases did: with specs, unit tests and `npm run check`
    is disconnected or removed. Disconnecting sent nothing in the refresh trial, but the metadata
    lists no revocation endpoint, so that says nothing about whether claude.ai would call one.
 
-### Planned: a bot made when a connection is approved
+### A bot made when a connection is approved
 
-**Status: the first of its two steps is built, and the second is planned** ("Build order",
-below, says which is which). A connection acts as a bot ("Whose account"),
-and only an ADMIN makes one, on `/users`. So a person with no bot meets a dead end on the
-consent page, and a person with bots is offered every one of them, whichever client asks: a
-ChatGPT connection can approve as the Claude bot, and what it writes then carries Claude's
-name, with nothing on the page to say so.
+A connection acts as a bot ("Whose account"). Were an ADMIN the only one to make a bot, a
+person with none would meet a dead end on the consent page; and were the page to offer a
+person's bots alike whichever client asks, a ChatGPT connection could approve as the Claude
+bot, and what it wrote would carry Claude's name, with nothing on the page to say so.
 
-This plan has each client that is an AI agent name which one it is, and each bot record the
-agent it is for, in `user.agent`. The consent page then puts first the person's bot for the
-asking client's agent. When the person has none and is an AUTHOR or above, it offers to make
-one instead. And it says so beside any bot that is another agent's. Approving with the new bot
-makes it, in `/authorize/decide`, just before the code is minted. Since a bot is then no
-longer an ADMIN's alone to make, an ADMIN can turn connections off for an account, in
-`user.mcp_allowed`.
+So each client that is an AI agent names which one it is, and each bot records the agent it
+is for, in `user.agent`. The consent page puts first the person's bot for the asking client's
+agent. When the person has none and is an AUTHOR or above, it offers to make one instead. And
+it says so beside any bot that is another agent's. Approving with the new bot makes it, in
+`/authorize/decide`, just before the code is minted. Since a bot is then not an ADMIN's alone
+to make, an ADMIN can turn connections off for an account, in `user.mcp_allowed`.
 
-It is built in two steps, accounts first and then clients and the consent page ("Build
-order", below).
-
-**Built so far**, the first step: `user.agent` with its index and its CHECK, and
-`user.mcp_allowed`; each agent's name and initials (`AGENTS`, `src/lib/bot-rules.ts`);
-`/users`' Agent field, Agent and MCP columns and four refusals (`createBot`, `setBotAgent`,
-`moveBot` and `restoreAccount`, `src/lib/bots.ts`); the flag in §3's check, which the consent
-page, the decision and the code's redemption all ask; the consent page's sentence and the
-Connections card's line; and the fixtures' rules. Of what follows, "A bot's agent" and
-"Connections turned off for an account" are as built. Nothing reads a bot's agent yet, so the
-consent page offers what it offered before, and no client has an agent.
+It deploys in two steps, accounts first and then clients and the consent page, with each
+instance's bots given their agents between them ("Build order", below).
 
 #### Which agent a client is
 
@@ -4553,25 +4560,25 @@ consent page offers what it offered before, and no client has an agent.
   lists and whether a connection replaces the last one ("Which clients"). An agent decides whose
   name a bot carries. The two disagree for Claude Code: its kind is `other`, but the agent is
   Claude, which is why its bot is Claude's, not "Claude Code". A pinned client takes an `agent`
-  beside its `kind` in `src/lib/oauth/pinned-clients.ts`. `OauthClientInfo` gains
+  beside its `kind` in `src/lib/oauth/pinned-clients.ts`, and `OauthClientInfo` carries
   `agent: Agent | null`.
 - **A client registered by hand takes its agent from `--agent`**:
-  `scripts/oauth-client.ts --agent=claude|chatgpt|antigravity`, kept in a new nullable column,
+  `scripts/oauth-client.ts --agent=claude|chatgpt|antigravity`, kept in a nullable column,
   `oauth_client.agent`, which `findClient` reads and `--list` shows.
-  - **Left out, it follows the kind**: a `claude-ai` client is Claude's and a `chatgpt` one
-    ChatGPT's, since those two kinds are those clients' fallbacks. An `other` has no agent
-    unless it is given one.
+  - **Left out, it follows the kind** (`defaultAgentOf`): a `claude-ai` client is Claude's and
+    a `chatgpt` one ChatGPT's, since those two kinds are those clients' fallbacks. An `other`
+    has no agent unless it is given one. The row keeps what that came to.
   - **It is how a fallback for Antigravity or Claude Code gets its agent.** Antigravity tries
     a configured `oauth.clientId` before its published identity ("Which clients"), and a client
     registered for that is an `other`.
-  - **The script refuses an agent that contradicts the kind**, `--kind=claude-ai
-    --agent=chatgpt` say. A kind sets the read bound and the replacing of a connection for
-    that one service.
+  - **An agent that contradicts the kind is refused**, `--kind=claude-ai --agent=chatgpt`
+    say (`agentKindRefusal`, which `registerClient` applies). A kind sets the read bound and
+    the replacing of a connection for that one service.
   - **A client with no agent** is anything else a person connects, the MCP Inspector say. No
     bot is made for it, and the consent page is unchanged for it.
-  - **The migration fills the column for the clients already registered**, from each one's
-    kind, below the line of the `--create-only` migration.
-- **An agent's name and its initials are one table**, in `src/lib/bot-rules.ts`, which
+  - **The migration filled the column for the clients already registered**
+    (`oauth_client_agent`), from each one's kind.
+- **An agent's name and its initials are one table**, `AGENTS` in `src/lib/bot-rules.ts`, which
   `/users`' select, the consent page and both ways of making a bot read. The initials are
   picked, not made from the name: `deriveInitials` would give `CL`, `CH` and `AN`.
 - **Antigravity's bot is "Antigravity", with `AGV`, not "Gemini".** Its person picks the
@@ -4635,10 +4642,10 @@ consent page offers what it offered before, and no client has an agent.
     consent page finds bots by their person, and the index ignores a row with none. It is
     kept because it costs one line, and keeps everyone who signs in out of `user.agent`.
 - **`/users`**:
-  - **The new-bot form gains an optional Agent field.** A bot made there keeps the name it is
-    given, and the slug from that name, as now.
+  - **The new-bot form has an optional Agent field.** A bot made there keeps the name it is
+    given, and the slug from that name.
     - **With an agent, its initials are that agent's** ("Which agent a client is"), as for one
-      made at Approve. Without one they are made from its name, as now. `createBot` takes the
+      made at Approve. Without one they are made from its name. `createBot` takes the
       agent and applies the one rule, so an AUTHORIZED person's Claude bot, which only an
       ADMIN makes, has the initials every other Claude bot has.
   - **Agent is a column of its own**, beside "Works for": an entry in the registry
@@ -4666,19 +4673,19 @@ consent page offers what it offered before, and no client has an agent.
     refusals, a bot promoted above its person and an ADMIN's own demotion. Each bulk action
     calls the throwing body instead (`restoreAccount`, `setUserRole`), since `settleBulk`
     reports a thrown refusal per row and would count a returned one as done.
-  - **Restoring moves into `src/lib/bots.ts`** for a row that is a bot, with `restoreUser` as
+  - **Restoring is `restoreAccount` in `src/lib/bots.ts`**, with `restoreUser` as
     its wrapper, and the e2e fixture `restoreTestUser` calls it, as `createTestBot` calls
     `createBot`. An ADMIN who wants the old bot back deletes the new one first: a deleted
     row's other controls are disabled, so its agent can't be cleared instead.
-- **Every existing bot gets its agent on `/users`, between the two steps** ("Build order",
-  below). The first step brings the column and the cell that sets it, and nothing reads the
-  column yet, so an instance's bots can be given their agents at any time after it deploys.
-  Sorting `/users` by "Works for" lists them. Explore has a Claude bot and a ChatGPT bot. Each
-  other instance has a Claude bot, once it has been given its person.
-  - **A bot left without its agent costs a duplicate.** Once the second step is there, the
-    instance's Claude bot would be offered beside a new one, and a person approving that would
-    end up with two. Giving the old one its agent is then refused, naming the new one, until
-    an ADMIN deletes one of the two.
+- **A bot made before agents gets its agent on `/users`, between the two steps' deploys**
+  ("Build order", below). The first step brings the column and the cell that sets it, and
+  nothing in it reads the column, so an instance's bots can be given their agents at any time
+  after it deploys. Sorting `/users` by "Works for" lists them. Explore has a Claude bot and a
+  ChatGPT bot. Each other instance has a Claude bot, once it has been given its person.
+  - **A bot left without its agent costs a duplicate.** With the second step there, the
+    instance's Claude bot is offered beside a new one, and a person approving that ends up
+    with two. Giving the old one its agent is then refused, naming the new one, until an
+    ADMIN deletes one of the two.
   - **They keep their names and their initials.** "Claude" stays "Claude", with `CL`, until an
     ADMIN changes either on its row.
 
@@ -4686,26 +4693,26 @@ consent page offers what it offered before, and no client has an agent.
 
 - **`user.mcp_allowed`, a boolean, true by default**: for every account there is, and every
   one made later. An ADMIN clears it on `/users`.
-- **Why.** A person has a bot today only when an ADMIN makes one, so an ADMIN withholds one by
-  doing nothing. With a bot made at Approve, deleting it only has the next approval make
-  another, and demoting the person to AUTHORIZED would take much else from them.
+- **Why.** While only an ADMIN made a bot, an ADMIN withheld one by doing nothing. With a bot
+  made at Approve, deleting it only has the next approval make another, and demoting the
+  person to AUTHORIZED would take much else from them.
 - **It joins §3's one check**: a token is refused while its account or its issuer has it off
   (`tokenRefusal`, on the two rows the check reads anyway). So it holds for every token, the
   header's included, and takes effect at the token's next call, as a demotion does.
   - **Off for a person**: no token of their own works, and none of any bot of theirs, since
     they issue those. The consent page offers them nothing ("The consent page", below), and
-    `ensureAgentBot` refuses.
+    `ensureAgentBot` refuses, as the decision does before it.
   - **Off for a bot**: that bot's tokens stop, and the consent page names it among the bots it
     can't offer. It still holds its agent, so no new one is offered in its place. That is how
     an ADMIN stops one bot and keeps it stopped.
   - **Nothing is revoked.** Turned on again, the same tokens work, as after a demotion undone.
     A connection that went its 90 days unused meanwhile has lapsed all the same.
-  - **At issue**, the script refuses a token the check would refuse, as it does now.
-- **Everything that asks the rank rule by itself asks the whole check instead.** `botsFor` and
+  - **At issue**, the script refuses a token the check would refuse (`issueApiToken`).
+- **Nothing asks the rank rule by itself where the whole check is meant.** `botsFor` and
   `worksFor` (`src/lib/oauth/consent.ts`) and the code's redemption (`src/lib/oauth/grant.ts`)
-  each call `botRoleRefusal` today, and would miss the flag. They call `tokenRefusal`, so the
-  page offers exactly what the check accepts, and a code minted before the flag was cleared is
-  refused at `/token`.
+  each call `tokenRefusal`; `botRoleRefusal` alone would miss the flag. So the page offers
+  exactly what the check accepts, and a code minted before the flag was cleared is refused at
+  `/token`.
 - **`/users`**: an "MCP" column, a checkbox on every row, people's and bots', as "Listed
   contributor" is: an entry in the registry, hidden by default, and a sort key. Its action is
   an ADMIN's alone.
@@ -4715,22 +4722,24 @@ consent page offers what it offered before, and no client has an agent.
 
 #### The consent page
 
-For a client with an agent:
+What the page offers is one pure function, `consentOffer` (`src/lib/oauth/consent-offer.ts`,
+unit-tested), of the person, the client's agent and the bots `botsFor` read. For a client with
+an agent:
 
 - **The person's bot for that agent comes first, chosen**, when the page offers it. Their
-  other offered bots follow.
+  other offered bots follow. The first option of the list is the one chosen.
 - **When they have none, and may have an AUTHOR bot**, the first option is "Claude (LB), a new
   bot", or ChatGPT's or Antigravity's, chosen, with value `new`. Their other bots follow.
   - **Who may** is `botRoleRefusal` for the role such a bot is made with, which is null for an
     AUTHOR or above. `ensureAgentBot` asks the same rule ("Making it", below), so the page
-    offers exactly what Approve will do.
+    offers exactly what Approve does.
   - **A line under the list says what approving as it does**: it makes a bot called Claude
     (LB), an AUTHOR working for them. Like every AUTHOR it reads each SHARED doc and file from
     the start, and a PRIVATE one only once it is put on that doc's or file's list. The line
     says both, since "only what is shared with it" reads as nothing until something is shared.
-  - **Approve is then on the page of a person who has never connected anything**, where today
-    that person has Cancel alone. So a link someone else's client started reaches more people
-    than it did. That is accepted, and is the first thing in "To reconsider", below.
+  - **Approve is then on the page of a person who has never connected anything**, who would
+    otherwise have Cancel alone. So a link someone else's client started reaches more people
+    than it would. That is accepted, and is the first thing in "To reconsider", below.
 - **Beside each bot that is another agent's**, a line, as the lines for a connection being
   replaced are: "Claude (LB) is a bot for Claude, not ChatGPT: what ChatGPT writes as it is
   signed Claude (LB)." It is a line per bot rather than one under the select, which would need
@@ -4738,25 +4747,25 @@ For a client with an agent:
   says whose it is.
 - **An AUTHORIZED person is offered no new bot, and the rest holds for them as for anyone**:
   their bot for the agent first, and the line beside another agent's. With no bot they get the
-  sentence they get now, that an ADMIN makes one. A bot made here is an AUTHOR, which would
+  sentence that an ADMIN makes one. A bot made here is an AUTHOR, which would
   outrank them, and a bot of their own role stays an ADMIN's to make on `/users`.
 - **A person whose bot for the agent is one §3's check refuses**, because it outranks them or
   is turned off, is offered no new one. The index allows one per agent, and a second would
   hide the first. The sentence for refused bots says which one it is, why, and that it is the
   client's. It shows above the list when the person's other bots are offered, and in the
-  list's place when none are, where the page shows that sentence now.
+  list's place when none are.
 - **A person whose connections are turned off** is told that an ADMIN has turned them off for
   their account, in the list's place and with Cancel alone, whatever bots they have.
 
-For a client with no agent, the page is unchanged but for that last sentence, and for a
-COMMENTER it is unchanged.
+For a client with no agent, the page lists the person's bots as they are, by name, and offers
+no new one; a COMMENTER is told that they can't have a bot.
 
 #### Making it, at Approve
 
 - **Nothing is made until Approve.** Not when the page loads, which is a GET: a link someone
   sent, or a prefetch, would make an account under the person's name. Not on Cancel.
-- **`/authorize/decide` takes `bot=new`** only for a client with an agent, and refuses it on
-  the page for any other. It takes the agent from the re-parsed request, never from the form.
+- **`/authorize/decide` takes `bot=new`** only for a client with an agent, and refuses it,
+  in words and not by redirect, for any other. It takes the agent from the re-parsed request, never from the form.
   It then calls `ensureAgentBot` as the person signed in, and mints the code for the bot that
   returns. A refusal from `ensureAgentBot` is answered on the page, as a bot that doesn't work
   for the person is.
@@ -4828,43 +4837,13 @@ COMMENTER it is unchanged.
   links to that page, so it can't answer 404, and a slug without the person's (`chatgpt-2`)
   would make bylines and `/users` harder to read.
 
-#### What changes beside it
-
-- **PERMISSIONS.md**:
-  - **"Bots"**: a row for having a bot made by approving a connection, which is ADMIN, EDITOR
-    and AUTHOR, but not AUTHORIZED or COMMENTER, and a row for turning connections off for an
-    account, which is ADMIN's. Making a bot on `/users`, and moving one, stay ADMIN's.
-  - **"The check, on every call"**: a token is refused while its account or its issuer has
-    connections turned off.
-  - **The table of ways in**: an OAuth connection acts as one of the person's bots, or as one
-    made when they approve. The bullet under it, that the consent page offers only the person's
-    own bots, gains the new one.
-  - **Its code-pointer table** gains `ensureAgentBot`, and `tokenRefusal`'s row the flag.
-- **§3**: the check's rule gains the flag.
-- **This section**:
-  - **"Whose account"**: "Why one person", whose second person's bot is "Claude (Alice)" and
-    becomes "Claude (AB)", and "The web interface makes bots".
-  - **"Which clients"**: each pinned client's agent, and `--agent` for a client registered by
-    hand.
-  - **"The consent page"**: what it shows.
-  - **"The token endpoint"**: "A person who wants both makes a second bot" becomes a second
-    bot with no agent, made by an ADMIN, since a person has one bot per agent.
-- **§16**: claude.ai's, ChatGPT's and Antigravity's "a connection acts as a bot" no longer
-  begins with an ADMIN making one. Antigravity's bot is Antigravity's, not "named for Gemini".
-- **§20**: its account of what a person with nothing to connect as is told. The three
-  sentences become four, with the one for connections turned off, and the one for no bot is an
-  AUTHORIZED person's, or any person's at a client with no agent.
-- **`NewBotForm`'s lead text**, which says what a bot is, and `scripts/oauth-client.ts`'s
-  header, which lists its flags.
-- **docs/DASHBOARD.md, "Connections"**: the card's line. **e2e/README.md**: the fixtures'
-  rules ("Testing", below).
-
 #### Build order
 
-Two steps, each with its specs, unit tests and `npm run check`. Each deploys on its own, and
-the first changes nothing a person sees until an ADMIN uses what it adds to `/users`.
+Two steps, each with its specs and unit tests. **Each deploys on its own, and the second only
+after the first's bots have their agents.** The first changes nothing a person sees until an
+ADMIN uses what it adds to `/users`.
 
-1. **Accounts. Built.** One migration (`bot_agents`): the enum `Agent`, `user.agent`,
+1. **Accounts.** One migration (`bot_agents`): the enum `Agent`, `user.agent`,
    `user.mcp_allowed`, the index and the CHECK. With it:
    - each agent's name and initials, in `src/lib/bot-rules.ts`;
    - `/users`: the form's Agent field, the Agent and MCP columns, the four refusals, the
@@ -4873,23 +4852,26 @@ the first changes nothing a person sees until an ADMIN uses what it adds to `/us
      consent page's sentence and the Connections card's line;
    - the fixtures: `deleteTestUser`'s bots, and `restoreTestUser`.
 
-   Nothing reads a bot's agent yet, so the consent page offers what it offers now.
+   Nothing in this step reads a bot's agent, so the consent page offers every bot alike.
 
    **Each instance's bots are then given their agents**, on `/users`, once this step has
    deployed there ("A bot's agent", above). Nothing is run by hand in a deploy.
-2. **Clients and the consent page. Planned.** One migration: `oauth_client.agent`, filled from each
-   row's kind. With it:
+2. **Clients and the consent page.** One migration (`oauth_client_agent`):
+   `oauth_client.agent`, filled from each row's kind. With it:
    - the pinned clients' agents, and `--agent`;
-   - the page's order, its lines and the new-bot option;
+   - the page's order, its lines and the new-bot option (`consentOffer`);
    - `ensureAgentBot` and `bot=new`.
 
 #### Testing
 
 - **Unit**:
-  - each pinned identity's agent and each kind's default, as a table;
-  - `tokenRefusal` with the flag off on the account, and on the issuer;
-  - each agent's name and initials, as a table;
-  - a new bot's name from an agent and a person's initials.
+  - each pinned identity's agent and each kind's default, as a table, and an agent that
+    contradicts its kind (`pinned-clients.test.ts`);
+  - `tokenRefusal` with the flag off on the account, and on the issuer; each agent's name and
+    initials, as a table; and a new bot's name from an agent and a person's initials
+    (`bot-rules.test.ts`);
+  - what the page offers: which bot comes first, when a new one is offered, and which bots
+    are another agent's (`consent-offer.test.ts`).
 - **What the e2e fixtures hold to**, in both steps:
   - **No spec gives the suite's admin a bot with an agent**, at consent or on `/users`, or
     turns its connections off. Nearly every spec's bots work for that one account, across
@@ -4897,9 +4879,9 @@ the first changes nothing a person sees until an ADMIN uses what it adds to `/us
     bot would head another's consent page, and one worker's flag would stop every other's
     calls. A spec that needs either makes a person of its own. `createTestBot` makes a bot with
     no agent unless asked for one.
-  - **No spec presses Approve on the admin's consent page without choosing a bot.** From the
-    second step on, the first option there, for any client with an agent, is a new bot. The
-    specs there are choose a bot by its id or post one.
+  - **No spec presses Approve on the admin's consent page without choosing a bot.** The first
+    option there, for any client with an agent, is a new bot. A spec chooses a bot by its id,
+    or posts one.
   - **A spec that soft-deletes a bot with an agent does it through the fixture, naming the
     bot's own person as the one who deleted it.** The suite's setup hard-deletes its admin at
     the start of every run. Had the admin deleted the bot, and the run died with the person's
@@ -4916,8 +4898,9 @@ the first changes nothing a person sees until an ADMIN uses what it adds to `/us
     `deleteTestUser`, so a crashed run's are covered the same way.
   - **`restoreTestUser` calls the restore in `src/lib/bots.ts`**, so a spec's restore meets
     the refusal `/users`' does.
-- **e2e, the first step, on `/users`**, each refused with the sentence naming the bot that
-  holds the agent:
+- **e2e, the first step, on `/users`** (`mcp-bots.spec.ts` for the rules, through the
+  fixtures, and `users-bots.spec.ts` for the page, where a production build must still show
+  the sentence), each refused with the sentence naming the bot that holds the agent:
   - making a bot with an agent its person's bot already has;
   - changing a bot's agent to one its person's other bot has;
   - `moveBot` to a person with a bot of that agent;
@@ -4938,20 +4921,19 @@ the first changes nothing a person sees until an ADMIN uses what it adds to `/us
   - turned on again: the same token works;
   - for a bot: its call is refused, the consent page names it with its reason, and the
     person's other bot is still offered.
-- **e2e, the second step**, through the consent page and `/token`:
+- **e2e, the second step**, through the consent page and `/token` (`mcp-oauth.spec.ts`), each
+  signed in as a person the test made (`signedInAt`):
   - an AUTHOR with no bot: the new bot offered and chosen; Approve makes one, with its agent,
     its role AUTHOR, its name from the agent and the person's initials, its own initials its
-    agent's, and its slug from the person's; `tools/list` then works. The spec in
-    `e2e/mcp-oauth.spec.ts` for a person with nothing to connect as takes an AUTHOR today, and
-    asserts the sentence that an ADMIN makes a bot: its person becomes AUTHORIZED, and the
-    AUTHOR's case is this one;
+    agent's, and its slug from the person's; `tools/list` then works. Neither the page's load
+    nor Cancel makes one;
   - a second connection from the same client finds that bot, chosen, and offers no new one;
   - an AUTHORIZED person with no bot: no new option, and the sentence that an ADMIN makes one;
   - an AUTHORIZED person with a bot for the agent and one for another: the first chosen, the
     line beside the second, and no new option;
   - a bot of another agent: the line beside it;
-  - a client registered by hand with no agent: the page as it is now. One registered as an
-    `other` with `--agent`: the new bot offered;
+  - a client registered by hand with no agent: the person's bots as they are. One registered
+    as an `other` with `--agent`: the new bot offered;
   - a person whose bot for the agent outranks them, or is turned off: no new option, and the
     sentence naming that bot, with their other bots still offered;
   - two Approves posted at once, with `bot=new`: one bot, and two codes for it;
@@ -4967,14 +4949,15 @@ the first changes nothing a person sees until an ADMIN uses what it adds to `/us
 
 #### To reconsider
 
-Each of these is accepted as the plan stands, and may be decided differently later.
+Each of these is accepted as built, and may be decided differently later.
 
 1. **Approve reaches people it didn't.** The page warns against a flow someone else started
    ("The consent page", above): an authorize link begun from another person's claude.ai looks
    exactly like one's own, and whether claude.ai refuses the code it yields rests on
-   claude.ai. Today a person sent such a link has Approve only if an ADMIN made them a bot,
-   and anyone else has Cancel alone. With this plan every AUTHOR and above has Approve, with
-   the new bot chosen. The people added are the ones who have never connected anything.
+   claude.ai. Were bots an ADMIN's alone to make, a person sent such a link would have Approve
+   only if an ADMIN had made them a bot, and anyone else Cancel alone. As built, every AUTHOR
+   and above has Approve, with the new bot chosen. The people added are the ones who have
+   never connected anything.
    - **What the sender would hold**: a connection acting as that person's new bot. It has
      `read`, and `write` only if the person ticked it. So it reads every SHARED doc and file,
      until it goes 90 days unused or the person revokes it under Connections.
@@ -4984,6 +4967,6 @@ Each of these is accepted as the plan stands, and may be decided differently lat
    - **The alternative**: the first bot is made from the Connections card on `/dashboard`,
      never at Approve, and the consent page keeps its dead end for a person with none. A sent
      link then reaches only a person who chose to set a bot up. The cost is a first connection
-     that takes two tries, which is what this plan set out to end.
+     that takes two tries, which is what making the bot at Approve ends.
 2. **Only initials tell two people's bots apart by name** ("Making it, at Approve"). Two
    people with the same initials get bots of the same name.

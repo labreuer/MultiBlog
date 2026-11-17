@@ -467,6 +467,7 @@ export const orphanTestBot = (...args: Parameters<DbHandlers["orphanTestBot"]>) 
 export const setTestPasswordHashInSql = (...args: Parameters<DbHandlers["setTestPasswordHashInSql"]>) =>
   call("setTestPasswordHashInSql", ...args);
 export const getTestAccountFacts = (...args: Parameters<DbHandlers["getTestAccountFacts"]>) => call("getTestAccountFacts", ...args);
+export const getTestBotsOf = (...args: Parameters<DbHandlers["getTestBotsOf"]>) => call("getTestBotsOf", ...args);
 export const getTestBotFacts = (...args: Parameters<DbHandlers["getTestBotFacts"]>) => call("getTestBotFacts", ...args);
 export const softDeleteTestUser = (...args: Parameters<DbHandlers["softDeleteTestUser"]>) =>
   call("softDeleteTestUser", ...args);

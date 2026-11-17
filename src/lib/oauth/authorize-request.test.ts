@@ -26,6 +26,7 @@ const CLAUDE: OauthClientInfo = {
   name: "Claude",
   redirectUris: ["https://claude.ai/api/mcp/auth_callback"],
   kind: "CLAUDE_AI",
+  agent: "CLAUDE",
 };
 
 /** A client with two loopback redirect URIs, as Claude Code's identity has. */
@@ -34,6 +35,7 @@ const NATIVE: OauthClientInfo = {
   name: "A native app",
   redirectUris: ["http://localhost/callback", "http://127.0.0.1/callback"],
   kind: "OTHER",
+  agent: null,
 };
 
 function request(overrides: Record<string, string | null> = {}, client: OauthClientInfo = CLAUDE): URLSearchParams {

@@ -1,9 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { ApiScope, Role } from "@/generated/prisma/enums";
 import { auth } from "@/lib/auth";
-import { tokenRefusalOf, type TokenRefusal } from "@/lib/bot-rules";
+import { tokenRefusalOf } from "@/lib/bot-rules";
 import { prisma } from "@/lib/prisma";
 import { replacesConnections, type OauthClientInfo } from "./clients";
+import type { Bot, RefusedBot } from "./consent-offer";
 import { NEWEST_REFRESH_TOKEN } from "./refresh";
 import { hasLapsed } from "./rotation";
 
@@ -24,13 +25,14 @@ import { hasLapsed } from "./rotation";
 /** How long a code is good for, and it is good once. */
 export const CODE_TTL_MS = 2 * 60_000;
 
-export type Bot = { id: string; name: string | null; slug: string };
+export type { Bot, RefusedBot };
 
-/** A bot the page can't offer, with why §3's check would refuse its token. */
-export type RefusedBot = Bot & { reason: TokenRefusal["reason"] };
-
-/** `mcpAllowed` is false while an ADMIN has connections turned off for the account (§21, "Connections turned off for an account"). */
-export type Person = { id: string; name: string | null; email: string; role: Role; mcpAllowed: boolean };
+/**
+ * `mcpAllowed` is false while an ADMIN has connections turned off for the
+ * account (§21, "Connections turned off for an account"). `adminInitials`
+ * is what a bot made for them at Approve is named with.
+ */
+export type Person = { id: string; name: string | null; email: string; role: Role; mcpAllowed: boolean; adminInitials: string };
 
 /**
  * Whoever is signed in, if their account is still live. The row is read, not
@@ -41,7 +43,10 @@ export async function signedInPerson(): Promise<Person | null> {
   const session = await auth();
   const id = session?.user?.id;
   if (!id) return null;
-  return prisma.user.findUnique({ where: { id }, select: { id: true, name: true, email: true, role: true, mcpAllowed: true } });
+  return prisma.user.findUnique({
+    where: { id },
+    select: { id: true, name: true, email: true, role: true, mcpAllowed: true, adminInitials: true },
+  });
 }
 
 /** `person` as §3's check reads a token's issuer. */
@@ -61,15 +66,15 @@ function issuerOf(person: Person) {
 export async function botsFor(person: Person): Promise<{ offered: Bot[]; refused: RefusedBot[] }> {
   const bots = await prisma.user.findMany({
     where: { worksForUserId: person.id },
-    select: { id: true, name: true, slug: true, role: true, worksForUserId: true, mcpAllowed: true },
+    select: { id: true, name: true, slug: true, agent: true, role: true, worksForUserId: true, mcpAllowed: true },
     orderBy: [{ name: "asc" }, { slug: "asc" }],
   });
   const offered: Bot[] = [];
   const refused: RefusedBot[] = [];
-  for (const { name, slug, ...account } of bots) {
+  for (const { name, slug, agent, ...account } of bots) {
     const refusal = tokenRefusalOf(account, issuerOf(person));
-    if (refusal === null) offered.push({ id: account.id, name, slug });
-    else refused.push({ id: account.id, name, slug, reason: refusal.reason });
+    if (refusal === null) offered.push({ id: account.id, name, slug, agent });
+    else refused.push({ id: account.id, name, slug, agent, reason: refusal.reason });
   }
   return { offered, refused };
 }
