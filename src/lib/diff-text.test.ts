@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { diffText, tokenizeFine, TooLargeToMerge, WORD_DIFF_MAX_CELLS } from "./diff";
+import { diffText, tokenizeFine, TooLargeToMerge, WORD_DIFF_MAX_CELLS } from "./diff-text";
 
 // The word diff's size cap (docs/MCP.md §6, "Size guards"): a pair past it is
 // trimmed to its changed middle first; a read past it even then gets the
@@ -36,6 +36,15 @@ test("a pair past the cap even after trimming: a read gets its middle replaced w
     { value: next, type: "insert" },
   ]);
   assert.throws(() => diffText(old, next, undefined, "edit"), TooLargeToMerge);
+
+  // A read is told the cap bit; a pair trimmed under it, and an edit, tell nothing.
+  const caps: string[] = [];
+  const onCap = (cap: string) => caps.push(cap);
+  diffText(old, next, undefined, "read", onCap);
+  assert.deepEqual(caps, ["word-diff"]);
+  diffText(old, old.replace(" w1050 ", " changed "), undefined, "read", onCap);
+  assert.throws(() => diffText(old, next, undefined, "edit", onCap), TooLargeToMerge);
+  assert.deepEqual(caps, ["word-diff"]);
 
   // Shared ends stay equal around the replaced middle.
   const framedOld = `alpha beta ${old} omega`;

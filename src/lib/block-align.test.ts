@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { alignBlocks, ALIGNMENT_MAX_CELLS, diffRuns, PAIRING_MAX_PAIRS, renderWordDiff, type AlignedPair } from "./block-align";
-import { TooLargeToMerge } from "./diff";
+import { TooLargeToMerge } from "./diff-text";
 
 // docs/MCP.md §6 — the block alignment an edit, a read of changes and a
 // revert share, and the word diff within a pair.
@@ -246,6 +246,13 @@ test("past the alignment's cap, a read gets everything between the equal ends de
   assert.ok(pairs.every((pair) => pair.old === null || pair.new === null));
   assert.throws(() => alignBlocks(oldTexts, newTexts, undefined, "edit"), TooLargeToMerge);
 
+  // A read is told which cap bit; an edit throws before anything is told.
+  const caps: string[] = [];
+  alignBlocks(oldTexts, newTexts, undefined, "read", (cap) => caps.push(cap));
+  assert.deepEqual(caps, ["alignment"]);
+  assert.throws(() => alignBlocks(oldTexts, newTexts, undefined, "edit", (cap) => caps.push(cap)), TooLargeToMerge);
+  assert.deepEqual(caps, ["alignment"]);
+
   // Equal ends are kept as pairs around the unpaired middle.
   const framed = alignBlocks(["head", ...oldTexts, "tail"], ["head", ...newTexts, "tail"]);
   assert.deepEqual(framed[0], { old: 0, new: 0 });
@@ -271,10 +278,15 @@ test("past the pairing cap, summed over gaps split by empty paragraphs, larger g
   assert.deepEqual(pairs.slice(0, 2), [{ old: 0, new: null }, { old: 1, new: null }]);
   assert.deepEqual(pairs[600], { old: null, new: 0 });
   assert.throws(() => alignBlocks(oldTexts, newTexts, undefined, "edit"), TooLargeToMerge);
+  const caps: string[] = [];
+  alignBlocks(oldTexts, newTexts, undefined, "read", (cap) => caps.push(cap));
+  assert.deepEqual(caps, ["pairing"]);
 
-  // Two such gaps are under the cap, and pair as before.
+  // Two such gaps are under the cap, and pair as before, with nothing told.
   const underOld = [...gap(1), "", ...gap(2)];
   const underNew = [...rewritten(gap(1)), "", ...rewritten(gap(2))];
   const under = alignBlocks(underOld, underNew, undefined, "edit");
   assert.equal(under.filter((pair) => pair.old !== null && pair.new !== null).length, underOld.length);
+  alignBlocks(underOld, underNew, undefined, "read", (cap) => caps.push(cap));
+  assert.deepEqual(caps, ["pairing"]);
 });

@@ -1,4 +1,4 @@
-import { diffText, TooLargeToMerge, type CapMode } from "./diff";
+import { diffText, TooLargeToMerge, type CapMode, type OnCap } from "./diff-text";
 
 // docs/MCP.md §6 — pairing two versions of a run of blocks, and the word diff
 // within each pair. One alignment for three callers: a read of what changed
@@ -124,14 +124,15 @@ export const PAIRING_MAX_PAIRS = 1_000_000;
  *
  * Two caps bound the rest. Past `ALIGNMENT_MAX_CELLS`, a read gets everything
  * between the equal ends deleted and added; past `PAIRING_MAX_PAIRS`, every
- * gap larger than 1×1 is left unpaired. An edit past either throws
- * `TooLargeToMerge`.
+ * gap larger than 1×1 is left unpaired. A read is told which through `onCap`;
+ * an edit past either throws `TooLargeToMerge`.
  */
 export function alignBlocks(
   oldTexts: readonly string[],
   newTexts: readonly string[],
   keys?: { old: readonly string[]; new: readonly string[] },
   mode: CapMode = "read",
+  onCap?: OnCap,
 ): AlignedPair[] {
   const oldKeys = keys?.old ?? oldTexts;
   const newKeys = keys?.new ?? newTexts;
@@ -163,6 +164,7 @@ export function alignBlocks(
 
   if (n * m > ALIGNMENT_MAX_CELLS) {
     if (mode === "edit") throw new TooLargeToMerge();
+    onCap?.("alignment");
     push(unpaired(n, m), 0, 0);
     return finish();
   }
@@ -201,6 +203,7 @@ export function alignBlocks(
   };
   const tooMany = gaps.reduce((sum, gap) => sum + scored(gap), 0) > PAIRING_MAX_PAIRS;
   if (tooMany && mode === "edit") throw new TooLargeToMerge();
+  if (tooMany) onCap?.("pairing");
 
   for (const [k, gap] of gaps.entries()) {
     push(
@@ -223,10 +226,12 @@ export type DiffRun = { type: "equal" | "delete" | "insert"; text: string; start
  * belongs to (the old text for a deletion, the new for an insertion and an
  * equal run). A change region runs across the whitespace between two changes,
  * so "the quick brown fox" against "the slow red fox" is one removal and one
- * addition, `[-quick brown-]{+slow red+}`, rather than two of each.
+ * addition, `[-quick brown-]{+slow red+}`, rather than two of each. A read:
+ * past the word diff's cap the changed middle is one removal and one
+ * addition, and `onCap` is told.
  */
-export function diffRuns(oldText: string, newText: string): DiffRun[] {
-  const tokens = diffText(oldText, newText);
+export function diffRuns(oldText: string, newText: string, onCap?: OnCap): DiffRun[] {
+  const tokens = diffText(oldText, newText, undefined, "read", onCap);
   const runs: DiffRun[] = [];
   let oldAt = 0;
   let newAt = 0;
