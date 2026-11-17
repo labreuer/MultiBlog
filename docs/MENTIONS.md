@@ -143,7 +143,9 @@ whose labels can name them.
   `/search?mentions=me`. Built.
 - **The notification stub** is the `mention` table's first-seen time, an outbox nothing reads
   yet. When notifications are built:
-  - only new mentions count, at most once per person per item;
+  - only new mentions count, at most once per person per item. A fork's inherited mentions
+    are not new: its chips get `mention` rows of their own, first seen when the fork was made
+    (FORKS.md, "Rules elsewhere that a fork meets");
   - the sender comes from the `clients` map;
   - delivery re-checks the recipient's read access.
 

@@ -17,7 +17,7 @@ What it does not repeat, because another file owns it:
 | [MARGIN_NOTES.md](MARGIN_NOTES.md) | The rail beside a doc's text, in the reading view and the editor. |
 | [TABLES.md](TABLES.md) | Tables inside a doc. |
 | PLAN.md §14 | `/side-by-side` and doc links, which join two docs. |
-| [FORKS.md](FORKS.md) | Who may see a doc's history; diffs of two docs or of one doc at two versions, as built; forks of a doc, a plan. |
+| [FORKS.md](FORKS.md) | Who may see a doc's history; diffs of two docs or of one doc at two versions; forks of a doc, the reading view's Actions menu and its family lines. |
 | PLAN.md §15 | Posts as snapshots of docs — a post is published *from* a doc, and `/post/[id]/edit` reads a doc's history. |
 | PLAN.md §16 | The admin-table kit `/docs` is one instance of. |
 
@@ -364,7 +364,12 @@ has synced.
   decision.
 - **The byline** is `AuthorByline` without its `"By "` prefix, dated by `Doc.updatedAt` —
   a doc has no publish date, so "last edited" is the only date that means anything, and the
-  cache write is what keeps it current.
+  cache write is what keeps it current. After the date come the doc's posts, for its editors
+  (BLOG.md §4), and an **Actions** menu (`DocActionsMenu.tsx`): "Publish as blog post" for an
+  editor of a doc with no post, and "Fork…" for any reader who may create docs. Under the
+  byline, a fork names the doc it was forked from and a forked doc lists its forks, each with
+  the diffs this viewer may see (`DocFamily.tsx`; FORKS.md, "The doc view" and "A doc's
+  family").
 - **The scrub bar** (`DocScrubBar.tsx`) is lazy by construction, not by a flag: before the
   reader interacts it is one grayed-out, inert `<input>`; the first `pointerdown`/`focus`
   fetches `/api/doc/[id]/replay` and mounts the real slider, and only then does
@@ -566,6 +571,8 @@ document rather than the remark.
   the comment above it instead.
 - **`e2e/doc-diff.spec.ts`** holds the scrub bar's pin, its two diff links and its
   "changes have come in" note, with the diff route they lead to (FORKS.md, "Testing").
+- **`e2e/doc-fork.spec.ts`** holds the Actions menu, the Fork dialog reading the scrub bar's
+  position, and the family lines, with forking itself (FORKS.md, "Testing").
 - **`e2e/doc-visibility.spec.ts`** pins the visibility rule and both listings: an
   ADMIN/EDITOR non-author is refused a `PRIVATE` doc for read and edit, a listed author is
   not, `SHARED` stays open to ADMIN/EDITOR regardless of byline, the `/docs` override is

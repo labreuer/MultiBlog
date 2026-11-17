@@ -60,7 +60,9 @@ in `doc-authz.ts`, so it sits with them.
 **Legend for every table below.** ✅ allowed · ❌ denied · `—` the page itself is denied by
 its `canManageDocs` gate, so the row can never arise · `own` only rows that user authored ·
 ⚠️ only with the ADMIN-only "Show all docs" checkbox (`?showAllDocs=1`) · † the action is
-doc-independent, so it is callable directly but unreachable through the UI.
+doc-independent, so it is callable directly but unreachable through the UI · ‡ but for the one
+version a fork of this doc was made at, in a diff, for a viewer who may see that fork's history
+(FORKS.md, "Who may see a doc's history").
 
 ## 1. PRIVATE & in `doc_author`
 
@@ -81,6 +83,8 @@ doc-independent, so it is callable directly but unreachable through the UI.
 | Side-by-side | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Diff, as it is now (`/diff`; the other side must be readable too) | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Diff at a version | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Fork, as it is now | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Fork at a version | ✅ | ✅ | ✅ | ❌ | ❌ |
 
 ## 2. PRIVATE & not in `doc_author`
 
@@ -104,6 +108,8 @@ byline, role notwithstanding.
 | Side-by-side | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Diff, as it is now (`/diff`; the other side must be readable too) | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Diff at a version | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Fork, as it is now | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Fork at a version | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 ## 3. SHARED & in `doc_author`
 
@@ -124,6 +130,8 @@ byline, role notwithstanding.
 | Side-by-side | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Diff, as it is now (`/diff`; the other side must be readable too) | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Diff at a version | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Fork, as it is now | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Fork at a version | ✅ | ✅ | ✅ | ❌ | ❌ |
 
 ## 4. SHARED & not in `doc_author`
 
@@ -146,7 +154,9 @@ inconsistencies" below, both of which are visible here.
 | Create doc link | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Side-by-side | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Diff, as it is now (`/diff`; the other side must be readable too) | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Diff at a version | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Diff at a version | ✅ | ✅ | ❌ ‡ | ❌ | ❌ |
+| Fork, as it is now | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Fork at a version | ✅ | ✅ | ❌ | ❌ | ❌ |
 
 ## Axis-independent — neither visibility nor byline applies
 
@@ -162,7 +172,11 @@ inconsistencies" below, both of which are visible here.
 | Read a published post, submit a comment | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 Two of these are worth not mistaking for doc rules. **Creating a doc** is `canManageDocs`
-with no doc to scope against yet, so it sits outside all four tables. **Deleting or
+with no doc to scope against yet, so it sits outside all four tables. **Forking a doc** is
+creating one from a doc the forker can read (`forkDoc`, `src/lib/doc-fork.ts`), which is why
+an AUTHOR may fork a `SHARED` doc they can't edit and an AUTHORIZED reader may fork nothing;
+at a version it also asks for the parent's history. The fork is the forker's own, `PRIVATE` or
+`SHARED` as they choose, whatever the parent's (FORKS.md, "Who may fork"). **Deleting or
 restoring an annotation** is `setAnnotationDeleted` (`src/lib/annotation-manage.ts`) — ADMIN
 or the annotation's own author, and a `DRAFT` its author alone — and never consults the doc,
 which is why that row reads identically in all four tables and why an ADMIN retains it, for a

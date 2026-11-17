@@ -212,10 +212,11 @@ Steps 0 to 3 are built but for the items each entry says are not; step 3's are i
   whose quote gives a chip other fields than it holds is refused as `chip_changed`.
 - **Styling, per doc and per post:**
   - **The doc's style** is in a `Y.Map("settings")` in its ydoc, one key per chip kind
-    (`settings.ts`), cached to `Doc.chipStyles` by the store. `DocSettingsPanel` writes it
-    through the editor's connection; open editors and reading views follow it live
-    (`useChipInputs` observes the map), and the next store relabels `prose_json` and the
-    anchors' chip records. Every server path that labels a doc's body takes the doc's style:
+    (`settings.ts`), cached to `Doc.chipStyles` by the store, and by `createDocWithContent`
+    for a seed that holds one, which a fork's does (FORKS.md, "The function").
+    `DocSettingsPanel` writes it through the editor's connection; open editors and reading
+    views follow it live (`useChipInputs` observes the map), and the next store relabels
+    `prose_json` and the anchors' chip records. Every server path that labels a doc's body takes the doc's style:
     the cache write, the first paint, the chip-context endpoint, MCP's doc state, anchor
     capture, the refresh and the integrity check.
   - **MCP:** a doc read carries `styles` when the doc has set any, `edit_doc` takes
