@@ -6,7 +6,7 @@
 // since both need a published post whose body holds a table and
 // createTestPost only takes plain text.
 import type { Page } from "@playwright/test";
-import { test, expect, bodyEditor, gotoOk } from "./fixtures";
+import { test, expect, bodyEditor, gotoOk, openDocActions } from "./fixtures";
 import { deleteTestDoc, deleteTestPost, getPostPath } from "./db";
 import { E2E_TITLE_PREFIX } from "./naming";
 
@@ -84,9 +84,10 @@ test("a pipe table imports, publishes, scrolls in place on a phone, and download
     await expect(bodyEditor(page).locator("table")).toHaveCount(2);
     await expect(bodyEditor(page).locator("table").nth(1)).toHaveAttribute("style", /width: 700px/);
 
-    // Publish it: the doc view's byline button creates the post and lands
+    // Publish it: the doc view's Actions menu creates the post and lands
     // on its editor; Publish there makes it public.
     await page.goto(`/doc/${docId}`);
+    await openDocActions(page);
     await page.getByRole("button", { name: "Publish as blog post" }).click();
     await page.waitForURL(/\/post\/[^/]+\/edit$/);
     postId = page.url().match(/\/post\/([^/]+)\/edit$/)?.[1] ?? null;

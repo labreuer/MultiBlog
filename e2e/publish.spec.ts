@@ -1,7 +1,7 @@
 // PLAN.md §15 — /post/[id]/edit no longer edits a post's own content; it
 // publishes a point in its backing doc's history. Editing happens at
 // /doc/[id]/edit, same as any doc.
-import { test, expect, bodyEditor, gotoOk, freshGoto, visibleText, waitForDocCollabReady } from "./fixtures";
+import { test, expect, bodyEditor, docActionItems, gotoOk, freshGoto, visibleText, waitForDocCollabReady } from "./fixtures";
 import { addTestDocAuthor, addTestPostAuthor, getPostPath, type TestPost } from "./db";
 
 // "Publish" without `exact` also matches "Publish as blog post" elsewhere.
@@ -202,7 +202,7 @@ test.describe("publish / unpublish", () => {
     // createTestPost titles the post and its doc separately, so every entry
     // here carries the "as <post title>" clause.
     await page.goto(docPage);
-    await expect(page.getByRole("button", { name: "Publish as blog post" })).toHaveCount(0);
+    expect(await docActionItems(page)).toEqual(["Fork…"]);
     await expect(page.getByText(`Draft as ${draftPost.title} (configure)`)).toBeVisible();
     await expect(configure()).toHaveAttribute("href", `/post/${draftPost.id}/edit`);
 
@@ -227,7 +227,7 @@ test.describe("publish / unpublish", () => {
       name: new RegExp(`^Scheduled as ${title} for \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} UTC \\(in 1 day, `),
     });
     await expect(scheduled).toHaveAttribute("href", `/post/${draftPost.id}/edit`);
-    await expect(page.getByRole("button", { name: "Publish as blog post" })).toHaveCount(0);
+    expect(await docActionItems(page)).toEqual(["Fork…"]);
 
     // Publish Now, then: "Published on <date>" to the live page, plus configure.
     await page.goto(`/post/${draftPost.id}/edit`);
@@ -243,12 +243,12 @@ test.describe("publish / unpublish", () => {
     await expect(page.getByText(/^Scheduled for/)).toHaveCount(0);
   });
 
-  test("the doc's byline offers \"Publish as blog post\" only while the doc has no post", async ({
+  test("the doc's Actions menu offers \"Publish as blog post\" only while the doc has no post", async ({
     page,
     draftDoc,
   }) => {
     await page.goto(`/doc/${draftDoc.id}`);
-    await expect(page.getByRole("button", { name: "Publish as blog post" })).toBeVisible();
+    expect(await docActionItems(page)).toEqual(["Publish as blog post", "Fork…"]);
     await expect(page.getByRole("link", { name: "configure" })).toHaveCount(0);
   });
 

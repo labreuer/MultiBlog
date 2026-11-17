@@ -479,6 +479,9 @@ export const renameTestTagSlug = (...args: Parameters<DbHandlers["renameTestTagS
 export const getDocMarkFacts = (...args: Parameters<DbHandlers["getDocMarkFacts"]>) => call("getDocMarkFacts", ...args);
 export const setTestDocRecord = (...args: Parameters<DbHandlers["setTestDocRecord"]>) => call("setTestDocRecord", ...args);
 export const softDeleteTestDoc = (...args: Parameters<DbHandlers["softDeleteTestDoc"]>) => call("softDeleteTestDoc", ...args);
+export const forkDocAs = (...args: Parameters<DbHandlers["forkDocAs"]>) => call("forkDocAs", ...args);
+export const getTestForkFacts = (...args: Parameters<DbHandlers["getTestForkFacts"]>) => call("getTestForkFacts", ...args);
+export const deleteTestDocYdoc = (...args: Parameters<DbHandlers["deleteTestDocYdoc"]>) => call("deleteTestDocYdoc", ...args);
 export const getFileAnnotationQuads = (...args: Parameters<DbHandlers["getFileAnnotationQuads"]>) =>
   call("getFileAnnotationQuads", ...args);
 export const getUploadFacts = (...args: Parameters<DbHandlers["getUploadFacts"]>) => call("getUploadFacts", ...args);

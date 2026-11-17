@@ -41,6 +41,8 @@ import { abandonFileVersion, promoteFileVersion } from "@/lib/file-manage";
 import { planCarry, previewCarryFromVersion, runPlannedCarry } from "@/lib/file-anchor-move";
 import { moveNote, setNoteMoveHidden, setNoteStays } from "@/lib/file-note-move";
 import { ApiError } from "@/lib/api/errors";
+import { forkDoc } from "@/lib/doc-fork";
+import { chipStylesOf, setChipStyle } from "@/lib/entity-chips/settings";
 import { storePageMap } from "@/lib/pdf-page-map-build";
 import { changeTagSlug, uniqueTagSlug } from "@/lib/tag-slug";
 import { targetFromColumns, targetToColumns, type AnchorTarget } from "@/lib/anchors";
@@ -526,6 +528,8 @@ export async function createTestDoc(opts: {
   bodyText?: string;
   /** A body as TipTap JSON, for a doc that needs headings or lists — in place of `bodyText`. */
   body?: JSONContent;
+  /** The doc's style per chip kind (docs/ENTITY_CHIPS.md, "Styling"), set in its ydoc and cached on its row as a store leaves them. */
+  chipStyles?: Record<string, unknown>;
 }): Promise<TestDoc> {
   const { authorEmail, title = uniqueTitle("doc"), visibility = "PRIVATE", bodyText, body } = opts;
   assertSafe(authorEmail);
@@ -564,6 +568,7 @@ export async function createTestDoc(opts: {
   );
   Y.applyUpdate(seed, Y.encodeStateAsUpdate(seededTitle));
   seededTitle.destroy();
+  for (const [kind, style] of Object.entries(opts.chipStyles ?? {})) setChipStyle(seed, kind, style);
 
   const { ydoc, stateVector } = encodeYdocState(seed);
   // Write the same title/prose_json cache the collab server would write on its
@@ -577,7 +582,11 @@ export async function createTestDoc(opts: {
   // prose_json_length follows from the doc_sync_prose_json_length trigger.
   const cachedDoc = await prisma.doc.update({
     where: { id: doc.id },
-    data: { proseJson: cached.proseJson as Prisma.InputJsonValue, title: cached.title },
+    data: {
+      proseJson: cached.proseJson as Prisma.InputJsonValue,
+      title: cached.title,
+      ...(cached.chipStyles ? { chipStyles: cached.chipStyles as Prisma.InputJsonValue } : {}),
+    },
   });
 
   return { id: cachedDoc.id, slug: cachedDoc.slug, title: cachedDoc.title };
@@ -3637,11 +3646,106 @@ export async function setTestDocRecord(docId: string, record: boolean): Promise<
   await prisma.doc.update({ where: { id: docId }, data: { record } });
 }
 
-/** Soft-deletes a test doc as the suite's admin, through the body the editor's Delete runs (src/lib/doc-manage.ts). */
-export async function softDeleteTestDoc(docId: string): Promise<void> {
+/**
+ * Soft-deletes a test doc through the body the editor's Delete runs
+ * (src/lib/doc-manage.ts): as the suite's admin, or as `byEmail`, for a
+ * PRIVATE doc the admin isn't on.
+ */
+export async function softDeleteTestDoc(docId: string, byEmail?: string): Promise<void> {
   const doc = await prisma.doc.findUniqueOrThrow({ where: { id: docId }, select: { title: true } });
   if (!doc.title.startsWith(E2E_TITLE_PREFIX)) throw new Error("softDeleteTestDoc: not a test doc.");
-  await setDocDeleted(await adminActor(), docId, true);
+  if (byEmail) assertSafe(byEmail);
+  const by = byEmail ? await prisma.user.findUniqueOrThrow({ where: { email: byEmail }, select: { id: true, role: true } }) : null;
+  await setDocDeleted(by ? { userId: by.id, role: by.role } : await adminActor(), docId, true);
+}
+
+/**
+ * forkDoc (src/lib/doc-fork.ts) as an actor the spec names: the function the
+ * Fork dialog's action wraps, so a spec can ask for what the dialog never
+ * sends. `visibility` and `revision` go as the spec gives them, as a server
+ * action is sent whatever its caller likes. `sessionRole` stands for a
+ * session whose role has since changed.
+ */
+export async function forkDocAs(opts: {
+  actorEmail: string;
+  sessionRole?: Role;
+  parentId: string;
+  revision?: string | null;
+  visibility?: string;
+}): Promise<{ ok: true; id: string; slug: string; path: string } | { ok: false; code: string; message: string }> {
+  assertSafe(opts.actorEmail);
+  const user = await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email: opts.actorEmail }, select: { id: true, role: true } });
+  try {
+    const fork = await forkDoc(
+      { userId: user.id, role: opts.sessionRole ?? user.role },
+      { parentId: opts.parentId, revision: opts.revision ?? null, visibility: (opts.visibility ?? "PRIVATE") as DocVisibility },
+    );
+    const row = await prisma.doc.findUniqueOrThrow({ where: { id: fork.id }, select: { slug: true } });
+    return { ok: true, ...fork, slug: row.slug };
+  } catch (err) {
+    const e = err as { code?: string; message?: string };
+    return { ok: false, code: e.code ?? "error", message: e.message ?? String(err) };
+  }
+}
+
+/** What a fork's row records, and the chip styles its ydoc and its row hold. Its marks are getDocMarkFacts'. */
+export async function getTestForkFacts(idOrSlug: string): Promise<{
+  id: string;
+  slug: string;
+  forkedFromDocId: string | null;
+  forkedFromUpdateId: string | null;
+  visibility: DocVisibility;
+  byline: string[];
+  createdByEmail: string | null;
+  record: boolean;
+  importKey: string | null;
+  importedUpdateId: string | null;
+  chipStylesInRow: unknown;
+  chipStylesInYdoc: unknown;
+}> {
+  const doc = await prismaIncludingDeleted.doc.findFirstOrThrow({
+    where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
+    select: {
+      id: true,
+      slug: true,
+      forkedFromDocId: true,
+      forkedFromUpdateId: true,
+      visibility: true,
+      record: true,
+      importKey: true,
+      importedUpdateId: true,
+      chipStyles: true,
+      createdBy: { select: { email: true } },
+      authors: { orderBy: { bylineOrder: "asc" }, select: { user: { select: { email: true } } } },
+    },
+  });
+  const row = await prisma.ydoc.findUniqueOrThrow({ where: { id: ydocIdForDoc(doc.id) }, select: { ydoc: true } });
+  const scratch = new Y.Doc();
+  Y.applyUpdate(scratch, new Uint8Array(row.ydoc));
+  const chipStylesInYdoc = chipStylesOf(scratch);
+  scratch.destroy();
+  return {
+    id: doc.id,
+    slug: doc.slug,
+    forkedFromDocId: doc.forkedFromDocId,
+    forkedFromUpdateId: doc.forkedFromUpdateId?.toString() ?? null,
+    visibility: doc.visibility,
+    byline: doc.authors.map((a) => a.user.email),
+    createdByEmail: doc.createdBy?.email ?? null,
+    record: doc.record,
+    importKey: doc.importKey,
+    importedUpdateId: doc.importedUpdateId?.toString() ?? null,
+    chipStylesInRow: doc.chipStyles,
+    chipStylesInYdoc,
+  };
+}
+
+/** Drops a throwaway doc's ydoc and its log: a doc with no history, which a failed eager create or a legacy import leaves. */
+export async function deleteTestDocYdoc(docId: string): Promise<void> {
+  const doc = await prismaIncludingDeleted.doc.findUniqueOrThrow({ where: { id: docId }, select: { title: true } });
+  if (!doc.title.startsWith(E2E_TITLE_PREFIX)) throw new Error("deleteTestDocYdoc: not a test doc.");
+  await prisma.ydocUpdate.deleteMany({ where: { ydocId: ydocIdForDoc(docId) } });
+  await prisma.ydoc.deleteMany({ where: { id: ydocIdForDoc(docId) } });
 }
 
 /** Re-slugs a test term through changeTagSlug, so the old slug lands in tag_slug_history as /tags' rename leaves it. */
@@ -3907,6 +4011,9 @@ const handlers = {
   getDocMarkFacts,
   setTestDocRecord,
   softDeleteTestDoc,
+  forkDocAs,
+  getTestForkFacts,
+  deleteTestDocYdoc,
 };
 
 export type DbHandlers = typeof handlers;
