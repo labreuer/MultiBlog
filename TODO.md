@@ -241,7 +241,7 @@ of its "Architecture invariants" matter only to someone changing one area. The a
 tried once: the topic doc gets a short section near its top, read whole before changing that
 area, and CLAUDE.md keeps only the lines that say when to read it. docs/PDF.md §0, "Mistakes
 that fail no check", is the example, with the four file-version traps and the four lines in
-CLAUDE.md that point to it.
+CLAUDE.md that point to it. docs/FORKS.md has a section of the same name for a doc's history.
 
 **Two entries known to fit**, both about PDFs and about 20 lines between them: "A PDF anchor
 cannot drift" and "Bumping `pdfjs-dist` is never routine". They join docs/PDF.md §0's list,

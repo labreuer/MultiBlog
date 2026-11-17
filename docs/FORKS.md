@@ -22,6 +22,31 @@ What it does not repeat:
 | [MCP.md](MCP.md) §6 | The engine, `alignBlocks` and `diffRuns`, which MCP's `since` already runs. |
 | PLAN.md §14 | `/side-by-side`, the doc-link surface, which links to the diff of its pair and shares nothing else with it ("Its own route"). |
 
+## Mistakes that fail no check
+
+Read these before changing code that shows a doc as it was at an earlier version: code that
+calls `loadDocStateAt` or `isDocVersion`, serves a doc's `ydoc_update` rows, or takes an update
+id from a request. Today that is the doc page's scrub bar and its replay route, the diff page,
+MCP's reads and writes, and `/post/[id]/edit`. Each mistake compiles, lints and gives a doc's
+editors the right answer, and the diff page's spec covers that page's gate alone. CLAUDE.md
+points here and holds none of it, so this list is the whole of the warning.
+
+- **Showing history through `canUserEditDoc`.** The two answer alike today, so nothing differs
+  until the rule changes: with forks, when a fork's editors may see one version of a parent
+  they can't edit, and again at the permissions redesign. Ask `canUserSeeDocHistory` for a
+  doc's history, `docsWithVisibleHistoryWhere` for several docs at once, and
+  `canUserSeeDocVersion` for one version ("Who may see a doc's history").
+- **Asking whether a version exists before whether the viewer may see it.** `isDocVersion`
+  first answers not-found for an id outside the doc's log and Forbidden for one inside it,
+  which tells a reader without the history which ids the log holds. `canUserSeeDocVersion`
+  comes first, and a viewer who fails it is refused whatever the id (`loadDiffPair`,
+  `src/app/diff/[left]/[right]/page.tsx`).
+- **Moving a check that replays in order to write.** `/post/[id]/edit`, MCP's revert and an
+  edit that names a passage at a version ask `canUserEditDoc`, because each is an edit. On the
+  history predicate, a rule that showed history to more people would let them publish from the
+  doc or write to it. Two of MCP's reads are outside the rule on purpose ("Who may see a doc's
+  history").
+
 ## What it is for
 
 1. **Changing a doc you can read but not edit**, in a copy of your own, with the text's
@@ -759,15 +784,16 @@ its own before forks go out.
    PERMISSIONS.md has the diff rows, and its "Replay history" rows name the predicate; DOCS.md's
    "The reading view" has the scrub bar's links; TODO.md has "Who may see a doc's history",
    "`?at=` is ignored for a reader without the scrub bar, and says nothing" and the worker's
-   untried Safari, and its size-guards entry the deadline and the phone. CLAUDE.md has the
-   history trigger (below). `e2e/doc-diff.spec.ts`. No migration.
+   untried Safari, and its size-guards entry the deadline and the phone. "Mistakes that fail
+   no check" has the history's three, and CLAUDE.md the line that points there (below).
+   `e2e/doc-diff.spec.ts`. No migration.
 3. **Forks.** The duplicate-slug fix first, then the migration, `doc-fork.ts` and
    `fork-seed.ts`, `createDocWithContent`'s options, the scrub bar's position getter, the
    Actions menu and the Fork dialog, the family lines with their diff links, `sideOrder`'s fork
    cases and **the second stop** ("Which side is later"), and the fork-point exception in
    `canUserSeeDocVersion`.
    PERMISSIONS.md's fork rows; TODO.md gains "A snapshot at a fork point" ("The function");
-   CLAUDE.md, the strip trigger (below); `e2e/doc-fork.spec.ts`.
+   "Mistakes that fail no check" gains the strip (below); `e2e/doc-fork.spec.ts`.
    If it reviews better as two, it splits at the family lines.
 4. **Sliders on the diff page** ("Planned: sliders on the diff page"). It needs item 2 alone,
    so it can be built before item 3. The shared block-building function and its parity test
@@ -778,15 +804,11 @@ its own before forks go out.
 **Each PR deploys once it merges**, so the feature reaches an instance in four steps, and the
 diffs work there before forks do.
 
-**CLAUDE.md's triggers**, each a sentence and a pointer to docs/FORKS.md. The first is there;
-the second lands with PR 3:
-
-- **at PR 2:** showing a doc's history is checked through `canUserSeeDocHistory`, and a version
-  through `canUserSeeDocVersion`, never through `canUserEditDoc` directly, and before
-  `isDocVersion`, never after. `/post/[id]/edit` keeps `canUserEditDoc`, where the question is
-  publishing;
-- **at PR 3:** the `annotation` strip in `forkSeed` is the only guard against copying a
-  parent's notes, since the doc schema accepts the mark.
+**CLAUDE.md holds one line for this file**, which names the code it applies to and points at
+"Mistakes that fail no check" (TODO.md, "CLAUDE.md: move topic-only traps into their topic
+doc"). PR 3 adds to that list and not to CLAUDE.md: the `annotation` strip in `forkSeed` is the
+only guard against copying a parent's notes, since the doc schema accepts the mark. The line in
+CLAUDE.md then grows a clause for code that seeds a doc from another doc's text.
 
 **Testing** ports what `e2e/wiki.spec.ts` checks of forks and diffs, without addresses.
 Diffs, in `e2e/doc-diff.spec.ts`: every check of rows waits for the island to mark itself done;

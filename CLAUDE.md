@@ -292,11 +292,9 @@ before changing the behavior it describes.
   docs/MCP.md §1, §2, §6.
 - **A `PRIVATE` doc is its listed `DocAuthor`s' alone** — no ADMIN/EDITOR bypass. docs/DOCS.md "Roles and
   visibility", docs/PERMISSIONS.md.
-- **Showing a doc's history asks `canUserSeeDocHistory`, and a version `canUserSeeDocVersion`,
-  never `canUserEditDoc` directly**, and before `isDocVersion`, never after: in the other
-  order, Forbidden against not-found tells a reader which ids are in the doc's log.
-  `/post/[id]/edit` keeps `canUserEditDoc`, where the question is publishing. docs/FORKS.md,
-  "Who may see a doc's history".
+- **Before changing code that shows a doc as it was at an earlier version (it calls
+  `loadDocStateAt` or `isDocVersion`, serves a doc's `ydoc_update` rows, or takes an update id
+  from a request), read docs/FORKS.md, "Mistakes that fail no check".**
 - **The landing page's preamble is the body of whichever `Doc` is titled exactly `FRONT PAGE`**
   (case-insensitive, first-created wins); its own title is never shown. Seed one with
   `npx tsx scripts/seed-front-page.ts`. No `DocVisibility` check — the title alone is what
