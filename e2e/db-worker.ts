@@ -3402,6 +3402,41 @@ export async function setTestPasswordHashInSql(email: string): Promise<void> {
   await prisma.$executeRaw`UPDATE "user" SET password_hash = 'x' WHERE email = ${email}`;
 }
 
+/**
+ * The bots that work for a person, deleted ones included, oldest first: what
+ * a spec reads after Approve to see which bot was made, or that none was
+ * (docs/MCP.md §21, "Making it, at Approve"). `connections` counts every
+ * connection ever made as the bot, revoked ones too.
+ */
+export async function getTestBotsOf(personEmail: string): Promise<
+  { id: string; email: string; name: string | null; slug: string; agent: Agent | null; role: Role; initials: string; deleted: boolean; connections: number }[]
+> {
+  assertSafe(personEmail);
+  const person = await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email: personEmail }, select: { id: true } });
+  const bots = await prismaIncludingDeleted.user.findMany({
+    where: { worksForUserId: person.id },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, email: true, name: true, slug: true, agent: true, role: true, adminInitials: true, deletedByUserId: true },
+  });
+  const connections = await prisma.apiToken.groupBy({
+    by: ["userId"],
+    where: { userId: { in: bots.map((bot) => bot.id) }, oauthClientId: { not: null } },
+    _count: { _all: true },
+  });
+  const made = new Map(connections.map((group) => [group.userId, group._count._all]));
+  return bots.map((bot) => ({
+    id: bot.id,
+    email: bot.email,
+    name: bot.name,
+    slug: bot.slug,
+    agent: bot.agent,
+    role: bot.role,
+    initials: bot.adminInitials,
+    deleted: bot.deletedByUserId !== null,
+    connections: made.get(bot.id) ?? 0,
+  }));
+}
+
 /** An account as /users shows a bot: its agent, name, initials and slug, whether connections are on, and whether it is deleted. */
 export async function getTestAccountFacts(email: string): Promise<{
   agent: Agent | null;
@@ -3522,7 +3557,13 @@ export async function lapseTestConnection(refreshToken: string): Promise<void> {
  * the script's rule. Its name starts with the suite's title prefix, which is
  * what `deleteTestOauthClient` deletes by. Returns its client_id.
  */
-export async function createTestOauthClient(opts: { name: string; redirectUris: string[]; kind: "CLAUDE_AI" | "CHATGPT" | "OTHER" }): Promise<string> {
+export async function createTestOauthClient(opts: {
+  name: string;
+  redirectUris: string[];
+  kind: "CLAUDE_AI" | "CHATGPT" | "OTHER";
+  /** The script's `--agent`; left out, the client takes its kind's, and an OTHER none. */
+  agent?: Agent;
+}): Promise<string> {
   if (!opts.name.startsWith(E2E_TITLE_PREFIX)) throw new Error(`createTestOauthClient: a test client's name starts with "${E2E_TITLE_PREFIX}".`);
   return registerClient(opts);
 }
@@ -3849,6 +3890,7 @@ const handlers = {
   orphanTestBot,
   setTestPasswordHashInSql,
   getTestAccountFacts,
+  getTestBotsOf,
   getTestBotFacts,
   softDeleteTestUser,
   restoreTestUser,

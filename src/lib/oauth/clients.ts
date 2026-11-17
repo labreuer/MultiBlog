@@ -1,6 +1,7 @@
+import type { Agent } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { redirectUriRefusal } from "./authorize-request";
-import { PINNED_CLIENTS, type OauthClientKind } from "./pinned-clients";
+import { PINNED_CLIENTS, agentKindRefusal, defaultAgentOf, type OauthClientKind } from "./pinned-clients";
 
 // docs/MCP.md §21, "Which clients" — who may ask for a connection. A request
 // names its client by `client_id`, and an unknown one is refused before
@@ -18,13 +19,19 @@ export type OauthClientInfo = {
   redirectUris: readonly string[];
   /** The `api_token.client` its connections get: never CLAUDE_CODE (§21, "Whose account"). */
   kind: OauthClientKind;
+  /**
+   * The AI agent the client is, or null for one that is no agent's (§21,
+   * "Which agent a client is"). The consent page puts the person's bot for it
+   * first, and makes one at Approve for a person who has none.
+   */
+  agent: Agent | null;
 };
 
 /** The pinned identities, by client_id. Any other URL is an unknown client: the pins are an allowlist. */
 const PINNED = new Map<string, OauthClientInfo>(
-  PINNED_CLIENTS.map(({ document, kind }) => [
+  PINNED_CLIENTS.map(({ document, kind, agent }) => [
     document.client_id,
-    { clientId: document.client_id, name: document.client_name, redirectUris: document.redirect_uris, kind },
+    { clientId: document.client_id, name: document.client_name, redirectUris: document.redirect_uris, kind, agent },
   ]),
 );
 
@@ -52,11 +59,11 @@ export async function findClient(clientId: string): Promise<OauthClientInfo | nu
   if (clientId.length > MAX_CLIENT_ID_LENGTH) return null;
   const row = await prisma.oauthClient.findUnique({
     where: { id: clientId },
-    select: { id: true, name: true, redirectUris: true, client: true, revokedAt: true },
+    select: { id: true, name: true, redirectUris: true, client: true, agent: true, revokedAt: true },
   });
   // CLAUDE_CODE is refused by a CHECK on the table; this keeps the type honest.
   if (!row || row.revokedAt !== null || row.client === "CLAUDE_CODE") return null;
-  return { clientId: row.id, name: row.name, redirectUris: row.redirectUris, kind: row.client };
+  return { clientId: row.id, name: row.name, redirectUris: row.redirectUris, kind: row.client, agent: row.agent };
 }
 
 /** No client registered by hand has a longer name; the consent page shows it whole. */
@@ -72,9 +79,14 @@ const MAX_CLIENT_NAME_LENGTH = 100;
  * script, on a redirect URI `redirectUriRefusal` refuses. Returns the new
  * client_id.
  *
+ * **`agent` is the AI agent the client is** (§21, "Which agent a client is").
+ * Left out, it follows the kind (`defaultAgentOf`), and the row keeps what
+ * that came to, so an OTHER given none is no agent's. One that contradicts
+ * the kind is refused.
+ *
  * Takes named fields and builds the row from them (CLAUDE.md, check:prisma-data).
  */
-export async function registerClient(opts: { name: string; redirectUris: readonly string[]; kind: OauthClientKind }): Promise<string> {
+export async function registerClient(opts: { name: string; redirectUris: readonly string[]; kind: OauthClientKind; agent?: Agent | null }): Promise<string> {
   const name = opts.name.trim();
   if (!name) throw new Error("A client needs a name: the consent page shows it.");
   if (name.length > MAX_CLIENT_NAME_LENGTH) throw new Error(`A client's name is at most ${MAX_CLIENT_NAME_LENGTH} characters.`);
@@ -84,7 +96,10 @@ export async function registerClient(opts: { name: string; redirectUris: readonl
     const refusal = redirectUriRefusal(uri);
     if (refusal) throw new Error(refusal);
   }
-  const row = await prisma.oauthClient.create({ data: { name, redirectUris, client: opts.kind }, select: { id: true } });
+  const agent = opts.agent ?? defaultAgentOf(opts.kind);
+  const contradiction = agent === null ? null : agentKindRefusal(opts.kind, agent);
+  if (contradiction) throw new Error(contradiction);
+  const row = await prisma.oauthClient.create({ data: { name, redirectUris, client: opts.kind, agent }, select: { id: true } });
   return row.id;
 }
 

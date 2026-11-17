@@ -5,6 +5,8 @@ import {
   grantedScopes,
   parseAuthorizeRequest,
 } from "@/lib/oauth/authorize-request";
+import { ApiError, httpStatusOf } from "@/lib/api/errors";
+import { ensureAgentBot } from "@/lib/bots";
 import { findClient } from "@/lib/oauth/clients";
 import { mintAuthorizationCode, signedInPerson, worksFor } from "@/lib/oauth/consent";
 import { issuer, mcpEndpointUrl } from "@/lib/oauth/discovery";
@@ -19,6 +21,17 @@ import { issuer, mcpEndpointUrl } from "@/lib/oauth/discovery";
 // site's, re-parses the request through the page's own parse, and re-checks
 // that the bot works for whoever is signed in. A cross-site post carries no
 // session to begin with: Auth.js's cookie is SameSite=Lax.
+//
+// **`bot=new` makes the person's bot for the client's agent, here and nowhere
+// earlier** ("Making it, at Approve"): not when the page loads, which is a
+// GET that a link someone sent or a prefetch would follow, and not on Cancel.
+// The agent is the re-parsed client's, never the form's, and a client that is
+// no agent's is refused. The bot and the code are not one transaction: a bot
+// made by an Approve whose code is never redeemed is the person's bot all the
+// same, and their next connection finds it.
+
+/** The `bot` value of the list's new-bot option. No account's id is this: an id is a cuid. */
+const NEW_BOT = "new";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,8 +79,21 @@ export async function POST(request: Request): Promise<Response> {
   // off for an account"); this is the answer to a form posted all the same.
   if (!person.mcpAllowed) return refused(403, "An ADMIN has turned connections off for your account.");
 
-  const botId = form.get("bot");
-  if (!botId || !(await worksFor(botId, person))) return refused(403, "That account doesn't work for you.");
+  let botId = form.get("bot");
+  if (botId === NEW_BOT) {
+    const agent = approved.client.agent;
+    if (agent === null) return refused(403, `${approved.client.name} is no AI agent's client, so no bot is made for it. Choose one of your bots.`);
+    try {
+      botId = (await ensureAgentBot({ userId: person.id, role: person.role }, agent)).id;
+    } catch (err) {
+      // Its refusals are written for the person, and answered on the page as
+      // a bot that doesn't work for them is.
+      if (err instanceof ApiError) return refused(httpStatusOf(err), err.message);
+      throw err;
+    }
+  } else if (!botId || !(await worksFor(botId, person))) {
+    return refused(403, "That account doesn't work for you.");
+  }
 
   const code = await mintAuthorizationCode({
     clientId: approved.client.clientId,

@@ -1,11 +1,11 @@
 import { scheduleMentionRefresh } from "@/lib/entity-chips/refresh";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { ApiError, forbidden, invalid } from "@/lib/api/errors";
-import { AGENTS, botRoleRefusal, outranks } from "@/lib/bot-rules";
+import { AGENTS, AGENT_BOT_ROLE, agentBotName, botRoleRefusal, outranks, tokenRefusalOf } from "@/lib/bot-rules";
 import { isAdmin } from "@/lib/role-checks";
 import { colorForSeed } from "@/lib/author-colors";
 import { displayNameOf } from "@/lib/display-name";
-import { uniqueUserSlug } from "@/lib/user-slug";
+import { isUserSlugFree, uniqueUserSlug } from "@/lib/user-slug";
 import { deriveInitials } from "@/lib/user-initials";
 import { Prisma } from "@/generated/prisma/client";
 import { Role, type Agent } from "@/generated/prisma/enums";
@@ -30,6 +30,9 @@ import type { Actor } from "@/lib/actor";
 // and restoring a deleted one. Each asks `agentHolder` first and refuses in
 // a sentence naming the bot that holds the agent, and each catches the
 // index's own refusal, for a write that slipped in between, and asks again.
+//
+// **One way a bot is made without an ADMIN**: `ensureAgentBot`, for a person
+// approving a connection ("Making it, at Approve").
 
 /** A bot's address is `<slug>@multiblog.invalid`: nothing is mailed to a `.invalid` address. */
 export const BOT_EMAIL_DOMAIN = "multiblog.invalid";
@@ -94,14 +97,18 @@ async function withAgentIndex<T>(
  * an account a person's; and one the bot doesn't outrank, who isn't a
  * COMMENTER.
  */
-async function requirePerson(personId: string, botRole: Role): Promise<void> {
-  const person = await prisma.user.findUnique({ where: { id: personId }, select: { role: true, passwordHash: true } });
+async function requirePerson(personId: string, botRole: Role): Promise<{ id: string; role: Role; slug: string; adminInitials: string; mcpAllowed: boolean }> {
+  const person = await prisma.user.findUnique({
+    where: { id: personId },
+    select: { id: true, role: true, passwordHash: true, slug: true, adminInitials: true, mcpAllowed: true },
+  });
   if (!person) throw new ApiError("not_found", "That person's account doesn't exist.");
   if (person.passwordHash === null) {
     throw invalid("A bot works only for an account with a password: one without is a bot itself, or an account nobody has claimed.");
   }
   const refusal = botRoleRefusal(botRole, person.role);
   if (refusal) throw invalid(refusal);
+  return { id: person.id, role: person.role, slug: person.slug, adminInitials: person.adminInitials, mcpAllowed: person.mcpAllowed };
 }
 
 /**
@@ -153,6 +160,94 @@ export async function createBot(
     }),
   );
   return { id: user.id, email, slug };
+}
+
+/** How many times `ensureAgentBot` picks a slug and inserts, before giving up on approvals racing it. */
+const AGENT_BOT_ATTEMPTS = 3;
+
+/**
+ * The slug and address of a new bot for `agent`: its person's slug and the
+ * agent's, `luke-breuer-chatgpt`, then `-2`, `-3` and so on. **A candidate is
+ * free only when its address is too**, `<candidate>@multiblog.invalid`,
+ * deleted accounts included: changing a slug leaves the address as it was,
+ * so an address can outlive its slug, and the two here move together.
+ */
+async function agentBotIdentity(personSlug: string, agent: Agent): Promise<{ slug: string; email: string }> {
+  const base = `${personSlug}-${agent.toLowerCase()}`;
+  for (let suffix = 1; ; suffix += 1) {
+    const slug = suffix === 1 ? base : `${base}-${suffix}`;
+    const email = `${slug}@${BOT_EMAIL_DOMAIN}`;
+    if (!(await isUserSlugFree(slug))) continue;
+    if (await prismaIncludingDeleted.user.findUnique({ where: { email }, select: { id: true } })) continue;
+    return { slug, email };
+  }
+}
+
+/**
+ * The actor's bot for `agent`, made if they have none: what Approve on the
+ * consent page connects as when the person chose the new bot
+ * (§21, "Making it, at Approve"). **The one way a bot is made without an
+ * ADMIN**, so its actor is the person approving.
+ *
+ * - **The gate is `requirePerson`, for the role such a bot is made with.** It
+ *   reads the actor's own row, so it holds whatever role the caller passed:
+ *   the account is live, has a password, and is an AUTHOR or above. A role
+ *   check alone would let a bot make a bot, since an `Actor` built from a
+ *   token can be one.
+ * - **A person whose connections are turned off is refused**, on that row.
+ * - **Their live bot for the agent is returned if there is one**, and refused
+ *   if §3's check would refuse its token: the index allows one per agent,
+ *   and a second would hide the first.
+ * - **Otherwise one is made**: an AUTHOR working for the actor, named for the
+ *   agent and the actor's initials, with the agent's own initials. The
+ *   actor's slug and initials are read once, here; a later change to either
+ *   doesn't carry over to the bot.
+ *
+ * **Two approvals at once end with one bot.** Both can find no bot, or pick
+ * the same slug, and one insert then fails as a duplicate. Each try reads
+ * again for a live bot first, so the one another approval made is returned;
+ * with none, the candidate was what collided, and the next is picked. That
+ * re-read says which collision it was, not the error's metadata.
+ */
+export async function ensureAgentBot(actor: Actor, agent: Agent): Promise<{ id: string; name: string | null; slug: string; made: boolean }> {
+  if (!Object.hasOwn(AGENTS, agent)) throw invalid("Invalid agent.");
+  const person = await requirePerson(actor.userId, AGENT_BOT_ROLE);
+  if (!person.mcpAllowed) throw forbidden("An ADMIN has turned connections off for your account.");
+
+  for (let attempt = 0; attempt < AGENT_BOT_ATTEMPTS; attempt += 1) {
+    const existing = await prisma.user.findFirst({
+      where: { worksForUserId: person.id, agent },
+      select: { id: true, name: true, slug: true, role: true, worksForUserId: true, mcpAllowed: true },
+    });
+    if (existing) {
+      const refusal = tokenRefusalOf(existing, person);
+      if (refusal) {
+        throw forbidden(`${displayNameOf(existing)} is your bot for ${AGENTS[agent].name}, and it can't be connected: ${refusal.message}`);
+      }
+      return { id: existing.id, name: existing.name, slug: existing.slug, made: false };
+    }
+    const { slug, email } = await agentBotIdentity(person.slug, agent);
+    const name = agentBotName(agent, person.adminInitials);
+    try {
+      const bot = await prismaIncludingDeleted.user.create({
+        data: {
+          email,
+          slug,
+          name,
+          role: AGENT_BOT_ROLE,
+          color: colorForSeed(email),
+          adminInitials: AGENTS[agent].initials,
+          worksForUserId: person.id,
+          agent,
+        },
+        select: { id: true },
+      });
+      return { id: bot.id, name, slug, made: true };
+    } catch (err) {
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002")) throw err;
+    }
+  }
+  throw new ApiError("conflict", "The bot couldn't be made just now; start the connection again.");
 }
 
 /**

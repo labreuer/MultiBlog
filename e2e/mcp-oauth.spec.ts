@@ -13,10 +13,12 @@ import {
   deleteTestOauthClient,
   deleteTestUser,
   expireTestApiToken,
+  getTestBotsOf,
   lapseTestConnection,
   revokeTestOauthClient,
   setTestMcpAllowed,
   setTestUserRole,
+  softDeleteTestUser,
   uniqueEmail,
   type TestUser,
 } from "./db";
@@ -692,10 +694,12 @@ test("a client registered by hand connects, and revoking it ends its connections
   }
 });
 
-test("a person with no bot to connect as is told why, and offered Cancel alone; the switch signs in someone else", async ({ browser, request }) => {
+test("an AUTHORIZED person with no bot to connect as is told why, and offered Cancel alone; the switch signs in someone else", async ({ browser, request }) => {
+  // An AUTHOR or above is offered a new bot instead (below). An AUTHORIZED
+  // person isn't: one made here is an AUTHOR, which would outrank them.
   const d = await discover(request);
   const email = uniqueEmail("oauth-person");
-  await createTestUser({ email, role: "AUTHOR" });
+  await createTestUser({ email, role: "AUTHORIZED" });
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
   try {
     const page = await context.newPage();
@@ -709,13 +713,14 @@ test("a person with no bot to connect as is told why, and offered Cancel alone; 
     // The space before "writes": SWC drops one that opens a multi-line JSX text holding an entity.
     await expect(page.getByText("so that what Claude writes carries the bot’s name")).toBeVisible();
     await expect(page.getByText("No bot works for you yet. An ADMIN can make one")).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Connect as" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
 
     // A bot that came to outrank its person is named, and not offered.
-    const bot = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: email });
+    const bot = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: email, role: "AUTHORIZED" });
     try {
-      await setTestUserRole(email, "AUTHORIZED");
+      await setTestUserRole(bot.email, "AUTHOR");
       await page.reload();
       await expect(page.getByText(`${bot.name} works for you, but a bot can’t outrank its person`)).toBeVisible();
       await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
@@ -749,15 +754,18 @@ test("connections turned off for a bot: the page names it with its reason and st
   const other = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: email });
   const { context, page } = await signedInAt(browser, email, authorizeUrl(d, pkce().challenge));
   try {
-    const select = page.getByRole("combobox", { name: "Connect as" });
-    await expect(select.locator("option")).toHaveCount(2);
+    // An AUTHOR's list also offers a new bot for Claude, first; these are the two they have.
+    const option = (name: string) => page.getByRole("combobox", { name: "Connect as" }).locator("option", { hasText: name });
+    await expect(option(bot.name)).toHaveCount(1);
+    await expect(option(other.name)).toHaveCount(1);
     const tokens = await connect(context.request, d, bot);
     expect(await callStatus(request, tokens.access_token)).toBe(200);
 
     await setTestMcpAllowed(bot.email, false);
     await page.reload();
     await expect(page.getByText(`${bot.name} works for you, but an ADMIN has turned connections off for it`)).toBeVisible();
-    await expect(select.locator("option")).toHaveText([other.name]);
+    await expect(option(bot.name)).toHaveCount(0);
+    await expect(option(other.name)).toHaveCount(1);
     await expect(page.getByRole("button", { name: "Approve" })).toBeVisible();
     expect(await callStatus(request, tokens.access_token)).toBe(401);
     // A form naming it all the same is refused, as a bot that isn't the person's is.
@@ -823,6 +831,267 @@ test("connections turned off for a person: Cancel alone on the page, no decision
     await context.close();
     await deleteTestUser(bot.email);
     await deleteTestUser(email);
+  }
+});
+
+// §21, "A bot made when a connection is approved". Each of these signs in as
+// a person of its own: a bot with an agent is never the suite's admin's
+// (e2e/README.md), and the admin's page, for any client with an agent, lists
+// a new bot first, which no spec approves.
+
+/** A person with initials of their own, so a bot made for them is named apart from every other test's. */
+async function agentPerson(role: "ADMIN" | "EDITOR" | "AUTHOR" | "AUTHORIZED" = "AUTHOR"): Promise<TestUser & { initials: string }> {
+  const initials = `Q${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+  const person = await createTestUser({ email: uniqueEmail("oauth-person"), role, adminInitials: initials });
+  return { ...person, initials };
+}
+
+/** Posts an approval as the new bot, for Claude's identity unless told otherwise. */
+function approveNew(request: APIRequestContext, d: Discovered, challenge: string, overrides: Record<string, string | null> = {}): Promise<APIResponse> {
+  return decide(request, d, { ...authorizeFields(d, challenge, overrides), bot: "new", decision: "approve" });
+}
+
+test("an AUTHOR with no bot is offered a new one, which Approve makes; their next connection finds it, and offers no other", async ({ browser, request }) => {
+  const d = await discover(request);
+  const person = await agentPerson();
+  const { verifier, challenge } = pkce();
+  const { context, page } = await signedInAt(browser, person.email, authorizeUrl(d, challenge));
+  const name = `Claude (${person.initials})`;
+  try {
+    const select = page.getByRole("combobox", { name: "Connect as" });
+    await expect(select.locator("option")).toHaveText([`${name}, a new bot`]);
+    await expect(select).toHaveValue("new");
+    await expect(page.getByText(`makes a bot called ${name}: an AUTHOR that works for you`)).toBeVisible();
+    await expect(page.getByText("it reads each SHARED doc and file from the start, and a PRIVATE one only once it is put on")).toBeVisible();
+    // Nothing is made until Approve: not by the page's load, and not by Cancel.
+    expect(await getTestBotsOf(person.email)).toEqual([]);
+    const cancelled = await decide(context.request, d, { ...authorizeFields(d, challenge), bot: "new", decision: "cancel" });
+    expect(callback(d, cancelled.headers()["location"]).get("error")).toBe("access_denied");
+    expect(await getTestBotsOf(person.email)).toEqual([]);
+
+    // The form's post goes to the real decision, whose 303 is read and not followed.
+    const decision: { status?: number; location?: string } = {};
+    await page.route("**/authorize/decide", async (route) => {
+      const res = await route.fetch({ maxRedirects: 0 });
+      decision.status = res.status();
+      decision.location = res.headers()["location"];
+      await route.fulfill({ status: 200, contentType: "text/html", body: "<p id=stub>decided</p>" });
+    });
+    await page.getByRole("button", { name: "Approve" }).click();
+    await expect(page.locator("#stub")).toBeVisible();
+    expect(decision.status).toBe(303);
+    const code = callback(d, decision.location).get("code");
+
+    const [bot, ...others] = await getTestBotsOf(person.email);
+    expect(others).toEqual([]);
+    expect(bot).toMatchObject({
+      name,
+      agent: "CLAUDE",
+      role: "AUTHOR",
+      initials: "CLD",
+      slug: `${person.slug}-claude`,
+      email: `${person.slug}-claude@multiblog.invalid`,
+      deleted: false,
+    });
+    const redeemed = await redeem(request, d, { code: code!, code_verifier: verifier });
+    expect(redeemed.status()).toBe(200);
+    const tokens = OAuthTokensSchema.parse(await redeemed.json());
+    expect(await toolNames(request, tokens.access_token)).toContain("multiblog_search");
+
+    // A second connection from the same client finds that bot, chosen, and offers no new one.
+    await page.unroute("**/authorize/decide");
+    await page.goto(authorizeUrl(d, pkce().challenge));
+    await expect(select.locator("option")).toHaveText([name]);
+    await expect(select).toHaveValue(bot.id);
+    await expect(page.getByText("a new bot")).toHaveCount(0);
+    await expect(page.getByText(`Approving as ${name} replaces it`)).toBeVisible();
+    // So does Claude Code's identity, whose agent is Claude's though its kind is other.
+    await page.goto(authorizeUrl(d, pkce().challenge, { client_id: CLAUDE_CODE, redirect_uri: "http://localhost:4141/callback" }));
+    await expect(select.locator("option")).toHaveText([name]);
+    // A form posting bot=new all the same gets that bot, not a second.
+    const again = pkce();
+    const posted = await approveNew(context.request, d, again.challenge);
+    expect(posted.status()).toBe(303);
+    expect((await getTestBotsOf(person.email)).map((b) => b.id)).toEqual([bot.id]);
+
+    // Another agent's client is offered its own new bot first, with a line beside the Claude one.
+    await page.goto(authorizeUrl(d, pkce().challenge, { client_id: CHATGPT, redirect_uri: CHATGPT_CALLBACK }));
+    await expect(select.locator("option")).toHaveText([`ChatGPT (${person.initials}), a new bot`, name]);
+    await expect(select).toHaveValue("new");
+    await expect(page.getByText(`${name} is a bot for Claude, not ChatGPT: what ChatGPT writes as it is signed ${name}.`)).toBeVisible();
+    await page.goto(authorizeUrl(d, pkce().challenge, { client_id: ANTIGRAVITY, redirect_uri: ANTIGRAVITY_CALLBACK }));
+    await expect(select.locator("option")).toHaveText([`Antigravity (${person.initials}), a new bot`, name]);
+  } finally {
+    await context.close();
+    await deleteTestUser(person.email);
+  }
+});
+
+test("an AUTHORIZED person's bot for the agent comes first, with a line beside another agent's, and no new bot is offered or made", async ({ browser, request }) => {
+  const d = await discover(request);
+  const person = await agentPerson("AUTHORIZED");
+  // Named so that the other agent's sorts first by name: the order is the agent's doing.
+  const gpt = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: person.email, name: "E2E Aardvark", role: "AUTHORIZED", agent: "CHATGPT" });
+  const claude = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: person.email, name: "E2E Zebra", role: "AUTHORIZED", agent: "CLAUDE" });
+  const plain = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: person.email, name: "E2E Mole", role: "AUTHORIZED" });
+  const { context, page } = await signedInAt(browser, person.email, authorizeUrl(d, pkce().challenge));
+  try {
+    const select = page.getByRole("combobox", { name: "Connect as" });
+    await expect(select.locator("option")).toHaveText([claude.name, gpt.name, plain.name]);
+    await expect(select).toHaveValue(claude.id);
+    await expect(page.getByText(`${gpt.name} is a bot for ChatGPT, not Claude: what Claude writes as it is signed ${gpt.name}.`)).toBeVisible();
+    // A bot with no agent gets no line: nothing says whose it is.
+    await expect(page.getByText(`${plain.name} is a bot for`)).toHaveCount(0);
+    await expect(page.getByText(`${claude.name} is a bot for`)).toHaveCount(0);
+
+    await page.goto(authorizeUrl(d, pkce().challenge, { client_id: CHATGPT, redirect_uri: CHATGPT_CALLBACK }));
+    await expect(select.locator("option")).toHaveText([gpt.name, plain.name, claude.name]);
+    await expect(page.getByText(`${claude.name} is a bot for Claude, not ChatGPT`)).toBeVisible();
+
+    // Antigravity's has none of theirs to put first, and offers them no new one.
+    await page.goto(authorizeUrl(d, pkce().challenge, { client_id: ANTIGRAVITY, redirect_uri: ANTIGRAVITY_CALLBACK }));
+    await expect(select.locator("option")).toHaveText([gpt.name, plain.name, claude.name]);
+    await expect(page.getByText("a new bot")).toHaveCount(0);
+    // The page not offering one proves nothing about a form: bot=new is refused, and no account made.
+    const posted = await approveNew(context.request, d, pkce().challenge, { client_id: ANTIGRAVITY, redirect_uri: ANTIGRAVITY_CALLBACK });
+    expect(posted.status()).toBe(400);
+    expect(await posted.text()).toContain("can't rank above the person it works for");
+    expect((await getTestBotsOf(person.email)).length).toBe(3);
+  } finally {
+    await context.close();
+    await deleteTestUser(person.email);
+  }
+});
+
+test("a client registered by hand with no agent offers no new bot and makes none; one given an agent offers that agent's", async ({ browser, request }) => {
+  const d = await discover(request);
+  const person = await agentPerson();
+  const plain = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: person.email });
+  const redirectUri = "https://app.example/oauth/callback";
+  const inspector = await createTestOauthClient({ name: uniqueTitle("client"), redirectUris: [redirectUri], kind: "OTHER" });
+  const fallback = await createTestOauthClient({ name: uniqueTitle("client"), redirectUris: [redirectUri], kind: "OTHER", agent: "ANTIGRAVITY" });
+  const through = (clientId: string) => ({ client_id: clientId, redirect_uri: redirectUri });
+  const { context, page } = await signedInAt(browser, person.email, authorizeUrl(d, pkce().challenge, through(inspector)));
+  try {
+    // No agent: the person's bots as they are, and nothing else.
+    const select = page.getByRole("combobox", { name: "Connect as" });
+    await expect(select.locator("option")).toHaveText([plain.name]);
+    await expect(page.getByText("a new bot")).toHaveCount(0);
+    const refused = await approveNew(context.request, d, pkce().challenge, through(inspector));
+    expect(refused.status()).toBe(403);
+    expect(await refused.text()).toContain("is no AI agent's client, so no bot is made for it");
+    expect((await getTestBotsOf(person.email)).map((bot) => bot.id)).toEqual([plain.id]);
+
+    // An `other` given an agent, as a fallback for Antigravity is: that agent's new bot.
+    await page.goto(authorizeUrl(d, pkce().challenge, through(fallback)));
+    await expect(select.locator("option")).toHaveText([`Antigravity (${person.initials}), a new bot`, plain.name]);
+    const { verifier, challenge } = pkce();
+    const approved = await approveNew(context.request, d, challenge, through(fallback));
+    const code = callback(d, approved.headers()["location"], redirectUri).get("code");
+    expect((await redeem(request, d, { client_id: fallback, code: code!, code_verifier: verifier })).status()).toBe(200);
+    const made = (await getTestBotsOf(person.email)).find((bot) => bot.id !== plain.id);
+    expect(made).toMatchObject({ name: `Antigravity (${person.initials})`, agent: "ANTIGRAVITY", initials: "AGV", slug: `${person.slug}-antigravity`, connections: 1 });
+
+    // A kind's own agent, and no other: a claude-ai client can't be ChatGPT's.
+    await expect(createTestOauthClient({ name: uniqueTitle("client"), redirectUris: [redirectUri], kind: "CLAUDE_AI", agent: "CHATGPT" })).rejects.toThrow(
+      /CLAUDE_AI client is CLAUDE's/,
+    );
+  } finally {
+    await context.close();
+    await deleteTestUser(person.email);
+    await deleteTestOauthClient(inspector);
+    await deleteTestOauthClient(fallback);
+  }
+});
+
+test("a person whose bot for the agent outranks them, or is turned off, is offered no new one, by name, and none is made for them", async ({ browser, request }) => {
+  const d = await discover(request);
+  const person = await agentPerson("ADMIN");
+  const held = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: person.email, role: "ADMIN", agent: "CLAUDE" });
+  const other = await createTestBot({ email: uniqueEmail("oauth-bot"), worksForEmail: person.email });
+  const { context, page } = await signedInAt(browser, person.email, authorizeUrl(d, pkce().challenge));
+  try {
+    const select = page.getByRole("combobox", { name: "Connect as" });
+    await expect(select.locator("option")).toHaveText([held.name, other.name]);
+
+    // An EDITOR may have a bot made, but theirs for Claude now outranks them and holds the agent.
+    await setTestUserRole(person.email, "EDITOR");
+    await page.reload();
+    await expect(page.getByText(`${held.name} works for you, but a bot can’t outrank its person`)).toBeVisible();
+    await expect(page.getByText(`${held.name} is your bot for Claude, which is what Claude connects as, so no new one is offered`)).toBeVisible();
+    await expect(select.locator("option")).toHaveText([other.name]);
+    await expect(page.getByText("a new bot")).toHaveCount(0);
+    const outranked = await approveNew(context.request, d, pkce().challenge);
+    expect(outranked.status()).toBe(403);
+    expect(await outranked.text()).toContain(`${held.name} is your bot for Claude, and it can't be connected`);
+
+    // Turned off, it holds the agent the same way: that is how an ADMIN keeps one bot stopped.
+    await setTestUserRole(person.email, "ADMIN");
+    await setTestMcpAllowed(held.email, false);
+    await page.reload();
+    await expect(page.getByText(`${held.name} works for you, but an ADMIN has turned connections off for it`)).toBeVisible();
+    await expect(page.getByText(`${held.name} is your bot for Claude`)).toBeVisible();
+    await expect(select.locator("option")).toHaveText([other.name]);
+    expect((await approveNew(context.request, d, pkce().challenge)).status()).toBe(403);
+
+    // With no other bot, the sentences stand in the list's place, with Cancel alone.
+    await softDeleteTestUser(other.email, person.email);
+    await page.reload();
+    await expect(page.getByText(`${held.name} is your bot for Claude`)).toBeVisible();
+    await expect(select).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
+
+    // Connections off for the person: no new bot by a form either.
+    await setTestMcpAllowed(held.email, true);
+    await setTestMcpAllowed(person.email, false);
+    const off = await approveNew(context.request, d, pkce().challenge, { client_id: CHATGPT, redirect_uri: CHATGPT_CALLBACK });
+    expect(off.status()).toBe(403);
+    expect(await off.text()).toContain("turned connections off for your account");
+    expect((await getTestBotsOf(person.email)).map((bot) => bot.id).sort()).toEqual([held.id, other.id].sort());
+  } finally {
+    await context.close();
+    await deleteTestUser(person.email);
+  }
+});
+
+test("two Approves at once make one bot; a taken address moves the slug on; and a deleted bot is replaced", async ({ browser, request }) => {
+  const d = await discover(request);
+  const person = await agentPerson();
+  // An account whose address is the one the first candidate would take, under
+  // another slug: changing a slug leaves the address as it was.
+  const squatter = `${person.slug}-claude@multiblog.invalid`;
+  await createTestUser({ email: squatter, name: `E2E Squatter ${Math.random().toString(36).slice(2, 8)}`, role: "COMMENTER" });
+  const { context, page } = await signedInAt(browser, person.email, authorizeUrl(d, pkce().challenge));
+  try {
+    const first = pkce();
+    const second = pkce();
+    const posted = await Promise.all([approveNew(context.request, d, first.challenge), approveNew(context.request, d, second.challenge)]);
+    const codes = posted.map((res) => {
+      expect(res.status()).toBe(303);
+      return callback(d, res.headers()["location"]).get("code")!;
+    });
+    // One bot, and both codes are for it.
+    expect((await redeem(request, d, { code: codes[0], code_verifier: first.verifier })).status()).toBe(200);
+    expect((await redeem(request, d, { code: codes[1], code_verifier: second.verifier })).status()).toBe(200);
+    const [bot, ...others] = await getTestBotsOf(person.email);
+    expect(others).toEqual([]);
+    expect(bot).toMatchObject({ agent: "CLAUDE", connections: 2, slug: `${person.slug}-claude-2`, email: `${person.slug}-claude-2@multiblog.invalid` });
+
+    // A deleted bot frees its agent: a new one is offered, and made beside it.
+    await softDeleteTestUser(bot.email, person.email);
+    await page.reload();
+    const select = page.getByRole("combobox", { name: "Connect as" });
+    await expect(select.locator("option")).toHaveText([`Claude (${person.initials}), a new bot`]);
+    expect((await approveNew(context.request, d, pkce().challenge)).status()).toBe(303);
+    const bots = await getTestBotsOf(person.email);
+    expect(bots.map((b) => [b.slug, b.deleted])).toEqual([
+      [`${person.slug}-claude-2`, true],
+      [`${person.slug}-claude-3`, false],
+    ]);
+  } finally {
+    await context.close();
+    await deleteTestUser(person.email);
+    await deleteTestUser(squatter);
   }
 });
 

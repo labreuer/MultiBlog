@@ -656,13 +656,14 @@ never acts as the person who approved it:
 | Way in | Started by | Acts as | Issued by | Scopes | Client |
 |---|---|---|---|---|---|
 | A header token, from `scripts/create-api-token.ts` | the operator, with a shell on the server | a person, or a bot | that person, or the bot's person | any of the three | `claude-code`, `claude-ai` or `other`, as issued |
-| An OAuth connection from claude.ai | the person, on the consent page | one of their bots | the person approving | `read`, or `read` and `write` | `claude-ai` |
-| An OAuth connection from Claude Code's `/mcp`, or from a client registered by hand | the person, on the consent page | one of their bots | the person approving | `read`, or `read` and `write` | `other`, or `claude-ai` for a client registered as claude.ai's |
+| An OAuth connection from claude.ai | the person, on the consent page | one of their bots, or one made when they approve | the person approving | `read`, or `read` and `write` | `claude-ai` |
+| An OAuth connection from Claude Code's `/mcp`, or from a client registered by hand | the person, on the consent page | one of their bots, or one made when they approve, for a client that is an AI agent's | the person approving | `read`, or `read` and `write` | `other`, or `claude-ai` for a client registered as claude.ai's |
 
 - **A connection acts as a bot so that what it writes carries the bot's name**, and it reads
   only what has been shared with the bot (MCP.md §12). The consent page offers only the
-  person's own bots that the check below accepts, `write` only when they tick it, and never
-  `manage`.
+  person's own bots that the check below accepts, their bot for the asking client's agent
+  first, and a new bot for that agent when they have none and may have one made (below);
+  `write` only when they tick it, and never `manage`.
 - **Nobody issues themselves a token in the app.** Only the script mints an `mb_` secret; the
   Connections card lists and revokes.
 - **A bot's token never lists `manage`**, Claude's included: what an agent reads includes text
@@ -678,6 +679,7 @@ works for one person (`user.works_for_user_id`), who issues every token it holds
 | Make a bot, move one to another person, or change the agent it is for, on `/users` | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Turn connections off for an account, a person's or a bot's, on `/users` | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Have a bot, and so connect an agent through OAuth | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Have a bot made for them by approving a connection from an AI agent's client | ✅ | ✅ | ✅ | ❌ | ❌ |
 | The highest role a bot of theirs may have | ADMIN | EDITOR | AUTHOR | AUTHORIZED | — |
 | See the Connections card on `/dashboard` | ✅ | ✅ | ✅ | ✅ | only when it lists a token |
 
@@ -689,6 +691,11 @@ works for one person (`user.works_for_user_id`), who issues every token it holds
   refuses the promotion, and the check below refuses the bot's tokens while it does, so
   demoting the person takes effect at the bot's next call.
 - **Moving a bot to another person revokes the tokens the previous person issued for it.**
+- **A bot made by approving a connection is an AUTHOR**, whatever its person's role, named for
+  its agent and their initials. An AUTHORIZED person's would outrank them, so theirs stays an
+  ADMIN's to make. Its person can't rename or delete it: both stay an ADMIN's, on `/users`,
+  and revoking under Connections is what ends its access (MCP.md §21, "Making it, at
+  Approve").
 - **A bot may be for one agent** (`user.agent`: Claude, ChatGPT or Antigravity), **and a person
   has one live bot per agent**, by a partial unique index. Making a bot, changing its agent,
   moving it and restoring it are each refused when they would make a second, naming the bot
@@ -832,6 +839,8 @@ Re-derive from these rather than trusting the tables after an authz change:
 | One live bot per agent per person: making a bot, changing its agent, moving it, restoring it | `createBot` / `setBotAgent` / `moveBot` / `restoreAccount` in `src/lib/bots.ts`, over the index `user_agent_per_person_key` |
 | Turning connections off for an account (ADMIN only) | `updateUserMcpAllowed` in `src/app/actions/users.ts` |
 | Which bots the consent page offers, and the decision's re-check, each by the whole token rule | `botsFor` / `worksFor` in `src/lib/oauth/consent.ts` |
+| The order of that list, and whether it offers a new bot | `consentOffer` in `src/lib/oauth/consent-offer.ts` |
+| Making a person's bot for an agent when they approve (an AUTHOR or above, with a password, connections on) | `ensureAgentBot` in `src/lib/bots.ts`, called by `src/app/authorize/decide/route.ts` for `bot=new` |
 | Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |
 
 `e2e/tags.spec.ts` pins the tag table's load-bearing rows — the signed-out reader

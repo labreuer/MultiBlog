@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Agent, Role } from "@/generated/prisma/enums";
-import { AGENTS, AGENT_KEYS, ROLES_BY_RANK, botRoleRefusal, botRolesFor, outranks, parseAgent, tokenRefusal, tokenRefusalOf } from "./bot-rules";
+import { AGENTS, AGENT_BOT_ROLE, AGENT_KEYS, ROLES_BY_RANK, agentBotName, botRoleRefusal, botRolesFor, outranks, parseAgent, tokenRefusal, tokenRefusalOf } from "./bot-rules";
 
 // docs/MCP.md §21, "Whose account" — a bot's rules, as functions of its row,
 // its person's and its token's issuer's.
@@ -85,4 +85,17 @@ test("an agent is parsed from its key alone", () => {
   for (const value of ["", "claude", "GEMINI", "toString", "__proto__", null, undefined, 3, { agent: "CLAUDE" }]) {
     assert.equal(parseAgent(value), null);
   }
+});
+
+test("a bot made at Approve is named for its agent and its person's initials", () => {
+  assert.equal(agentBotName("CLAUDE", "LB"), "Claude (LB)");
+  assert.equal(agentBotName("CHATGPT", " AB "), "ChatGPT (AB)");
+  assert.equal(agentBotName("ANTIGRAVITY", "X"), "Antigravity (X)");
+  assert.equal(agentBotName("CLAUDE", "  "), "Claude");
+});
+
+test("a bot made at Approve is an AUTHOR, so an AUTHOR or above may have one", () => {
+  assert.equal(AGENT_BOT_ROLE, "AUTHOR");
+  const may = ROLES_BY_RANK.filter((role) => botRoleRefusal(AGENT_BOT_ROLE, role) === null);
+  assert.deepEqual(may, ["ADMIN", "EDITOR", "AUTHOR"]);
 });

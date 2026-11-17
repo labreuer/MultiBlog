@@ -13,7 +13,9 @@ import {
 import { signOut } from "@/lib/auth";
 import { findClient } from "@/lib/oauth/clients";
 import LocalTime from "@/components/LocalTime";
+import { AGENTS } from "@/lib/bot-rules";
 import { botsFor, connectedBots, signedInPerson, type Bot, type Person, type RefusedBot } from "@/lib/oauth/consent";
+import { consentOffer } from "@/lib/oauth/consent-offer";
 import { issuer, mcpEndpointUrl } from "@/lib/oauth/discovery";
 import { signInPath } from "@/lib/sign-in-redirect";
 import { SITE_TITLE } from "@/lib/site-config";
@@ -31,7 +33,14 @@ import styles from "./page.module.css";
 //    can't send a visitor to a client's redirect URI unseen;
 // 3. the rest of the request, each refusal redirected to the client.
 //
-// Then it asks. Every request asks: no consent is remembered, so a flow
+// Then it asks. **For a client that is an AI agent's** ("Which agent a client
+// is"), the person's bot for that agent is listed first, and so chosen; with
+// none, an AUTHOR or above is offered a new one first, which Approve makes;
+// and a bot that is another agent's has a line saying whose name it signs
+// (`consentOffer`). A line per bot, not one that follows the select, which
+// would need JavaScript.
+//
+// Every request asks: no consent is remembered, so a flow
 // someone else started can't finish without the person seeing what it
 // grants. The decision posts to /authorize/decide, which parses everything
 // again. next.config.ts keeps the page from being framed, and SiteHeader
@@ -71,9 +80,11 @@ export default async function AuthorizePage({
   const connected = await connectedBots(request.client, person.id, bots.offered.map((bot) => bot.id));
   const name = request.client.name;
   const host = new URL(request.redirectUri).host;
+  const agent = request.client.agent;
+  const offer = consentOffer(person, agent, bots.offered, bots.refused);
   // Nothing is offered to a person whose connections are turned off, whatever
   // bots they have: §3's check refuses every token they would issue.
-  const canApprove = person.mcpAllowed && bots.offered.length > 0;
+  const canApprove = person.mcpAllowed && (offer.bots.length > 0 || offer.newBot !== null);
   const publisher = clientIdHost(request.client.clientId);
 
   // Signs out and back in, to this same request. A server action, so it
@@ -120,18 +131,34 @@ export default async function AuthorizePage({
           ))}
           {canApprove ? (
             <>
-              <RefusedBots refused={bots.refused} client={name} />
+              <RefusedBots refused={bots.refused} held={offer.held} client={name} />
               <label className={account.field}>
                 Connect as
+                {/* The first option is the one chosen: the new bot, or the person's bot for the client's agent. */}
                 <select name="bot" className={styles.select}>
-                  {bots.offered.map((bot) => (
+                  {offer.newBot !== null && <option value="new">{offer.newBot}, a new bot</option>}
+                  {offer.bots.map((bot) => (
                     <option key={bot.id} value={bot.id}>
                       {botName(bot)}
                     </option>
                   ))}
                 </select>
               </label>
-              {bots.offered
+              {offer.newBot !== null && (
+                <p className={styles.replaces}>
+                  Approving as {offer.newBot}, a new bot, makes a bot called {offer.newBot}: an AUTHOR that works for
+                  you. Like every AUTHOR it reads each SHARED doc and file from the start, and a PRIVATE one only once
+                  it is put on that doc&rsquo;s or file&rsquo;s list.
+                </p>
+              )}
+              {agent !== null &&
+                offer.otherAgents.map((bot) => (
+                  <p key={bot.id} className={styles.replaces}>
+                    {botName(bot)} is a bot for {AGENTS[bot.agent!].name}, not {AGENTS[agent].name}: what{" "}
+                    {AGENTS[agent].name} writes as it is signed {botName(bot)}.
+                  </p>
+                ))}
+              {offer.bots
                 .filter((bot) => connected.has(bot.id))
                 .map((bot) => (
                   <p key={bot.id} className={styles.replaces}>
@@ -166,7 +193,7 @@ export default async function AuthorizePage({
               </div>
             </>
           ) : (
-            <NoBot person={person} refused={bots.refused} client={name} />
+            <NoBot person={person} refused={bots.refused} held={offer.held} client={name} />
           )}
           <div className={styles.buttons}>
             {canApprove && (
@@ -191,9 +218,11 @@ function botName(bot: Bot): string {
 /**
  * The bots that work for the person and can't be offered, each group with
  * its reason: above the list when their other bots are offered, and in the
- * list's place when none are.
+ * list's place when none are. `held` is the one among them that is the
+ * client's agent's, which is why the list offers no new bot: a person has one
+ * live bot per agent, and a second would hide the first.
  */
-function RefusedBots({ refused, client }: { refused: RefusedBot[]; client: string }) {
+function RefusedBots({ refused, held, client }: { refused: RefusedBot[]; held: RefusedBot | null; client: string }) {
   const outranking = refused.filter((bot) => bot.reason === "outranks");
   const off = refused.filter((bot) => bot.reason === "account-off");
   return (
@@ -213,6 +242,12 @@ function RefusedBots({ refused, client }: { refused: RefusedBot[]; client: strin
           which you start the connection again from {client}.
         </p>
       )}
+      {held && held.agent && (
+        <p className={styles.noBot}>
+          {botName(held)} is your bot for {AGENTS[held.agent].name}, which is what {client} connects as, so no new
+          one is offered in its place.
+        </p>
+      )}
     </>
   );
 }
@@ -221,7 +256,7 @@ function RefusedBots({ refused, client }: { refused: RefusedBot[]; client: strin
  * Why there is nothing to connect as: connections turned off for the person,
  * a COMMENTER, bots §3's check refuses, or no bot at all.
  */
-function NoBot({ person, refused, client }: { person: Person; refused: RefusedBot[]; client: string }) {
+function NoBot({ person, refused, held, client }: { person: Person; refused: RefusedBot[]; held: RefusedBot | null; client: string }) {
   if (!person.mcpAllowed) {
     return (
       <p className={styles.noBot}>
@@ -238,7 +273,7 @@ function NoBot({ person, refused, client }: { person: Person; refused: RefusedBo
       </p>
     );
   }
-  if (refused.length > 0) return <RefusedBots refused={refused} client={client} />;
+  if (refused.length > 0) return <RefusedBots refused={refused} held={held} client={client} />;
   return (
     <p className={styles.noBot}>
       A connection acts as a bot, an account of its own that works for you, so that what {client}{" "}

@@ -55,6 +55,28 @@ export const AGENTS: Readonly<Record<Agent, { name: string; initials: string }>>
   ANTIGRAVITY: { name: "Antigravity", initials: "AGV" },
 };
 
+/**
+ * The role a bot is made with when a person approves a connection (§21,
+ * "Making it, at Approve"): the one constant the consent page's offer and
+ * `ensureAgentBot`'s gate both read. Who may have such a bot is then
+ * `botRoleRefusal(AGENT_BOT_ROLE, theirRole)`, an AUTHOR or above, with no
+ * second statement of it to drift. Never the person's own role: a bot's
+ * tokens act with the bot's, so an ADMIN's agent made an ADMIN would reach
+ * everything that role widens, which nobody chose.
+ */
+export const AGENT_BOT_ROLE: Role = "AUTHOR";
+
+/**
+ * The name of a bot made at Approve: its agent's, then its person's initials,
+ * "Claude (LB)". Most surfaces show an account by its name alone, a byline or
+ * a note's card, and two people's bots both called "Claude" would read alike
+ * in all of them.
+ */
+export function agentBotName(agent: Agent, personInitials: string): string {
+  const initials = personInitials.trim();
+  return initials ? `${AGENTS[agent].name} (${initials})` : AGENTS[agent].name;
+}
+
 /** Every agent, in the order the enum declares them; a unit test holds the two to each other. */
 export const AGENT_KEYS = Object.keys(AGENTS) as readonly Agent[];
 

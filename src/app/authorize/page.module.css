@@ -49,7 +49,9 @@
   border-radius: 4px;
 }
 
-/* A bot's existing claude.ai connection, which approving replaces. */
+/* A line about one of the listed bots: its existing connection, which
+   approving replaces; that it is new, and what making it does; or that it is
+   another agent's. */
 .replaces {
   font-size: 0.9rem;
   color: var(--text-secondary);

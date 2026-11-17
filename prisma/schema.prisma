@@ -2207,6 +2207,10 @@ model OauthClient {
   name         String
   redirectUris String[]       @map("redirect_uris")
   client       ApiTokenClient
+  // The AI agent the client is, which decides the bot a connection through it
+  // is offered first, and the one made at Approve (§21, "Which agent a client
+  // is"). Null for a client that is no agent's, the MCP Inspector say.
+  agent        Agent?
   createdAt    DateTime       @default(now()) @map("created_at")
   revokedAt    DateTime?      @map("revoked_at")
 
