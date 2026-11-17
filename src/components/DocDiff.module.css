@@ -1,0 +1,59 @@
+/* The diff page's rows (docs/FORKS.md, "What is compared"): two columns, the
+   left side and the right, one row per aligned pair of blocks, so a changed
+   block sits beside the block it is compared with. Text runs only, wrapped as
+   written: a list's items and a table's cells arrive as one block's text with
+   line breaks in it, which pre-wrap keeps.
+
+   The page's headers sit in a grid of the same two columns and the same gap
+   (page.module.css), which is what lines them up with these. */
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px 1rem;
+}
+
+/* A row's two cells sit in the grid's two columns. */
+.row {
+  display: contents;
+}
+
+.cell,
+.empty {
+  padding: 4px 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-radius: 3px;
+}
+
+.row[data-kind="changed"] .cell,
+.row[data-kind="added"] .cell,
+.row[data-kind="deleted"] .cell {
+  background: var(--surface-muted);
+}
+
+.heading {
+  font-weight: bold;
+}
+
+.removed {
+  background: var(--fill-danger);
+  text-decoration: line-through;
+}
+
+.added {
+  background: var(--fill-success);
+}
+
+/* A line across both columns: a folded stretch, or what a row below it lacks. */
+.note {
+  grid-column: 1 / -1;
+  padding: 2px 6px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.status {
+  margin-top: 1rem;
+  color: var(--text-secondary);
+}
