@@ -751,7 +751,9 @@ export default function UsersTable({
         <SelectCell
           value={row.role}
           options={rolesFor(row)}
-          save={(next) => updateUserRole(row.id, next)}
+          save={async (next) => {
+            await orRefused(updateUserRole(row.id, next));
+          }}
           failureMessage="Failed to update role."
           run={(action) => runWithStatus(row.id, action)}
         />

@@ -19,7 +19,7 @@ import { scheduleMentionRefresh } from "@/lib/entity-chips/refresh";
 import { createBot as createBotAs, moveBot, requireBotRole, requireInvitable, restoreAccount, setBotAgent } from "@/lib/bots";
 import { parseAgent } from "@/lib/bot-rules";
 import { actorFromSessionUser, type Actor } from "@/lib/actor";
-import { ApiError } from "@/lib/api/errors";
+import { ApiError, forbidden, invalid } from "@/lib/api/errors";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -35,19 +35,30 @@ async function adminActor(): Promise<Actor> {
   return actorFromSessionUser(session.user);
 }
 
-export async function updateUserRole(userId: string, role: Role): Promise<void> {
+// The body is `setUserRole`, below, whose refusals are sentences an ADMIN
+// has to read: a bot promoted above its person, or an ADMIN's own demotion.
+// So they are returned (`refusalOf`).
+export async function updateUserRole(userId: string, role: Role): Promise<Refused | null> {
   const adminId = await requireAdmin();
-  if (!Object.values(Role).includes(role)) {
-    throw new Error("Invalid role.");
-  }
-  if (adminId === userId && role !== Role.ADMIN) {
-    throw new Error("You can't remove your own admin role.");
-  }
+  return refusalOf(async () => {
+    await setUserRole(adminId, String(userId), role);
+    revalidatePath("/users");
+    return null;
+  });
+}
+
+/**
+ * Changes an account's role, **throwing** its refusals as `ApiError`s:
+ * `updateUserRole` returns them, and `bulkSetUserRole` lets settleBulk report
+ * each row's. Not exported, so it is no server action of its own.
+ */
+async function setUserRole(adminId: string, userId: string, role: Role): Promise<void> {
+  if (!Object.values(Role).includes(role)) throw invalid("Invalid role.");
+  if (adminId === userId && role !== Role.ADMIN) throw forbidden("You can't remove your own admin role.");
   // A bot is never promoted above its person (docs/MCP.md §21, "Whose
   // account"); demoting anyone is never refused.
   await requireBotRole(userId, role);
   await prisma.user.update({ where: { id: userId }, data: { role } });
-  revalidatePath("/users");
 }
 
 /** A bot action's refusal, as a value: what `refusalOf` answers in place of a result. */
@@ -354,11 +365,12 @@ export async function restoreUser(userId: string): Promise<Refused | null> {
   });
 }
 
-// Bulk actions (PLAN.md §16g). Each delegates to the single-row action, so
-// every row goes through the same requireAdmin and the same guards — notably
-// deleteUser's "you can't delete your own account" and updateUserRole's "you
-// can't remove your own admin role", which a bulk path must not be able to
-// sidestep.
+// Bulk actions (PLAN.md §16g). Each delegates to the single-row action, or,
+// where that action returns its refusal rather than throwing it, to the body
+// it wraps, so every row goes through the same requireAdmin and the same
+// guards — notably deleteUser's "you can't delete your own account" and
+// setUserRole's "you can't remove your own admin role", which a bulk path
+// must not be able to sidestep.
 export async function bulkDeleteUsers(userIds: string[]): Promise<BulkResult> {
   return settleBulk(userIds, (id) => deleteUser(id));
 }
@@ -373,7 +385,12 @@ export async function bulkRestoreUsers(userIds: string[]): Promise<BulkResult> {
 }
 
 export async function bulkSetUserRole(userIds: string[], role: Role): Promise<BulkResult> {
-  return settleBulk(userIds, (id) => updateUserRole(id, role));
+  // updateUserRole returns its refusal, which settleBulk would count as a
+  // success, so the rows go through its body, which throws.
+  const adminId = await requireAdmin();
+  const result = await settleBulk(userIds, (id) => setUserRole(adminId, String(id), role));
+  revalidatePath("/users");
+  return result;
 }
 
 export async function bulkSetUserModerationPolicy(userIds: string[], policy: ModerationPolicy): Promise<BulkResult> {

@@ -3,7 +3,8 @@
 // have under the one chosen; and the Works for column, which moves a bot only
 // after a Yes, since the move stops the tokens its previous person issued.
 // And the two columns beside it: Agent, the agent a bot is for ("A bot's
-// agent"), and MCP, which turns connections off for an account.
+// agent"), and MCP, which turns connections off for an account. And Role,
+// which refuses a bot's promotion above its person in words.
 // The rules beneath them are e2e/mcp-bots.spec.ts's; this drives the UI once.
 import { test, expect } from "./fixtures";
 import {
@@ -14,6 +15,7 @@ import {
   getTestAccountFacts,
   getTestBotFacts,
   orphanTestBot,
+  setTestUserRole,
   softDeleteTestUser,
   uniqueEmail,
 } from "./db";
@@ -104,6 +106,27 @@ test("Works for moves a bot only after a Yes, which stops the tokens its previou
     await deleteTestUser(bot.email);
     await deleteTestUser(firstEmail);
     await deleteTestUser(secondEmail);
+  }
+});
+
+test("the Role column refuses a bot's promotion above its person, in a sentence a production build still shows", async ({ page }) => {
+  const personEmail = uniqueEmail("role-person");
+  await createTestUser({ email: personEmail, role: "AUTHOR" });
+  const bot = await createTestBot({ email: uniqueEmail("role-bot"), worksForEmail: personEmail, role: "AUTHORIZED" });
+  try {
+    await page.goto(`/users?q=${encodeURIComponent(bot.email)}&cols=email,role`);
+    const row = page.getByRole("row", { name: new RegExp(bot.email.replace(/[.+]/g, "\\$&")) });
+    const role = row.getByRole("combobox");
+    // Offered while its person is an AUTHOR, and refused once they are demoted
+    // after the page loaded, which the page can't know.
+    await expect(role.locator("option")).toHaveText(["AUTHOR", "AUTHORIZED", "COMMENTER"]);
+    await setTestUserRole(personEmail, "AUTHORIZED");
+    await role.selectOption("AUTHOR");
+    await expect(row.getByText("A bot can't rank above the person it works for (AUTHOR is above AUTHORIZED).")).toBeVisible();
+    expect((await getTestBotFacts(bot.email)).role).toBe("AUTHORIZED");
+  } finally {
+    await deleteTestUser(bot.email);
+    await deleteTestUser(personEmail);
   }
 });
 

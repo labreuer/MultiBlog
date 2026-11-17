@@ -4662,7 +4662,10 @@ consent page offers what it offered before, and no client has an agent.
     action in a production build, so a thrown one would reach the ADMIN as a generic sentence
     with no bot named. Only an `ApiError` is returned, and the table throws it again in the
     browser, where it keeps its words (`orRefused`). The same holds for a refused move's
-    other reasons, a COMMENTER or a person the bot would outrank.
+    other reasons, a COMMENTER or a person the bot would outrank, and for the Role cell's
+    refusals, a bot promoted above its person and an ADMIN's own demotion. Each bulk action
+    calls the throwing body instead (`restoreAccount`, `setUserRole`), since `settleBulk`
+    reports a thrown refusal per row and would count a returned one as done.
   - **Restoring moves into `src/lib/bots.ts`** for a row that is a bot, with `restoreUser` as
     its wrapper, and the e2e fixture `restoreTestUser` calls it, as `createTestBot` calls
     `createBot`. An ADMIN who wants the old bot back deletes the new one first: a deleted
@@ -4920,6 +4923,8 @@ the first changes nothing a person sees until an ADMIN uses what it adds to `/us
   - `moveBot` to a person with a bot of that agent;
   - restoring a deleted bot whose person has made a new one since;
   - and changing the agent of an account that isn't a bot: refused.
+- **e2e, the first step, a bot's role on `/users`**: a promotion above its person, offered
+  before the person was demoted, is refused with the rule's sentence on a production build.
 - **e2e, the first step, a bot's initials on `/users`**: made with an agent, its agent's; made
   without, its name's; and unchanged when its agent is changed.
 - **e2e, the first step, a bot with an agent and no person**:
