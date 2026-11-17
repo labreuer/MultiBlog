@@ -1,0 +1,107 @@
+/* The doc view's Actions menu and its Fork dialog (DocActionsMenu.tsx,
+   ForkDialog.tsx; docs/FORKS.md "The doc view: an Actions menu and the Fork
+   dialog").
+
+   The menu is a <details> like SiteHeader's tool menus, but its panel is
+   absolute rather than fixed: the byline has no scrolling ancestor to escape,
+   so it can hang off the summary with no JS placing it. */
+.menuWrap {
+  display: inline-block;
+  position: relative;
+  margin-left: 1rem;
+}
+
+.summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--link);
+}
+
+.summary::-webkit-details-marker {
+  display: none;
+}
+
+.panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 10rem;
+  margin-top: 4px;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px var(--shadow-color);
+  padding: 4px 0;
+  white-space: nowrap;
+}
+
+/* A full-width row, as SiteHeader's .dropdownItem is: the wash on hover reads
+   as a menu entry where a button's own chrome would read as a form. */
+.item {
+  display: block;
+  width: 100%;
+  padding: 4px 12px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover {
+  background: var(--surface-hover);
+}
+
+.dialog {
+  width: min(32rem, calc(100vw - 32px));
+  margin: auto;
+  padding: 1.25rem;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px var(--shadow-color);
+}
+
+/* ::backdrop inherits custom properties from its dialog in current engines;
+   where one doesn't, the var() is unset and the backdrop is clear, which
+   leaves the dialog usable. */
+.dialog::backdrop {
+  background: var(--shadow-color);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.title {
+  font-size: 1.15rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.note {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.error {
+  color: var(--error);
+}
+
+.buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

@@ -1,0 +1,35 @@
+/* A doc's family under its byline (DocFamily.tsx, docs/FORKS.md "A doc's
+   family"): one line per kind of relative, in the byline's own secondary
+   type, the forks running inline with a dot between them. It sits below the
+   byline's divider and takes over the byline's gap to the text. */
+.family {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: -0.75rem;
+  margin-bottom: 1.5rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+}
+
+.label {
+  color: var(--foreground);
+}
+
+.list {
+  display: inline;
+  list-style: none;
+}
+
+.list li {
+  display: inline;
+}
+
+.list li + li::before {
+  content: " · ";
+}
+
+.more {
+  font-style: italic;
+}

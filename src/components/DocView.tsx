@@ -19,6 +19,9 @@ type Props = {
   // Byline + date — static, server-rendered (page.tsx), so it doesn't need
   // to react to scrubbing the way the title/body do.
   byline: ReactNode;
+  // The family lines under it (docs/FORKS.md "A doc's family"), server-rendered
+  // like the byline; null for a doc with no parent and no fork to show.
+  family?: ReactNode;
   // Gates the title's link to the editor.
   canEdit: boolean;
   // Gates the scrub bar, by the answer GET /api/doc/[id]/replay itself gives
@@ -53,6 +56,7 @@ export default function DocView({
   initialBodyJSON,
   staticBody,
   byline,
+  family,
   canEdit,
   canSeeHistory,
   userColor,
@@ -117,6 +121,7 @@ export default function DocView({
     <>
       <h1>{canEdit ? <Link href={`/doc/${docId}/edit`}>{title}</Link> : title}</h1>
       {byline}
+      {family}
       <SignedOutNotice />
       <OutOfDateNotice />
       <DocReadingBody
