@@ -72,6 +72,7 @@ import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import { issueApiToken } from "@/lib/api/tokens";
 import { softDeleteUser } from "@/lib/user-delete";
+import { setDocDeleted } from "@/lib/doc-manage";
 import { createBot, moveBot, requireBotRole, requireInvitable, restoreAccount, setBotAgent } from "@/lib/bots";
 import { prosemirrorToYXmlFragment } from "y-prosemirror";
 import type { Agent, ApiScope, ApiTokenClient } from "@/generated/prisma/enums";
@@ -3636,6 +3637,13 @@ export async function setTestDocRecord(docId: string, record: boolean): Promise<
   await prisma.doc.update({ where: { id: docId }, data: { record } });
 }
 
+/** Soft-deletes a test doc as the suite's admin, through the body the editor's Delete runs (src/lib/doc-manage.ts). */
+export async function softDeleteTestDoc(docId: string): Promise<void> {
+  const doc = await prisma.doc.findUniqueOrThrow({ where: { id: docId }, select: { title: true } });
+  if (!doc.title.startsWith(E2E_TITLE_PREFIX)) throw new Error("softDeleteTestDoc: not a test doc.");
+  await setDocDeleted(await adminActor(), docId, true);
+}
+
 /** Re-slugs a test term through changeTagSlug, so the old slug lands in tag_slug_history as /tags' rename leaves it. */
 export async function renameTestTagSlug(tagId: string, slug: string): Promise<string> {
   const tag = await prisma.tag.findUniqueOrThrow({ where: { id: tagId }, select: { createdBy: { select: { email: true } } } });
@@ -3898,6 +3906,7 @@ const handlers = {
   renameTestTagSlug,
   getDocMarkFacts,
   setTestDocRecord,
+  softDeleteTestDoc,
 };
 
 export type DbHandlers = typeof handlers;

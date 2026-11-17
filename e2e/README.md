@@ -479,6 +479,15 @@ the admin account.
   `Unexpected end of JSON input` was Next failing to parse its own
   prerender-manifest (vercel/next.js#96664), 500ing the request before the
   action ran.
+- **A diff's rows arrive after the page does.** `/diff/<left>/<right>` compares its two sides
+  in a worker, and its island says where it is in `data-state`: wait for
+  `[data-state="done"]` before reading a row (`done` in `doc-diff.spec.ts`), or a row not yet
+  drawn reads like one that never will be. Rows carry `data-kind`, cells `data-side`.
+  `softDeleteTestDoc` deletes a doc the way the editor's Delete does.
+- **The scrub bar's slider exists before its history does.** The inert `<input>` it starts
+  as has the same label and a `max` of 100, so a wait on `max` alone can pass before
+  anything has loaded. Wait for the value the history gives it, or for a control only the
+  loaded bar has ("Pin this version").
 - **Two users means two browser contexts**, which `secondUser()` handles. Don't
   reach for two tabs: they share a cookie jar, and the second sign-in silently
   re-authenticates the first (the same trap docs/BROWSER_PANE.md documents for the browser
