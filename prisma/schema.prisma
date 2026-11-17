@@ -810,11 +810,11 @@ model CommentQuoteAnchor {
 // (§12d) — nullable because they're empty until the first store, i.e. for a
 // doc that's been created but never edited.
 model Doc {
-  id                String                   @id @default(cuid())
-  slug              String                   @unique
-  title             String
-  visibility        DocVisibility            @default(PRIVATE)
-  proseJson         Json?                    @map("prose_json")
+  id                 String                   @id @default(cuid())
+  slug               String                   @unique
+  title              String
+  visibility         DocVisibility            @default(PRIVATE)
+  proseJson          Json?                    @map("prose_json")
   // Character count of proseJson, maintained by the doc_sync_prose_json_length
   // trigger — never assign to it. A plain column rather than a GENERATED one
   // because Prisma reads a generated column's expression as a default and
@@ -824,18 +824,18 @@ model Doc {
   // sorting by it, not just the page. @default(0) so
   // `doc.create()` needn't name it; the trigger overwrites it on INSERT
   // anyway.
-  proseJsonLength   Int                      @default(0) @map("prose_json_length")
+  proseJsonLength    Int                      @default(0) @map("prose_json_length")
   // docs/ENTITY_CHIPS.md, "Styling" — the doc's choice of form per chip
   // kind (mentions as names, initials or handles), as its ydoc's `settings`
   // map holds it: a cache, written by the store with `title` and
   // `proseJson`, for readers with no ydoc open. Null for a doc that has set
   // none. Read through `parseChipStyles`, never a cast.
-  chipStyles        Json?                    @map("chip_styles")
+  chipStyles         Json?                    @map("chip_styles")
   // docs/FULLTEXT.md §3 — the title (weight A) and body text (D) as a
   // tsvector, maintained by the doc_sync_search_vector trigger: never assign
   // to it, the same rule as proseJsonLength above. Unsupported, so the client
   // never selects it; search reads it through raw SQL.
-  searchVector      Unsupported("tsvector")? @map("search_vector")
+  searchVector       Unsupported("tsvector")? @map("search_vector")
   // PLAN.md §13q — which `ydoc_update` row `proseJson` above is the content
   // of, written by the same `updateDocCache` pass.
   //
@@ -851,34 +851,42 @@ model Doc {
   // system. This one describes a cached rendering; that one describes where a
   // quotation was measured. They are stamped from different logs for a reply
   // (§13p) and mean different things everywhere.
-  proseJsonUpdateId BigInt?                  @map("prose_json_update_id")
-  createdAt         DateTime                 @default(now()) @map("created_at")
+  proseJsonUpdateId  BigInt?                  @map("prose_json_update_id")
+  createdAt          DateTime                 @default(now()) @map("created_at")
   // Who made the doc: the account that created the row, set by every create
   // path and never edited. Not the byline, which is seeded with the creator
   // and edited freely afterwards (docs/DOCS.md "Who created a doc"). Null
   // when nothing names one: a row older than the column that
   // scripts/doc/backfill-created-by.ts found no author for, or a creator
   // since hard-deleted.
-  createdByUserId   String?                  @map("created_by_user_id")
-  updatedAt         DateTime                 @updatedAt @map("updated_at")
+  createdByUserId    String?                  @map("created_by_user_id")
+  updatedAt          DateTime                 @updatedAt @map("updated_at")
   // Updated when Prisma would update updatedAt. Sloppy with concurrent writes.
-  updatedByUserId   String?                  @map("updated_by_user_id")
-  deletedByUserId   String?                  @map("deleted_by_user_id")
-  deletedAt         DateTime?                @map("deleted_at")
+  updatedByUserId    String?                  @map("updated_by_user_id")
+  deletedByUserId    String?                  @map("deleted_by_user_id")
+  deletedAt          DateTime?                @map("deleted_at")
   // docs/MCP.md §6 — evidence of what was said, which the MCP server's
   // edit_doc refuses with `read_only`: the importer sets it on every doc it
   // makes from a chat transcript. The editor doesn't consult it, so a person
   // can still correct a record by hand. Changing it is the `manage` scope.
-  record            Boolean                  @default(false)
+  record             Boolean                  @default(false)
   // docs/MCP.md §6 — the update the importer last wrote to this doc, on a
   // create or an `--update`. `--update` refuses a doc whose log has moved
   // past it, since the planner would undo whatever was written in between.
   // Null for a doc the importer never touched, or imported before the column.
-  importedUpdateId  BigInt?                  @map("imported_update_id")
+  importedUpdateId   BigInt?                  @map("imported_update_id")
   // What the importer matches a source to this doc by: a transcript's chat
   // id, a summary's file name. A title can change through the editor or
   // edit_doc, and a match by title would then import the source again.
-  importKey         String?                  @map("import_key")
+  importKey          String?                  @map("import_key")
+  // docs/FORKS.md "Data model" — the doc this one was forked from, and the
+  // parent's `ydoc_update` it was copied at: a plain bigint like every
+  // update id here, naming a row of the parent's log for as long as the
+  // parent exists. Set together at creation by forkDoc and never edited
+  // (the doc_fork_at_revision CHECK holds the pair). A hard-deleted parent
+  // nulls the first and leaves the second as residue.
+  forkedFromDocId    String?                  @map("forked_from_doc_id")
+  forkedFromUpdateId BigInt?                  @map("forked_from_update_id")
 
   authors             DocAuthor[]
   createdBy           User?                  @relation("DocCreatedBy", fields: [createdByUserId], references: [id])
@@ -894,6 +902,8 @@ model Doc {
   tagAnchors          TagAnchor[]            @relation("TagAnchorDoc")
   anchoredLinkAnchors AnchoredLinkAnchor[]   @relation("AnchoredLinkAnchorDoc")
   commentQuoteAnchors CommentQuoteAnchor[]   @relation("CommentQuoteAnchorDoc")
+  forkedFrom          Doc?                   @relation("DocFork", fields: [forkedFromDocId], references: [id], onDelete: SetNull)
+  forks               Doc[]                  @relation("DocFork")
   mentions            Mention[]
   citations           Citation[]
 
