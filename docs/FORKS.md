@@ -1,7 +1,8 @@
 # Forks and diffs — a doc's copies, and what changed between two texts
 
-**Status: planned, 2026-11-16. Nothing is built.** This file is the plan, and it becomes the
-as-built account section by section as the build lands. PLAN.md §36 points here.
+**Status: planned, 2026-11-16. The engine's size guards are built (Build order, item 1); the
+diffs and forks are not.** This file is the plan, and it becomes the as-built account section
+by section as the build lands. PLAN.md §36 points here.
 
 A **fork** is a new doc seeded from another doc's text at one version, which records where it
 came from. A **diff** shows two texts side by side, word by word: two docs, or one doc at two
@@ -348,37 +349,34 @@ anything is built on it ("Build order").
 
 ### The engine's size guards
 
-**The engine is `since`'s**: `alignBlocks` pairs the blocks, identical ones anchoring a longest
-common subsequence and changed ones between them paired by how alike their words are, and
-`diffRuns` diffs each pair word by word (MCP.md §6). Main bounds neither: one cell edited in a
-400×5 table builds a ~2 GB word-diff table through `since` today, on a server with 2 GB. The
-diff page adds no caller on the server, but its worker runs the same code in a reader's tab,
-with the alignment's worst case among its inputs: two docs written apart share few identical
-blocks to anchor on, often only empty paragraphs. So the guards come first, as a PR of their
-own.
-
-**The `wiki` branch's guards, ported** (`b6126e5`; its MCP.md §6, "Size guards"):
+**Built.** The engine is `since`'s: `alignBlocks` pairs the blocks, identical ones
+anchoring a longest common subsequence and changed ones between them paired by how alike their
+words are, and `diffRuns` diffs each pair word by word (MCP.md §6). Each builds a table that
+grows with the square of what it compares: unbounded, one cell edited in a 400×5 table would
+build a ~2 GB word-diff table through `since`, on a server with 2 GB. The diff page adds no
+caller on the server, but its worker runs the same code in a reader's tab, with the
+alignment's worst case among its inputs: two docs written apart share few identical blocks to
+anchor on, often only empty paragraphs. So the engine bounds every caller, the worker
+included, as MCP.md §6's "Size guards" sets out:
 
 - **Three changes answer the same, more cheaply**: `pairGap` counts each block's words once,
   the alignment's table is a `Uint16Array`, and a code block, which takes no marks, is merged
-  by taking the new block whole.
+  by taking the new block whole. Its old block's mentions are still checked for coming back
+  as plain words (`chip_as_text`), which needs no diff.
 - **Three caps change the answer when they bite**: the word diff at 4M cells after trimming a
   pair's shared ends, the alignment at 25M cells, and pairing at 1M pairs summed over every
   gap.
 - **A read past a cap shows less detail; an edit past one is refused** and writes nothing
   (`TooLargeToMerge`), since merging with less detail would lose marks. The Yjs write-back
-  never refuses, since a throw would leave its transaction half written.
-- **The commit doesn't cherry-pick.** `src/lib/doc-edit.ts`, `server/doc-edit.ts`,
-  `src/lib/mcp/doc-writes.ts` and `src/lib/mcp/annotation-writes.ts` have moved on since
-  (entity chips), so those hunks are applied by hand. The engine's own two files and the three
-  test files apply as they are.
+  never refuses, since a throw would leave its transaction half written. A PDF sheet's diff,
+  which carries a file's notes to its next version, refuses as an edit does, since a carry
+  writes anchors (PDF.md §13, "Placing each anchor").
 
-**The caps are the engine's constants, the same in the worker as on the server.** They are
-first guesses from development machines, as the branch's were, and TODO.md's "The diff
-engine's size guards are first guesses" comes over with them. Its item on a total over a
-request's word diffs stays, for `since`. PR 2 adds two to it: the deadline's length, and the
-engine's time and memory on the oldest phone the baseline claims, which has less memory than
-a server.
+**The caps are the engine's constants, and the worker will run them as the server does.** They
+are first guesses from development machines, and TODO.md's "The diff engine's size guards are
+first guesses" lists what tuning them takes, among it a total over a request's word diffs, for
+`since`. PR 2 adds two items to it: the deadline's length, and the engine's time and memory on
+the oldest phone the baseline claims, which has less memory than a server.
 
 **A version costs one replay on the server**, the one `since` already pays:
 `materializeYdocAt` starts from the newest `ydoc_snapshot` at or before it, or from row #1. A
@@ -684,10 +682,13 @@ its own before forks go out.
 
 **Three PRs, one at a time**, each branched from main once the last has merged.
 
-1. **The engine's size guards.** `b6126e5` ported. MCP.md §6 gains
-   "Size guards", and TODO.md the entry on tuning them. The branch's unit tests come with it:
+1. **The engine's size guards — built.** `b6126e5` ported. MCP.md §6 has "Size guards", and
+   TODO.md the entry on tuning them. The branch's unit tests came with it:
    `block-align.test.ts`'s comparison with the alignment from before on a seeded random table,
-   `diff.test.ts`, and `doc-edit.test.ts`'s refusals. No UI and no migration.
+   `diff.test.ts`, and `doc-edit.test.ts`'s refusals. Two things main has and the branch
+   didn't are covered beside them: a code block's merge keeps the `chip_as_text` check
+   (`entity-chips/edit.test.ts`), and a PDF sheet's diff refuses past the word diff's cap
+   (`pdf-quote-carry.test.ts`, PDF.md §13). No UI and no migration.
 2. **Diffs.** `canUserSeeDocHistory`, its filter form and `canUserSeeDocVersion` first, with the
    three existing checks moved onto the first and no change in behaviour; `canUserSeeDocVersion`
    is the predicate alone until forks exist. Then the worker alone, answering in a production
@@ -759,9 +760,9 @@ address needs:
 | `DocActionsMenu` | Publish as blog post, Fork… | Move into the wiki…, Fork into the wiki… |
 | `b6126e5`, `1425a6a` | Ported | Nothing |
 
-**`b6126e5` and `1425a6a` are on the local `wiki` branch only**, which the rebuild replaces. So
-PR 1 and PR 3's slug fix are ported before the rebuild starts, or the two commits are tagged
-first.
+**`b6126e5` is ported to main by PR 1; `1425a6a` is on the local `wiki` branch only**, which the
+rebuild replaces. So PR 3's slug fix is ported before the rebuild starts, or the commit is
+tagged first.
 
 Its replay map shrinks to match: the size guards and the slug fix leave its prerequisites,
 forking a doc as a doc is no longer deferred, and its fork, banner and diff steps keep only

@@ -19,6 +19,7 @@ import { chipMarkdowns, chipsIn } from "../src/lib/entity-chips/renderings";
 import { chipStylesOf, sameChipStyles, setChipStyle } from "../src/lib/entity-chips/settings";
 import { NO_CHIP_INPUTS, type ChipInputs } from "../src/lib/entity-chips/types";
 import { writeBackDoc } from "../src/lib/doc-edit-yjs";
+import { TooLargeToMerge } from "../src/lib/diff";
 import { markdownToText } from "../src/lib/markdown-import";
 import { chipPositions, parseChipRecords, rangeWithEdgeChips } from "../src/lib/anchors/chips";
 import { resolveAnchorInDoc } from "../src/lib/anchors/resolve";
@@ -139,8 +140,15 @@ function planOn(doc: Y.Doc, request: EditRequest, authorId: string): Planned | {
     chipMarkdown: chipMarkdowns(chipsIn(body), inputs.styles, inputs.context),
   });
   if (!plan.ok) return { refusal: plan.refusal };
-  const nextTitle =
-    request.title === undefined ? null : planTitle(title, request.title, { schema: pmTitleSchema, authorId, keepMarks: false });
+  let nextTitle: PMNode | null = null;
+  try {
+    if (request.title !== undefined) {
+      nextTitle = planTitle(title, request.title, { schema: pmTitleSchema, authorId, keepMarks: false });
+    }
+  } catch (err) {
+    if (err instanceof TooLargeToMerge) return { refusal: { edit: 0, code: "invalid", message: err.message } };
+    throw err;
+  }
   return { body, title, plan, nextTitle };
 }
 

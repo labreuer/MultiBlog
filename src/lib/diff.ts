@@ -83,10 +83,26 @@ export function tokenizeFine(text: string): string[] {
   return text.match(/[\p{L}\p{N}]+|\s+|[^\p{L}\p{N}\s]/gu) ?? [];
 }
 
-// Word-level LCS diff. O(n*m) — fine at the doc sizes a hobby blog produces.
-export function diffText(oldText: string, newText: string, split: (text: string) => string[] = tokenize): DiffToken[] {
-  const a = split(oldText);
-  const b = split(newText);
+/**
+ * What a size cap does when it bites (docs/MCP.md §6, "Size guards"): a read
+ * shows less detail past it, and an edit is refused, since merging with less
+ * detail would lose marks.
+ */
+export type CapMode = "read" | "edit";
+
+/** An edit past a size cap: too large to merge word by word, so refused rather than merged with less detail. */
+export class TooLargeToMerge extends Error {
+  constructor() {
+    super("That edit is too large to merge word by word; make it in smaller pieces.");
+    this.name = "TooLargeToMerge";
+  }
+}
+
+/** The word diff's cap, in table cells (old tokens × new): about 2,000 tokens a side, and 32 MB as the table is held. */
+export const WORD_DIFF_MAX_CELLS = 4_000_000;
+
+/** The longest common subsequence of two token lists, as a diff. O(n·m) in time and space. */
+function lcsDiff(a: readonly string[], b: readonly string[]): DiffToken[] {
   const n = a.length;
   const m = b.length;
 
@@ -122,4 +138,43 @@ export function diffText(oldText: string, newText: string, split: (text: string)
     j++;
   }
   return result;
+}
+
+/**
+ * Word-level LCS diff. Its table is every old token by every new one, so a
+ * pair past `WORD_DIFF_MAX_CELLS` first has its shared start and end trimmed,
+ * which can change at most which of several equal tokens counts as the
+ * unchanged one, and is diffed if that brings it under. If not, a read gets
+ * the changed middle removed and added whole, and an edit throws
+ * `TooLargeToMerge`.
+ */
+export function diffText(
+  oldText: string,
+  newText: string,
+  split: (text: string) => string[] = tokenize,
+  mode: CapMode = "read",
+): DiffToken[] {
+  const a = split(oldText);
+  const b = split(newText);
+  if (a.length * b.length <= WORD_DIFF_MAX_CELLS) return lcsDiff(a, b);
+
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+  const oldMiddle = a.slice(head, a.length - tail);
+  const newMiddle = b.slice(head, b.length - tail);
+  let middle: DiffToken[];
+  if (oldMiddle.length * newMiddle.length <= WORD_DIFF_MAX_CELLS) {
+    middle = lcsDiff(oldMiddle, newMiddle);
+  } else if (mode === "edit") {
+    throw new TooLargeToMerge();
+  } else {
+    middle = [
+      { value: oldMiddle.join(""), type: "delete" },
+      { value: newMiddle.join(""), type: "insert" },
+    ];
+  }
+  const equal = (value: string): DiffToken => ({ value, type: "equal" });
+  return [...a.slice(0, head).map(equal), ...middle, ...a.slice(a.length - tail).map(equal)];
 }

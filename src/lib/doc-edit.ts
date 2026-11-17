@@ -1,7 +1,7 @@
 import { Fragment, Mark, Slice, type Node as PMNode, type Schema } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
 import type { JSONContent } from "@tiptap/core";
-import { diffText, tokenizeFine } from "./diff";
+import { diffText, tokenizeFine, TooLargeToMerge } from "./diff";
 import { writesBack } from "./entity-chips/registry";
 import { chipAttrsOf, chipContinues, chipIdentitiesBetween, chipIdentity, chipMarkdownBetween, chipsIn } from "./entity-chips/renderings";
 import { chipDisplayText, displayTextBetween, isChip, type ChipLabels } from "./entity-chips/text";
@@ -33,6 +33,10 @@ import { contextOf, resolveQuote, type QuoteSpec } from "./quote-resolve";
 //    words, only those on both sides of it.
 // 3. The write-back (doc-edit-yjs.ts) goes block by block, never as a whole
 //    fragment.
+//
+// An edit too large to align or to diff word by word within the engine's
+// size caps (diff.ts, block-align.ts) is refused, never merged with less
+// detail, which would lose the marks step 2 exists to keep.
 //
 // The one difference from typing is at an edge: ProseMirror extends an
 // inclusive mark over text typed at its end, and a sentence added after an
@@ -267,15 +271,26 @@ function build(template: PMNode, atoms: readonly Atom[]): PMNode {
  * Two versions of one textblock merged word by word: what survived keeps its
  * marks, what is new is marked as new (above). The result takes the new
  * block's type and attributes, so a paragraph that became a heading is one.
+ *
+ * A textblock that allows no marks, a code block, has none to carry over and
+ * holds no chip, so the new block is taken whole, with no word diff: the same
+ * block the merge would build, at no cost however long it is. The old block
+ * may still have held a chip, so the check for its label typed back as plain
+ * words runs as it does below; it is linear.
  */
 export function mergeTextblock(old: PMNode, next: PMNode, options: MergeOptions): PMNode {
   const merge = options.chipMerge ?? chipMergeFor(old, next, options.labels);
   const oa = atomsOf(old, merge);
   const na = atomsOf(next, merge);
+  if (next.type.markSet?.length === 0) {
+    if (!options.keepMarks) noteChipsAsText(oa, na, merge);
+    return next;
+  }
   const tokens = diffText(
     oa.map((a) => a.text).join(""),
     na.map((a) => a.text).join(""),
     tokenizeFine,
+    "edit",
   );
   const out: Atom[] = [];
   // The chips this merge removes, and where in `out` the ones it adds are.
@@ -417,6 +432,7 @@ export function mergeBlock(old: PMNode, next: PMNode, options: MergeOptions): PM
       oc.map((node) => blockText(node)),
       nc.map((node) => blockText(node)),
       { old: oc.map(blockKey), new: nc.map(blockKey) },
+      "edit",
     );
     const children = pairs.flatMap((pair) =>
       pair.new === null
@@ -434,7 +450,8 @@ export function mergeBlock(old: PMNode, next: PMNode, options: MergeOptions): PM
  * One whole document merged into another, top-level block by block — what
  * planEdits does after its Transform, for a caller that has the new document
  * whole: the MCP server's edit_note, whose body is sent entire and whose
- * surviving words must still keep their marks.
+ * surviving words must still keep their marks. Throws `TooLargeToMerge` past
+ * a size cap.
  */
 export function mergeDoc(old: PMNode, next: PMNode, given: MergeOptions): PMNode {
   // One allocation of chip characters for the whole document; a caller that
@@ -442,7 +459,12 @@ export function mergeDoc(old: PMNode, next: PMNode, given: MergeOptions): PMNode
   const options: MergeOptions = given.chipMerge ? given : { ...given, chipMerge: chipMergeFor(old, next, given.labels) };
   const oc = childrenOf(old);
   const nc = childrenOf(next);
-  const pairs = alignBlocks(oc.map((node) => blockText(node)), nc.map((node) => blockText(node)), { old: oc.map(blockKey), new: nc.map(blockKey) });
+  const pairs = alignBlocks(
+    oc.map((node) => blockText(node)),
+    nc.map((node) => blockText(node)),
+    { old: oc.map(blockKey), new: nc.map(blockKey) },
+    "edit",
+  );
   const merged = pairs.flatMap((pair) =>
     pair.new === null ? [] : pair.old === null ? [markNew(nc[pair.new], options)] : [mergeBlock(oc[pair.old], nc[pair.new], options)],
   );
@@ -691,19 +713,29 @@ export function planEdits(
   // Step 2: the merge, top-level block by block.
   const oc = childrenOf(doc);
   const nc = childrenOf(shaped);
-  const pairs = alignBlocks(oc.map((node) => blockText(node)), nc.map((node) => blockText(node)), { old: oc.map(blockKey), new: nc.map(blockKey) });
   const merged: PMNode[] = [];
   const changed: number[] = [];
   // One allocation of chip characters for the whole merge, and one place its
   // findings collect.
   const chipMerge = chipMergeFor(doc, shaped, options.labels);
   const merging: MergeOptions = { ...options, chipMerge };
-  for (const pair of pairs) {
-    if (pair.new === null) continue;
-    const block =
-      pair.old === null ? markNew(nc[pair.new], merging) : mergeBlock(oc[pair.old], nc[pair.new], merging);
-    merged.push(block);
-    if (pair.old === null || !block.eq(oc[pair.old])) changed.push(merged.length);
+  try {
+    const pairs = alignBlocks(
+      oc.map((node) => blockText(node)),
+      nc.map((node) => blockText(node)),
+      { old: oc.map(blockKey), new: nc.map(blockKey) },
+      "edit",
+    );
+    for (const pair of pairs) {
+      if (pair.new === null) continue;
+      const block =
+        pair.old === null ? markNew(nc[pair.new], merging) : mergeBlock(oc[pair.old], nc[pair.new], merging);
+      merged.push(block);
+      if (pair.old === null || !block.eq(oc[pair.old])) changed.push(merged.length);
+    }
+  } catch (err) {
+    if (err instanceof TooLargeToMerge) return refuse(0, "invalid", err.message);
+    throw err;
   }
   let next: PMNode;
   try {
@@ -740,7 +772,8 @@ function chipChanges(old: PMNode, next: PMNode, labels: ChipLabels | undefined):
  * A title rewritten as a targeted edit is (§6, "The title is a Yjs
  * fragment"): the old title's paragraph merged with the new one word by
  * word, so the words that survive keep whoever typed them. `schema` is the
- * title schema with the author mark (titleAuthorHighlightExtensions).
+ * title schema with the author mark (titleAuthorHighlightExtensions). Throws
+ * `TooLargeToMerge` past the word diff's cap.
  */
 export function planTitle(oldTitle: PMNode | null, text: string, options: MergeOptions): PMNode {
   const schema = options.schema;

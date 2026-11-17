@@ -1,4 +1,4 @@
-import { diffText, tokenizeFine } from "./diff";
+import { diffText, tokenizeFine, TooLargeToMerge, type DiffToken } from "./diff";
 import { skeletonOf, type TextRange } from "./pdf-fragment";
 
 // docs/PDF.md §13, "Placing each anchor": a quote whose words were corrected
@@ -36,9 +36,21 @@ const WORD = /^[\p{L}\p{N}]/u;
  * the space or the comma between two changed words, and a run cut there
  * pairs "empiricafphenomenon" with "empirical" and loses "phenomenon". So a
  * shared token that is not a word ends no run.
+ *
+ * **Past the word diff's cap** (docs/MCP.md §6, "Size guards") nothing is
+ * aligned, so no range is carried and no fit is made. A read's answer there
+ * is the changed middle as one token, which would carry a range onto the
+ * whole of it; a carry writes anchors, so it takes the edit's refusal.
  */
 export function alignSheetWords(earlier: string, later: string): SheetWords {
   const words: SheetWords = { earlier: [], later: [], runs: [] };
+  let tokens: DiffToken[];
+  try {
+    tokens = diffText(earlier, later, tokenizeFine, "edit");
+  } catch (err) {
+    if (err instanceof TooLargeToMerge) return words;
+    throw err;
+  }
   let at = 0;
   let to = 0;
   let run: Run | null = null;
@@ -46,7 +58,7 @@ export function alignSheetWords(earlier: string, later: string): SheetWords {
     if (run) words.runs.push(run);
     run = null;
   };
-  for (const token of diffText(earlier, later, tokenizeFine)) {
+  for (const token of tokens) {
     const word = WORD.test(token.value);
     const length = token.value.length;
     if (token.type === "equal") {

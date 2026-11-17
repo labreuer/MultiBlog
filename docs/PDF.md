@@ -2230,6 +2230,11 @@ reads what the rules take and measures the target each placement gives.
   - **It is tried only where the earlier sheet's stored text still holds the quote at the
     anchor's offsets.** Where that extraction is gone, or the offsets are not into it, there
     is no range to carry.
+  - **Past the word diff's cap the diff aligns nothing** (MCP.md §6, "Size guards": 4M
+    cells, about 2,000 tokens a side, once the two sheets' shared start and end are
+    trimmed), so no range is carried, and no fit is made for the rule after this one. A
+    read's answer there is the changed middle removed and added whole, which would carry a
+    quote onto all of it.
   - **A run is what stands between two shared words.** The diff also matches the space or the
     comma between two changed words. Cut there, a run pairs "empiricafphenomenon" with
     "empirical" and the range loses "phenomenon".

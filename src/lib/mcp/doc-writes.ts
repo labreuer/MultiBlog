@@ -14,7 +14,8 @@ import { linkPartsInto } from "@/lib/anchored-link-data";
 import { flattenForMatch, quotedTextAt } from "@/lib/comment-quote-match";
 import { resolveQuote } from "@/lib/quote-resolve";
 import { withQuoteChips } from "@/lib/entity-chips/parsed-chips";
-import { alignBlocks, diffRuns, renderWordDiff } from "@/lib/block-align";
+import { alignBlocks, diffRuns, renderWordDiff, type AlignedPair } from "@/lib/block-align";
+import { TooLargeToMerge } from "@/lib/diff";
 import { blockKey, type EditSpec, type EditTarget } from "@/lib/doc-edit";
 import { requestDocEdit, type AnchorRef } from "@/lib/doc-edit-client";
 import { docLogTail, isDocVersion, loadDocState, loadDocStateAt } from "@/lib/doc-state";
@@ -362,11 +363,20 @@ export async function revertEditFor(
   if (!previous) throw invalid("That is the doc's first version, which created it; there is nothing before it to go back to.");
   const [before, after] = await Promise.all([loadDocStateAt(doc.id, previous.id), loadDocStateAt(doc.id, version)]);
 
-  const pairs = alignBlocks(
-    before.blocks.map((b) => b.text),
-    after.blocks.map((b) => b.text),
-    { old: before.blocks.map((b) => blockKey(b.node)), new: after.blocks.map((b) => blockKey(b.node)) },
-  );
+  // The alignment decides the hunks, so past a size cap the revert is refused
+  // rather than planned from a coarser alignment; the summaries are reads.
+  let pairs: AlignedPair[];
+  try {
+    pairs = alignBlocks(
+      before.blocks.map((b) => b.text),
+      after.blocks.map((b) => b.text),
+      { old: before.blocks.map((b) => blockKey(b.node)), new: after.blocks.map((b) => blockKey(b.node)) },
+      "edit",
+    );
+  } catch (err) {
+    if (err instanceof TooLargeToMerge) throw invalid("That edit is too large to revert in one piece.");
+    throw err;
+  }
   const hunks: Hunk[] = [];
   let lastAfterText: string | null = null;
   for (const pair of pairs) {

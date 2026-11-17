@@ -101,3 +101,15 @@ test("letters changed are counted over both quotes", () => {
   assert.equal(lettersChanged("abc", "xyz"), 1);
   assert.equal(lettersChanged("", ""), 0);
 });
+
+test("past the word diff's cap nothing is aligned, and a corrected word is not carried", () => {
+  // 1,201 words a side is 2,401 tokens, past 4M cells, and a change at each
+  // end leaves no shared start or end to trim.
+  const middle = Array.from({ length: 1199 }, (_, i) => `w${i}`).join(" ");
+  const earlier = `tbe ${middle.replace("w600", "modem")} end`;
+  const later = `the ${middle.replace("w600", "modern")} fin`;
+  assert.deepEqual(alignSheetWords(earlier, later), { earlier: [], later: [], runs: [] });
+  assert.deepEqual(carry(earlier, later, "modem"), { kind: "none" });
+  // Under it, the same correction carries.
+  assert.equal(carry("tbe w1 modem w2 end", "the w1 modern w2 fin", "modem").kind, "placed");
+});

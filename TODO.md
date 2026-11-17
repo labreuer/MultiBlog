@@ -452,6 +452,43 @@ All five instances run main with all of it. Not yet done:
   `maxRequestBodySize` of 8 MiB, which holds that much text however a client escapes it (six
   bytes a character at worst).
 
+## The diff engine's size guards are first guesses
+
+**Status:** decided 2026-10-22, in the wiki plan's final review, and carried into
+docs/FORKS.md: the guards ship as a first, sensible set (docs/MCP.md §6, "Size guards"), and
+are tuned later. Nothing here is started.
+
+What the first set leaves:
+
+- **The numbers.** 4M cells, 25M cells and 1M pairs are round guesses from timings on
+  development machines. The servers are 1-vCPU boxes with 2 GB, slower than any of those, and
+  nothing has been measured there.
+- **A word diff without a table.** Myers' O(ND) diff, in its linear-space form, needs none,
+  which would let the word diff's cap go, and with it the one place a PDF's notes are refused
+  a carry for size: a dense sheet's corrections, past the cap, place nothing by the diff
+  (docs/PDF.md §13, "Placing each anchor"). Where two diffs are equally short it can choose
+  differently, and that changes whose marks `mergeTextblock` keeps. The tests can't tell: with
+  Myers swapped in, the 17 tests in `block-align.test.ts` and `doc-edit.test.ts` from before the
+  guards all pass, while `planEdits` credits different authors on the fixture at
+  `doc-edit.test.ts` lines 87–92, which asserts only which words carry a note. Deciding it
+  wants a differential test over real edits, and that fixture asserting authorship too. In the
+  review's measurements, a forward Myers gave today's answer on about 2,400 single-word edits.
+- **A pairing budget by words, spent gap by gap.** The cap counts pairs, where a pair's cost is
+  its two blocks' words. And past the cap every gap larger than 1×1 is left unpaired, where
+  spending a budget gap by gap, smallest first, would keep pairing the gaps it can afford.
+- **`pairGap`'s own tables.** It keeps a similarity table and a best-score table as nested
+  arrays, 71 MB at 2,100 blocks a side with no anchor, which the pairing cap bounds at 1M cells
+  each. Scoring each pair as the table fills, into one `Float64Array`, would take 9 MB there,
+  and let the cap rise.
+- **A total over a request's word diffs.** Each pair is capped, but a doc of many large blocks,
+  each under the cap, is not.
+- **Post history on the engine.** It diffs two whole texts, so a change near each end of a long
+  post shows everything between them as replaced. Diffing block by block, through `alignBlocks`
+  and `diffRuns`, needs each version's blocks from its stored `proseJson`, and a renderer for
+  the result.
+- **`since` past a cap.** Its answer grows, with whole blocks removed and added where a word
+  diff was. Saying the change is too large to show might serve a model better.
+
 ## The claude.ai trial: what to undo
 
 claude.ai connected to the trial instance on 2026-10-13 through a request-header connector,
