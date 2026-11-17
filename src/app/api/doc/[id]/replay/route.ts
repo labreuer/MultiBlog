@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canUserEditDoc } from "@/lib/doc-authz";
+import { canUserSeeDocHistory } from "@/lib/doc-authz";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 
 // Doc-scoped sibling of /api/ydoc/[id]/replay (that route stays ADMIN-gated
 // and /ydoc-debug-only) — identically shaped response, consumed by
 // DocScrubBar.tsx's embedded scrub bar on /doc/[slug] (PLAN.md §12a/§12n).
-// Gated on canUserEditDoc rather than isAdmin: a doc's own AUTHOR should see
-// its history without being an admin.
+// Gated on canUserSeeDocHistory rather than isAdmin: this is a doc's whole
+// history, and that predicate is who may see it (docs/FORKS.md, "Who may see
+// a doc's history").
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) {
@@ -20,7 +21,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (!doc) {
     return NextResponse.json({ error: "Doc not found" }, { status: 404 });
   }
-  if (!(await canUserEditDoc(session.user.id, session.user.role, id))) {
+  if (!(await canUserSeeDocHistory(session.user.id, session.user.role, id))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
