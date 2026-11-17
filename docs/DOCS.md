@@ -17,7 +17,7 @@ What it does not repeat, because another file owns it:
 | [MARGIN_NOTES.md](MARGIN_NOTES.md) | The rail beside a doc's text, in the reading view and the editor. |
 | [TABLES.md](TABLES.md) | Tables inside a doc. |
 | PLAN.md §14 | `/side-by-side` and doc links, which join two docs. |
-| [FORKS.md](FORKS.md) | Forks of a doc, and diffs of two docs or of one doc at two versions: a plan. |
+| [FORKS.md](FORKS.md) | Who may see a doc's history; diffs of two docs or of one doc at two versions, as built; forks of a doc, a plan. |
 | PLAN.md §15 | Posts as snapshots of docs — a post is published *from* a doc, and `/post/[id]/edit` reads a doc's history. |
 | PLAN.md §16 | The admin-table kit `/docs` is one instance of. |
 
@@ -275,12 +275,13 @@ mechanics, and why the re-read runs there and not on every navigation.
 | Route | Purpose |
 |---|---|
 | `/docs` | management table, `canManageDocs` + own-byline scoping, widened by `SHARED` docs for ADMIN/EDITOR and by the ADMIN-only override below |
-| `/doc/[slug]` | the live reading view, `canUserReadDoc`; embeds the scrub bar. `?sel=` is an anchored link (ANCHORED_LINKS.md), `?at=` a scrub position; both survive the sign-in round trip |
+| `/doc/[slug]` | the live reading view, `canUserReadDoc`; embeds the scrub bar for whoever may see the doc's history (`canUserSeeDocHistory`). `?sel=` is an anchored link (ANCHORED_LINKS.md), `?at=` a scrub position; both survive the sign-in round trip |
 | `/doc/[slug]/edit` | the editor, `canUserEditDoc`; a soft-deleted doc still loads so Settings can offer Undelete |
 | `/doc/[slug]/slug` | rename, with a suggested standard slug derived from the title |
 | `/annotations` | annotation browse/admin, scoped to the docs the viewer may *read* (ANNOTATIONS.md) |
 | `POST /api/doc/[id]/token` | the collab token, with `readOnly` for a reader ("Collab") |
-| `GET /api/doc/[id]/replay` | the update log the scrub bar replays |
+| `GET /api/doc/[id]/replay` | the update log the scrub bar replays, `canUserSeeDocHistory` |
+| `/diff/[left]/[right]` | a word diff of two docs, or of one doc at two versions; each side a doc id, or `<id>@<update id>` (FORKS.md, "Diffs") |
 
 **One segment, id-or-slug.** Next rejects `app/doc/[slug]/page.tsx` beside
 `app/doc/[id]/edit/page.tsx` ("You cannot use different slug names for the same dynamic
@@ -350,7 +351,9 @@ has synced.
 - **`DocView.tsx`** (client) owns the `<h1>`, the byline slot and the one piece of state the
   scrub bar, the title and the body share: which historical state, if any, is overriding the
   live one. The `<h1>` links to `/doc/[id]/edit` whenever the viewer can edit — an ordinary
-  hyperlink, not the heading's color — and is plain text otherwise. The page keys `DocView`
+  hyperlink, not the heading's color — and is plain text otherwise. The scrub bar mounts on
+  a second answer, `canSeeHistory`: who may see a doc's history is a question of its own
+  (FORKS.md, "Who may see a doc's history"). The page keys `DocView`
   on `doc.id` so a client-side navigation between docs remounts rather than reuses it.
 - **`DocReadingBody.tsx`** is the surface, and **`useLiveDocContent`** (`src/lib/`) is the
   engine underneath it: a read-only Hocuspocus tap that pushes each remote Yjs update into
@@ -369,6 +372,14 @@ has synced.
   Scrubbing rewrites the live title and body *in place*, through the same `setContent`
   path a live update uses, so there is no separate history route. With no doc snapshots
   every rebuild replays from row #1; a performance characteristic, not a defect.
+- **The loaded bar links to diffs of its positions** (FORKS.md, "Choosing two versions on
+  the scrub bar"): "Diff with now" while the slider is off the live end, and, once the
+  reader has pinned a version with "Pin this version", "Diff pinned → here", the older of
+  the two on the left. The pin is the tab's and is in no URL. Both links are plain `<a>`s
+  to `/diff/…`, never `<Link>`s, so that Back is a load of this page at its `?at=`. The
+  bar's history is the replay it fetched, so it says when the live tap has received a
+  change since ("Changes have come in since this history loaded; reload to include them"),
+  and replays nothing again.
 - **The position is in the URL as `?at=<ydoc_update id>`**, and the live end is the
   parameter's *absence* — so a link shared before later edits still means "the newest
   version" rather than pinning its reader to a head that has moved. The id, not the
@@ -402,7 +413,9 @@ selected. A selection made between "editor mounted" and "provider synced once" t
 vanishes before it can be annotated. The hook exposes `synced` for exactly this — there is
 no visible connection UI on the reading view otherwise — rendered as a hidden marker that
 `e2e/doc.spec.ts`'s annotation tests wait on. Anything else that reacts to a reader's
-selection needs the same gate.
+selection needs the same gate. For the same reason `onLiveUpdate`, the hook's report of a
+change someone made, is called only for an update applied after that first sync: the scrub
+bar's "changes have come in" note would otherwise show on every load.
 
 ### The frozen reading view
 
@@ -551,6 +564,8 @@ document rather than the remark.
   value naming nothing renders live. What a DOM assertion cannot see — `replaceState`
   rather than `pushState`, and the debounce — is held by `src/lib/scrub-url.test.ts` and
   the comment above it instead.
+- **`e2e/doc-diff.spec.ts`** holds the scrub bar's pin, its two diff links and its
+  "changes have come in" note, with the diff route they lead to (FORKS.md, "Testing").
 - **`e2e/doc-visibility.spec.ts`** pins the visibility rule and both listings: an
   ADMIN/EDITOR non-author is refused a `PRIVATE` doc for read and edit, a listed author is
   not, `SHARED` stays open to ADMIN/EDITOR regardless of byline, the `/docs` override is

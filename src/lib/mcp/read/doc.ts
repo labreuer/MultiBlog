@@ -23,7 +23,7 @@ import {
   type DocBlock,
 } from "@/lib/doc-text";
 import { isDocVersion, loadDocState, loadDocStateAt, type DocState } from "@/lib/doc-state";
-import { canUserEditDoc } from "@/lib/doc-authz";
+import { canUserSeeDocHistory } from "@/lib/doc-authz";
 import { ApiError, ERROR_LIST_CAP, forbidden, invalid } from "@/lib/api/errors";
 import type { McpContext, ToolResult } from "../tool";
 import { bylineOf, dayOf, sizeOf } from "../shape";
@@ -171,10 +171,10 @@ export async function readDoc(
     if (args[pdfOnly] !== undefined) throw invalid(`${pdfOnly} is for a PDF; a doc reads by section or by blocks.`);
   }
 
-  // A doc's history is its editors', as the reading view's scrub bar is
-  // (`/api/doc/[id]/replay`, docs/PERMISSIONS.md): what changed since a
-  // version shows text a reader may never have been shown.
-  if (args.since !== undefined && !(await canUserEditDoc(ctx.actor.userId, ctx.actor.role, doc.id))) {
+  // What changed since a version is the doc's history, as the reading view's
+  // scrub bar is (`/api/doc/[id]/replay`), and shows text a reader may never
+  // have been shown: docs/FORKS.md, "Who may see a doc's history".
+  if (args.since !== undefined && !(await canUserSeeDocHistory(ctx.actor.userId, ctx.actor.role, doc.id))) {
     throw forbidden("You can read this doc but not edit it, and what changed since a version is its history, which is for its editors.");
   }
 

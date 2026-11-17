@@ -13,6 +13,15 @@
   font-family: sans-serif;
 }
 
+/* The page's own row above SideBySideView's bars: it takes its height and
+   leaves the rest of the chain to the columns. */
+.tools {
+  flex: 0 0 auto;
+  padding: 0.2em 0.5em 0;
+  font-size: 0.85rem;
+  text-align: right;
+}
+
 .forbidden {
   max-width: 480px;
   margin: 4rem auto;

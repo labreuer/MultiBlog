@@ -226,21 +226,75 @@ export async function searchReadableDocsFor(
   return [...prefix, ...contains];
 }
 
-// canUserEditDoc expressed as a `where` clause — the same relationship
-// readableDocsFor has to canUserReadDoc, above. Backs the doc picker at
-// /posts/new and "Change doc…" on /post/[id]/edit (PLAN.md §15d): only a doc
-// its creator/publisher could open the editor for is offered. ADMIN/EDITOR
-// get every SHARED doc as a candidate; PRIVATE candidates are this user's own
-// byline, for every role.
-export async function editableDocsFor(userId: string, role: Role): Promise<ReadableDoc[]> {
-  if (!canManageDocs(role)) return [];
+/**
+ * canUserEditDoc as a `where` on Doc, for this viewer, or null for one who
+ * can edit no doc: the same relationship readableDocsWhere has to
+ * canUserReadDoc, above. ADMIN/EDITOR get every SHARED doc; a PRIVATE doc is
+ * its byline's, for every role.
+ *
+ * `deletedByUserId: null` is spelled out for the reason readableDocsWhere
+ * gives: a relation filter goes around the soft-delete extension.
+ */
+function editableDocsWhere(userId: string, role: Role): Prisma.DocWhereInput | null {
+  if (!canManageDocs(role)) return null;
 
   const or: Prisma.DocWhereInput[] = [{ authors: { some: { userId } } }];
   if (canEditAnySharedDoc(role)) or.push({ visibility: "SHARED" });
+  return { deletedByUserId: null, OR: or };
+}
+
+// Backs the doc picker at /posts/new and "Change doc…" on /post/[id]/edit
+// (PLAN.md §15d): only a doc its creator/publisher could open the editor for
+// is offered.
+export async function editableDocsFor(userId: string, role: Role): Promise<ReadableDoc[]> {
+  const where = editableDocsWhere(userId, role);
+  if (!where) return [];
 
   return prisma.doc.findMany({
-    where: { deletedByUserId: null, OR: or },
+    where,
     select: { id: true, slug: true, title: true },
     orderBy: { title: "asc" },
   });
+}
+
+// docs/FORKS.md "Who may see a doc's history" — a doc's history is any state
+// of it but the current one: the scrub bar's replay, what changed since a
+// version, a diff's versions.
+//
+// **An interim rule: a doc's history is its editors'.** These three functions
+// are the whole of it, so that a change to who sees history is a change here
+// and at no call site. Every check that *shows* history asks one of them, and
+// never canUserEditDoc directly. A check that replays the log in order to
+// *write* (publishing from a doc at a version on /post/[id]/edit, MCP's
+// revert, an edit naming a passage by its ends) is an edit, and stays on
+// canUserEditDoc.
+
+/** Whether this viewer may see states of the doc other than its current one. A deleted doc answers false. */
+export async function canUserSeeDocHistory(userId: string, role: Role, docId: string): Promise<boolean> {
+  return canUserEditDoc(userId, role, docId);
+}
+
+/**
+ * canUserSeeDocHistory as a `where` on Doc, or null for a viewer who sees no
+ * doc's history: for a check that asks about several docs in one query.
+ */
+export function docsWithVisibleHistoryWhere(userId: string, role: Role): Prisma.DocWhereInput | null {
+  return editableDocsWhere(userId, role);
+}
+
+/**
+ * Whether this viewer may be shown the doc at `version`, in a diff. Ask it
+ * **before** `isDocVersion`, never after: in the other order, Forbidden
+ * against not-found tells a reader without the history which ids are in the
+ * doc's log.
+ */
+export async function canUserSeeDocVersion(
+  userId: string,
+  role: Role,
+  docId: string,
+  // Not consulted: a viewer who may see a doc's history may see every version of it.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  version: bigint,
+): Promise<boolean> {
+  return canUserSeeDocHistory(userId, role, docId);
 }

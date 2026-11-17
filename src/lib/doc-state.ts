@@ -7,6 +7,7 @@ import { docContentExtensions, pmDocContentSchema, titleAuthorHighlightExtension
 import { titleTextFromJSON } from "@/lib/ydoc-render";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
+import { ydocStore } from "../../server/ydoc-store";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { docBlocks, type DocBlock } from "@/lib/doc-text";
 import { chipInputsForBody } from "@/lib/entity-chips/context";
@@ -23,6 +24,7 @@ import type { ChipInputs } from "@/lib/entity-chips/types";
 //
 // When nobody has the doc open the row *is* the doc; while someone types, it
 // trails them by the store debounce (two seconds of quiet, ten at most).
+// `loadDocStateNow` is the read that closes that gap, for the diff page.
 //
 // Server-only (Prisma, and the store through ydoc-version).
 
@@ -84,6 +86,47 @@ export async function loadDocState(docId: string): Promise<DocState> {
     const state = await stateOf(doc);
     const version = row ? (await resolveUpdateIdForSnapshot(ydocId, Y.encodeSnapshot(Y.snapshot(doc)))).updateId : null;
     return { ...state, version };
+  } finally {
+    doc.destroy();
+  }
+}
+
+/**
+ * The doc as it is now: the `ydoc` row with the log's later rows applied to
+ * it (docs/FORKS.md, "A doc as it is now"). What a diff's side with no
+ * version reads, so that it is never older than a version the scrub bar has
+ * handed out, which `loadDocState`'s stored row alone can be while someone
+ * types.
+ *
+ * One store pass writes the row's bytes and its `last_update_id` together,
+ * after its appends have landed, so the bytes hold every log row up to that
+ * id, and the rows past it are the seconds since. A null `last_update_id` (a
+ * doc just created, or a row no store pass has stamped) applies the whole
+ * log, which is correct and costs the log's length. Applying a row the bytes
+ * already hold changes nothing, so the two reads need no transaction.
+ *
+ * Not a replay of the log alone: that would cost the doc's history on every
+ * read, and a row that failed to append is in the stored bytes and not in the
+ * log.
+ *
+ * `version` is the last row applied, or the row's own stamp when there were
+ * none: null only for a doc with no log row and no stamp.
+ */
+export async function loadDocStateNow(docId: string): Promise<DocState> {
+  const ydocId = ydocIdForDoc(docId);
+  const row = await prisma.ydoc.findUnique({ where: { id: ydocId }, select: { ydoc: true, lastUpdateId: true } });
+  const doc = new Y.Doc();
+  try {
+    let version: bigint | null = null;
+    if (row) {
+      Y.applyUpdate(doc, new Uint8Array(row.ydoc));
+      version = row.lastUpdateId;
+      for (const update of await ydocStore.updatesAfter(ydocId, row.lastUpdateId)) {
+        Y.applyUpdate(doc, update.update);
+        version = update.id;
+      }
+    }
+    return { ...(await stateOf(doc)), version };
   } finally {
     doc.destroy();
   }

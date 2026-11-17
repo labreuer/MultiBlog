@@ -118,6 +118,11 @@ export type LiveDocContentOptions = {
   // a change, never for an `overrideBodyJSON` push, and never while `frozen`.
   // PLAN.md §12n, "The title follows the fragment live".
   onLiveTitle?: (title: string) => void;
+  // Fired for each Yjs update the tap applies once it has synced, frozen or
+  // not: a change to the document made since this page loaded, and never the
+  // tap's own handshake. The scrub bar's "changes have come in" note listens
+  // (docs/FORKS.md, "Choosing two versions on the scrub bar").
+  onLiveUpdate?: () => void;
   // Fired synchronously after every setContent — a live remote update, a
   // scrub jump, or hoisted mode's catch-up on mount. This is the one
   // content-change choke point each surface re-resolves its own anchored
@@ -166,6 +171,7 @@ export function useLiveDocContent({
   onSelectionUpdate,
   onContentPushed,
   onLiveTitle,
+  onLiveUpdate,
 }: LiveDocContentOptions): LiveDocContent {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -192,6 +198,12 @@ export function useLiveDocContent({
   const onLiveTitleRef = useRef(onLiveTitle);
   useEffect(() => {
     onLiveTitleRef.current = onLiveTitle;
+  });
+
+  // Same ref indirection again, same reason.
+  const onLiveUpdateRef = useRef(onLiveUpdate);
+  useEffect(() => {
+    onLiveUpdateRef.current = onLiveUpdate;
   });
 
   // Only a *changed* title goes up: every body keystroke re-derives the same
@@ -381,6 +393,14 @@ export function useLiveDocContent({
       }
     }
     applyUpdateRef.current = applyUpdate;
+    // The Y.Doc's own "update" event, as distinct from the catch-up calls to
+    // applyUpdate (a sync, an unfreeze). Yjs emits it only for an update that
+    // changed the doc, so once the first sync has landed each one is a change
+    // someone made, whether or not the view is frozen.
+    function handleYdocUpdate() {
+      if (contentSynced) onLiveUpdateRef.current?.();
+      applyUpdate();
+    }
 
     // Hoisted mode (PLAN.md §14g) — the caller (DocColumn) owns the Y.Doc
     // and provider's connection lifecycle across read/write toggles, so this
@@ -392,7 +412,7 @@ export function useLiveDocContent({
     // write → read cycle would otherwise call setContent on an editor this
     // instance already unmounted.
     if (hoistedProvider) {
-      ydoc.on("update", applyUpdate);
+      ydoc.on("update", handleYdocUpdate);
       const handleSynced = () => setSynced(true);
       hoistedProvider.on("synced", handleSynced);
       // **Ask again, because the event may already be gone.** A hoisted
@@ -409,7 +429,7 @@ export function useLiveDocContent({
       if (hoistedProvider.isSynced) setSynced(true);
       setAwareness(hoistedProvider.awareness);
       return () => {
-        ydoc.off("update", applyUpdate);
+        ydoc.off("update", handleYdocUpdate);
         hoistedProvider.off("synced", handleSynced);
         setAwareness(null);
       };
@@ -450,7 +470,7 @@ export function useLiveDocContent({
         if (cancelled) return;
         firstToken = token;
 
-        ydoc.on("update", applyUpdate);
+        ydoc.on("update", handleYdocUpdate);
 
         // Only after the token succeeded: an anonymous reader is refused
         // above and must not be the one to open the page's socket.

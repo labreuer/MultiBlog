@@ -626,7 +626,7 @@ runtime by the positioning hook, and a `max-width: 1179px` mirror in CSS would b
 same rule spelled as its off-by-one complement, which is exactly how the two drift apart
 later. Anything else keying JS off a breakpoint should do the same.
 
-Five centred-column widths now, and they are one decision rather than five:
+Six centred-column widths now, and they are one decision rather than six:
 
 - **680px** — listings.
 - **800px** — full text (the post page, `/doc/[slug]`, `DocEditor`). This is *the* reading
@@ -678,6 +678,13 @@ Five centred-column widths now, and they are one decision rather than five:
   `/doc/[slug]` — the deepest of the three, the flag's gutter being the widest — reaching
   its full 800 a few pixels further up. 800 is the measure the
   layout is composed from, not a promise about the narrowest window that has a rail.
+
+- **1600px** — the diff page, two reading measures side by side (docs/FORKS.md, "Diffs"):
+  `calc(1600px + 1rem + 3rem)` in `src/app/diff/[left]/[right]/page.module.css`, 800 a
+  column, the 1rem between them, and a 1.5rem gutter either side, which the container
+  carries itself since it is the `<main>`. A side's text there wraps as it does on the
+  doc's own page. Below that width `max-width: 100%` decides and the two columns share
+  what there is, each `minmax(0, 1fr)`; there is no breakpoint at which they stack.
 
 ## The admin-table kit (`components/table/`)
 

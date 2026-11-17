@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import type { JSONContent } from "@tiptap/react";
 import type { ReactNode } from "react";
+import Link from "next/link";
 import * as Y from "yjs";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
@@ -17,6 +18,7 @@ import { StaticBibliography } from "@/components/bibliography/Bibliography";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { getDocLinkGroupsForPair, countOtherDocLinks } from "@/lib/doc-links-query";
 import { signInPath } from "@/lib/sign-in-redirect";
+import { diffPath } from "@/lib/diff-side";
 import SideBySideView from "@/components/sidebyside/SideBySideView";
 import styles from "./page.module.css";
 import { displayNameOf } from "@/lib/display-name";
@@ -165,6 +167,12 @@ export default async function SideBySidePage({
 
   return (
     <main className={styles.container}>
+      {/* docs/FORKS.md "From side-by-side" — the word diff of this pair as the
+          two docs are now, which asks only what this page's gate already has:
+          that both be readable. By id, since a diff's sides are never slugs. */}
+      <p className={styles.tools}>
+        <Link href={diffPath({ docId: leftDoc.id, updateId: null }, { docId: rightDoc.id, updateId: null })}>Diff</Link>
+      </p>
       <SideBySideView
         left={{
           docId: leftDoc.id,

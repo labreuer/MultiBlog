@@ -39,9 +39,11 @@
 }
 
 /* Combined with .container only when the pinned scrub footer actually
-   renders, so it never overlaps the comment section's bottom content. */
+   renders, so it never overlaps the comment section's bottom content. Room
+   for the bar at its tallest: the slider under its position line, a pinned
+   version's line and the "changes have come in" note. */
 .containerScrubbable {
-  padding-bottom: 5rem;
+  padding-bottom: 7rem;
 }
 
 /* Mirrors app/[slug]/page.module.css exactly — same breakpoint, same track
