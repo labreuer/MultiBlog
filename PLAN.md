@@ -5019,3 +5019,10 @@ ADMIN turns connections off for an account in `user.mcp_allowed`. Planned 2026-1
 steps that deploy apart. Built 2026-11-16: accounts, the first. Built 2026-11-16: clients and
 the consent page, the second and last. **Plan and what is built:
 [docs/MCP.md](docs/MCP.md) §21, "A bot made when a connection is approved".**
+
+## 36. Forking docs, and diffing them
+
+Planned 2026-11-16: a fork is a new doc seeded from another doc's text at one version, which
+records where it came from, and a diff shows two docs, or one doc at two versions chosen on the
+scrub bar, word by word. Both are taken from the `wiki` branch without the wiki, which adds its
+addresses on top when it is rebuilt. **Plan: [docs/FORKS.md](docs/FORKS.md).**
