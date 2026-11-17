@@ -459,7 +459,7 @@ one, behind one predicate (docs/FORKS.md, "Who may see a doc's history").
 
 A doc's past states are its editors': `canUserSeeDocHistory` in `src/lib/doc-authz.ts` is
 `canUserEditDoc`'s answer. It decides the reading view's scrub bar and its replay route, MCP's
-`since`, and a diff's versions, and will decide forking at a version. A reader with
+`since`, a diff's versions, and forking at a version. A reader with
 `canViewDocs` sees a `SHARED` doc only as it is now, and a diff of two docs as they are now.
 The rule changes in the predicate and its filter form, `docsWithVisibleHistoryWhere`, and at no
 call site.
@@ -472,8 +472,8 @@ What the redesign should weigh:
 - **What readers saw anyway.** Every state since a doc went `SHARED` was readable live by the
   same readers, so for those states the rule withholds only what they missed.
 - **A fork's first state.** It is the parent's text at the fork point, which the fork's creator
-  chose to copy. FORKS.md plans it as an exception for the fork's editors, in diffs alone; a
-  rule could count it as part of the fork for its readers too.
+  chose to copy. It is an exception for the fork's editors, in diffs alone
+  (`canUserSeeDocVersion`); a rule could count it as part of the fork for its readers too.
 - **MCP's two reads outside the rule.** Anchoring rebuilds a doc at the version an agent sends
   with a quote (MCP.md §7) and checks only that the version is in the doc's log: a reader
   can't read old text that way, but can learn whether a quote of their own once matched.
@@ -504,6 +504,29 @@ from" line links its parent as it is now, not at the fork point.
   reader: a line above the text, and no freeze.
 - **If readers get history**, the page can freeze for them too, rendered on the server from
   `loadDocStateAt`, with no scrub bar.
+
+## A snapshot at a fork point
+
+**Status:** not built, on purpose (docs/FORKS.md, "The function"). Look again when a replay of
+a forked doc, timed on an instance, takes long enough to notice.
+
+A fork writes nothing to its parent, so "what the parent changed since" and a later fork at
+the same point replay the parent from its newest `ydoc_snapshot`, or from row #1. A snapshot
+of the parent at the fork point (`ensureYdocSnapshotAt`, the call publishing a post makes)
+would let both start there. Its costs fall on the parent: both replay routes send every
+snapshot's bytes whole, `findNewestSnapshotCoveredBy` reads every snapshot's state vector, a
+`PRIVATE` fork would leave a dated dot on the parent's `/post/[id]/edit` bar, and nothing is
+unique on a snapshot's doc and mark, so two forks at once would write two. Measured in a copy
+of a production database, the longest doc log, 1,270 updates, replays in about 10 ms on a
+development machine.
+
+- **The one rule such a snapshot must follow:** it is built by replaying the log to the fork
+  point, never from the state the fork's seed came from. For a fork of the latest that state is
+  `loadDocStateNow`'s, the stored row with the log's later rows applied, which can hold more
+  than a replay to its version when an update failed to append. A snapshot holding that extra
+  text would hand it to every replay that starts there and to none that starts earlier.
+- **If long logs do make a replay slow**, snapshots along the log at a fixed spacing may serve
+  better than one per fork point, since they bound the scrub bar's and a diff's replay too.
 
 ## The diff engine's size guards are first guesses
 

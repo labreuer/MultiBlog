@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { diffPath, parseDiffSide, parseUpdateId, sideOrder } from "./diff-side";
+import { diffPath, parseDiffSide, parseUpdateId, pastForkPoint, sideOrder, type PairLineage } from "./diff-side";
 
 // docs/FORKS.md "The route" — a diff side, and what it refuses: anything but
 // a doc id, or a doc id and one version within Postgres's bigint. And "Which
@@ -67,4 +67,60 @@ test("a pair with no order: one version twice, now twice, or two docs", () => {
   assert.equal(sideOrder(at(null), at(null)), null);
   assert.equal(sideOrder(at(3), at(40, "other0000doc")), null);
   assert.equal(sideOrder(at(null), at(40, "other0000doc")), null);
+});
+
+// A fork and its parent: FORK was made of DOC at DOC's update 40.
+const FORK = "fork0000doc";
+const lineage = (parentNow: number | null = 40): PairLineage => ({
+  parentDocId: DOC,
+  forkDocId: FORK,
+  forkPoint: BigInt(40),
+  parentNow: parentNow === null ? null : BigInt(parentNow),
+});
+const side = (docId: string, updateId: number | null) => ({ docId, updateId: updateId === null ? null : BigInt(updateId) });
+
+test("a fork and its parent at or before the fork point: the parent is the earlier, whichever version the fork is at", () => {
+  for (const forkAt of [41, 90, null]) {
+    for (const parentAt of [40, 12]) {
+      assert.equal(sideOrder(side(DOC, parentAt), side(FORK, forkAt), lineage()), "left-earlier");
+      assert.equal(sideOrder(side(FORK, forkAt), side(DOC, parentAt), lineage()), "right-earlier");
+      assert.equal(pastForkPoint(side(DOC, parentAt), side(FORK, forkAt), lineage()), false);
+    }
+  }
+});
+
+test("a parent's side with no version stands at the update the parent is at now", () => {
+  // Unchanged since the fork: still at the fork point.
+  assert.equal(sideOrder(side(DOC, null), side(FORK, null), lineage(40)), "left-earlier");
+  assert.equal(pastForkPoint(side(DOC, null), side(FORK, null), lineage(40)), false);
+  // Changed since.
+  assert.equal(sideOrder(side(DOC, null), side(FORK, null), lineage(77)), null);
+  assert.equal(pastForkPoint(side(DOC, null), side(FORK, null), lineage(77)), true);
+  // Not known: no order, and no claim that both changed.
+  assert.equal(sideOrder(side(DOC, null), side(FORK, null), lineage(null)), null);
+  assert.equal(pastForkPoint(side(DOC, null), side(FORK, null), lineage(null)), false);
+});
+
+test("a fork and its parent past the fork point have no order, either way round", () => {
+  assert.equal(sideOrder(side(DOC, 41), side(FORK, null), lineage()), null);
+  assert.equal(sideOrder(side(FORK, 90), side(DOC, 77), lineage()), null);
+  assert.equal(pastForkPoint(side(DOC, 41), side(FORK, null), lineage()), true);
+  assert.equal(pastForkPoint(side(FORK, 90), side(DOC, 77), lineage()), true);
+});
+
+test("lineage that isn't this pair's changes nothing, and one doc on both sides ignores it", () => {
+  const other = "other0000doc";
+  assert.equal(sideOrder(side(DOC, 12), side(other, null), lineage()), null);
+  assert.equal(sideOrder(side(other, 12), side(FORK, null), lineage()), null);
+  assert.equal(pastForkPoint(side(DOC, 77), side(other, null), lineage()), false);
+  assert.equal(sideOrder(side(DOC, 77), side(DOC, 12), lineage()), "right-earlier");
+  assert.equal(pastForkPoint(side(DOC, 77), side(DOC, 12), lineage()), false);
+  assert.equal(pastForkPoint(side(DOC, 77), side(FORK, null), null), false);
+});
+
+test("the fork point is compared as a bigint", () => {
+  const big: PairLineage = { parentDocId: DOC, forkDocId: FORK, forkPoint: BigInt("9007199254740992"), parentNow: null };
+  const parentAt = { docId: DOC, updateId: BigInt("9007199254740993") };
+  assert.equal(sideOrder(parentAt, side(FORK, null), big), null);
+  assert.equal(pastForkPoint(parentAt, side(FORK, null), big), true);
 });

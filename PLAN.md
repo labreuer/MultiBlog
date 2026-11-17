@@ -2428,8 +2428,8 @@ original go-live-date-preservation rule across an unpublish/republish cycle carr
 `unpublishPost` is unchanged in shape. `derivePostStatus`/`publishedPostWhere` swap
 `publishRevisionId` for `publishEventId`.
 
-A post can be created from a doc two ways: a picker at `/posts/new` and a "Publish as blog post"
-button on `/doc/[slug]` while the doc has no post (once it has any, the byline lists them
+A post can be created from a doc two ways: a picker at `/posts/new` and "Publish as blog post"
+in `/doc/[slug]`'s Actions menu while the doc has no post (once it has any, the byline lists them
 instead — `DocPostsLine`, §21i), both landing on the same `createPostFromDoc(docId)` action,
 gated on `canUserEditDoc` and seeding the post's authors from the doc's `doc_author` rows.
 
@@ -5026,5 +5026,7 @@ Planned 2026-11-16: a fork is a new doc seeded from another doc's text at one ve
 records where it came from, and a diff shows two docs, or one doc at two versions chosen on the
 scrub bar, word by word. Both are taken from the `wiki` branch without the wiki, which adds its
 addresses on top when it is rebuilt. Built 2026-11-17: the diffs, at `/diff/<left>/<right>`,
-with the scrub bar's pin and links and side-by-side's link. Forks are not built. **Plan and
-what is built: [docs/FORKS.md](docs/FORKS.md).**
+with the scrub bar's pin and links and side-by-side's link. Built 2026-11-17: forks, from the
+doc view's Actions menu, with a doc's family lines and their diffs; how a diff shows a fork
+against its parent is still to choose. **Plan and what is built:
+[docs/FORKS.md](docs/FORKS.md).**

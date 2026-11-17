@@ -1,15 +1,16 @@
 # Forks and diffs — a doc's copies, and what changed between two texts
 
-**Status: partly built. The engine's size guards and the diffs are built (Build order, items 1
-and 2); forks, and sliders on the diff page, are planned.** Everything under "Diffs" and "Who
-may see a doc's history" is the as-built account, but for the parts that say they come with
-forks and the section headed "Planned"; "Forks" is the plan.
+**Status: built, but for one choice and one plan. The engine's size guards, the diffs and the
+forks are built (Build order, items 1 to 3).** How the diff page shows a fork against its
+parent is built to be tried and not yet chosen ("Which side is later"), and sliders on the diff
+page are planned ("Planned: sliders on the diff page"). Everything else is the as-built
+account.
 PLAN.md §36 points here.
 
 A **fork** is a new doc seeded from another doc's text at one version, which records where it
 came from. A **diff** shows two texts side by side, word by word: two docs, or one doc at two
 versions. The `wiki` branch built both for wiki pages (its docs/WIKI.md, "Forking", "The
-banner", "Diffs"). This plan builds them for every doc, with nothing of the wiki in them, so
+banner", "Diffs"). Here they are for every doc, with nothing of the wiki in them, so
 that the wiki, when it is rebuilt, adds its addresses on top of them rather than carrying forks
 and diffs of its own ("What the wiki adds later").
 
@@ -18,7 +19,7 @@ What it does not repeat:
 | | |
 |---|---|
 | [DOCS.md](DOCS.md) | The doc, its ydoc, the reading view and its scrub bar. |
-| [PERMISSIONS.md](PERMISSIONS.md) | Who may read and edit, as tables; the rows this plan adds are named where they arise. |
+| [PERMISSIONS.md](PERMISSIONS.md) | Who may read and edit, as tables; the rows for diffs and forks are named where they arise. |
 | [MCP.md](MCP.md) §6 | The engine, `alignBlocks` and `diffRuns`, which MCP's `since` already runs. |
 | PLAN.md §14 | `/side-by-side`, the doc-link surface, which links to the diff of its pair and shares nothing else with it ("Its own route"). |
 
@@ -27,15 +28,16 @@ What it does not repeat:
 Read these before changing code that shows a doc as it was at an earlier version: code that
 calls `loadDocStateAt` or `isDocVersion`, serves a doc's `ydoc_update` rows, or takes an update
 id from a request. Today that is the doc page's scrub bar and its replay route, the diff page,
-MCP's reads and writes, and `/post/[id]/edit`. Each mistake compiles, lints and gives a doc's
-editors the right answer, and the diff page's spec covers that page's gate alone. CLAUDE.md
-points here and holds none of it, so this list is the whole of the warning.
+forking, MCP's reads and writes, and `/post/[id]/edit`. Read the last of them before writing
+code that seeds a doc from another doc's text. Each mistake compiles, lints and gives a doc's
+editors the right answer, and the specs cover the diff page's gate and `forkDoc` alone.
+CLAUDE.md points here and holds none of it, so this list is the whole of the warning.
 
-- **Showing history through `canUserEditDoc`.** The two answer alike today, so nothing differs
-  until the rule changes: with forks, when a fork's editors may see one version of a parent
-  they can't edit, and again at the permissions redesign. Ask `canUserSeeDocHistory` for a
-  doc's history, `docsWithVisibleHistoryWhere` for several docs at once, and
-  `canUserSeeDocVersion` for one version ("Who may see a doc's history").
+- **Showing history through `canUserEditDoc`.** The two answer alike for a doc's own scrub bar,
+  so nothing differs there until the permissions redesign. They already differ in a diff, where
+  a fork's editors may see one version of a parent they can't edit. Ask `canUserSeeDocHistory`
+  for a doc's history, `docsWithVisibleHistoryWhere` for several docs at once, and
+  `canUserSeeDocVersion` for one version in a diff ("Who may see a doc's history").
 - **Asking whether a version exists before whether the viewer may see it.** `isDocVersion`
   first answers not-found for an id outside the doc's log and Forbidden for one inside it,
   which tells a reader without the history which ids the log holds. `canUserSeeDocVersion`
@@ -46,6 +48,17 @@ points here and holds none of it, so this list is the whole of the warning.
   history predicate, a rule that showed history to more people would let them publish from the
   doc or write to it. Two of MCP's reads are outside the rule on purpose ("Who may see a doc's
   history").
+- **Asking `canUserSeeDocVersion` outside a diff.** Its fork-point exception shows one version
+  of a parent to a fork's editors, who hold that text already. The parent's scrub bar, its
+  `since` and forking it at a version ask `canUserSeeDocHistory`. On the wider predicate, a
+  fork's editor could fork the parent again at that version, or be served its replay.
+- **Seeding a doc from another doc's body without `forkSeed`.** The doc schema has the
+  `annotation` mark, so `createDocWithContent` accepts a body that still carries the marks of
+  the other doc's notes, and nothing after it refuses one. An editor-made annotation is a mark
+  whose `id` is one of that doc's annotation rows, so a copy lights up its notes in the new
+  doc's editor, on rows that resolve against another doc. `forkSeed` (`src/lib/fork-seed.ts`)
+  strips the mark, and its unit test is all that holds the strip ("What it takes, and what
+  stays").
 
 ## What it is for
 
@@ -55,7 +68,7 @@ points here and holds none of it, so this list is the whole of the warning.
 3. **Diffing one doc between two points in its history**, chosen on the scrub bar.
 4. **Diffing any two docs you can read**, the pair side-by-side shows.
 
-Items 3 and 4 need no fork, so diffs are built first ("Build order").
+Items 3 and 4 need no fork ("Build order").
 
 ## Who may see a doc's history
 
@@ -68,8 +81,8 @@ state of it but the current one, is its editors', with one exception for forks.
   role can't (AUTHORIZED, COMMENTER) sees no history.
 - **Every check that shows a doc's history goes through it**: the scrub bar's replay route
   (`/api/doc/[id]/replay`), the doc page's choice to mount the scrub bar, MCP's `since`
-  (`src/lib/mcp/read/doc.ts`) and a diff's versions, and forking at a version will. So the
-  redesign replaces the predicate and its filter form rather than five call sites.
+  (`src/lib/mcp/read/doc.ts`), a diff's versions, and forking at a version (`readForkSource`).
+  So the redesign replaces the predicate and its filter form rather than five call sites.
 - **The predicate has a filter form beside it, `docsWithVisibleHistoryWhere(userId, role)`**, as
   `readableDocsWhere` is beside `canUserReadDoc`: the same rule as a `where` on `Doc`, and null
   for a viewer who sees no doc's history. A check that asks about several docs at once goes
@@ -91,17 +104,16 @@ state of it but the current one, is its editors', with one exception for forks.
   rebuilds the doc at the note's stamp and gives the passage the note was on
   (`passageAtStamp`, `src/lib/mcp/read/threads.ts`), to any reader of the thread: old text, and
   no more of it than the note marked. The redesign weighs both (below).
-- **The exception, which comes with forks: a fork point is not history to the fork's
-  editors.** A diff may show
+- **The exception: a fork point is not history to the fork's editors.** A diff may show
   `<parent>@<X>` to a viewer who may see the history of a live fork of that parent whose
   `forked_from_update_id` is X, and who can read the parent now, as any diff demands. The
   parent at X is that fork's first state, which its editors can already reach on its own scrub
   bar, so the exception shows them nothing they don't already hold. It is what lets an AUTHOR
   who forked a doc they can't edit see what its author changed since.
 - **`canUserSeeDocVersion(userId, role, docId, version)`** is what a diff asks of each
-  version, and is the predicate alone until forks exist. With forks it holds both: the
-  predicate, or a live fork of the doc, forked at that version, among the docs whose history
-  the viewer may see, which is one query through the filter form however many forks were made
+  version. It holds both: the predicate, or a live fork of the doc, forked at that version,
+  among the docs whose history the viewer may see, of a parent the viewer can read now. That
+  is one query, through the filter form and `readableDocsWhere`, however many forks were made
   at that version. Its answer depends only on forks the viewer may already see into, so it
   tells them nothing about the parent's log that those forks don't.
 - **The exception is for diffs alone.** The parent's scrub bar, its `since` and forking it at a
@@ -187,7 +199,7 @@ shareable each answer a question of side-by-side's:
   a slug on side-by-side but not on its diff, `x@1` on the diff but not on side-by-side.
 - **It refuses the same doc on both sides**, because two live columns on one doc would put two
   providers for one document name on a socket, or two `Y.Doc`s on one IndexedDB database. A
-  diff of one doc at two versions is half of what this plan is for.
+  diff of one doc at two versions is half of what a diff is for.
 - **Its bodies come from `prose_json`**, with a decode of the `ydoc` row when that is still
   null, copied from `/doc/[slug]`. That is right for a live column's first paint, which the tap
   then replaces, and wrong for a diff, whose "now" must be the state a fork records
@@ -237,8 +249,8 @@ reload, and it shows no rows.
 
 A COMMENTER gets no diffs, since `canUserReadDoc` refuses them every doc, and someone signed
 out is sent to sign in. PERMISSIONS.md has two rows per table: "Diff, as it is now" (read both
-sides) and "Diff at a version" (see that doc's history; with forks, or the history of a fork of
-it made at that version).
+sides) and "Diff at a version" (see that doc's history, or the history of a fork of it made at
+that version).
 
 ### What is compared
 
@@ -286,16 +298,21 @@ opposite.
 - **The same doc on both sides has an order**: the lower update id is the earlier, and a side
   with no version is later than any version. Two sides at one version have none, and the page
   says "No differences".
-- **A fork and its parent at or before the fork point will have one**, with forks: the
-  parent's side is the earlier, whichever version the fork is at.
+- **A fork and its parent at or before the fork point have one**: the parent's side is the
+  earlier, whichever version the fork is at. A parent's side with no version stands at the
+  update it was read at as the page loaded, so a parent nobody has changed since the fork is
+  at its fork point.
 - **No other pair has one**: two unrelated docs, or a fork and its parent past the fork point,
   where each has changed since. A chain through a grandparent isn't followed. It can pass
   through a doc the viewer can't read, and a label would tell them the two sides are related
   through it.
 
-`sideOrder(left, right)` in `src/lib/diff-side.ts` answers it, pure, with a unit table: the
-left is the earlier, the right is, or the pair has no order. With forks it takes the pair's
-lineage as a third argument.
+`sideOrder(left, right, lineage)` in `src/lib/diff-side.ts` answers it, pure, with a unit
+table: the left is the earlier, the right is, or the pair has no order. The lineage
+(`PairLineage`) is which of the pair's two docs was forked from the other, the fork point, and
+the update the parent is at now. The page reads it off the two docs' rows once the gate has
+passed both, so it names nothing the viewer can't read. `pastForkPoint` beside it answers
+whether a parent's side is past the fork point.
 
 **How the page shows it:**
 
@@ -307,14 +324,20 @@ lineage as a third argument.
 - **Rows keep their colours and wording whatever the order.** Removed is always what the left
   has and the right lacks, so a swapped pair shows the same rows mirrored.
 
-**How a fork and its parent are shown is not decided, and is decided by trying it.** What PR 3
-builds to be tried: the labels above for a fork against its fork point, and for a fork and its
-parent past the fork point a line, "Both sides have changed since the fork was made," so that
-the diff isn't read as what the fork changed. **That build stops for the choice, and asks**,
-once the family lines' links exist: Luke is given the fork against its fork point both ways
-round, and against its parent after both have changed. Nothing more is built on the headers
-for a fork, and no spec is written for them, until he has chosen. What he chooses replaces
-this paragraph.
+**How a fork and its parent are shown is not decided, and is decided by trying it.** What is
+built to be tried: the labels above for a fork against its parent at or before the fork point,
+and, for a fork and its parent past the fork point, a line above the rows, "Both sides have
+changed since the fork was made," so that the diff isn't read as what the fork changed. Two
+things the choice should weigh:
+
+- **A fork keeps its parent's title**, so the two headers read alike, and nothing in them says
+  which side is the fork.
+- **The line shows whenever the parent's side is past the fork point**, also when the fork has
+  not been edited, where it is untrue. Telling the two apart needs the fork's first update,
+  one more query.
+
+Nothing more is built on the headers for a fork, and no spec covers them, until Luke has
+chosen. What he chooses replaces this paragraph.
 
 ### Where the comparing is done
 
@@ -474,8 +497,8 @@ what they do once here.
 
 - **Who gets one is `canUserSeeDocHistory`, per side**, which `loadDiffPair` already asks for a
   side at a version, and here asks for a side with none too. A side that fails it keeps its
-  header and has no slider. From forks on, a parent a fork's editor sees through the fork-point
-  exception has none: the exception is one version.
+  header and has no slider. A parent a fork's editor sees through the fork-point exception has
+  none: the exception is one version.
 - **One slider a side, for one doc at two versions too.** A single track with two thumbs suits
   that case alone, and two docs have two histories. The sliders may cross: the headers' "Earlier"
   and "Later" and the line above the rows already follow the order ("Which side is later").
@@ -526,7 +549,8 @@ changed" can rely on the fork having begun as that exact copy.
   history its forker may never have been shown. The id is parsed with `parseUpdateId`.
   `loadDocStateAt` replays up to any id without asking whether it is one of this doc's, so an
   unchecked one would record a fork point that isn't the parent's version, and "what the parent
-  changed since" would 404.
+  changed since" would 404. A reader without the history is refused as Forbidden whatever the
+  id; for one with it, an id outside the grammar or the parent's log is refused as invalid.
 - **A parent the forker can't read is Forbidden, and one that is missing or deleted is not
   found**, the two answers the doc's own page and the diff's gate give. Whoever gets as far as
   this check may create docs, and to them the difference is useful: Forbidden says the doc is
@@ -549,7 +573,7 @@ changed" can rely on the fork having begun as that exact copy.
   a `SHARED` doc may be `PRIVATE`, and a fork of a `PRIVATE` doc, which only its byline can
   make, may be `SHARED`.
 
-PERMISSIONS.md gains two rows per table: "Fork, as it is now" and "Fork at a version".
+PERMISSIONS.md has two rows per table: "Fork, as it is now" and "Fork at a version".
 
 ### What it takes, and what stays
 
@@ -557,7 +581,7 @@ PERMISSIONS.md gains two rows per table: "Fork, as it is now" and "Fork at a ver
 |---|---|
 | Body | The parent's at the version, `authorHighlight` marks kept, so inherited text still shows who wrote it; `annotation` marks removed |
 | Title | The parent's, seeded as plain text, as a seeded title always is; the slug comes from it (`my-essay-2`) |
-| Entity chips | Carried, and so are the parent's chip styles at the version (`Y.Map("settings")`), written into the seed with `setChipStyle` and into the row's `chip_styles`, so the labels read as the parent's did |
+| Entity chips | Carried, and so are the parent's chip styles at the version (`Y.Map("settings")`), written into the seed with `setChipStyle` and into the row's `chip_styles`, so the labels read as the parent's did. A style for a chip kind this build doesn't know is not carried, since `setChipStyle` refuses one |
 | Byline, creator | The forker alone |
 | Visibility | Chosen in the dialog, `PRIVATE` by default |
 | Replay | Starts at the fork: row #1 is the seed, credited to the forker through the `clients` map |
@@ -590,6 +614,9 @@ first two:
   `readForkSource`, `forkSeed`, then `createDocWithContent`. It returns the fork's id and its
   editor's path, to which the action redirects.
 
+Each refusal is an `ApiError`. The action, `forkDocAction`, hands the form's fields over as
+they were sent, shows a refusal in the dialog, and lets anything else be a fault.
+
 **A fork writes nothing to its parent.** It could leave a `ydoc_snapshot` of the parent at the
 fork point (`ensureYdocSnapshotAt`, the call publishing a post makes), so that "what the parent
 changed since", and a later fork at the same point, would start there and not at row #1. It
@@ -608,59 +635,60 @@ parent, and the parent would pay for it:
 - **Nothing is unique on a snapshot's doc and mark**, so two forks at once would write two.
 
 What it would save is small where it has been measured: replaying the longest doc log in a
-copy of a production database, 1,270 updates, takes about 10 ms on a development machine. With
-PR 3, TODO.md gains "A snapshot at a fork point", which says when to look again: when a replay
-of a parent, timed on an instance, takes long enough to notice. It also keeps the one rule
-such a snapshot must follow. It is built by replaying the log to the fork point, never from
+copy of a production database, 1,270 updates, takes about 10 ms on a development machine.
+TODO.md's "A snapshot at a fork point" says when to look again: when a replay of a parent,
+timed on an instance, takes long enough to notice. It also keeps the one rule such a snapshot
+must follow. It is built by replaying the log to the fork point, never from
 the state the seed came from, which for a fork of the latest can hold more than a replay to
 its version ("A doc as it is now"): a snapshot holding that extra text would hand it to every
 replay that starts there and to none that starts earlier.
 
-**`createDocWithContent` (`src/lib/doc-create.ts`) gains three options**, each written in its
-one transaction, from named fields (`npm run check:prisma-data`):
+**`createDocWithContent` (`src/lib/doc-create.ts`) takes three options for a fork**, each
+written in its one transaction, from named fields (`npm run check:prisma-data`):
 
 - `visibility`, written with the row, `PRIVATE` when absent, as now;
 - `forkedFrom: { docId, updateId }`;
-- `chipStyles`, written into the seed's settings map before it is encoded, and into the row's
-  `chip_styles` beside `prose_json`. `docCacheFromYdoc` already returns the styles it labelled
-  the body under, and the create writes the body alone today, which is right only while no
-  seed holds a style. A fork nobody has edited has had no store to fill the column. With it
-  null, the reading view's static body would label the fork's chips in the default style, and
-  a label refresh would write `prose_json` in it (CLAUDE.md, "An entity chip's label is
-  computed").
+- `chipStyles`, written into the seed's settings map before it is encoded, and so into the
+  row's `chip_styles` beside `prose_json`: `docCacheFromYdoc` returns the styles it labelled
+  the body under, and the create writes both. A fork nobody has edited has had no store to
+  fill the column. With it null, the reading view's static body would label the fork's chips
+  in the default style, and a label refresh would write `prose_json` in it (CLAUDE.md, "An
+  entity chip's label is computed").
 
 **A duplicate slug is recognised from the driver adapter's error.** Prisma 7.9's adapter builds
-a P2002 with no `meta.target`, so `isSlugTaken` never recognises one, and two docs created at
-once with one title, two forks of one doc or two imports, end in a 500 rather than the `-2`
-retry. The `wiki` branch's `1425a6a` reads the adapter's `fields` (`src/lib/unique-violation.ts`,
-with its unit test); its code applies to main as it is. It lands with forks, which make the
-race likelier.
+a P2002 with no `meta.target`, so `isSlugTaken` reads the columns from the adapter's `fields`
+(`isUniqueViolationOn`, `src/lib/unique-violation.ts`, with its unit test). Reading
+`meta.target` alone, two docs created at once with one title, two forks of one doc or two
+imports, would end in a 500 rather than the `-2` retry, a race forks make likelier.
 
 ### The doc view: an Actions menu and the Fork dialog
 
-**"Publish as blog post" becomes an item of an "Actions" menu** on the byline line, beside the
-doc's posts, as the wiki built it (`src/components/DocActionsMenu.tsx`):
+**"Publish as blog post" is an item of an "Actions" menu** on the byline line, beside the
+doc's posts (`src/components/DocActionsMenu.tsx`):
 
 - **Publish as blog post**, for an editor of a doc with no post, as the button is now;
 - **Fork…**, for any reader with `canManageDocs`, readers who can't edit included.
 
-The menu is a client island beside `DocPostsLine`, a Server Component gated on `canEdit`, and
-shows to anyone who may do one of its items. It is a `<details>`, as the header's tool menus
-are, and its dialog is a native `<dialog>` outside it, since a modal inside a closed
-`<details>` isn't rendered. It only keeps from offering what would be refused; the server
-decides.
+The menu is a client island beside `DocPostsLine`, a Server Component gated on `canEdit` that
+shows once the doc has a post. The menu shows to anyone who may do one of its items, and to
+nobody else. It is a `<details>`, as the header's tool menus are, and its dialog
+(`src/components/ForkDialog.tsx`) is a native `<dialog>` outside it, since a modal inside a
+closed `<details>` isn't rendered. It only keeps from offering what would be refused; the
+server decides.
 
 **The Fork dialog says what it will copy**, "as it is now", or "as it was at" a time when the
 reader has scrubbed back, and asks for a visibility, `PRIVATE` by default. Fork takes the
 reader to the fork's editor.
 
 **It reads the version from the scrub bar, not from the URL.** `LoadedScrubBar` registers a
-getter in `DocScrubContext`, beside the seek function it registers there. Called, it answers
-with the slider's position: the update's id and its time, or null at the live end. The dialog
-calls it when it opens. **The position is never the provider's state.** The getter reads a ref
-the bar keeps, and its identity doesn't change as the slider moves, since a state update in
-that provider re-renders the doc view, the notes and the rail, and a drag would make one per
-tick (`useRegisterDocScrubSeek`'s note). `?at=` would not serve:
+getter in `DocScrubContext` (`useRegisterDocScrubPosition`), beside the seek function it
+registers there. Called, it answers with the slider's position: the update's id and its time,
+or null at the live end. The menu calls it (`useDocScrubPosition`) as the dialog opens.
+**The position is never the provider's state.** The getter reads a ref the bar keeps, the
+provider keeps the registered getter in a ref of its own, and neither identity changes as the
+slider moves, since a state update in that provider re-renders the doc view, the notes and
+the rail, and a drag would make one per tick (`useRegisterDocScrubSeek`'s note). `?at=` would
+not serve:
 
 - it holds an id and no time, and the time is in the bar's replay alone;
 - it trails the slider by `SCRUB_URL_DEBOUNCE_MS`;
@@ -673,7 +701,8 @@ reader is on the live text in both cases, and the dialog offers the doc as it is
 ### A doc's family
 
 **A fork says it is one, and a forked doc lists its forks**, under the byline in the doc view
-(`src/lib/doc-family.ts`, `src/components/DocFamily.tsx`):
+(`src/lib/doc-family.ts`, `src/components/DocFamily.tsx`, handed to `DocView` as its `family`
+prop):
 
 - **Forked from:** the parent, linked as it is now, and when the fork was made. It isn't
   linked at the fork point (`?at=`), which only a view with the parent's history honours; the
@@ -686,11 +715,14 @@ byline's `PRIVATE` doc, isn't named or linked, but the line stays: "Forked from 
 read". Left out, a `SHARED` fork of a `PRIVATE` doc would pass its parent's text off as its
 forker's. The forks list names readable forks only and gives no count of the rest. Each query
 goes through `readableDocsWhere` and spells out `deletedByUserId: null`, since a relation filter
-goes around the soft-delete extension.
+goes around the soft-delete extension. A fork whose parent was hard-deleted, which only
+fixtures and scripts do, has no line at all: its `forked_from_doc_id` is null.
 
 **Each entry links to the diffs between it and this doc that the viewer may see**, labelled
 "(diff: parent vs. fork, parent, fork)" in both directions. Whose history the viewer may see
-is asked once for the docs listed, through `docsWithVisibleHistoryWhere`, not row by row:
+is asked once for the docs listed, through `docsWithVisibleHistoryWhere`, not row by row. The
+docs are `<Link>`s and the diffs plain `<a>`s, for the scrub bar's reason ("Choosing two
+versions on the scrub bar"):
 
 | Diff | URL | For |
 |---|---|---|
@@ -739,8 +771,8 @@ CREATE INDEX "doc_forked_from_idx" ON "doc" ("forked_from_doc_id")
 - **Search finds a fork beside its parent**, with the same text, and doesn't merge them.
 - **Mentions and citations:** a fork's chips get rows of their own from the `mention` and
   `citation` triggers, first seen at the fork. Nothing reads that outbox yet. When
-  notifications are built, a fork's inherited mentions should not count as new, and
-  MENTIONS.md's "The notification stub" gets a line saying so.
+  notifications are built, a fork's inherited mentions should not count as new, as
+  MENTIONS.md's "The notification stub" says.
 - **`/docs`** has no fork column in v1. One later goes through the table kit.
 - **MCP:** `forkDoc` takes an `Actor`, so a tool is a wrapper. Deferred, with
   `multiblog_read` naming a doc's parent and reading a diff's URL.
@@ -760,7 +792,7 @@ update shows as a change made after the left side's version, until the doc is re
 **So a flagged doc is repaired first, by appending what its blob holds beyond its log's replay
 as one update**, which keeps text its writers saw saved. The script's closing note offers the
 other direction, rewriting the blob from the log, which would drop that text. Nothing does
-either yet, so the check runs on each instance well before PR 3 deploys there: if it flags
+either yet, so the check runs on each instance well before forks deploy there: if it flags
 nothing, nothing more is needed, and if it flags a doc, the repair is written as a script of
 its own before forks go out.
 
@@ -787,16 +819,16 @@ its own before forks go out.
    untried Safari, and its size-guards entry the deadline and the phone. "Mistakes that fail
    no check" has the history's three, and CLAUDE.md the line that points there (below).
    `e2e/doc-diff.spec.ts`. No migration.
-3. **Forks.** The duplicate-slug fix first, then the migration, `doc-fork.ts` and
-   `fork-seed.ts`, `createDocWithContent`'s options, the scrub bar's position getter, the
-   Actions menu and the Fork dialog, the family lines with their diff links, `sideOrder`'s fork
-   cases and **the second stop** ("Which side is later"), and the fork-point exception in
-   `canUserSeeDocVersion`.
-   PERMISSIONS.md's fork rows; TODO.md gains "A snapshot at a fork point" ("The function");
-   "Mistakes that fail no check" gains the strip (below); `e2e/doc-fork.spec.ts`.
-   If it reviews better as two, it splits at the family lines.
-4. **Sliders on the diff page** ("Planned: sliders on the diff page"). It needs item 2 alone,
-   so it can be built before item 3. The shared block-building function and its parity test
+3. **Forks — built.** The duplicate-slug fix; the `doc_forks` migration; `doc-fork.ts`, and
+   `fork-seed.ts` with its unit test; `createDocWithContent`'s options; the scrub bar's
+   position getter; the Actions menu and the Fork dialog; the family lines with their diff
+   links; `sideOrder`'s fork cases, with how the page shows them still to choose ("Which side
+   is later"); and the fork-point exception in `canUserSeeDocVersion`.
+   PERMISSIONS.md has the fork rows; TODO.md has "A snapshot at a fork point" ("The function");
+   "Mistakes that fail no check" has the strip and the exception's reach (below);
+   `e2e/doc-fork.spec.ts`. One migration.
+4. **Sliders on the diff page** ("Planned: sliders on the diff page"). It needs item 2 alone.
+   The shared block-building function and its parity test
    first; then the sliders, the worker's restart and the address. DOCS.md and this file's
    "Diffs" gain it as built; `e2e/doc-diff.spec.ts` gains a slid side's rows and the address
    it leaves. No migration.
@@ -806,9 +838,8 @@ diffs work there before forks do.
 
 **CLAUDE.md holds one line for this file**, which names the code it applies to and points at
 "Mistakes that fail no check" (TODO.md, "CLAUDE.md: move topic-only traps into their topic
-doc"). PR 3 adds to that list and not to CLAUDE.md: the `annotation` strip in `forkSeed` is the
-only guard against copying a parent's notes, since the doc schema accepts the mark. The line in
-CLAUDE.md then grows a clause for code that seeds a doc from another doc's text.
+doc"). The `annotation` strip in `forkSeed` is on that list and not in CLAUDE.md, whose line
+carries a clause for code that seeds a doc from another doc's text.
 
 **Testing** ports what `e2e/wiki.spec.ts` checks of forks and diffs, without addresses.
 Diffs, in `e2e/doc-diff.spec.ts`: every check of rows waits for the island to mark itself done;
@@ -820,16 +851,20 @@ sides, and Back from one returns to the bar at its position, unpinned; side-by-s
 names its pair by id; a diff with now asked for while a socket is still typing has the
 scrubbed-to version's text on the left and the later text on the right, and the bar says
 changes have come in; and a doc ending in a heading, opened in the editor, gains the trailing
-paragraph and the diff leaves it out. With forks that last check is also made of a fork. Forks:
-a reader forks the latest, an editor forks
-at the version the scrub bar is on, a reader's version is refused, a deleted parent is not
-found and an unreadable one is Forbidden, a visibility that is neither value is refused, the parent
-has no more `ydoc_snapshot` rows after a fork than before it,
-annotation marks don't follow, the chip style does and shows on the fork's reading view before
-any edit, "Forked from a doc you can't read" stands in for a hidden parent, the forks list
-leaves out what the viewer can't read, and each diff link shows to whom it should. The
-exception: a fork's editor who can't edit its parent sees what the parent changed since, is
-still refused any other version of the parent, and loses it when the fork is deleted. The diff
+paragraph and the diff leaves it out. That last check is also made of a fork. Forks, in
+`e2e/doc-fork.spec.ts`: the menu offers each item to whoever may do it, a reader forks the
+latest through the dialog, an editor forks at the version the scrub bar is on, a reader's
+version is refused, a deleted parent is not found and an unreadable one is Forbidden, a
+visibility that is neither value is refused, two forks of one doc at once both succeed, the
+parent has no more `ydoc_snapshot` rows after a fork than before it, annotation marks don't
+follow, the chip style does and shows on the fork's reading view before any edit, "Forked from
+a doc you can't read" stands in for a hidden parent, the forks list leaves out what the viewer
+can't read, and each diff link shows to whom it should. The exception: a fork's editor who
+can't edit its parent sees what the parent changed since, is still refused any other version
+of the parent, its replay and a fork of it at a version, and loses it when the fork is
+deleted. No spec covers how the diff page's headers show a fork against its parent, which is
+not chosen ("Which side is later"); `diff-side.test.ts` holds which of those pairs have an
+order. The diff
 with now is typed over a socket: an edit through `/admin/doc-edit` stores as its connection
 closes (Hocuspocus's `DirectConnection.disconnect`), and leaves no gap to test. Before each UI
 commit, the specs it touches run with `npm run e2e:dev -- <spec>`; the full suite runs before
@@ -851,9 +886,8 @@ address needs:
 | `DocActionsMenu` | Publish as blog post, Fork… | Move into the wiki…, Fork into the wiki… |
 | `b6126e5`, `1425a6a` | Ported | Nothing |
 
-**`b6126e5` is ported to main by PR 1; `1425a6a` is on the local `wiki` branch only**, which the
-rebuild replaces. So PR 3's slug fix is ported before the rebuild starts, or the commit is
-tagged first.
+**Both `b6126e5` and `1425a6a` are on main**, so the rebuild needs neither from the `wiki`
+branch it replaces.
 
 Its replay map shrinks to match: the size guards and the slug fix leave its prerequisites,
 forking a doc as a doc is no longer deferred, and its fork, banner and diff steps keep only
@@ -896,9 +930,12 @@ Made here:
 
 ## Open
 
-Nothing blocks PR 3's start. **One choice is made during it**: how the diff page shows a fork
-against its parent, tried at its stop ("Which side is later"). Who should see more of a doc's
-history is left to the permissions redesign.
+**One choice is open**: how the diff page shows a fork against its parent, built to be tried
+("Which side is later"). **How the sliders load a side's history is not settled either.** The
+plan under "Planned: sliders on the diff page" fetches the whole replay to the browser; the
+alternative is to fetch an index alone, the update ids and their times, and have the server
+rebuild a side each time its slider settles, as it does for any `@<id>`. Who should see more
+of a doc's history is left to the permissions redesign.
 
 ## Deferred
 

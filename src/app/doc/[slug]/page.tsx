@@ -5,7 +5,8 @@ import * as Y from "yjs";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam, resolveDocSlugHistory } from "@/lib/resolve-doc-param";
 import { gated, titleWhenOk } from "@/lib/route-access";
-import { canUserReadDoc, canUserEditDoc, canUserSeeDocHistory } from "@/lib/doc-authz";
+import { canManageDocs, canUserReadDoc, canUserEditDoc, canUserSeeDocHistory } from "@/lib/doc-authz";
+import { loadDocFamily } from "@/lib/doc-family";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { readYdocContent } from "@/lib/ydoc-render";
@@ -18,6 +19,8 @@ import { ydocIdForDoc } from "@/lib/ydoc-names";
 import DocView from "@/components/DocView";
 import AuthorByline from "@/components/AuthorByline";
 import DocPostsLine from "@/components/DocPostsLine";
+import DocActionsMenu from "@/components/DocActionsMenu";
+import DocFamily from "@/components/DocFamily";
 import AnnotationSection from "@/components/annotation/AnnotationSection";
 import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
 import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
@@ -52,6 +55,11 @@ const DOC_SELECT = {
   chipStyles: true,
   deletedByUserId: true,
   updatedAt: true,
+  // The family lines' (docs/FORKS.md "A doc's family"): what this doc was
+  // forked from, at which of the parent's updates, and when.
+  createdAt: true,
+  forkedFromDocId: true,
+  forkedFromUpdateId: true,
   authors: {
     orderBy: { bylineOrder: "asc" },
     select: { userId: true, user: { select: { slug: true, name: true } } },
@@ -166,6 +174,14 @@ export default async function PublicDocPage({
     canUserEditDoc(user.id, user.role, doc.id),
     canUserSeeDocHistory(user.id, user.role, doc.id),
   ]);
+
+  // docs/FORKS.md "The doc view: an Actions menu and the Fork dialog" — who
+  // is offered what. Publishing is an editor's, of a doc with no post yet;
+  // forking is any reader's who may create docs, readers who can't edit this
+  // one included. The server decides each again when it is asked.
+  const canPublish = canEdit && doc.posts.length === 0;
+  const canFork = canManageDocs(user.role);
+  const family = await loadDocFamily(user, doc);
 
   // PLAN.md §13o — fetched here rather than inside AnnotationSection because
   // the body needs them too: a column-anchored annotation's highlight is a
@@ -286,6 +302,10 @@ export default async function PublicDocPage({
                       userColor={user.color}
                       annotationAnchors={annotationAnchors}
                       initialScrubUpdateId={scrubUpdateId}
+                      // docs/FORKS.md "A doc's family" — under the byline.
+                      // Keyed for the byline's own reason: a prop DocView
+                      // renders among siblings.
+                      family={family && <DocFamily key="family" family={family} />}
                       byline={
                         // A <div>, not <p> — <form> isn't valid inside <p> (HTML
                         // rejects it; React hydrates it anyway and then warns), same
@@ -311,15 +331,18 @@ export default async function PublicDocPage({
                               §12k), so "last edited" is the only date that means anything.
                               Short date visible, full timestamp on hover. */}
                           <span title={doc.updatedAt.toLocaleString()}>{doc.updatedAt.toLocaleDateString()}</span>
-                          {/* PLAN.md §21i — "Publish as blog post" while the doc has
-                              no post (§15d's entry point into post creation), the
-                              doc's posts once it has any. Gated on canEdit, as the
-                              button always was: a scheduled post is not public
+                          {/* PLAN.md §21i — the doc's posts, once it has any.
+                              Gated on canEdit: a scheduled post is not public
                               information. The key is load-bearing for the same
                               reason TagChips' below is. */}
-                          {canEdit && (
-                            <DocPostsLine key="posts" docId={doc.id} docTitle={doc.title} posts={doc.posts} />
+                          {canEdit && doc.posts.length > 0 && (
+                            <DocPostsLine key="posts" docTitle={doc.title} posts={doc.posts} />
                           )}
+                          {/* docs/FORKS.md — "Publish as blog post" (§15d's
+                              entry point into post creation) and "Fork…", each
+                              for whoever may. A client island, which renders
+                              nothing with neither; keyed for the same reason. */}
+                          <DocActionsMenu key="actions" docId={doc.id} publish={canPublish} fork={canFork} />
                           {/* PLAN.md §20k — a second line of the byline rather
                               than a block below the text, and "bare" is what
                               drops the "Tags" label. Gated by this page's own

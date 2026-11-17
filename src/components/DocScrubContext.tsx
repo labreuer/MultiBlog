@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 // PLAN.md §12p/§13 — lets an annotation's own "jump to this revision"
 // control (AnnotationNode) reach DocScrubBar's slider, which is a sibling
@@ -15,9 +15,15 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 // let the browser follow the href and let a fresh page load try instead.
 type SeekFn = (updateId: string) => boolean;
 
+/** Where the scrub bar's slider is: the update it shows and that update's time (an ISO string), or null at the live end. */
+export type ScrubPosition = { updateId: string; createdAt: string };
+type PositionFn = () => ScrubPosition | null;
+
 type Ctx = {
   registerSeek: (fn: SeekFn | null) => void;
   seekToUpdateId: SeekFn | null;
+  registerPosition: (fn: PositionFn | null) => void;
+  getPosition: PositionFn;
   hasScrubBar: boolean;
 };
 
@@ -41,9 +47,20 @@ export function DocScrubProvider({ children, hasScrubBar }: { children: ReactNod
     setSeekFn(() => fn);
   }, []);
 
+  // The bar's position getter (docs/FORKS.md, "The doc view: an Actions menu
+  // and the Fork dialog"). **A ref, never state**: neither registering it nor
+  // the slider moving changes anything this provider renders, so a drag
+  // re-renders nothing under it. `getPosition` keeps its identity for good and
+  // reads whatever is registered when it is called.
+  const positionRef = useRef<PositionFn | null>(null);
+  const registerPosition = useCallback((fn: PositionFn | null) => {
+    positionRef.current = fn;
+  }, []);
+  const getPosition = useCallback(() => positionRef.current?.() ?? null, []);
+
   const value = useMemo(
-    () => ({ registerSeek, seekToUpdateId: seekFn, hasScrubBar }),
-    [registerSeek, seekFn, hasScrubBar],
+    () => ({ registerSeek, seekToUpdateId: seekFn, registerPosition, getPosition, hasScrubBar }),
+    [registerSeek, seekFn, registerPosition, getPosition, hasScrubBar],
   );
 
   return <DocScrubContext.Provider value={value}>{children}</DocScrubContext.Provider>;
@@ -86,4 +103,30 @@ export function useRegisterDocScrubSeek(fn: SeekFn | null): void {
     registerSeek?.(fn);
     return () => registerSeek?.(null);
   }, [registerSeek, fn]);
+}
+
+const NO_POSITION: PositionFn = () => null;
+
+// Where the scrub bar's slider is when the returned function is called: the
+// update's id and its time, or null at the live end. Null too on a page with
+// no bar, or one whose bar hasn't loaded its history, where the reader is on
+// the live text. For something that needs the position once, at a click (the
+// Fork dialog, as it opens), and so must not re-render as the slider moves:
+// the function's identity never changes.
+//
+// Not `?at=`: that holds an id and no time, trails the slider by
+// SCRUB_URL_DEBOUNCE_MS, and can name an id the bar never went to.
+export function useDocScrubPosition(): PositionFn {
+  return useContext(DocScrubContext)?.getPosition ?? NO_POSITION;
+}
+
+// Called by LoadedScrubBar, beside useRegisterDocScrubSeek. `fn` reads a ref
+// the bar keeps and should be stable; registering it sets a ref in the
+// provider and re-renders nothing.
+export function useRegisterDocScrubPosition(fn: PositionFn | null): void {
+  const registerPosition = useContext(DocScrubContext)?.registerPosition;
+  useEffect(() => {
+    registerPosition?.(fn);
+    return () => registerPosition?.(null);
+  }, [registerPosition, fn]);
 }

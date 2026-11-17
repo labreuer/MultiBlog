@@ -261,8 +261,8 @@ export async function editableDocsFor(userId: string, role: Role): Promise<Reada
 // of it but the current one: the scrub bar's replay, what changed since a
 // version, a diff's versions.
 //
-// **An interim rule: a doc's history is its editors'.** These three functions
-// are the whole of it, so that a change to who sees history is a change here
+// **An interim rule: a doc's history is its editors', and a fork point is
+// also its fork's editors'.** These three functions are the whole of it, so that a change to who sees history is a change here
 // and at no call site. Every check that *shows* history asks one of them, and
 // never canUserEditDoc directly. A check that replays the log in order to
 // *write* (publishing from a doc at a version on /post/[id]/edit, MCP's
@@ -287,14 +287,29 @@ export function docsWithVisibleHistoryWhere(userId: string, role: Role): Prisma.
  * **before** `isDocVersion`, never after: in the other order, Forbidden
  * against not-found tells a reader without the history which ids are in the
  * doc's log.
+ *
+ * The history predicate, or **the fork-point exception**: a fork point is not
+ * history to the fork's editors. The doc at `version` is the first state of
+ * any fork made of it there, which that fork's editors can already reach on
+ * the fork's own scrub bar, so showing it tells them nothing they don't hold.
+ * It is what lets an AUTHOR who forked a doc they can't edit see what its
+ * author changed since. One query however many forks were made at the
+ * version: a live fork of this doc, forked at exactly this version, among the
+ * docs whose history the viewer may see, whose parent the viewer can read
+ * now. The answer depends only on forks the viewer may already see into, so
+ * it says nothing about this doc's log that those forks don't.
+ *
+ * **For diffs alone.** The doc's scrub bar, its `since` and forking it at a
+ * version ask canUserSeeDocHistory, and stay its editors'.
  */
-export async function canUserSeeDocVersion(
-  userId: string,
-  role: Role,
-  docId: string,
-  // Not consulted: a viewer who may see a doc's history may see every version of it.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  version: bigint,
-): Promise<boolean> {
-  return canUserSeeDocHistory(userId, role, docId);
+export async function canUserSeeDocVersion(userId: string, role: Role, docId: string, version: bigint): Promise<boolean> {
+  if (await canUserSeeDocHistory(userId, role, docId)) return true;
+  const historyWhere = docsWithVisibleHistoryWhere(userId, role);
+  const readableWhere = readableDocsWhere(userId, role);
+  if (!historyWhere || !readableWhere) return false;
+  const fork = await prisma.doc.findFirst({
+    where: { AND: [{ forkedFromDocId: docId, forkedFromUpdateId: version, forkedFrom: readableWhere }, historyWhere] },
+    select: { id: true },
+  });
+  return fork !== null;
 }

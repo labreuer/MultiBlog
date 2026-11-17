@@ -21,6 +21,8 @@ import {
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { markdownToDocContent, MAX_MARKDOWN_BYTES } from "@/lib/markdown-import";
 import { insertDocRow, createDocWithContent } from "@/lib/doc-create";
+import { forkDoc } from "@/lib/doc-fork";
+import { ApiError } from "@/lib/api/errors";
 import { resolveParsedChips } from "@/lib/entity-chips/parsed-chips";
 import { ydocStore, encodeYdocState } from "../../../server/ydoc-store";
 import { DocVisibility } from "@/generated/prisma/enums";
@@ -84,6 +86,41 @@ export async function createDoc(): Promise<void> {
 
   revalidatePath("/docs");
   redirect(`/doc/${doc.id}/edit`);
+}
+
+export type ForkDocState = { error?: string };
+
+// docs/FORKS.md "Forks" — the doc view's Fork dialog, for useActionState: a
+// wrapper around forkDoc (src/lib/doc-fork.ts), which holds every check. The
+// form's fields reach it as they were sent, a `visibility` that is neither
+// value included, since refusing one is forkDoc's rule and not this
+// wrapper's. A refusal is the form's to show; anything else is a fault. The
+// redirect is outside the try, since it throws Next's own signal. It lands on
+// the fork's editor.
+export async function forkDocAction(_prevState: ForkDocState, formData: FormData): Promise<ForkDocState> {
+  const session = await auth();
+  if (!session?.user) {
+    // No callbackUrl: this guards a mutation, and a POST can't be replayed by
+    // arriving at a URL, so there is no destination worth naming.
+    redirect(signInPath());
+  }
+  const parentId = formData.get("parentId");
+  const revision = formData.get("revision");
+  const visibility = formData.get("visibility");
+  let path: string;
+  try {
+    ({ path } = await forkDoc(actorFromSessionUser(session.user), {
+      parentId: typeof parentId === "string" ? parentId : "",
+      // "" is the hidden field's way of saying the doc as it is now.
+      revision: typeof revision === "string" && revision !== "" ? revision : null,
+      visibility: visibility as DocVisibility,
+    }));
+  } catch (err) {
+    if (err instanceof ApiError) return { error: err.message };
+    throw err;
+  }
+  revalidatePath("/docs");
+  redirect(path);
 }
 
 // ---------------------------------------------------------------------------

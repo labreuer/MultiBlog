@@ -5,7 +5,7 @@ import type { JSONContent } from "@tiptap/react";
 import { titleTextFromJSON } from "@/lib/ydoc-render";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { useReplayScrub, type ReplayPayload } from "./YdocDebug";
-import { useRegisterDocScrubSeek } from "./DocScrubContext";
+import { useRegisterDocScrubPosition, useRegisterDocScrubSeek, type ScrubPosition } from "./DocScrubContext";
 import { SCRUB_URL_DEBOUNCE_MS, replaceScrubParam } from "@/lib/scrub-url";
 import { diffPath, type DiffSide } from "@/lib/diff-side";
 import styles from "./DocScrubBar.module.css";
@@ -224,6 +224,18 @@ function LoadedScrubBar({
     [replay, seek],
   );
   useRegisterDocScrubSeek(seekToUpdateId);
+
+  // docs/FORKS.md — where the slider is, for the Fork dialog to ask as it
+  // opens: the update and its time, or null at the live end, where a fork
+  // takes the doc as it is now. Kept in a ref written after each render, and
+  // read through a getter whose identity never changes, so nothing outside
+  // this bar re-renders as the slider moves.
+  const positionRef = useRef<ScrubPosition | null>(null);
+  useEffect(() => {
+    positionRef.current = live || !current ? null : { updateId: current.id.toString(), createdAt: current.createdAt };
+  }, [live, current]);
+  const getPosition = useCallback(() => positionRef.current, []);
+  useRegisterDocScrubPosition(getPosition);
 
   // Nothing on mount — useReplayScrub already starts where it should (the
   // live end, or ?at='s position). Only an actual change in resetSignal (the

@@ -58,16 +58,66 @@ export function diffPath(left: DiffSide, right: DiffSide): string {
 export type SideOrder = "left-earlier" | "right-earlier";
 
 /**
- * Whether one side of a pair is earlier than the other (docs/FORKS.md, "Which
- * side is later"). **The same doc on both sides has an order**: the lower
- * update id is the earlier, and a side with no version, the doc as it is now,
- * is later than any version. Two sides at one version have none, nor do two
- * sides with no version. Two different docs have none.
+ * A pair's lineage, when one of its two docs was forked from the other: which
+ * is which, and the parent's update the fork was made at. One generation
+ * only. A chain through a grandparent isn't followed: it can pass through a
+ * doc the viewer can't read, and a label would tell them the two sides are
+ * related through it.
  */
-export function sideOrder(left: DiffSide, right: DiffSide): SideOrder | null {
-  if (left.docId !== right.docId) return null;
-  if (left.updateId === right.updateId) return null;
-  if (left.updateId === null) return "right-earlier";
-  if (right.updateId === null) return "left-earlier";
-  return left.updateId < right.updateId ? "left-earlier" : "right-earlier";
+export type PairLineage = {
+  parentDocId: string;
+  forkDocId: string;
+  forkPoint: bigint;
+  /**
+   * The update the parent is at now, which a parent's side with no version
+   * stands for; null when that isn't known, and such a side then has no
+   * place against the fork point.
+   */
+  parentNow: bigint | null;
+};
+
+/** The parent's version on a fork-and-parent pair, as lineage reads it; null when the pair isn't one, or the version isn't known. */
+function parentVersion(left: DiffSide, right: DiffSide, lineage: PairLineage | null): { parentOnLeft: boolean; version: bigint | null } | null {
+  if (lineage === null) return null;
+  const parentOnLeft = left.docId === lineage.parentDocId && right.docId === lineage.forkDocId;
+  const parentOnRight = right.docId === lineage.parentDocId && left.docId === lineage.forkDocId;
+  if (!parentOnLeft && !parentOnRight) return null;
+  const parent = parentOnLeft ? left : right;
+  return { parentOnLeft, version: parent.updateId ?? lineage.parentNow };
+}
+
+/**
+ * Whether one side of a pair is earlier than the other (docs/FORKS.md, "Which
+ * side is later").
+ *
+ * - **The same doc on both sides has an order**: the lower update id is the
+ *   earlier, and a side with no version, the doc as it is now, is later than
+ *   any version. Two sides at one version have none, nor do two sides with no
+ *   version.
+ * - **A fork and its parent at or before the fork point have one**: the
+ *   parent's side is the earlier, whichever version the fork is at, since
+ *   everything in the fork came after its seed.
+ * - **No other pair has one**: two docs neither of which is the other's
+ *   parent, or a fork and its parent past the fork point (`pastForkPoint`).
+ */
+export function sideOrder(left: DiffSide, right: DiffSide, lineage: PairLineage | null = null): SideOrder | null {
+  if (left.docId === right.docId) {
+    if (left.updateId === right.updateId) return null;
+    if (left.updateId === null) return "right-earlier";
+    if (right.updateId === null) return "left-earlier";
+    return left.updateId < right.updateId ? "left-earlier" : "right-earlier";
+  }
+  const parent = parentVersion(left, right, lineage);
+  if (parent === null || parent.version === null || parent.version > lineage!.forkPoint) return null;
+  return parent.parentOnLeft ? "left-earlier" : "right-earlier";
+}
+
+/**
+ * Whether the pair is a fork and its parent with the parent's side past the
+ * fork point: a pair with no order, where the diff is not what the fork
+ * changed, since the parent has changed too.
+ */
+export function pastForkPoint(left: DiffSide, right: DiffSide, lineage: PairLineage | null): boolean {
+  const parent = parentVersion(left, right, lineage);
+  return parent !== null && parent.version !== null && parent.version > lineage!.forkPoint;
 }

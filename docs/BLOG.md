@@ -614,8 +614,10 @@ on the viewer arrives after hydration.
   on (PLAN.md §15i).
 - **The doc's byline names its posts.** `DocPostsLine` (`src/components/DocPostsLine.tsx`) is
   the post line in `/doc/[slug]`'s byline, shown to a viewer who may edit the doc, since a
-  schedule is not public information. With no post it *is* the "Publish as blog post" button.
-  With posts it lists them, separated by `|`:
+  schedule is not public information. It lists the doc's posts, separated by `|`, and a doc
+  with none has no line: "Publish as blog post" is then an item of the byline's Actions menu
+  (`DocActionsMenu.tsx`; docs/FORKS.md, "The doc view: an Actions menu and the Fork dialog").
+  The entries:
   - "Published on <yyyy-mm-dd>", linking to the public URL, then "(configure)" to the editor;
   - "Scheduled for <UTC timestamp> (in N days, N hours, N minutes)", linking to the editor,
     since there is nowhere public to go yet;

@@ -357,6 +357,11 @@ the admin account.
   implementation that threw the old version away.
 - **`"Publish"` also matches "Publish as blog post" on `/doc/[slug]`.** Use
   `exact: true`.
+- **The doc view's Actions menu is a closed `<details>`, and its items aren't in the
+  accessibility tree until it opens.** So `toHaveCount(0)` on "Publish as blog post" or
+  "Fork…" passes whether or not the item was offered. Ask `docActionItems(page)`
+  (`fixtures.ts`), which opens the menu and returns what it holds, and `docActionsMenu(page)`
+  for a viewer who should get no menu at all.
 - **`getByRole("button", { name: "Next" })` also matches Next.js's dev-tools
   button.** The pagination controls are `"◀ Prev"`/`"Next ▶"`; match them with
   `exact: true` on the full label, arrows included.

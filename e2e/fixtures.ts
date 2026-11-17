@@ -498,6 +498,29 @@ export async function openDashboardCard(page: Page, name: string): Promise<void>
   }
 }
 
+/** The doc view's byline menu (docs/FORKS.md "The doc view: an Actions menu and the Fork dialog"). */
+export function docActionsMenu(page: Page) {
+  return page.locator("details").filter({ has: page.locator("summary", { hasText: "Actions" }) });
+}
+
+/**
+ * Opens the doc view's byline menu: its items aren't in the accessibility
+ * tree while it is closed, so a `toHaveCount(0)` on one would pass whether
+ * or not it was offered. Checks `open` first, as openDashboardCard does.
+ */
+export async function openDocActions(page: Page): Promise<void> {
+  const menu = docActionsMenu(page);
+  if (!(await menu.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await menu.locator("summary").click();
+  }
+}
+
+/** The menu's items, in order, once it is open: what this viewer is offered. */
+export async function docActionItems(page: Page): Promise<string[]> {
+  await openDocActions(page);
+  return docActionsMenu(page).getByRole("button").allTextContents();
+}
+
 export async function freshGoto(page: Page, path: string): Promise<void> {
   await page.request
     .post("/api/test/revalidate", { data: { path }, failOnStatusCode: false })
