@@ -56,6 +56,9 @@ type Props = {
   // The live tap's title, for DocView's <h1> — useLiveDocContent's option of
   // the same name. Raw; DocView applies the fallback.
   onLiveTitle?: (title: string) => void;
+  // Each change the live tap receives once it has synced, for the scrub bar's
+  // "changes have come in" note. useLiveDocContent's option of the same name.
+  onLiveUpdate?: () => void;
   // PLAN.md §13o — every column-anchored annotation on this doc, so their
   // ranges can be tracked against the live document and drawn. Mark-anchored
   // ones aren't in here and don't need to be: their highlight is the mark's
@@ -113,6 +116,7 @@ export default function DocReadingBody({
   scrubUpdateId = null,
   onReturnToLive,
   onLiveTitle,
+  onLiveUpdate,
   annotationAnchors = EMPTY_ANCHORS,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -164,6 +168,7 @@ export default function DocReadingBody({
     reportSignedOut,
     extensions,
     onLiveTitle,
+    onLiveUpdate,
     onSelectionUpdate: selection.capture,
     onContentPushed: (liveEditor) => {
       selection.reresolve(liveEditor);

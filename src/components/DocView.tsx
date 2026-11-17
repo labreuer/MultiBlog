@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import type { JSONContent } from "@tiptap/react";
 import DocReadingBody from "./DocReadingBody";
@@ -19,11 +19,12 @@ type Props = {
   // Byline + date — static, server-rendered (page.tsx), so it doesn't need
   // to react to scrubbing the way the title/body do.
   byline: ReactNode;
-  // Gates both the title's link-to-editor and the scrub bar itself — the
-  // latter matches GET /api/doc/[id]/replay's own gating, so a reader who
-  // can't edit never even sees a scrub bar that would 403 the moment it
-  // fetched.
+  // Gates the title's link to the editor.
   canEdit: boolean;
+  // Gates the scrub bar, by the answer GET /api/doc/[id]/replay itself gives
+  // (canUserSeeDocHistory), so a reader it would refuse never sees a bar that
+  // would 403 the moment it fetched.
+  canSeeHistory: boolean;
   // The viewer's own color (PLAN.md §13f) — resolved server-side (page.tsx
   // already calls auth()) and threaded down rather than read from
   // useSession() inside DocReadingBody, so the pending-selection decoration's
@@ -53,6 +54,7 @@ export default function DocView({
   staticBody,
   byline,
   canEdit,
+  canSeeHistory,
   userColor,
   annotationAnchors,
   initialScrubUpdateId,
@@ -65,6 +67,21 @@ export default function DocView({
   // back to the end instead of sitting at whatever historical position it
   // was left at while the body it drives has already snapped back to live.
   const [resetSignal, setResetSignal] = useState(0);
+
+  // The live tap's changes, handed to the scrub bar as a subscription and not
+  // as state: a count held here would re-render the title, the body and the
+  // bar on every remote keystroke, for a note the bar shows once.
+  const liveUpdateListenersRef = useRef(new Set<() => void>());
+  const notifyLiveUpdate = useCallback(() => {
+    for (const listener of liveUpdateListenersRef.current) listener();
+  }, []);
+  const subscribeLiveUpdates = useCallback((listener: () => void) => {
+    const listeners = liveUpdateListenersRef.current;
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
 
   // Scrubbing freezes the view exactly while it's showing something other
   // than the live end — not merely while a scrub bar is mounted, which is
@@ -109,17 +126,19 @@ export default function DocView({
         overrideBodyJSON={scrubbed?.bodyJSON ?? null}
         userColor={userColor}
         onLiveTitle={setLiveTitle}
+        onLiveUpdate={notifyLiveUpdate}
         scrubFrozen={scrubFrozen}
         scrubUpdateId={scrubUpdateId}
         onReturnToLive={handleReturnToLive}
         annotationAnchors={annotationAnchors}
       />
-      {canEdit && (
+      {canSeeHistory && (
         <DocScrubBar
           docId={docId}
           onScrub={setScrubbed}
           resetSignal={resetSignal}
           initialUpdateId={initialScrubUpdateId}
+          subscribeLiveUpdates={subscribeLiveUpdates}
         />
       )}
     </>

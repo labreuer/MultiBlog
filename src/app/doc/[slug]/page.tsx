@@ -5,7 +5,7 @@ import * as Y from "yjs";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam, resolveDocSlugHistory } from "@/lib/resolve-doc-param";
 import { gated, titleWhenOk } from "@/lib/route-access";
-import { canUserReadDoc, canUserEditDoc } from "@/lib/doc-authz";
+import { canUserReadDoc, canUserEditDoc, canUserSeeDocHistory } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { docContentExtensions } from "@/lib/tiptap-schema";
 import { readYdocContent } from "@/lib/ydoc-render";
@@ -158,7 +158,14 @@ export default async function PublicDocPage({
   }
   const { value: doc, user } = access;
 
-  const canEdit = await canUserEditDoc(user.id, user.role, doc.id);
+  // Two questions, which have one answer only while a doc's history is its
+  // editors' (docs/FORKS.md, "Who may see a doc's history"): the title's link
+  // to the editor and the posts line ask the first, the scrub bar and the
+  // room left for it the second.
+  const [canEdit, canSeeHistory] = await Promise.all([
+    canUserEditDoc(user.id, user.role, doc.id),
+    canUserSeeDocHistory(user.id, user.role, doc.id),
+  ]);
 
   // PLAN.md §13o — fetched here rather than inside AnnotationSection because
   // the body needs them too: a column-anchored annotation's highlight is a
@@ -226,7 +233,7 @@ export default async function PublicDocPage({
   );
 
   return (
-    <main className={`${styles.container} ${canEdit ? styles.containerScrubbable : ""}`}>
+    <main className={`${styles.container} ${canSeeHistory ? styles.containerScrubbable : ""}`}>
       {/* Wraps both trees so "Move to bottom" (PLAN.md §13g) can hand a
           draft's id from the inline popover (inside DocView) to the bottom
           composer (AnnotationSection), and so every LiveAnnotationComposer
@@ -239,11 +246,11 @@ export default async function PublicDocPage({
               above: AnnotationNode's "at this revision" control (inside
               AnnotationSection) reaches DocScrubBar's slider (inside
               DocView) through this, since neither is the other's ancestor.
-              `hasScrubBar` is the same canEdit the bar itself is gated on:
+              `hasScrubBar` is the same answer the bar itself is gated on:
               that control is a link now (docs/DOCS.md, "?at="), so it renders
               before the bar has loaded — but never on a page where no bar
               will ever exist, which is what a read-only viewer has. */}
-          <DocScrubProvider hasScrubBar={canEdit}>
+          <DocScrubProvider hasScrubBar={canSeeHistory}>
             {/* PLAN.md §18. AnnotationSection stays exactly where it was —
                 below the doc, heading and composer and sort control included,
                 along with every annotation whose mark is gone — and only the
@@ -275,6 +282,7 @@ export default async function PublicDocPage({
                       initialBodyJSON={bodyJSON}
                       staticBody={<div className={proseStyles.prose}>{staticBody}</div>}
                       canEdit={canEdit}
+                      canSeeHistory={canSeeHistory}
                       userColor={user.color}
                       annotationAnchors={annotationAnchors}
                       initialScrubUpdateId={scrubUpdateId}

@@ -23,6 +23,64 @@
   margin: 0;
 }
 
+/* The slider with the pin's tick over it. */
+.track {
+  position: relative;
+}
+
+/* Where the reader pinned a version (docs/FORKS.md, "Choosing two versions on
+   the scrub bar"). A range input's thumb travels the track's width less its
+   own, so the tick is placed along that span and not along the whole width:
+   `--pin-at` is the pinned position from 0 to 1, set inline. 16px is the
+   thumb in Chromium and WebKit; Firefox's is 20px, which puts the tick at
+   most 2px off its thumb there. */
+.pinTick {
+  --thumb: 16px;
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  left: calc(var(--pin-at) * (100% - var(--thumb)) + var(--thumb) / 2 - 1px);
+  width: 2px;
+  background: var(--frozen);
+  pointer-events: none;
+}
+
+/* The position on the left, the pin and the diff links on the right. */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 1rem;
+  font-size: 0.8rem;
+  margin-bottom: 0.35rem;
+}
+
+.controls .positionLine {
+  margin-bottom: 0;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+  margin-left: auto;
+}
+
+/* A button that reads as one of the links beside it. */
+.linkButton {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--link);
+  cursor: pointer;
+}
+
+.linkButton:hover {
+  text-decoration: underline;
+}
+
 /* The unloaded state (DocScrubBar's "idle"/"loading") — nothing has been
    fetched yet, so nothing about this slider's position means anything. */
 .sliderGrayed {
@@ -31,9 +89,14 @@
 }
 
 .positionLine,
-.loadingLine {
+.loadingLine,
+.staleLine {
   font-size: 0.8rem;
   margin-bottom: 0.35rem;
+}
+
+.staleLine {
+  color: var(--warning-text);
 }
 
 .positionLine {

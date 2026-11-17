@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { JSONContent } from "@tiptap/react";
 import { titleTextFromJSON } from "@/lib/ydoc-render";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { useReplayScrub, type ReplayPayload } from "./YdocDebug";
 import { useRegisterDocScrubSeek } from "./DocScrubContext";
 import { SCRUB_URL_DEBOUNCE_MS, replaceScrubParam } from "@/lib/scrub-url";
+import { diffPath, type DiffSide } from "@/lib/diff-side";
 import styles from "./DocScrubBar.module.css";
 
 // `live` is true exactly when the slider sits at the newest update — PLAN.md
@@ -30,6 +31,10 @@ type Props = {
   // eagerly — see `activate` below. Null on an ordinary visit, which is every
   // visit that didn't follow a link to a revision.
   initialUpdateId?: string | null;
+  // The reading view's live tap, as a subscription: the listener is called
+  // for each change the tap receives once it has synced (useLiveDocContent's
+  // `onLiveUpdate`). What the "changes have come in" note listens to.
+  subscribeLiveUpdates?: (listener: () => void) => () => void;
 };
 
 type LoadState = "idle" | "loading" | "error";
@@ -43,7 +48,7 @@ type LoadState = "idle" | "loading" | "error";
 // server nothing beyond the page it already loaded. The single exception is
 // a URL that names a position (`?at=`, src/lib/scrub-url.ts), which is a
 // request for the history and so loads it at once.
-export default function DocScrubBar({ docId, onScrub, resetSignal, initialUpdateId }: Props) {
+export default function DocScrubBar({ docId, onScrub, resetSignal, initialUpdateId, subscribeLiveUpdates }: Props) {
   const [state, setState] = useState<LoadState>("idle");
   const [replay, setReplay] = useState<ReplayPayload | null>(null);
 
@@ -94,10 +99,12 @@ export default function DocScrubBar({ docId, onScrub, resetSignal, initialUpdate
   if (replay) {
     return (
       <LoadedScrubBar
+        docId={docId}
         replay={replay}
         onScrub={onScrub}
         resetSignal={resetSignal}
         initialUpdateId={initialUpdateId}
+        subscribeLiveUpdates={subscribeLiveUpdates}
       />
     );
   }
@@ -121,16 +128,40 @@ export default function DocScrubBar({ docId, onScrub, resetSignal, initialUpdate
   );
 }
 
+/**
+ * "update 12 of 40", then its time. Formatted in the browser from the replay
+ * this bar fetched, which is never in the server's HTML, so the hydration
+ * rule (CLAUDE.md, "Never call `toLocaleString()`") has nothing to compare.
+ */
+function positionText(index: number, total: number, createdAt: string, separator: string): string {
+  return `update ${index + 1} of ${total}${separator}${new Date(createdAt).toLocaleString()}`;
+}
+
+// docs/FORKS.md "Choosing two versions on the scrub bar" — once the history
+// has loaded, the bar also offers a diff of two of its positions: this one
+// against the doc as it is now, or against a position the reader pinned.
+// **The pin is this component's state and nothing else's**: `?at=` stays one
+// position, and a URL naming two is the diff's own.
+//
+// **The links are plain `<a>`s, not `<Link>`s**, so that Back is a load of
+// this page at its `?at=`. Next's router keeps the page it rendered for the
+// address the reader arrived at, and `?at=` is written afterwards, with
+// `replaceState`. So after a client navigation, Back restores that page,
+// whose bar never loaded, under a URL that names a position.
 function LoadedScrubBar({
+  docId,
   replay,
   onScrub,
   resetSignal,
   initialUpdateId,
+  subscribeLiveUpdates,
 }: {
+  docId: string;
   replay: ReplayPayload;
   onScrub: (scrubbed: ScrubbedState) => void;
   resetSignal?: number;
   initialUpdateId?: string | null;
+  subscribeLiveUpdates?: (listener: () => void) => () => void;
 }) {
   // -1 — no ?at=, or an id belonging to some other doc's log — falls back to
   // useReplayScrub's own default, the head. Same treatment
@@ -194,15 +225,16 @@ function LoadedScrubBar({
   );
   useRegisterDocScrubSeek(seekToUpdateId);
 
-  // Skips on mount — useReplayScrub already starts where it should (the live
-  // end, or ?at='s position), so there's nothing to reset yet. Only an actual
-  // change in resetSignal (the FROZEN flag being clicked) should seek.
-  const resetDidMountRef = useRef(false);
+  // Nothing on mount — useReplayScrub already starts where it should (the
+  // live end, or ?at='s position). Only an actual change in resetSignal (the
+  // FROZEN flag being clicked) seeks. Compared with the value last acted on,
+  // and not with a "has mounted" flag: React's StrictMode runs a mount's
+  // effects twice in development, the flag is set by the second run, and the
+  // bar then left the position `?at=` had just opened it at.
+  const lastResetSignalRef = useRef(resetSignal);
   useEffect(() => {
-    if (!resetDidMountRef.current) {
-      resetDidMountRef.current = true;
-      return;
-    }
+    if (resetSignal === lastResetSignalRef.current) return;
+    lastResetSignalRef.current = resetSignal;
     if (resetSignal === undefined) return;
     seek(total - 1);
     // queueMicrotask only to keep this out of the "no setState synchronously
@@ -213,32 +245,110 @@ function LoadedScrubBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- seek/total intentionally excluded: resetSignal changing is the only trigger, not their own identity
   }, [resetSignal]);
 
+  // The slider index the reader pinned, or null. An index and not an id: the
+  // replay is fetched once and never grows, so the two name the same update
+  // for as long as this bar is mounted.
+  const [pinnedIndex, setPinnedIndex] = useState<number | null>(null);
+
+  // **The one live part of the bar.** Its history is the replay it fetched,
+  // while the reading view's tap goes on receiving updates, so the slider's
+  // last position stands for the doc as it was when the history loaded. This
+  // mounts when the history has loaded, and the tap reports nothing before
+  // its first sync, so one report is a change made since. Nothing is replayed
+  // or diffed again; the note says to reload.
+  const [changesCameIn, setChangesCameIn] = useState(false);
+  useEffect(() => {
+    if (!subscribeLiveUpdates) return;
+    return subscribeLiveUpdates(() => setChangesCameIn(true));
+  }, [subscribeLiveUpdates]);
+
   if (total === 0) {
     // No update history yet (a doc created but never edited) — nothing to
     // scrub, and rendering an empty slider would just invite a no-op drag.
     return null;
   }
 
+  // A position as a side of a diff. **The live end is a side with no
+  // version**, which on the diff page is the doc as it is when that page
+  // loads, not the head this bar loaded.
+  const sideAt = (i: number): DiffSide => ({
+    docId,
+    updateId: i === total - 1 ? null : BigInt(replay.updates[i].id),
+  });
+  const pinned = pinnedIndex === null ? null : replay.updates[pinnedIndex];
+  // The older of the two on the left, whichever was pinned.
+  const pinnedDiffHref =
+    pinnedIndex === null || pinnedIndex === index
+      ? null
+      : diffPath(sideAt(Math.min(pinnedIndex, index)), sideAt(Math.max(pinnedIndex, index)));
+
+  // The URL trails the slider by its debounce, and leaving the page drops the
+  // write still waiting. Following a diff link writes it first, so Back
+  // returns to the position the reader left from.
+  const settleScrubParam = () => replaceScrubParam(live ? null : (current?.id.toString() ?? null));
+
   return (
     <div className={styles.bar}>
       <div className={styles.inner}>
-        {hasScrubbed && current && (
-          <p className={styles.positionLine}>
-            update {index + 1} of {total} — {new Date(current.createdAt).toLocaleString()}
+        {changesCameIn && (
+          <p className={styles.staleLine} data-kind="changes-came-in">
+            Changes have come in since this history loaded; reload to include them.
           </p>
         )}
-        <input
-          type="range"
-          className={styles.slider}
-          min={0}
-          max={total - 1}
-          value={index}
-          aria-label="Scrub through this doc's edit history"
-          onChange={(e) => {
-            setHasScrubbed(true);
-            seek(Number(e.target.value));
-          }}
-        />
+        {pinned && pinnedIndex !== null && (
+          <p className={styles.positionLine} data-kind="pinned">
+            Pinned: {positionText(pinnedIndex, total, pinned.createdAt, ", ")} ·{" "}
+            <button type="button" className={styles.linkButton} onClick={() => setPinnedIndex(null)}>
+              Unpin
+            </button>
+          </p>
+        )}
+        <div className={styles.controls}>
+          {hasScrubbed && current && (
+            <span className={styles.positionLine} data-kind="position">
+              {positionText(index, total, current.createdAt, " — ")}
+            </span>
+          )}
+          <span className={styles.actions}>
+            {pinnedIndex !== index && (
+              <button type="button" className={styles.linkButton} onClick={() => setPinnedIndex(index)}>
+                Pin this version
+              </button>
+            )}
+            {!live && (
+              <a href={diffPath(sideAt(index), sideAt(total - 1))} onClick={settleScrubParam}>
+                Diff with now
+              </a>
+            )}
+            {pinnedDiffHref && (
+              <a href={pinnedDiffHref} onClick={settleScrubParam}>
+                Diff pinned → here
+              </a>
+            )}
+          </span>
+        </div>
+        <div className={styles.track}>
+          <input
+            type="range"
+            className={styles.slider}
+            min={0}
+            max={total - 1}
+            value={index}
+            aria-label="Scrub through this doc's edit history"
+            onChange={(e) => {
+              setHasScrubbed(true);
+              seek(Number(e.target.value));
+            }}
+          />
+          {pinnedIndex !== null && (
+            <span
+              className={styles.pinTick}
+              data-kind="pin-tick"
+              aria-hidden="true"
+              style={{ "--pin-at": total > 1 ? pinnedIndex / (total - 1) : 0 } as CSSProperties}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

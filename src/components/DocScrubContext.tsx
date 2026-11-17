@@ -24,9 +24,9 @@ type Ctx = {
 const DocScrubContext = createContext<Ctx | null>(null);
 
 // `hasScrubBar` is whether this page renders a scrub bar at all — page.tsx's
-// own `canEdit`, the same value DocView gates the bar on, passed in rather
-// than derived from the bar having mounted. Two reasons it is a prop: a
-// reader who may read but not edit gets a provider and no bar (the provider
+// own `canSeeHistory`, the same value DocView gates the bar on, passed in
+// rather than derived from the bar having mounted. Two reasons it is a prop: a
+// reader who may not see the doc's history gets a provider and no bar (the provider
 // wraps both subtrees unconditionally, above where the bar's gate applies),
 // so the context's mere existence answers the wrong question; and an
 // effect-registered "I exist" would make every "at this revision" link pop
@@ -50,8 +50,8 @@ export function DocScrubProvider({ children, hasScrubBar }: { children: ReactNod
 }
 
 // Whether this page has a scrub bar on it at all — true on /doc/[slug] for a
-// viewer who may edit the doc, false in the doc editor's rail, on a PDF, and
-// for a reader who only has read access. Distinct from useDocScrub() being
+// viewer who may see the doc's history, false in the doc editor's rail, on a
+// PDF, and for a reader who may not. Distinct from useDocScrub() being
 // non-null, which additionally means that bar has loaded its replay and can
 // seek *now*: a control that only needs somewhere to link to (docs/DOCS.md,
 // "?at=") can render on the strength of this alone, which is what lets "at
