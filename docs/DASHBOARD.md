@@ -6,6 +6,13 @@ self-service — the page never edits anyone but the signed-in user, and every
 write re-derives its permission from the session server-side rather than
 trusting which fields the form rendered.
 
+## Email collisions
+
+An ADMIN sees one line under the header: how many rows of the email-collision log wait for
+review, linked to `/email-collisions` (docs/COMMENTS.md, "The log"). It shows at zero too,
+since it is the page's way in, and a reviewed row is still worth reaching. Not a card: it is
+one count, and nobody else sees it.
+
 ## Section cards
 
 Each major section is a native `<details className={styles.card}>` with its

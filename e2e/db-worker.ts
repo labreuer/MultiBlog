@@ -76,6 +76,8 @@ import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import { applyAnnotationMark } from "@/lib/annotation-admin";
 import { issueApiToken } from "@/lib/api/tokens";
 import { softDeleteUser } from "@/lib/user-delete";
+import { findOrCreateAnonymousCommenter, findOrCreateSignedInCommenter } from "@/lib/commenter-identity";
+import { logEmailCollision, type EmailCollisionMeeting } from "@/lib/email-collision-log";
 import { setDocByline, setDocDeleted, setDocSlug, setDocVisibility } from "@/lib/doc-manage";
 import { wikiPathOfDoc } from "@/lib/wiki-address";
 import { foldWikiName, type FoldedWikiName } from "@/lib/wiki-claim";
@@ -218,6 +220,10 @@ async function deleteAccount(email: string): Promise<void> {
   // comments go first, taking their revisions with them by cascade.
   await prisma.comment.deleteMany({ where: { commenter: { email } } });
   await prisma.commenter.deleteMany({ where: { email } });
+  // The email-collision log names the account by a SET NULL key, so its rows
+  // would outlive it; a spec that logged one meets them in the next run's
+  // count otherwise (docs/COMMENTS.md, "The log").
+  await deleteEmailCollisionsFor(email);
   // annotation.user_id is ON DELETE RESTRICT (an annotation's author is never
   // optional, unlike Commenter's) — a secondUser({role: "AUTHORIZED"}) who
   // annotated a doc during the test would otherwise block their own
@@ -2533,29 +2539,25 @@ export async function createComment(opts: {
   createdAt?: string;
   /** A reply to this comment, which must be in the same (general) thread. */
   parentCommentId?: string;
+  /** Posted by an anonymous identity even when an account has this email: one the fix found already there (docs/COMMENTS.md, "Identities kept apart"). */
+  anonymous?: boolean;
+  /** The comment's `ip_address`; default none. */
+  ipAddress?: string;
 }): Promise<{ id: string; commenterId: string }> {
   const { postId, anchoredEventId, email, displayName, body, status = "PENDING", parentCommentId } = opts;
   const createdAt = opts.createdAt ? new Date(opts.createdAt) : new Date();
   assertSafe(email);
 
-  // Linked to a User when one exists with this email, keyed on `userId` — the
-  // same upsert shape submitComment uses for a signed-in commenter. Without
-  // this every fixture comment is anonymous, and "edit your own comment"
-  // (PLAN.md §22c, which is `commenter.userId === viewer`) is untestable: the
-  // control would never appear for anyone. An email belonging to no user still
-  // produces an anonymous commenter, so every existing caller is unaffected.
-  const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  // Linked to a User when one exists with this email, found by `userId` — the
+  // same rule submitComment uses for a signed-in commenter. Without this every
+  // fixture comment is anonymous, and "edit your own comment" (PLAN.md §22c,
+  // which is `commenter.userId === viewer`) is untestable: the control would
+  // never appear for anyone. An email belonging to no user still produces an
+  // anonymous commenter, so every existing caller is unaffected.
+  const user = opts.anonymous ? null : await prisma.user.findUnique({ where: { email }, select: { id: true } });
   const commenter = user
-    ? await prisma.commenter.upsert({
-        where: { userId: user.id },
-        update: {},
-        create: { userId: user.id, email, displayName },
-      })
-    : await prisma.commenter.upsert({
-        where: { email },
-        update: {},
-        create: { email, displayName },
-      });
+    ? (await findOrCreateSignedInCommenter(user.id, email, displayName)).commenter
+    : await findOrCreateAnonymousCommenter(email, displayName);
 
   const thread =
     (await prisma.commentThread.findFirst({ where: { postId, quotedText: "" } })) ??
@@ -2575,6 +2577,7 @@ export async function createComment(opts: {
       bodyText: body,
       status,
       createdAt,
+      ipAddress: opts.ipAddress ?? null,
       revisions: {
         create: { revisionNo: 1, body: commentDocFromText(body), authorUserId: commenter.userId, createdAt },
       },
@@ -2725,11 +2728,7 @@ export async function createQuoteThread(opts: {
   const { postId, anchoredEventId, anchorFrom, anchorTo, quotedText, email, displayName, body } = opts;
   assertSafe(email);
 
-  const commenter = await prisma.commenter.upsert({
-    where: { email },
-    update: {},
-    create: { email, displayName },
-  });
+  const commenter = await findOrCreateAnonymousCommenter(email, displayName);
   const thread = await prisma.commentThread.create({
     data: { postId, anchoredEventId, anchorFrom, anchorTo, quotedText },
   });
@@ -2770,8 +2769,8 @@ export async function createCommentWithQuotes(opts: {
   assertSafe(email);
   const user = await prisma.user.findUnique({ where: { email }, select: { id: true, role: true } });
   const commenter = user
-    ? await prisma.commenter.upsert({ where: { userId: user.id }, update: {}, create: { userId: user.id, email, displayName } })
-    : await prisma.commenter.upsert({ where: { email }, update: {}, create: { email, displayName } });
+    ? (await findOrCreateSignedInCommenter(user.id, email, displayName)).commenter
+    : await findOrCreateAnonymousCommenter(email, displayName);
   const post = await prisma.post.findUniqueOrThrow({ where: { id: postId }, select: { publishEventId: true } });
 
   let thread: { id: string; anchorFrom: number };
@@ -3414,6 +3413,11 @@ export async function sweepTestData(): Promise<{
     await prisma.comment.deleteMany({ where: { commenterId: { in: staleCommenterIds } } });
     await prisma.commenter.deleteMany({ where: { id: { in: staleCommenterIds } } });
   }
+
+  await prisma.$executeRaw`
+    DELETE FROM "email_collision"
+    WHERE lower(email) LIKE ${`${E2E_PREFIX.toLowerCase()}%`} AND lower(email) LIKE '%@example.com'
+  `;
 
   const staleYdocs = await prisma.ydoc.deleteMany({ where: { id: { startsWith: "ydoc:test-" } } });
 
@@ -4389,6 +4393,73 @@ export async function addTestDocSlugHistory(docId: string, slug: string): Promis
   await prisma.docSlugHistory.create({ data: { docId, slug } });
 }
 
+// ---------------------------------------------------------------------------
+// docs/COMMENTS.md, "Identities kept apart" — the commenter identities an
+// email has, and the email-collision log. Every comparison is raw
+// `lower() = lower()`, as the app's is: Prisma's insensitive mode is an
+// `ILIKE`, and the spec's `_` case is exactly what it would get wrong.
+
+async function deleteEmailCollisionsFor(email: string): Promise<void> {
+  await prisma.$executeRaw`DELETE FROM "email_collision" WHERE lower(email) = lower(${email})`;
+}
+
+/** Deletes every email-collision row on this email, in any case. */
+export async function deleteTestEmailCollisions(email: string): Promise<void> {
+  assertSafe(email.toLowerCase());
+  await deleteEmailCollisionsFor(email);
+}
+
+/** Logs a meeting through the app's own writer, for a spec about the review page. */
+export async function logTestEmailCollision(meeting: EmailCollisionMeeting): Promise<void> {
+  assertSafe(meeting.email.toLowerCase());
+  await logEmailCollision(meeting);
+}
+
+export type EmailCollisionFacts = {
+  source: string;
+  email: string;
+  count: number;
+  userId: string | null;
+  commenterId: string | null;
+  postId: string | null;
+  ipAddresses: string[];
+  reviewed: boolean;
+};
+
+export async function getTestEmailCollisions(email: string): Promise<EmailCollisionFacts[]> {
+  assertSafe(email.toLowerCase());
+  const rows = await prisma.$queryRaw<
+    { source: string; email: string; count: number; user_id: string | null; commenter_id: string | null; post_id: string | null; ip_addresses: string[]; reviewed_at: Date | null }[]
+  >`
+    SELECT source::text, email, count, user_id, commenter_id, post_id, ip_addresses, reviewed_at
+    FROM "email_collision" WHERE lower(email) = lower(${email}) ORDER BY first_seen_at, id
+  `;
+  return rows.map((row) => ({
+    source: row.source,
+    email: row.email,
+    count: row.count,
+    userId: row.user_id,
+    commenterId: row.commenter_id,
+    postId: row.post_id,
+    ipAddresses: row.ip_addresses,
+    reviewed: row.reviewed_at !== null,
+  }));
+}
+
+/** Every commenter row holding this email, in any case, with its comments' bodies. */
+export async function getTestCommenters(
+  email: string,
+): Promise<{ id: string; userId: string | null; comments: string[] }[]> {
+  assertSafe(email.toLowerCase());
+  const ids = await prisma.$queryRaw<{ id: string }[]>`SELECT id FROM "commenter" WHERE lower(email) = lower(${email})`;
+  const rows = await prisma.commenter.findMany({
+    where: { id: { in: ids.map((row) => row.id) } },
+    select: { id: true, userId: true, comments: { select: { bodyText: true }, orderBy: { createdAt: "asc" } } },
+    orderBy: { id: "asc" },
+  });
+  return rows.map((row) => ({ id: row.id, userId: row.userId, comments: row.comments.map((c) => c.bodyText) }));
+}
+
 const handlers = {
   moveDocAs,
   moveWikiPageAs,
@@ -4490,6 +4561,10 @@ const handlers = {
   backdateAnnotationPosting,
   setAnnotationEditingSince,
   createComment,
+  deleteTestEmailCollisions,
+  logTestEmailCollision,
+  getTestEmailCollisions,
+  getTestCommenters,
   softDeleteComment,
   unpublishTestPost,
   createCommentWithQuotes,

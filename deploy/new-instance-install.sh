@@ -571,7 +571,7 @@ WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env
 Environment=NODE_ENV=production
 Environment=PORT=$WEB_PORT
-ExecStart=/usr/bin/npm run start
+ExecStart=/usr/bin/npm run start -- -H 127.0.0.1
 Restart=on-failure
 RestartSec=3
 

@@ -197,6 +197,25 @@ export const ADMIN_TABLE_COLUMNS = {
     { key: "forkedFrom", label: "Forked from" },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
   ],
+  // docs/COMMENTS.md, "The log" — /email-collisions, ADMIN-only. The comment
+  // counts and IP addresses are read live through the
+  // `email_collision_listing` view, which is what lets them sort.
+  "email-collisions": [
+    { key: "lastSeen", label: "Last seen" },
+    { key: "count", label: "Times" },
+    { key: "source", label: "Source" },
+    { key: "email", label: "Email" },
+    { key: "account", label: "Account" },
+    { key: "anonymous", label: "Anonymous identity" },
+    { key: "anonymousComments", label: "Its comments" },
+    { key: "requestIps", label: "Request IPs" },
+    { key: "anonymousIps", label: "Its comments' IPs" },
+    { key: "accountIps", label: "Account's comments' IPs" },
+    { key: "post", label: "Post", defaultHidden: true },
+    { key: "firstSeen", label: "First seen", defaultHidden: true },
+    { key: "reviewedAt", label: "Reviewed at", defaultHidden: true },
+    { key: "reviewedBy", label: "Reviewed by", defaultHidden: true },
+  ],
 } as const satisfies Record<AdminTableName, readonly ColumnMeta[]>;
 
 /** The movable column keys of one admin table — what its `registryColumns` call must supply a body for. */

@@ -382,14 +382,17 @@ export function DateFormatSelect({
 export function ShowDeletedToggle({
   checked,
   onChange,
+  label = "Show deleted rows",
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
+  /** For a table whose hidden-by-default rows are something other than deleted ones (/email-collisions' reviewed rows). */
+  label?: string;
 }) {
   return (
     <p className={styles.showDeletedRow}>
       <label>
-        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /> Show deleted rows
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /> {label}
       </label>
     </p>
   );

@@ -376,6 +376,13 @@ export const createTestAnnotation = (
 ): Promise<{ id: string }> => call("createTestAnnotation", ...args);
 
 export const createComment = (...args: Parameters<DbHandlers["createComment"]>) => call("createComment", ...args);
+export const deleteTestEmailCollisions = (...args: Parameters<DbHandlers["deleteTestEmailCollisions"]>) =>
+  call("deleteTestEmailCollisions", ...args);
+export const logTestEmailCollision = (...args: Parameters<DbHandlers["logTestEmailCollision"]>) =>
+  call("logTestEmailCollision", ...args);
+export const getTestEmailCollisions = (...args: Parameters<DbHandlers["getTestEmailCollisions"]>) =>
+  call("getTestEmailCollisions", ...args);
+export const getTestCommenters = (...args: Parameters<DbHandlers["getTestCommenters"]>) => call("getTestCommenters", ...args);
 
 export const softDeleteComment = (...args: Parameters<DbHandlers["softDeleteComment"]>): Promise<void> =>
   call("softDeleteComment", ...args);

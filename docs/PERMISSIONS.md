@@ -224,6 +224,7 @@ read as `SHARED`, but where these say otherwise. Two namespaces: a person's,
 | `/posts` + `/comments` rows | all | all | own | — | — | — |
 | Edit post / post history | ✅ | ✅ | own | ❌ | ❌ | ❌ |
 | `/users`, `/users/[id]/slug` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `/email-collisions` (read, mark reviewed) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `/ydoc-debug`, `/api/ydoc/*` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `/dashboard` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Read a published post, submit a comment | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -932,7 +933,8 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Which bots the consent page offers, and the decision's re-check, each by the whole token rule | `botsFor` / `worksFor` in `src/lib/oauth/consent.ts` |
 | The order of that list, and whether it offers a new bot | `consentOffer` in `src/lib/oauth/consent-offer.ts` |
 | Making a person's bot for an agent when they approve (an AUTHOR or above, with a password, connections on) | `ensureAgentBot` in `src/lib/bots.ts`, called by `src/app/authorize/decide/route.ts` for `bot=new` |
-| Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**` |
+| Admin-only surfaces | `src/app/users/**`, `src/app/ydoc-debug/**`, `src/app/api/ydoc/**`, `src/app/email-collisions/**` with `src/app/actions/email-collisions.ts` |
+| A signed-out comment giving a live account's email (refused, logged) | `liveAccountIdWithEmail` in `src/lib/commenter-identity.ts`, called by `submitComment` in `src/app/actions/comments.ts` |
 
 `e2e/tags.spec.ts` pins the tag table's load-bearing rows — the signed-out reader
 seeing a public post's chip but no tagger, and the EDITOR who cannot see a PRIVATE doc under
