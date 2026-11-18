@@ -293,8 +293,10 @@ before changing the behavior it describes.
 - **A `PRIVATE` doc is its listed `DocAuthor`s' alone** — no ADMIN/EDITOR bypass. docs/DOCS.md "Roles and
   visibility", docs/PERMISSIONS.md.
 - **Before changing code that tests or offers a doc's visibility, decides who may edit a doc,
-  changes a doc's settings, or writes a doc's `title` or `wiki_*` columns, read docs/WIKI.md,
-  "Mistakes that fail no check".**
+  changes a doc's settings, writes a doc's `title` or `wiki_*` columns, answers a doc lookup
+  for a viewer who can't read it, or links to a doc with a `#fragment`, read docs/WIKI.md,
+  "Mistakes that fail no check".** `PUBLIC` is read only by the wiki read rule, which stays
+  outside `canUserReadDoc`.
 - **Before changing code that shows a doc as it was at an earlier version (it calls
   `loadDocStateAt`, `isDocVersion` or `docBodyOf`, serves a doc's `ydoc_update` rows, or takes
   an update id from a request), or that seeds a doc from another doc's text, read
@@ -561,7 +563,10 @@ working on.
   against `next@16.2.11`), so a route packing two ids into one segment as `a+b` would see
   `"a%2Bb"` and `.split("+")` would 404 every URL — a `+`-means-space assumption that's true
   for query strings and false here. `/side-by-side/[left]/[right]` (PLAN.md §14c) uses two path
-  segments specifically to never need to decode anything.
+  segments specifically to never need to decode anything. **`generateMetadata` is handed the
+  same params already decoded**, so a route that decodes hands its loader what each caller
+  decoded, or not: decoded twice, `%2541` names `A` and a bare `%` throws
+  (`routeSegments`, `src/lib/wiki-pages.ts`; docs/WIKI.md "The owner segment").
 - **A Server Component handed to a client component as a prop needs a `key` if it has
   siblings** — even though nothing there is a list. A JSX tree passed across that boundary is
   *serialized into the RSC payload* rather than rendered in place, and the Flight server's

@@ -648,6 +648,92 @@ What the first set leaves:
   cap on the oldest phone the baseline claims (`npx tsx scripts/remote-console.ts`), and lower
   the worker's caps, apart from the server's, if a tab dies or the deadline always bites.
 
+## The public render of a wiki page is uncached (docs/WIKI.md "Public pages")
+
+**Status:** decided 2026-11-18, with the wiki's pages (PR 2). One route,
+`/wiki/<owner>/<page>`, answers a signed-in reader with the doc view and everyone else with
+the public render, and reads the session to tell them apart, so nothing of it is cached.
+Every signed-out request, a crawler's included, costs the owner and page lookups (three or
+four queries: the owner, an old slug if it misses, the name's key, the page), the chip
+labels and the bibliography (`docJsonForPostSide`), and a render.
+
+- **What a cache would be keyed on**: more than the doc's stored text. The render computes
+  each chip's label from its record (`docJsonForPostSide`), so a mention's label and a
+  citation's change without the doc changing, and so does the owner's slug, which the
+  render links.
+- **Shapes**: a `PUBLIC`-only route the signed-out answer redirects to, statically
+  generated and revalidated by the writes that change a public page; or `unstable_cache`
+  around the body's conversion, tagged by doc id and by every chip record it reads.
+- **When it matters**: when a public page is linked from somewhere with traffic, or when
+  the access log shows crawlers on `/wiki/`. Measure first: `PERFORMANCE.md`'s perf logging.
+
+## Some refusals still tell a wiki page from a missing doc (docs/WIKI.md "URLs")
+
+**Status:** left as it is by decision, 2026-11-17. Wherever a doc is looked up by its URL,
+a viewer who can't read a wiki doc gets the answer for a missing doc: `/doc/<slug>`, its
+`/edit` and `/slug`, side-by-side, the link preview, the diff gate and forking. Two kinds of
+surface still tell them apart:
+
+- **What takes a doc's id and nothing else**: the replay route and the collab token route
+  (`/api/doc/[id]/token`) answer a missing doc 404 and an unreadable one 403, and
+  `createDocLink`, posting an annotation and the bulk actions (through `settleBulk`) return
+  their refusals apart in the same way. Ids are cuids, which nobody guesses; a wiki page's
+  id reaches a reader only on surfaces that already gate on it.
+- **A slug that is taken says some doc holds it**, as it does for every doc on main:
+  `changeDocSlug` answers "already in use", and `uniqueDocSlug` adds a suffix, over live and
+  deleted docs and their slug histories alike. So someone who titles a doc `Mercury planet`
+  and is given `mercury-planet-2` learns that a doc has that slug: not whose, nor that it is
+  a wiki page.
+- **If either matters**: answer an unreadable wiki doc 404 in the two routes (one branch
+  each, on the `wikiName` they would select), and give the doc slug a suffix of random
+  characters where it collides with a slug the creator can't read.
+
+## A public page publishes each mention's slug (docs/WIKI.md "Public pages")
+
+**Status:** found 2026-11-17, in the wiki plan's review; the same holds for a published post
+today. A mention's label links to `/authors/<slug>` and carries the person's user id
+(`data-chip-ref`), on a public wiki page as on a post. So every mention puts the person's
+slug on the page, in its link: an email-derived one included, which is what a person's wiki
+namespace refuses to put in a URL (`slugIsFromEmail`). It is the label itself in the handle
+style, and its qualifier when two people share a label.
+
+- **The fix**: in `chipsToLinkedText` (`src/lib/entity-chips/linked-text.ts`), leave a
+  mention whose person's slug is made from their email unlinked, and label it by name or
+  initials whatever the style, on every post-side surface; or require a slug change before
+  such a person can be mentioned in a doc that publishes.
+
+## A discarded server action can undo the next navigation
+
+**Status:** found 2026-10-22 on the dev target, as `e2e/wiki.spec.ts`'s "a namespace list's
+links go to its pages and Back" timing out on its second click twice in a week. The spec
+waits for the first page's requests to settle before going Back, which avoids the race in
+the spec. The race itself is still there, on every surface that mounts `DocReadingBody`,
+`/doc/[slug]` included.
+
+- **Mechanism** (`next@16.2.11`, `client/components/app-router-instance.js`): a navigation
+  dispatched while a server action is pending marks that action `discarded` and runs at once.
+  When the discarded action answers, `handleResult` still calls `runRemainingActions`, which
+  advances `actionQueue.pending`. By then `pending` is the navigation, so the queue reads as
+  empty while the navigation is in flight. A server action dispatched in that window runs at
+  once against the state from *before* the navigation, and its result is applied after the
+  navigation's own, so the router lands back on the page the reader left. Nothing is logged.
+- **Our trigger:** `open-link-store.ts` reads the open link through `loadMyOpenLink`, a server
+  action, when its first consumer mounts. Under dev's StrictMode the store subscribes twice,
+  the second call finds the first in flight and queues a re-read, and that re-read is
+  dispatched the moment the first answers, which is the window above. In production nothing
+  dispatches the second action, so the reader would have to start one by hand in a window
+  about 200ms wide.
+- **Fixes, either of which closes our trigger:**
+  1. Read the open link with a GET route handler instead of a server action. A read has no
+     business in the router's action queue: it serializes behind navigations and is subject
+     to discarding. Check the other mount-time reads that are server actions
+     (`loadPdfAnnotationEntries` is one) for the same shape.
+  2. Don't queue a re-read when a *subscribe* finds a read in flight. The queue exists for
+     notifies after a mutation, and a re-subscribe asks the same question the read in flight
+     will answer.
+- Worth an upstream report: `runRemainingActions` should advance the queue only when the
+  action that finished is the one at its head.
+
 ## The diff page's workers have not run on the oldest engines in the baseline
 
 **Status:** the worker that compares runs in Safari 27.2 and on an iPhone on iOS 18.6.2

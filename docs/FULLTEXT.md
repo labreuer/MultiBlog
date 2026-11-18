@@ -31,6 +31,7 @@ indexing or when searching.**
 | Kind | Text | Which version |
 |---|---|---|
 | Docs | `doc.title`, `doc.prose_json` | The live text, at most one store debounce behind ([DOCS.md](DOCS.md), "The caches") |
+| Wiki pages | the same columns: a wiki page is a doc, whose title is its name ([WIKI.md](WIKI.md)) | As docs |
 | Posts | `post.title`, `post.prose_json` | The published or scheduled version, searched under the post's read rule, never the doc's. A draft that was never published has no text of its own: it is found by its title, and its words through its doc |
 | Annotations | `annotation.body_text`, `annotation.quoted_text` with each entity chip as the label its record holds (`anchor_quote_text`, [ENTITY_CHIPS.md](ENTITY_CHIPS.md) step 1, item 11) | The last settled body: an edit in progress isn't searchable, just as it isn't readable ([ANNOTATIONS.md](ANNOTATIONS.md), "Editing after posting"). The quoted passage is a column only for a reading-view or PDF annotation; the doc editor's keep theirs as a mark in the doc's body, so those words find the doc instead (§10, item 9) |
 | Comments | `comment.body_text` | The current revision |
@@ -52,7 +53,8 @@ states it as a filter:
 
 | Kind | A hit is readable when | Through |
 |---|---|---|
-| Docs | SHARED, and the viewer has `canViewDocs`; or PRIVATE, and the viewer is on its byline (with `canManageDocs`). There is no ADMIN or EDITOR bypass | `readableDocsWhere` — `canUserReadDoc`'s rule |
+| Docs | SHARED, and the viewer has `canViewDocs`; or PRIVATE, and the viewer is on its byline (with `canManageDocs`). There is no ADMIN or EDITOR bypass. Not a wiki page | `readableDocsWhere` — `canUserReadDoc`'s rule — with `wikiName: null` |
+| Wiki pages | Docs' rule, `PUBLIC` read as SHARED: so signed out, none. Searching `PUBLIC` pages signed out would take the wiki read rule beyond the wiki's routes, and is deferred ([WIKI.md](WIKI.md), "Listing wiki pages") | `readableDocsWhere` with `wikiName` not null, in a query of its own |
 | Posts | Published. **A signed-in viewer also gets the unpublished posts they may edit**, drafts and scheduled: every one for an ADMIN or EDITOR, the ones on their byline for an AUTHOR | `readablePostWhere` |
 | Annotations | Not a DRAFT, not deleted, and its doc or PDF is live and readable | `readableAnnotationsWhere` — `canUserAccessAnnotationYdoc`'s rule |
 | Comments | APPROVED, not deleted, and on a post that is published and not deleted, for every viewer | `publicCommentsWhere` — `isCommentPublic`'s rule |
@@ -341,7 +343,7 @@ you mean" suggestions when a search did find something.
 | Parameter | Meaning |
 |---|---|
 | `q` | The text (§4) |
-| `kinds` | Any of `docs`, `posts`, `pdfs`, `annotations`, `comments`, comma-joined or repeated; by default every kind the viewer can read. A kind the viewer can't search is dropped |
+| `kinds` | Any of `docs`, `wiki`, `posts`, `pdfs`, `annotations`, `comments`, comma-joined or repeated; by default every kind the viewer can read. A kind the viewer can't search is dropped |
 | `authors` | User slugs, comma-joined or repeated; a hit matches if any one of them is its author. A slug not on this viewer's picker is dropped |
 | `mentions` | User slugs, or `me` for the searcher, comma-joined or repeated; a hit matches if it mentions any one of them ([MENTIONS.md](MENTIONS.md), "Search"). An `@handle` word in `q` means the same. A handle nobody has narrows to nothing |
 | `cites` | Reference keys, comma-joined or repeated, an `@` before one allowed; a hit matches if it cites any one of them ([CITATIONS.md](CITATIONS.md), "Search"). A key a reference used to have still names it, and one nothing has narrows to nothing |
@@ -510,7 +512,11 @@ in `page.module.css` and use STYLE.md's color tokens, `<mark>` included.
   (`{ userId, role } | null`) and a scope, and is never exported from a `"use server"` file.
   [MCP.md](MCP.md), a plan that isn't built, sets that rule for every operation. Its `search`
   tool calls this one with the token's user as the actor, behind a stricter parse than
-  `params.ts`'s, which falls back to a default where a tool should refuse (MCP.md §14).
+  `params.ts`'s, which falls back to a default where a tool should refuse (MCP.md §14). It
+  knows no `wiki` kind: it passes `wikiInDocs`, under which the docs kind ranks the readable
+  ids of both sides of the split together (`docsAndWikiSearch`, `src/lib/search/wiki.ts`), so
+  its order, totals and cursor are what they were before wiki pages had a section; a page's
+  hit names its address. The bulk export's selection by filters asks the same.
 - **The admin tables' `?q=`** stays on titles (PLAN.md §16l). Pointing it at bodies is a
   separate decision.
 

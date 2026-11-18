@@ -12,8 +12,10 @@ annotating a `SHARED` doc; `canManageDocs` governs `/docs` management) and the p
 `DocAuthor`s alone, with no ADMIN/EDITOR bypass. DOCS.md, "Routes", covers the two admin listings and the
 ADMIN-only "Show all docs" override. `/site-settings` is deliberately out of scope.
 
-**`PRIVATE`/`SHARED` is `Doc.visibility`.** Posts have no visibility column at all, so the
-four tables below are about docs and the surfaces derived from them. Post permissions vary
+**`PRIVATE`/`SHARED` is `Doc.visibility`.** Its third value, `PUBLIC`, is a wiki page's alone,
+and behaves as `SHARED` everywhere but the wiki's own routes ("Wiki pages", below). Posts have
+no visibility column at all, so the four tables below are about docs and the surfaces derived
+from them. Post permissions vary
 along neither axis and live in their own table at the end rather than being repeated four
 times.
 
@@ -157,6 +159,41 @@ inconsistencies" below, both of which are visible here.
 | Diff at a version | ✅ | ✅ | ❌ ‡ | ❌ | ❌ |
 | Fork, as it is now | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Fork at a version | ✅ | ✅ | ❌ | ❌ | ❌ |
+
+## Wiki pages ([WIKI.md](WIKI.md))
+
+A wiki page is a doc with an address, so the four tables above hold for it, with `PUBLIC`
+read as `SHARED`, but where these say otherwise. Two namespaces: a person's,
+`/wiki/@<slug>/…`, and the commons', `/wiki/commons/…`.
+
+| | A person's page, `/wiki/@x/…` | A commons page, `/wiki/commons/…` |
+|---|---|---|
+| Create | `x`, with `canManageDocs` and a slug not made from their email | ADMIN or EDITOR |
+| Read | by visibility: `PRIVATE`, its byline; `SHARED`, `canViewDocs`; `PUBLIC`, anyone | the same, but never `PRIVATE` |
+| Edit | its byline only, and `x` is always on it | its byline, plus ADMIN and EDITOR: the `SHARED` rule |
+| See history | as Edit (the interim rule, "Who may see a doc's history"), with its fork-point exception ‡ | as Edit, with the same exception ‡ |
+| Change visibility | `x` may raise it; its byline and ADMIN may lower it | as for any doc, within `allowedVisibilities` |
+| Byline | its byline, which may add to it; `x` stays on it | as for any doc |
+| Delete or restore | `x` alone | its byline, plus ADMIN and EDITOR |
+| Claim a held commons name (`Front Page`, `About`), creating or restoring | — (a person's namespace holds none) | ADMIN or EDITOR |
+| Listed in `/docs` | never: the wiki table, `/wiki/special/pages`, lists wiki pages | never |
+
+- **`x`'s powers are judged by their account as it is now**: raising, deleting, restoring
+  and claiming in `@x` read `x`'s row again (`ownerWhoCanAct`), so a deleted or demoted owner
+  loses them at once, whatever their session's role says. A bot has no namespace.
+- **ADMIN may lower a person's page, and do nothing else to it**, from the wiki table or
+  MCP's `manage`; the editor is still its byline's.
+- **Reading `PUBLIC` is the wiki read rule** (`canReadWikiDoc`, `readableWikiDocsWhere`), which
+  only the wiki's routes, `/doc/<slug>`'s redirect to them, and the namespace lists ask. Every
+  other gate on a doc is built on `canUserReadDoc`, which refuses a signed-out reader and a
+  COMMENTER a `PUBLIC` page as it does a `SHARED` one: the collab token, replay, annotations,
+  tags, diffs, side-by-side, search and MCP. A signed-out reader or a COMMENTER gets the
+  public render of the text alone.
+- **Wherever a doc is looked up, a viewer who can't read a wiki doc gets the answer for a
+  missing doc**, never Forbidden: its address, `/doc/<slug>` and its `/edit` and `/slug`,
+  side-by-side, the link preview, the diff gate and forking. Routes that take only an id
+  still tell the two apart (TODO.md, "Some refusals still tell a wiki page from a missing
+  doc").
 
 ## Axis-independent — neither visibility nor byline applies
 
@@ -525,6 +562,7 @@ public after it was quoted; the words stay, the citation degrades).
 | A `PENDING` or `SPAM` or deleted comment | ❌ — not public yet, or no longer |
 | A `StoredFile` | ❌ until §19 grows a publicly-readable tier |
 | A doc, `PRIVATE` or `SHARED` | ❌ — there is no public doc tier (DOCS.md, "Roles and visibility") |
+| A wiki page, `PUBLIC` included | ❌ — `PUBLIC` is read only on the wiki's routes ("Wiki pages", above); quoting one is deferred (WIKI.md) |
 | An annotation body | ❌ — it lives on a doc or a file, and inherits the above |
 
 Two consequences. The doc, file and annotation arms of `comment_quote_anchor`'s arc have no
@@ -777,7 +815,8 @@ byline or status.
 
 | A hit on… | is found by | through |
 |---|---|---|
-| a doc | whoever may read it — a `PRIVATE` doc's byline alone, ADMIN and EDITOR included | `readableDocsWhere` |
+| a doc | whoever may read it — a `PRIVATE` doc's byline alone, ADMIN and EDITOR included | `readableDocsWhere`, with `wikiName: null` |
+| a wiki page | whoever may read it by `canUserReadDoc`: signed out, none, `PUBLIC` included | `readableDocsWhere`, with `wikiName` not null |
 | a post | everyone when published; a draft or scheduled one also by whoever may edit it | `readablePostWhere` |
 | a PDF | whoever may read the file | `readableFilesWhere` |
 | an annotation | whoever may read its doc or PDF — never a `DRAFT`, its own writer included | `readableAnnotationsWhere` |
@@ -822,6 +861,11 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Annotation edit sessions (begin / finish / cancel) | `requireEditableBody` in `src/app/actions/annotations.ts` |
 | Comment editing and history | `editComment` / `getCommentHistory` in `src/app/actions/comments.ts` |
 | `/docs` row scoping + the "Show all docs" override | `src/app/docs/page.tsx` |
+| The wiki read rule, per row and as a `where` | `canReadWikiDoc` / `readableWikiDocsWhere` in `src/lib/doc-authz.ts` |
+| A person's page's rules (owner on the byline, raising, deleting, restoring, ADMIN's lowering) | `setDocByline`, `setDocVisibility`, `setDocDeleted` in `src/lib/doc-manage.ts`; `ownerWhoCanAct` in `src/lib/wiki-claim.ts` |
+| Where a viewer may create a page; the held commons names | `wikiNamespacesFor` / `claimableNamespace` in `src/lib/wiki-create.ts`; `claimWikiAddress` in `src/lib/wiki-claim.ts` |
+| A wiki route's resolution: owner, page, redirects | `resolveWikiPath` in `src/lib/wiki-pages.ts` |
+| The wiki table's row scoping and per-row flags | `src/app/wiki/special/pages/page.tsx` |
 | `/annotations` row scoping | `src/app/annotations/page.tsx` |
 | `/doc/[slug]` read gate · `/doc/[slug]/edit` edit gate | `src/app/doc/[slug]/page.tsx`, `…/edit/page.tsx` |
 | Collab token: writable vs read-only vs refused | `src/app/api/doc/[id]/token/route.ts` |
