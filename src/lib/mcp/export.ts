@@ -122,7 +122,7 @@ export async function selectByList(actor: Actor, refs: unknown): Promise<ExportS
   const docIds: string[] = [];
   const missing: string[] = [];
   for (const ref of refs as string[]) {
-    const parsed = await parseDocRef(ref);
+    const parsed = await parseDocRef(ref, actor);
     const param = parsed.kind === "doc" ? parsed.param : parsed.kind === "id" ? parsed.id : null;
     try {
       if (param === null) throw invalid(ref);

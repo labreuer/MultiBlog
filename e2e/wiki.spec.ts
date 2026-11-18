@@ -27,12 +27,16 @@ import {
   foldTestWikiName,
   forkDocAs,
   frontPagePreambleText,
+  renameWikiPageAs,
+  getTestWikiAddressHistory,
+  ageTestWikiAddressHistory,
   getTestForkFacts,
   getTestWikiFacts,
   writeTestFileVisibility,
   writeTestWikiColumns,
 } from "./db";
 import { checkWikiName } from "@/lib/wiki-name";
+import { wikiNameSegment } from "@/lib/wiki-address";
 import { createAgent } from "./mcp";
 
 test.describe("names and data (docs/WIKI.md \"Data model\", \"The name is the title\")", () => {
@@ -482,7 +486,7 @@ test.describe("a person's page and its owner (docs/WIKI.md \"Permissions\")", ()
       expect(await asOwner(true)).toMatchObject({ ok: true });
       // Taken in other capitals, which is the same address.
       second = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", name: first.wikiName.toUpperCase(), visibility: "SHARED" });
-      expect(await asOwner(false)).toEqual({ ok: true, wikiPath: `${first.path}~2`, renamedFrom: first.path });
+      expect(await asOwner(false)).toEqual({ ok: true, wikiPath: `${first.path}~2`, renamedFrom: first.path, removedAddresses: [] });
       expect(await getTestWikiFacts(first.id)).toMatchObject({ deleted: false, wikiVariant: "2" });
     } finally {
       await deleteTestDoc(first.id);
@@ -693,7 +697,7 @@ test.describe("wiki addresses (docs/WIKI.md \"URLs\", \"Requests and responses\"
     }
   });
 
-  test("a page's editor: Forbidden with a link to the page for a reader who can't edit it, the editor for one who can, its name read-only", async ({
+  test("a page's editor: Forbidden with a link to the page for a reader who can't edit it, the editor for one who can, its name the rename field", async ({
     page,
     secondUser,
   }) => {
@@ -710,8 +714,8 @@ test.describe("wiki addresses (docs/WIKI.md \"URLs\", \"Requests and responses\"
       await ownerPage.goto(`${wiki.path}/edit`);
       await waitForDocCollabReady(ownerPage);
       await expect(ownerPage.getByRole("link", { name: "View and Annotate" })).toHaveAttribute("href", wiki.path);
-      await expect(ownerPage.locator("[data-wiki-name]")).toHaveText(wiki.wikiName);
-      await expect(ownerPage.locator("[data-wiki-name] [contenteditable]")).toHaveCount(0);
+      await expect(ownerPage.locator("[data-wiki-name]")).toHaveValue(wiki.wikiName);
+      await expect(ownerPage.locator("[data-wiki-name-field] [contenteditable]")).toHaveCount(0);
     } finally {
       await deleteTestDoc(wiki.id);
     }
@@ -1118,6 +1122,317 @@ test.describe("listing wiki pages (docs/WIKI.md \"Listing wiki pages\", \"Labels
   });
 });
 
+/** A page's path at another name in its own namespace. */
+function pathAt(wiki: { path: string }, name: string, variant = ""): string {
+  const base = wiki.path.slice(0, wiki.path.lastIndexOf("/") + 1);
+  return `${base}${wikiNameSegment(name)}${variant ? `~${variant}` : ""}`;
+}
+
+test.describe("renaming (docs/WIKI.md \"Renaming\")", () => {
+  test("a rename reserves the address it leaves: every claim refuses it, a restore passes over it, and a reader is sent on, a 307 keeping the sub-path and query", async ({
+    page,
+    playwright,
+    baseURL,
+    secondUser,
+  }) => {
+    const { user: owner } = await secondUser({ role: "AUTHOR" });
+    const wiki = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "SHARED" });
+    const renamed = `${wiki.wikiName} renamedword`;
+    const created: string[] = [];
+    try {
+      expect(await renameWikiPageAs({ actorEmail: owner.email, docId: wiki.id, change: { name: renamed } })).toEqual({
+        ok: true,
+        path: pathAt(wiki, renamed),
+        renamedFrom: wiki.path,
+      });
+      expect(await getTestWikiFacts(wiki.id, "renamedword")).toMatchObject({ wikiName: renamed, title: renamed, searchMatches: true });
+      expect(await getTestWikiAddressHistory(wiki.id)).toMatchObject([
+        { ownerEmail: owner.email, name: wiki.wikiName, variant: "", reserved: true, movedByEmail: owner.email },
+      ]);
+
+      // Creating at it, in any capitals, is refused, naming the address.
+      const taken = await createWikiPageAs({
+        actorEmail: owner.email,
+        page: { namespace: "person", name: wiki.wikiName.toUpperCase(), visibility: "SHARED" },
+      });
+      expect(taken).toMatchObject({ ok: false, code: "conflict" });
+
+      // A deleted page restored to an address a reserved row holds comes back at the next free variant.
+      const other = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "SHARED" });
+      created.push(other.id);
+      expect(await changeTestDocSetting({ actorEmail: owner.email, docId: other.id, change: { deleted: true } })).toMatchObject({ ok: true });
+      expect(await renameWikiPageAs({ actorEmail: owner.email, docId: wiki.id, change: { name: other.wikiName } })).toMatchObject({ ok: true });
+      expect(await changeTestDocSetting({ actorEmail: owner.email, docId: other.id, change: { deleted: false } })).toMatchObject({
+        ok: true,
+        wikiPath: `${other.path}~2`,
+      });
+
+      // A reader at the old address is sent on, keeping the sub-path and the query; the first rename's
+      // address still holds, and now sends them to the page's current name.
+      const now = pathAt(wiki, other.wikiName);
+      expect(await answer(page.request, `${wiki.path}?a=1`)).toEqual([307, `${now}?a=1`]);
+      expect(await answer(page.request, `${pathAt(wiki, renamed)}/edit`)).toEqual([307, `${now}/edit`]);
+      expect(await answer(page.request, wiki.path.toUpperCase().replace("/WIKI/", "/wiki/").replace(/^\/wiki\/@[^/]+/, (m) => m.toLowerCase()))).toEqual([
+        307,
+        now,
+      ]);
+      // Signed out, a page that isn't public: the old address is the sign-in redirect, as a missing page is.
+      const anonymous = await playwright.request.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+      try {
+        expect(await answer(anonymous, wiki.path)).toEqual([307, toSignIn]);
+      } finally {
+        await anonymous.dispose();
+      }
+    } finally {
+      await deleteTestDoc(wiki.id);
+      for (const id of created) await deleteTestDoc(id);
+    }
+  });
+
+  test("renaming back takes the page's own rows, a change of case alone keeps none, and Revert keeps none inside the hour", async ({ secondUser }) => {
+    const { user: owner } = await secondUser({ role: "AUTHOR" });
+    const wiki = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "SHARED" });
+    const as = (change: Parameters<typeof renameWikiPageAs>[0]["change"]) => renameWikiPageAs({ actorEmail: owner.email, docId: wiki.id, change });
+    const names = async () => (await getTestWikiAddressHistory(wiki.id)).map((row) => `${row.name}${row.variant ? `~${row.variant}` : ""}`);
+    const b = `${wiki.wikiName} B`;
+    const c = `${wiki.wikiName} C`;
+    try {
+      expect(await as({ name: b })).toMatchObject({ ok: true });
+      expect(await names()).toEqual([wiki.wikiName]);
+      // Back to where it was: its own row there goes, and the one it leaves is kept.
+      expect(await as({ name: wiki.wikiName })).toMatchObject({ ok: true, path: wiki.path });
+      expect(await names()).toEqual([b]);
+      // Case alone: no row, and nothing refused.
+      expect(await as({ name: wiki.wikiName.toUpperCase() })).toMatchObject({ ok: true });
+      expect(await names()).toEqual([b]);
+      expect(await getTestWikiFacts(wiki.id)).toMatchObject({ wikiName: wiki.wikiName.toUpperCase() });
+      // A variant is a rename too.
+      expect(await as({ name: wiki.wikiName, variant: "v" })).toMatchObject({ ok: true, path: pathAt(wiki, wiki.wikiName, "v") });
+      expect(await names()).toEqual([wiki.wikiName.toUpperCase(), b]);
+
+      // Revert inside the hour: back to the newest reserved row, keeping none for where it was.
+      expect(await as({ revert: true })).toMatchObject({ ok: true, path: pathAt(wiki, wiki.wikiName.toUpperCase()) });
+      expect(await names()).toEqual([b]);
+      // An hour on, Revert keeps a row for the address it leaves.
+      expect(await as({ name: c })).toMatchObject({ ok: true });
+      await ageTestWikiAddressHistory(wiki.id, 2 * 60 * 60 * 1000);
+      expect(await as({ revert: true })).toMatchObject({ ok: true });
+      expect(await names()).toEqual([c, b]);
+      // Nothing left to go back to once the rows are gone.
+      for (const row of await getTestWikiAddressHistory(wiki.id)) expect(await as({ deleteRow: row.id })).toEqual({ ok: true });
+      expect(await as({ revert: true })).toMatchObject({ ok: false, code: "invalid" });
+    } finally {
+      await deleteTestDoc(wiki.id);
+    }
+  });
+
+  test("who may rename: a person's page's byline, a commons page's byline plus ADMIN and EDITOR, a held name an editor alone; an unreadable page is not_found", async ({
+    secondUser,
+  }) => {
+    const { user: owner } = await secondUser({ role: "AUTHOR" });
+    const { user: coauthor } = await secondUser({ role: "AUTHOR" });
+    const { user: editor } = await secondUser({ role: "EDITOR" });
+    const personal = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "SHARED" });
+    const hidden = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "PRIVATE" });
+    const commons = await createTestWikiPage({ authorEmail: owner.email, namespace: "commons", visibility: "SHARED" });
+    const rename = (actorEmail: string, docId: string, name: string, variant?: string) =>
+      renameWikiPageAs({ actorEmail, docId, change: { name, variant } });
+    try {
+      // A person's page: no bypass for an ADMIN or EDITOR, who can read it; a co-author may.
+      expect(await rename(ADMIN_EMAIL, personal.id, `${personal.wikiName} x`)).toMatchObject({ ok: false, code: "forbidden" });
+      expect(await rename(editor.email, personal.id, `${personal.wikiName} x`)).toMatchObject({ ok: false, code: "forbidden" });
+      expect(await rename(ADMIN_EMAIL, hidden.id, `${hidden.wikiName} x`)).toMatchObject({ ok: false, code: "not_found" });
+      await addTestDocAuthor(personal.id, coauthor.email);
+      expect(await rename(coauthor.email, personal.id, `${personal.wikiName} x`)).toMatchObject({ ok: true });
+
+      // A commons page: its byline, and an EDITOR off it.
+      expect(await rename(editor.email, commons.id, `${commons.wikiName} x`)).toMatchObject({ ok: true });
+      // The held names are an ADMIN's or EDITOR's to give, in any capitals and with any variant.
+      for (const [name, variant] of [["ABOUT", `e2e-${Date.now()}`], ["Front Page", "x"]]) {
+        expect(await rename(owner.email, commons.id, name, variant)).toMatchObject({ ok: false, code: "forbidden", message: expect.stringContaining("kept for editors") });
+      }
+      expect(await rename(editor.email, commons.id, "About", `e2e-${Date.now()}`)).toMatchObject({ ok: true });
+      // A deleted page is renamed after it is restored.
+      expect(await changeTestDocSetting({ actorEmail: owner.email, docId: hidden.id, change: { deleted: true } })).toMatchObject({ ok: true });
+      expect(await rename(owner.email, hidden.id, `${hidden.wikiName} x`)).toMatchObject({ ok: false, code: "invalid" });
+      // A doc that isn't a wiki page has a title, not a name.
+      const doc = await createTestDoc({ authorEmail: owner.email, visibility: "SHARED" });
+      try {
+        expect(await rename(owner.email, doc.id, "Anything")).toMatchObject({ ok: false, code: "invalid" });
+      } finally {
+        await deleteTestDoc(doc.id);
+      }
+    } finally {
+      for (const id of [personal.id, hidden.id, commons.id]) await deleteTestDoc(id);
+    }
+  });
+
+  test("two renames of one page queue on its row, each recording the address the other left, and neither ends as a deadlock", async ({ secondUser }) => {
+    const { user: owner } = await secondUser({ role: "AUTHOR" });
+    const wiki = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "SHARED" });
+    try {
+      const [first, second] = await Promise.all(
+        ["Alpha", "Omega"].map((suffix) => renameWikiPageAs({ actorEmail: owner.email, docId: wiki.id, change: { name: `${wiki.wikiName} ${suffix}` } })),
+      );
+      expect(first).toMatchObject({ ok: true });
+      expect(second).toMatchObject({ ok: true });
+      const facts = await getTestWikiFacts(wiki.id);
+      const left = (await getTestWikiAddressHistory(wiki.id)).map((row) => row.name).sort();
+      // The page ends at one of the two names, and its history holds the original and the other.
+      const other = facts.wikiName === `${wiki.wikiName} Alpha` ? `${wiki.wikiName} Omega` : `${wiki.wikiName} Alpha`;
+      expect(left).toEqual([wiki.wikiName, other].sort());
+    } finally {
+      await deleteTestDoc(wiki.id);
+    }
+  });
+
+  test("a deleted row ends its redirect and frees its address", async ({ page, secondUser }) => {
+    const { user: owner } = await secondUser({ role: "AUTHOR" });
+    const wiki = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "SHARED" });
+    const created: string[] = [];
+    try {
+      expect(await renameWikiPageAs({ actorEmail: owner.email, docId: wiki.id, change: { name: `${wiki.wikiName} moved` } })).toMatchObject({ ok: true });
+      expect((await answer(page.request, wiki.path))[0]).toBe(307);
+      const [row] = await getTestWikiAddressHistory(wiki.id);
+      // Only its editors may delete it.
+      expect(await renameWikiPageAs({ actorEmail: ADMIN_EMAIL, docId: wiki.id, change: { deleteRow: row.id } })).toMatchObject({ ok: false, code: "forbidden" });
+      expect(await renameWikiPageAs({ actorEmail: owner.email, docId: wiki.id, change: { deleteRow: row.id } })).toEqual({ ok: true });
+      expect((await answer(page.request, wiki.path))[0]).toBe(404);
+      const again = await createWikiPageAs({ actorEmail: owner.email, page: { namespace: "person", name: wiki.wikiName, visibility: "SHARED" } });
+      expect(again).toMatchObject({ ok: true });
+      if (again.ok) created.push(again.id);
+    } finally {
+      await deleteTestDoc(wiki.id);
+      for (const id of created) await deleteTestDoc(id);
+    }
+  });
+
+  test("the editor's name field renames and goes on to the new address; /doc/<slug>/slug lists the history, renames with a variant, reverts and deletes", async ({
+    page,
+  }) => {
+    const wiki = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", visibility: "SHARED" });
+    const renamed = `${wiki.wikiName} (renamed)`;
+    try {
+      await page.goto(`${wiki.path}/edit`);
+      await waitForDocCollabReady(page);
+      const field = page.locator("[data-wiki-name]");
+      await field.fill(`${renamed} [`);
+      await expect(page.locator("[data-wiki-name-field]").getByText(checkWikiNameMessage(`${renamed} [`))).toBeVisible();
+      await expect(page.getByRole("button", { name: "Rename", exact: true })).toBeDisabled();
+      await field.fill(renamed);
+      await page.getByRole("button", { name: "Rename", exact: true }).click();
+      await page.waitForURL((url) => url.pathname === `${pathAt(wiki, renamed)}/edit`);
+      await expect(page.locator("[data-wiki-name]")).toHaveValue(renamed);
+      await expect(page).toHaveTitle(new RegExp(renamed.replace(/[()]/g, "\\$&")));
+
+      await page.goto(`/doc/${wiki.slug}/slug`);
+      const manager = page.locator("[data-wiki-address-manager]");
+      await expect(manager.getByRole("link", { name: pathAt(wiki, renamed) })).toBeVisible();
+      await expect(manager.locator(`[data-wiki-address-row="${wiki.path}"]`)).toContainText("Yes");
+      await manager.getByRole("button", { name: "Rename…" }).click();
+      await manager.getByLabel("Variant").fill("e2e-v");
+      await manager.getByRole("button", { name: "Rename", exact: true }).click();
+      await expect(manager.getByRole("link", { name: pathAt(wiki, renamed, "e2e-v") })).toBeVisible();
+      await expect(manager.locator("[data-wiki-address-row]")).toHaveCount(2);
+
+      // Revert inside the hour goes back and keeps nothing for the variant.
+      await manager.getByRole("button", { name: "Revert" }).click();
+      await expect(manager.getByRole("link", { name: pathAt(wiki, renamed) })).toBeVisible();
+      await expect(manager.locator("[data-wiki-address-row]")).toHaveCount(1);
+      await manager.getByRole("button", { name: "Delete" }).click();
+      await manager.getByRole("button", { name: "Yes" }).click();
+      await expect(manager.getByText("No past addresses.")).toBeVisible();
+      expect(await getTestWikiAddressHistory(wiki.id)).toEqual([]);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(wiki.id);
+    }
+  });
+});
+
+test.describe("deleting a page (docs/WIKI.md \"Deleting a page\")", () => {
+  test("a delete takes the page's past addresses with it, and a restore doesn't bring them back", async ({ page, secondUser }) => {
+    const { user: owner } = await secondUser({ role: "AUTHOR" });
+    const wiki = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "SHARED" });
+    try {
+      expect(await renameWikiPageAs({ actorEmail: owner.email, docId: wiki.id, change: { name: `${wiki.wikiName} 2` } })).toMatchObject({ ok: true });
+      expect(await changeTestDocSetting({ actorEmail: owner.email, docId: wiki.id, change: { deleted: true } })).toEqual({
+        ok: true,
+        wikiPath: null,
+        renamedFrom: null,
+        removedAddresses: [wiki.path],
+      });
+      expect(await getTestWikiAddressHistory(wiki.id)).toEqual([]);
+      expect((await answer(page.request, wiki.path))[0]).toBe(404);
+      expect(await changeTestDocSetting({ actorEmail: owner.email, docId: wiki.id, change: { deleted: false } })).toMatchObject({ ok: true });
+      expect(await getTestWikiAddressHistory(wiki.id)).toEqual([]);
+    } finally {
+      await deleteTestDoc(wiki.id);
+    }
+  });
+
+  test("the editor's Delete and the wiki table's row and bulk Delete list the past addresses first, and a page with none deletes at once", async ({
+    page,
+  }) => {
+    const moved = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", visibility: "SHARED" });
+    const plain = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", visibility: "SHARED" });
+    const renamed = `${moved.wikiName} now`;
+    const settings = page.locator("details").filter({ has: page.locator("summary", { hasText: "Settings" }) });
+    const reset = async () => {
+      await changeTestDocSetting({ actorEmail: ADMIN_EMAIL, docId: moved.id, change: { deleted: false } });
+      await renameWikiPageAs({ actorEmail: ADMIN_EMAIL, docId: moved.id, change: { name: moved.wikiName } });
+      await renameWikiPageAs({ actorEmail: ADMIN_EMAIL, docId: moved.id, change: { name: renamed } });
+    };
+    try {
+      expect(await renameWikiPageAs({ actorEmail: ADMIN_EMAIL, docId: moved.id, change: { name: renamed } })).toMatchObject({ ok: true });
+
+      // The editor: asks, lists, and Cancel deletes nothing.
+      await page.goto(`${pathAt(moved, renamed)}/edit`);
+      await waitForDocCollabReady(page);
+      await settings.locator("summary").click();
+      await settings.getByRole("button", { name: "Delete" }).click();
+      const confirm = settings.locator("[data-delete-addresses-confirm]");
+      await expect(confirm).toContainText(moved.path);
+      await confirm.getByRole("button", { name: "Cancel" }).click();
+      expect(await getTestWikiFacts(moved.id)).toMatchObject({ deleted: false });
+      await settings.getByRole("button", { name: "Delete" }).click();
+      await confirm.getByRole("button", { name: "Delete" }).click();
+      await page.waitForURL(`**/doc/${moved.id}/edit`);
+      expect(await getTestWikiFacts(moved.id)).toMatchObject({ deleted: true });
+      expect(await getTestWikiAddressHistory(moved.id)).toEqual([]);
+
+      // The wiki table's row Delete asks for the page with history, and not for one without.
+      await reset();
+      const row = await wikiTableRow(page, { wikiName: renamed });
+      await row.getByRole("button", { name: /Delete/ }).click();
+      const tableConfirm = page.locator("[data-delete-addresses-confirm]");
+      await expect(tableConfirm).toContainText(moved.path);
+      await tableConfirm.getByRole("button", { name: "Delete" }).click();
+      await expect.poll(async () => (await getTestWikiFacts(moved.id)).deleted).toBe(true);
+      const plainRow = await wikiTableRow(page, plain);
+      await plainRow.getByRole("button", { name: /Delete/ }).click();
+      await expect.poll(async () => (await getTestWikiFacts(plain.id)).deleted).toBe(true);
+      await expect(page.locator("[data-delete-addresses-confirm]")).toHaveCount(0);
+      await changeTestDocSetting({ actorEmail: ADMIN_EMAIL, docId: plain.id, change: { deleted: false } });
+
+      // The bulk Delete lists the selected pages that have history before any is deleted.
+      await reset();
+      await page.goto(`/wiki/special/pages?q=${encodeURIComponent(moved.wikiName)}`);
+      await page.getByRole("checkbox", { name: "Select all rows" }).check();
+      await page.getByRole("button", { name: "Delete selected pages" }).click();
+      const bulkConfirm = page.locator("[data-bulk-confirm]");
+      await expect(bulkConfirm).toContainText(moved.path);
+      expect(await getTestWikiFacts(moved.id)).toMatchObject({ deleted: false });
+      await bulkConfirm.getByRole("button", { name: "Delete selected pages" }).click();
+      await expect.poll(async () => (await getTestWikiFacts(moved.id)).deleted).toBe(true);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(moved.id);
+      await deleteTestDoc(plain.id);
+    }
+  });
+});
+
 test.describe("MCP and a page's address (docs/WIKI.md \"URLs\")", () => {
   test("read and tag take a page's address, in other capitals too, and an unreadable page is not_found as a missing one is", async ({
     request,
@@ -1133,6 +1448,11 @@ test.describe("MCP and a page's address (docs/WIKI.md \"URLs\")", () => {
       expect(JSON.stringify(read.result)).toContain("Read through MCP.");
       const folded = await agent.call("read", { url: wiki.path.toLowerCase() });
       expect(folded.isError).toBeFalsy();
+      // An old address reaches the page, as a slug in a doc's history does.
+      expect(await renameWikiPageAs({ actorEmail: ADMIN_EMAIL, docId: wiki.id, change: { name: `${wiki.wikiName} renamed` } })).toMatchObject({ ok: true });
+      const moved = await agent.call("read", { url: wiki.path });
+      expect(moved.isError).toBeFalsy();
+      expect(JSON.stringify(moved.result)).toContain("Read through MCP.");
       for (const url of [hidden.path, "/wiki/commons/E2E_no_such_page"]) {
         const refused = await agent.call("read", { url });
         expect(refused.isError, url).toBe(true);

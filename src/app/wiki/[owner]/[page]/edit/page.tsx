@@ -29,7 +29,7 @@ const loadWikiEditor = gatedAnyViewer(async (user, owner: string, page: string) 
     const doc = await findWikiPage(ownerIdOf(found), address!.name, address!.variant, DOC_EDIT_SELECT);
     if (!doc || !(await canReadWikiDoc(user, doc))) return null;
     return { value: doc, page: { name: doc.wikiName!, variant: doc.wikiVariant } };
-  });
+  }, { oldAddressesFor: { viewer: user } });
   if (answer.kind === "not-found") return "not-found";
   if (answer.kind === "redirect") return redirectRejection(answer.redirect);
   if (user === null) return "signed-out";

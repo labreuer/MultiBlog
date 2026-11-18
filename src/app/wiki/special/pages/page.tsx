@@ -21,6 +21,8 @@ import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import { docPagePath, wikiPagePath, type WikiOwner } from "@/lib/wiki-address";
 import { parseTagList } from "@/lib/tag-data";
 import { codeDefaultColumns } from "@/lib/admin-table-columns";
+import { staffDisplayNameOf } from "@/lib/display-name";
+import { wikiAddressHistoriesOf } from "@/lib/wiki-rename";
 import WikiPagesTable, { type WikiPageRow } from "@/components/WikiPagesTable";
 
 // docs/WIKI.md "Listing wiki pages" — every wiki page this viewer's /docs
@@ -178,6 +180,14 @@ export default async function WikiPagesPage({
     prismaIncludingDeleted.doc.count({ where }),
   ]);
 
+  // docs/WIKI.md "Deleting a page": a delete lists the past addresses it
+  // takes with the page, so each live row whose Delete is offered carries
+  // them. A deleted page has none: they went with it.
+  const histories = await wikiAddressHistoriesOf(
+    docs.filter((doc) => doc.deletedByUserId === null).map((doc) => doc.id),
+    (u) => staffDisplayNameOf(u, role),
+  );
+
   const rows: WikiPageRow[] = docs.map((doc) => {
     const isAuthor = doc.authors.length > 0;
     // canUserReadDoc's rule over the row in hand, as /docs inlines it: only a
@@ -231,6 +241,7 @@ export default async function WikiPagesPage({
       canSetVisibility,
       canDelete,
       canTag: readable,
+      addressHistory: canDelete ? (histories.get(doc.id) ?? []) : [],
     };
   });
 

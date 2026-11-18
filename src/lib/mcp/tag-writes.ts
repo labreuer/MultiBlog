@@ -61,7 +61,7 @@ async function postTarget(ctx: McpContext, by: { slug: string } | { id: string }
  * through its own read rule; `applyTags` runs the tag gate on top.
  */
 export async function resolveTagTarget(ctx: McpContext, ref: string): Promise<TagTarget> {
-  const parsed = await parseDocRef(ref);
+  const parsed = await parseDocRef(ref, ctx.actor);
   switch (parsed.kind) {
     case "doc": {
       const doc = await readableDocByParam(ctx.actor, parsed.param);

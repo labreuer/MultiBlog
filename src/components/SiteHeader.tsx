@@ -198,11 +198,26 @@ export default function SiteHeader() {
               >
                 References
               </Link>
+              {/* docs/WIKI.md "Listing wiki pages" — wiki pages have an admin
+                  table of their own, since /docs lists none of them. */}
+              <Link
+                href="/wiki/special/pages"
+                className={styles.dropdownItem}
+                onClick={() => closeMenu(docsMenuRef.current)}
+              >
+                Wiki pages
+              </Link>
             </div>
           </details>
         </span>
       ),
     });
+  }
+  // docs/WIKI.md "Build order" — the wiki's front, for any signed-in reader:
+  // it lists the commons pages the viewer may read, a COMMENTER's PUBLIC ones
+  // included. Signed out the header stays the blog's.
+  if (session?.user) {
+    leftNav.push({ key: "wiki", node: <Link href="/wiki">Wiki</Link> });
   }
   // Content first, people last: Posts, Docs and Files are the three things
   // the site *holds*, Links is a cross-cutting view over two of them, and

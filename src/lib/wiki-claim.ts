@@ -91,27 +91,35 @@ export async function lockWikiName(tx: RawClient, ownerUserId: string | null, na
   return { key: row.key, assigned: row.assigned, heldInCommons: row.held };
 }
 
-/** The variants live at a name's key in one namespace, `excludeDocId`'s aside. Asked under lockWikiName. */
+/**
+ * The variants held at a name's key in one namespace, asked under
+ * lockWikiName: those a live page lives at, and those a reserved history row
+ * holds (docs/WIKI.md "Renaming"). A released row holds nothing. The
+ * claiming doc's own address and own rows don't count against it
+ * (`excludeDocId`): a page renamed back to an address it had takes it.
+ */
 export async function takenVariants(
   tx: Prisma.TransactionClient,
   ownerUserId: string | null,
   key: string,
   excludeDocId?: string,
 ): Promise<Set<string>> {
-  const rows = await tx.doc.findMany({
-    where: {
-      wikiNameKey: key,
-      wikiName: { not: null },
-      wikiOwnerUserId: ownerUserId,
-      deletedByUserId: null,
-      ...(excludeDocId ? { id: { not: excludeDocId } } : {}),
-    },
-    select: { wikiVariant: true },
-  });
-  return new Set(rows.map((row) => row.wikiVariant));
+  const notThisDoc = excludeDocId ? { id: { not: excludeDocId } } : {};
+  const notThisDocsRows = excludeDocId ? { docId: { not: excludeDocId } } : {};
+  const [live, reserved] = await Promise.all([
+    tx.doc.findMany({
+      where: { wikiNameKey: key, wikiName: { not: null }, wikiOwnerUserId: ownerUserId, deletedByUserId: null, ...notThisDoc },
+      select: { wikiVariant: true },
+    }),
+    tx.wikiAddressHistory.findMany({
+      where: { nameKey: key, ownerUserId, reserved: true, ...notThisDocsRows },
+      select: { variant: true },
+    }),
+  ]);
+  return new Set([...live.map((row) => row.wikiVariant), ...reserved.map((row) => row.variant)]);
 }
 
-/** A claim of a typed address that a live page already holds, refused before anything is written. */
+/** A claim of a typed address that a live page or a reserved history row already holds, refused before anything is written. */
 export class WikiAddressTaken extends Error {
   constructor() {
     super("That address is taken.");
@@ -141,8 +149,8 @@ export type WikiClaim = {
  *   takes the first free one, so of two claims of one default address the
  *   second gets the next. A dialog shows the default and sends none.
  *
- * `excludeDocId` is the doc making the claim, whose own address doesn't count
- * against it (a restore).
+ * `excludeDocId` is the doc making the claim, whose own address and history
+ * rows don't count against it (a restore, a rename).
  */
 export async function claimWikiAddress(
   tx: Prisma.TransactionClient,
