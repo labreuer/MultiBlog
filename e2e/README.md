@@ -489,6 +489,14 @@ the admin account.
   `[data-state="done"]` before reading a row (`done` in `doc-diff.spec.ts`), or a row not yet
   drawn reads like one that never will be. Rows carry `data-kind`, cells `data-side`.
   `softDeleteTestDoc` deletes a doc the way the editor's Delete does.
+- **A diff's slider is driven by key, once its index has loaded.** An untouched slider is the
+  same `<input>` with its value held, so a key pressed on it moves nothing: focus it, wait
+  for `[data-loaded]` on its half of the bar (`[data-kind="diff-sliders"] [data-side]`), then
+  press. A press turns the island's `data-state` to `comparing` at once, with the rows of
+  the pair before still in it, and it is `done` again only when the rows are for the pair
+  the sliders name: wait on `done`, never on the address, which is written 400 ms after the
+  sliders rest whether or not the rows have come. `next dev` mounts the page twice (Strict
+  Mode), so a count of `/api/diff/` requests on a fresh mount differs between the targets.
 - **The scrub bar's slider exists before its history does.** The inert `<input>` it starts
   as has the same label and a `max` of 100, so a wait on `max` alone can pass before
   anything has loaded. Wait for the value the history gives it, or for a control only the

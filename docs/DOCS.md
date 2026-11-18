@@ -281,7 +281,9 @@ mechanics, and why the re-read runs there and not on every navigation.
 | `/annotations` | annotation browse/admin, scoped to the docs the viewer may *read* (ANNOTATIONS.md) |
 | `POST /api/doc/[id]/token` | the collab token, with `readOnly` for a reader ("Collab") |
 | `GET /api/doc/[id]/replay` | the update log the scrub bar replays, `canUserSeeDocHistory` |
-| `/diff/[left]/[right]` | a word diff of two docs, or of one doc at two versions; each side a doc id, or `<id>@<update id>` (FORKS.md, "Diffs") |
+| `GET /api/doc/[id]/versions` | the log's update ids and their times, and none of its bytes: what a slider on the diff page reads, `canUserSeeDocHistory` (FORKS.md, "Sliders on the diff page") |
+| `GET /api/diff/[left]/[right]` | a diff's pair as JSON, behind the diff page's own gate: what that page asks for each pair its sliders name (FORKS.md, "Sliders on the diff page") |
+| `/diff/[left]/[right]` | a word diff of two docs, or of one doc at two versions; each side a doc id, or `<id>@<update id>`, with a slider for each side whose history the viewer may see (FORKS.md, "Diffs") |
 
 **One segment, id-or-slug.** Next rejects `app/doc/[slug]/page.tsx` beside
 `app/doc/[id]/edit/page.tsx` ("You cannot use different slug names for the same dynamic
@@ -385,6 +387,12 @@ has synced.
   bar's history is the replay it fetched, so it says when the live tap has received a
   change since ("Changes have come in since this history loaded; reload to include them"),
   and replays nothing again.
+- **The diff page has sliders of its own**, one for each side whose history the viewer may
+  see, and they share nothing with this bar but the look of an untouched one. This bar
+  downloads the log and replays it in the browser; a diff's slider fetches the log's ids and
+  times (`/api/doc/[id]/versions`) and names a pair, which the page asks the server for
+  (`/api/diff/[left]/[right]`), so the server builds both sides (FORKS.md, "Sliders on the
+  diff page").
 - **The position is in the URL as `?at=<ydoc_update id>`**, and the live end is the
   parameter's *absence* — so a link shared before later edits still means "the newest
   version" rather than pinning its reader to a head that has moved. The id, not the

@@ -45,7 +45,9 @@
   pointer-events: none;
 }
 
-/* The position on the left, the pin and the diff links on the right. */
+/* Under the slider: the position on the left, the pin and the diff links on
+   the right. A line high even when it holds nothing, so the slider above it
+   doesn't move as its parts come and go. */
 .controls {
   display: flex;
   flex-wrap: wrap;
@@ -53,7 +55,8 @@
   justify-content: space-between;
   gap: 0 1rem;
   font-size: 0.8rem;
-  margin-bottom: 0.35rem;
+  min-height: 1.2em;
+  margin-top: 0.35rem;
 }
 
 .controls .positionLine {
@@ -89,10 +92,16 @@
 }
 
 .positionLine,
-.loadingLine,
 .staleLine {
   font-size: 0.8rem;
   margin-bottom: 0.35rem;
+}
+
+/* Under the unloaded slider, a line high even when empty. */
+.loadingLine {
+  font-size: 0.8rem;
+  min-height: 1.2em;
+  margin-top: 0.35rem;
 }
 
 .staleLine {

@@ -1,69 +1,7 @@
-/* The diff page's shell (docs/FORKS.md, "What is compared"): a title row, the
-   two sides' headers, and below them DocDiff's rows.
-
-   Two reading measures side by side: 800px a column, the 1rem between them,
-   and a 1.5rem gutter either side, which this container carries itself since
-   it is the <main> (STYLE.md, "Breakpoints and centred-column widths"). On a
-   narrower window the two columns share what there is. */
-.container {
-  width: calc(1600px + 1rem + 3rem);
-  max-width: 100%;
-  margin: 2rem auto;
-  padding: 0 1.5rem;
-  font-family: sans-serif;
-}
-
+/* The diff page's refusal. Everything a diff itself is drawn with is
+   DiffView's (src/components/DiffView.module.css). */
 .forbidden {
   max-width: 480px;
   margin: 4rem auto;
   font-family: sans-serif;
-}
-
-.titleRow {
-  display: flex;
-  align-items: baseline;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-/* The same two columns and the same gap as DocDiff's grid, so each header
-   sits over its side's cells. */
-.sides {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 4px 1rem;
-  margin-bottom: 8px;
-}
-
-.side {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.sideTitle {
-  overflow-wrap: anywhere;
-}
-
-.when {
-  color: var(--text-secondary);
-  font-size: 0.85rem;
-}
-
-/* "Earlier" or "Later", before the side's time. */
-.order {
-  margin-right: 0.5em;
-  font-weight: bold;
-  color: var(--foreground);
-}
-
-.orderNote {
-  margin: 0.5rem 0;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--surface-muted);
-  font-size: 0.9rem;
 }

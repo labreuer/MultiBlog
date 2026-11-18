@@ -62,7 +62,7 @@ its `canManageDocs` gate, so the row can never arise · `own` only rows that use
 ⚠️ only with the ADMIN-only "Show all docs" checkbox (`?showAllDocs=1`) · † the action is
 doc-independent, so it is callable directly but unreachable through the UI · ‡ but for the one
 version a fork of this doc was made at, in a diff, for a viewer who may see that fork's history
-(FORKS.md, "Who may see a doc's history").
+(FORKS.md, "Who may see a doc's history"); that side of the diff has no slider.
 
 ## 1. PRIVATE & in `doc_author`
 
@@ -71,7 +71,7 @@ version a fork of this doc was made at, in a diff, for a viewer who may see that
 | Read `/doc/[slug]` | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Edit `/doc/[slug]/edit` | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Collab connection | write | write | write | ✗ | ✗ |
-| See history (`canUserSeeDocHistory`: the scrub bar; MCP's `since`) | ✅ | ✅ | ✅ | ❌ | ❌ |
+| See history (`canUserSeeDocHistory`: the scrub bar; a diff side's slider; MCP's `since`) | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Visibility / byline / slug / delete | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Listed in `/docs` | ✅ | ✅ | ✅ | — | — |
 | Edit link in `/docs` | ✅ | ✅ | ✅ | — | — |
@@ -96,7 +96,7 @@ byline, role notwithstanding.
 | Read `/doc/[slug]` | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Edit `/doc/[slug]/edit` | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Collab connection | ✗ | ✗ | ✗ | ✗ | ✗ |
-| See history (`canUserSeeDocHistory`: the scrub bar; MCP's `since`) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| See history (`canUserSeeDocHistory`: the scrub bar; a diff side's slider; MCP's `since`) | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Visibility / byline / slug / delete | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Listed in `/docs` | ⚠️ | ❌ | ❌ | — | — |
 | Edit link in `/docs` | ❌ | ❌ | ❌ | — | — |
@@ -118,7 +118,7 @@ byline, role notwithstanding.
 | Read `/doc/[slug]` | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Edit `/doc/[slug]/edit` | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Collab connection | write | write | write | read-only | ✗ |
-| See history (`canUserSeeDocHistory`: the scrub bar; MCP's `since`) | ✅ | ✅ | ✅ | ❌ | ❌ |
+| See history (`canUserSeeDocHistory`: the scrub bar; a diff side's slider; MCP's `since`) | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Visibility / byline / slug / delete | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Listed in `/docs` | ✅ | ✅ | ✅ | — | — |
 | Edit link in `/docs` | ✅ | ✅ | ✅ | — | — |
@@ -143,7 +143,7 @@ inconsistencies" below, both of which are visible here.
 | Read `/doc/[slug]` | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Edit `/doc/[slug]/edit` | ✅ | ✅ | **❌** | ❌ | ❌ |
 | Collab connection | write | write | **read-only** | read-only | ✗ |
-| See history (`canUserSeeDocHistory`: the scrub bar; MCP's `since`) | ✅ | ✅ | ❌ | ❌ | ❌ |
+| See history (`canUserSeeDocHistory`: the scrub bar; a diff side's slider; MCP's `since`) | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Visibility / byline / slug / delete | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Listed in `/docs` | ✅ | ✅ | **❌** | — | — |
 | Edit link in `/docs` | ✅ | ✅ | ❌ | — | — |
@@ -825,8 +825,8 @@ Re-derive from these rather than trusting the tables after an authz change:
 | `/annotations` row scoping | `src/app/annotations/page.tsx` |
 | `/doc/[slug]` read gate · `/doc/[slug]/edit` edit gate | `src/app/doc/[slug]/page.tsx`, `…/edit/page.tsx` |
 | Collab token: writable vs read-only vs refused | `src/app/api/doc/[id]/token/route.ts` |
-| A doc's history, any state of it but the current one: the scrub bar's replay and its mounting, MCP's `since`, and a diff's versions (asked before the version is looked for) | `canUserSeeDocHistory`, `docsWithVisibleHistoryWhere` and `canUserSeeDocVersion` in `src/lib/doc-authz.ts`, applied in `src/app/api/doc/[id]/replay/route.ts`, `src/app/doc/[slug]/page.tsx`, `readDoc` in `src/lib/mcp/read/doc.ts` and `loadDiffPair` |
-| The diff route's pair gate | `loadDiffPair` in `src/app/diff/[left]/[right]/page.tsx` |
+| A doc's history, any state of it but the current one: the scrub bar's replay and its mounting, MCP's `since`, a diff's versions (asked before the version is looked for), and a diff side's slider with the index it reads (asked before anything is looked up) | `canUserSeeDocHistory`, `docsWithVisibleHistoryWhere` and `canUserSeeDocVersion` in `src/lib/doc-authz.ts`, applied in `src/app/api/doc/[id]/replay/route.ts`, `src/app/api/doc/[id]/versions/route.ts`, `src/app/doc/[slug]/page.tsx`, `readDoc` in `src/lib/mcp/read/doc.ts` and `gateDiffPair` in `src/lib/diff-pair.ts`, which the diff page and `/api/diff/[left]/[right]` both call |
+| The diff's pair gate, for its page and for `/api/diff/[left]/[right]` | `gateDiffPair` in `src/lib/diff-pair.ts` |
 | Doc mutations (visibility, byline, slug, record, delete) | `src/lib/doc-manage.ts`, wrapped by `src/app/actions/docs.ts` |
 | File mutations (visibility, title, slug, owners, delete), a version's promotion and abandoning, and the upload of a file or of a version | `src/lib/file-manage.ts`, `src/lib/file-ingest.ts` |
 | Who may upload a new version of a file (its managers, and a bot whose person manages it) | `canUserUploadFileVersion` in `src/lib/file-authz.ts` |

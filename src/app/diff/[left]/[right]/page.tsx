@@ -1,151 +1,27 @@
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
-import Link from "next/link";
-import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { gated, titleWhenOk } from "@/lib/route-access";
-import { canUserReadDoc, canUserSeeDocHistory, canUserSeeDocVersion } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
-import { isDocVersion, loadDocStateAt, loadDocStateNow } from "@/lib/doc-state";
-import { diffPath, parseDiffSide, pastForkPoint, sideOrder, type DiffSide, type PairLineage, type SideOrder } from "@/lib/diff-side";
-import type { DiffBlock } from "@/lib/doc-diff";
-import { SCRUB_PARAM } from "@/lib/scrub-url";
+import { gateDiffPair, readDiffPair } from "@/lib/diff-pair";
+import { diffPath, parseDiffSide } from "@/lib/diff-side";
 import { signInPath } from "@/lib/sign-in-redirect";
-import DocDiff from "@/components/DocDiff";
-import LocalTime from "@/components/LocalTime";
+import DiffView from "@/components/DiffView";
 import styles from "./page.module.css";
 
 // docs/FORKS.md "Diffs" — a word diff from the left side to the right: two
 // docs, or one doc at two versions. Each side is a doc id, or `<id>@<update
 // id>` for the doc at that version (src/lib/diff-side.ts). This page decides
 // who may see the pair and reads each side's blocks; the reader's browser
-// compares them, in a worker (`DocDiff`). It opens no collab connection, and
-// a side with no version is the doc as it was when the page loaded.
+// compares them, in a worker. It opens no collab connection, and a side with
+// no version is the doc as it was when read.
+//
+// **The gate and the read are src/lib/diff-pair.ts's, which the route a
+// slider asks (`/api/diff/[left]/[right]`) calls too.** Neither is written
+// here: this answers the gate's refusals and hands the read to `DiffView`,
+// which draws it and every pair the sliders name after it.
 
-const DOC_SELECT = {
-  id: true,
-  slug: true,
-  title: true,
-  visibility: true,
-  deletedByUserId: true,
-  // Whether one side was forked from the other, for "Which side is later".
-  forkedFromDocId: true,
-  forkedFromUpdateId: true,
-} as const;
-
-type PairDoc = { id: string; forkedFromDocId: string | null; forkedFromUpdateId: bigint | null };
-
-/**
- * Which of the pair's two docs was forked from the other, if either was. One
- * generation only (docs/FORKS.md, "Which side is later"). Both docs have
- * passed the gate by the time this is read, so it names nothing the viewer
- * can't read. `parentNow` is filled in once the sides are loaded.
- */
-function pairLineage(left: PairDoc, right: PairDoc): Omit<PairLineage, "parentNow"> | null {
-  for (const [fork, parent] of [
-    [left, right],
-    [right, left],
-  ] as const) {
-    if (fork.forkedFromDocId === parent.id && fork.forkedFromUpdateId !== null) {
-      return { parentDocId: parent.id, forkDocId: fork.id, forkPoint: fork.forkedFromUpdateId };
-    }
-  }
-  return null;
-}
-
-/**
- * The pair gate, in the order docs/FORKS.md's "Who may see one" gives:
- *
- * 1. both sides parse, or the page is a 404;
- * 2. each doc is read by id alone, so a slug is a 404, and a deleted one is
- *    refused by hand, since canUserReadDoc doesn't consider deletion;
- * 3. if either side is unreadable, so is the whole page, and the title
- *    answers the same way rather than naming half a pair;
- * 4. **a version needs canUserSeeDocVersion, asked before the version itself
- *    is looked for**, so a reader without the history gets Forbidden whatever
- *    the id;
- * 5. then a version that isn't in its doc's log is a 404, never replaced by
- *    the doc as it is now. In the other order, Forbidden against 404 would
- *    tell that reader which ids are in the log.
- *
- * The same doc on both sides is allowed: nothing here opens a Y.Doc in the
- * browser.
- */
-const loadDiffPair = gated(async (user, left: string, right: string) => {
-  const leftSide = parseDiffSide(left);
-  const rightSide = parseDiffSide(right);
-  if (leftSide === null || rightSide === null) return "not-found";
-  const sides = [leftSide, rightSide] as const;
-
-  const [leftDoc, rightDoc] = await Promise.all(
-    sides.map((side) => prismaIncludingDeleted.doc.findUnique({ where: { id: side.docId }, select: DOC_SELECT })),
-  );
-  if (!leftDoc || leftDoc.deletedByUserId !== null || !rightDoc || rightDoc.deletedByUserId !== null) return "not-found";
-
-  const readable = await Promise.all([leftDoc, rightDoc].map((doc) => canUserReadDoc(user.id, user.role, doc)));
-  if (!readable.every(Boolean)) return "forbidden";
-
-  const versioned = sides.filter((side): side is DiffSide & { updateId: bigint } => side.updateId !== null);
-  const visible = await Promise.all(versioned.map((side) => canUserSeeDocVersion(user.id, user.role, side.docId, side.updateId)));
-  if (!visible.every(Boolean)) return "forbidden";
-  const inLog = await Promise.all(versioned.map((side) => isDocVersion(side.docId, side.updateId)));
-  if (!inLog.every(Boolean)) return "not-found";
-
-  // Whether the doc's own reading view would honour `?at=` for this viewer:
-  // a version may also be visible as a fork's first state, to a viewer the
-  // parent's scrub bar is not for.
-  const [leftHistory, rightHistory] = await Promise.all(
-    sides.map((side) => (side.updateId === null ? false : canUserSeeDocHistory(user.id, user.role, side.docId))),
-  );
-  return {
-    left: { side: leftSide, doc: leftDoc, history: leftHistory },
-    right: { side: rightSide, doc: rightDoc, history: rightHistory },
-    lineage: leftDoc.id === rightDoc.id ? null : pairLineage(leftDoc, rightDoc),
-  };
-});
-
-type GatedSide = { side: DiffSide; doc: { id: string; slug: string; title: string }; history: boolean };
-
-type LoadedSide =
-  | {
-      ok: true;
-      title: string;
-      blocks: DiffBlock[];
-      at: Date | null;
-      /** The update a side with no version was read at; null for a side at a version, which names its own. */
-      nowVersion: bigint | null;
-    }
-  /** The store was unavailable, or the ydoc didn't decode under the doc schema. */
-  | { ok: false };
-
-/**
- * A side's text and its title as of that side. No version is
- * `loadDocStateNow`, the stored row with the log's later rows applied; a
- * version is `loadDocStateAt`, one replay. Neither comes from `prose_json`,
- * which trails the log while someone types.
- *
- * Either read can throw, once the gate has passed: the page then says so in
- * that side's place, and is not a 500.
- */
-async function loadSide({ side, doc }: GatedSide): Promise<LoadedSide> {
-  try {
-    const [now, at, row] = await Promise.all([
-      side.updateId === null ? loadDocStateNow(doc.id) : null,
-      side.updateId === null ? null : loadDocStateAt(doc.id, side.updateId),
-      side.updateId === null ? null : prisma.ydocUpdate.findUnique({ where: { id: side.updateId }, select: { createdAt: true } }),
-    ]);
-    const state = (now ?? at)!;
-    return {
-      ok: true,
-      title: docTitleOrFallback(state.title),
-      blocks: state.blocks.map((block) => ({ text: block.text, type: block.node.type.name, heading: block.heading !== null })),
-      at: row?.createdAt ?? null,
-      nowVersion: now?.version ?? null,
-    };
-  } catch (err) {
-    console.error(`[diff] couldn't read doc ${doc.id}${side.updateId === null ? "" : ` at ${side.updateId}`}:`, err);
-    return { ok: false };
-  }
-}
+// Wrapped once at module scope: `generateMetadata` and the page share one pass.
+const loadDiffPair = gated(gateDiffPair);
 
 export async function generateMetadata({ params }: { params: Promise<{ left: string; right: string }> }): Promise<Metadata> {
   const { left, right } = await params;
@@ -155,56 +31,6 @@ export async function generateMetadata({ params }: { params: Promise<{ left: str
       : `Diff: ${docTitleOrFallback(a.doc.title)} → ${docTitleOrFallback(b.doc.title)}`,
   );
 }
-
-function SideHeader({
-  gatedSide,
-  loaded,
-  loadedAt,
-  order,
-}: {
-  gatedSide: GatedSide;
-  loaded: LoadedSide;
-  loadedAt: Date;
-  /** "Earlier" or "Later" when the pair has an order, and nothing when it has none. */
-  order: "Earlier" | "Later" | null;
-}) {
-  const { side, doc, history } = gatedSide;
-  // The doc at this version where its reading view honours `?at=` for this
-  // viewer, and the doc as it is now otherwise.
-  const href = side.updateId !== null && history ? `/doc/${doc.slug}?${SCRUB_PARAM}=${side.updateId}` : `/doc/${doc.slug}`;
-  return (
-    <div className={styles.side}>
-      <Link href={href} className={styles.sideTitle}>
-        {loaded.ok ? loaded.title : docTitleOrFallback(doc.title)}
-      </Link>
-      {loaded.ok ? (
-        <span className={styles.when}>
-          {order && <span className={styles.order}>{order}</span>}
-          {side.updateId === null ? (
-            <>
-              when this page loaded, <LocalTime value={loadedAt} />
-            </>
-          ) : loaded.at ? (
-            <>
-              as it was at <LocalTime value={loaded.at} />
-            </>
-          ) : (
-            "at an earlier version"
-          )}
-        </span>
-      ) : (
-        <span className={styles.when}>
-          Couldn&apos;t read this doc&apos;s text. <a href="">Reload</a> to try again.
-        </span>
-      )}
-    </div>
-  );
-}
-
-const ORDER_LABELS: Record<SideOrder, { left: "Earlier" | "Later"; right: "Earlier" | "Later" }> = {
-  "left-earlier": { left: "Earlier", right: "Later" },
-  "right-earlier": { left: "Later", right: "Earlier" },
-};
 
 /**
  * Where sign-in sends a reader back to. The segments arrive percent-encoded
@@ -234,41 +60,5 @@ export default async function DiffPage({ params }: { params: Promise<{ left: str
       </main>
     );
   }
-  const { left: leftGated, right: rightGated } = access.value;
-  const loadedAt = new Date();
-  const [leftLoaded, rightLoaded] = await Promise.all([loadSide(leftGated), loadSide(rightGated)]);
-  // A fork and its parent: where the parent's side stands against the fork
-  // point decides whether the pair has an order. A parent's side with no
-  // version stands at the update it was just read at.
-  const parentLoaded = access.value.lineage?.parentDocId === leftGated.doc.id ? leftLoaded : rightLoaded;
-  const lineage = access.value.lineage && { ...access.value.lineage, parentNow: parentLoaded.ok ? parentLoaded.nowVersion : null };
-  const order = sideOrder(leftGated.side, rightGated.side, lineage);
-  const diverged = pastForkPoint(leftGated.side, rightGated.side, lineage);
-  const labels = order ? ORDER_LABELS[order] : null;
-  const swapped = diffPath(rightGated.side, leftGated.side);
-
-  return (
-    <main className={styles.container}>
-      <div className={styles.titleRow}>
-        <h1>Diff</h1>
-        <Link href={swapped}>Swap sides</Link>
-      </div>
-      <div className={styles.sides}>
-        <SideHeader gatedSide={leftGated} loaded={leftLoaded} loadedAt={loadedAt} order={labels?.left ?? null} />
-        <SideHeader gatedSide={rightGated} loaded={rightLoaded} loadedAt={loadedAt} order={labels?.right ?? null} />
-      </div>
-      {order === "right-earlier" && (
-        <p className={styles.orderNote} data-kind="later-on-left">
-          The later version is on the left, so text marked removed was added since, and text marked added was removed.{" "}
-          <Link href={swapped}>Swap sides</Link>
-        </p>
-      )}
-      {diverged && (
-        <p className={styles.orderNote} data-kind="both-changed">
-          Both sides have changed since the fork was made.
-        </p>
-      )}
-      {leftLoaded.ok && rightLoaded.ok && <DocDiff left={leftLoaded.blocks} right={rightLoaded.blocks} />}
-    </main>
-  );
+  return <DiffView initial={await readDiffPair(access.value)} />;
 }

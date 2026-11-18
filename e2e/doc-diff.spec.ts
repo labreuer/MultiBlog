@@ -11,6 +11,7 @@ import {
   createTestDoc,
   deleteTestDoc,
   getDocYdocUpdateIds,
+  setTestUserRole,
   softDeleteTestDoc,
   type TestDoc,
 } from "./db";
@@ -54,7 +55,7 @@ async function statusOf(page: Page, path: string): Promise<number | undefined> {
 
 /** The two headers' "Earlier"/"Later" labels, left then right, with "" for a header that has none. */
 async function orderLabels(page: Page): Promise<string[]> {
-  const whens = page.locator("main").getByText(/when this page loaded|as it was at/);
+  const whens = page.locator("main").getByText(/when last read|as it was at/);
   await expect(whens).toHaveCount(2);
   return whens.evaluateAll((els) => els.map((el) => /^(Earlier|Later)/.exec(el.textContent ?? "")?.[1] ?? ""));
 }
@@ -338,6 +339,638 @@ test.describe("ways in (docs/FORKS.md \"Choosing two versions on the scrub bar\"
     } finally {
       await page.goto("about:blank").catch(() => {});
       await deleteTestDoc(other.id);
+    }
+  });
+});
+
+// docs/FORKS.md "Sliders on the diff page" — a slider for each side whose
+// history the viewer may see. A slider names a pair; the page asks
+// `/api/diff/<left>/<right>` for it, compares it and draws it, with no
+// navigation, and writes its address once the sliders have rested.
+//
+// Driven by key: a press is one position, where a drag is as many as the
+// pointer crosses. `done` is what says the rows are for the pair the sliders
+// name; it is "comparing" from the keypress until the new rows are drawn.
+test.describe("sliders (docs/FORKS.md \"Sliders on the diff page\")", () => {
+  const THIRD = "A fourth paragraph, appended as the doc's fourth version.";
+  const sliderOf = (page: Page, which: "left" | "right") => page.getByLabel(`Scrub the ${which} side through its doc's history`);
+  const bar = (page: Page) => page.locator('[data-kind="diff-sliders"]');
+  const loadedHalf = (page: Page, which: "left" | "right") => bar(page).locator(`[data-side="${which}"][data-loaded]`);
+  const pairPath = (left: string, right: string) => `/api/diff/${left}/${right}`;
+
+  /** The pathname of every request the page makes that `pattern` matches, as they are sent. */
+  function requestsTo(page: Page, pattern: RegExp): string[] {
+    const seen: string[] = [];
+    page.on("request", (request) => {
+      const { pathname } = new URL(request.url());
+      if (pattern.test(pathname)) seen.push(pathname);
+    });
+    return seen;
+  }
+  const indexRequests = (page: Page) => requestsTo(page, /^\/api\/doc\/[^/]+\/versions$/);
+  const pairRequests = (page: Page) => requestsTo(page, /^\/api\/diff\//);
+
+  /**
+   * Counts history calls from here on, the page's own apart from the
+   * router's: Next answers a native `replaceState` with one of its own, whose
+   * state it marks.
+   */
+  async function watchHistory(page: Page): Promise<() => Promise<{ own: string[]; all: number }>> {
+    await page.evaluate(() => {
+      const seen = { own: [] as string[], all: 0 };
+      (window as unknown as { __history: typeof seen }).__history = seen;
+      for (const name of ["pushState", "replaceState"] as const) {
+        const before = window.history[name];
+        window.history[name] = function (this: History, ...args: Parameters<History["pushState"]>) {
+          seen.all += 1;
+          if (!(args[0] as { __NA?: boolean } | null)?.__NA) seen.own.push(String(args[2]));
+          return before.apply(this, args);
+        };
+      }
+    });
+    return () => page.evaluate(() => (window as unknown as { __history: { own: string[]; all: number } }).__history);
+  }
+
+  test("a slid side's rows and the address it leaves, with no navigation and without losing the slider's focus", async ({
+    page,
+    sharedDoc,
+  }) => {
+    const id = sharedDoc.id;
+    const [first] = await getDocYdocUpdateIds(id);
+    const second = await appendTestDocParagraph({ docId: id, text: FIRST });
+    await appendTestDocParagraph({ docId: id, text: SECOND });
+    const indexes = indexRequests(page);
+    const pairs = pairRequests(page);
+    // A navigation would ask the server for the page: a document, or the router's own fetch.
+    const pages = requestsTo(page, /^\/diff\//);
+    const left = sliderOf(page, "left");
+    const right = sliderOf(page, "right");
+
+    // Somewhere to come Back to.
+    await page.goto(`/doc/${sharedDoc.slug}`);
+    await expect(bodyEditor(page)).toBeVisible();
+    await gotoOk(page, `/diff/${id}@${first}/${id}`);
+    let island = await done(page);
+    await expect(island.locator('[data-kind="added"] [data-side="new"]')).toHaveText([FIRST, SECOND]);
+
+    // Untouched: two grayed-out inputs, and nothing fetched for them.
+    await expect(left).toBeVisible();
+    await expect(right).toBeVisible();
+    await expect(bar(page).locator("[data-loaded]")).toHaveCount(0);
+    expect(indexes).toEqual([]);
+    expect(pairs).toEqual([]);
+    expect(pages).toHaveLength(1);
+
+    // A touch fetches the doc's index, once for the two sides it is on.
+    await right.focus();
+    await expect(bar(page).locator("[data-loaded]")).toHaveCount(2);
+    await expect(left).toHaveValue("0");
+    await expect(right).toHaveValue("2");
+    await expect(right).toHaveAttribute("max", "2");
+    await expect(bar(page).locator('[data-side="right"] [data-kind="position"]')).toContainText("update 3 of 3");
+    expect(indexes).toHaveLength(1);
+
+    // One step back from the live end: the slider's line at once, then the
+    // rows and the headers together, then the address.
+    await right.press("ArrowLeft");
+    await expect(bar(page).locator('[data-side="right"] [data-kind="position"]')).toContainText("update 2 of 3");
+    island = await done(page);
+    await expect(island.locator('[data-kind="added"] [data-side="new"]')).toHaveText([FIRST]);
+    expect(await orderLabels(page)).toEqual(["Earlier", "Later"]);
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${first}/${id}@${second}$`));
+    expect(pairs).toEqual([pairPath(`${id}@${first}`, `${id}@${second}`)]);
+
+    // Nothing under the page was mounted anew, so the input still has the focus.
+    await expect(right).toBeFocused();
+    await page.keyboard.press("ArrowLeft");
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${first}/${id}@${first}$`));
+    island = await done(page);
+    await expect(island.locator('[data-kind="no-differences"]')).toBeVisible();
+    expect(await orderLabels(page)).toEqual(["", ""]);
+
+    // The last position is the live end: a side with no version, never `@<the last id>`.
+    await page.keyboard.press("End");
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${first}/${id}$`));
+    island = await done(page);
+    await expect(island.locator('[data-kind="added"] [data-side="new"]')).toHaveText([FIRST, SECOND]);
+
+    // The other side's slider.
+    await left.press("ArrowRight");
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${second}/${id}$`));
+    island = await done(page);
+    await expect(island.locator('[data-kind="added"] [data-side="new"]')).toHaveText([SECOND]);
+    await expect(left).toHaveValue("1");
+    await expect(right).toHaveValue("2");
+
+    // Crossed: the left past the right, and the page says which way round it is.
+    await right.press("Home");
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${second}/${id}@${first}$`));
+    island = await done(page);
+    await expect(island.locator('[data-kind="deleted"] [data-side="old"]')).toHaveText([FIRST]);
+    expect(await orderLabels(page)).toEqual(["Later", "Earlier"]);
+    await expect(page.locator('[data-kind="later-on-left"]')).toBeVisible();
+    // Five pairs drawn, and the page was never asked for again.
+    expect(pairs).toHaveLength(5);
+    expect(pages).toHaveLength(1);
+
+    // Swapped by its link, which is a navigation: each slider follows its side, on the index already held.
+    await page.getByRole("link", { name: "Swap sides" }).first().click();
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${first}/${id}@${second}$`));
+    await done(page);
+    await expect(left).toHaveValue("0");
+    await expect(right).toHaveValue("1");
+    expect(indexes).toHaveLength(1);
+
+    // Back undoes the swap, to the pair the sliders had left there and not
+    // the one the page was first opened on…
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${second}/${id}@${first}$`));
+    island = await done(page);
+    await expect(island.locator('[data-kind="deleted"] [data-side="old"]')).toHaveText([FIRST]);
+    expect(await orderLabels(page)).toEqual(["Later", "Earlier"]);
+    // …and Back again leaves the diff: five slid pairs made no entry.
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`/doc/${sharedDoc.slug}$`));
+  });
+
+  test("the address is written once for a run of moves, on the entry the page already has", async ({ page, sharedDoc }) => {
+    const id = sharedDoc.id;
+    const [first] = await getDocYdocUpdateIds(id);
+    const second = await appendTestDocParagraph({ docId: id, text: FIRST });
+    await appendTestDocParagraph({ docId: id, text: SECOND });
+    const right = sliderOf(page, "right");
+
+    await page.goto(`/doc/${sharedDoc.slug}`);
+    await expect(bodyEditor(page)).toBeVisible();
+    await gotoOk(page, `/diff/${id}@${first}/${id}`);
+    await done(page);
+    await right.focus();
+    await expect(loadedHalf(page, "right")).toHaveCount(1);
+    const entries = await page.evaluate(() => window.history.length);
+    const calls = await watchHistory(page);
+
+    // Four moves, each sooner after the last than the address waits.
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowLeft");
+    const rested = `/diff/${id}@${first}/${id}@${second}`;
+    await expect(page).toHaveURL(new RegExp(`${rested}$`));
+    await done(page);
+    // Longer than the wait: nothing more is written once the sliders rest.
+    await page.waitForTimeout(1000);
+    const seen = await calls();
+    expect(seen.own).toEqual([rested]);
+    // The page's write, and the router's answer to it.
+    expect(seen.all).toBe(2);
+    expect(await page.evaluate(() => window.history.length)).toBe(entries);
+
+    // A slider brought back to where the address has it writes nothing.
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowRight");
+    await done(page);
+    await page.waitForTimeout(1000);
+    expect((await calls()).own).toEqual([rested]);
+
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`/doc/${sharedDoc.slug}$`));
+  });
+
+  test("Back to a diff from elsewhere shows the pair its address names, not the one it was opened on", async ({ page, sharedDoc }) => {
+    const id = sharedDoc.id;
+    const [first] = await getDocYdocUpdateIds(id);
+    const second = await appendTestDocParagraph({ docId: id, text: FIRST });
+    await appendTestDocParagraph({ docId: id, text: SECOND });
+    const right = sliderOf(page, "right");
+
+    await gotoOk(page, `/diff/${id}@${first}/${id}`);
+    let island = await done(page);
+    await right.focus();
+    await expect(loadedHalf(page, "right")).toHaveCount(1);
+    await page.keyboard.press("ArrowLeft");
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${first}/${id}@${second}$`));
+    island = await done(page);
+    await expect(island.locator('[data-kind="added"] [data-side="new"]')).toHaveText([FIRST]);
+
+    // Away by a link, which the router follows without a document load.
+    await page.locator("main").getByRole("link", { name: sharedDoc.title }).first().click();
+    await expect(page).toHaveURL(new RegExp(`/doc/${sharedDoc.slug}\\?at=${first}$`));
+    await expect(bodyEditor(page)).toBeVisible();
+
+    // The router restores the page it rendered for that entry, which is the
+    // first pair's. The view asks for the address's pair, and shows that.
+    const pairs = pairRequests(page);
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${first}/${id}@${second}$`));
+    island = await done(page);
+    await expect(island.locator('[data-kind="added"] [data-side="new"]')).toHaveText([FIRST]);
+    await expect(page.locator("main").getByText(/when last read/)).toHaveCount(0);
+    // One request for it. `next dev` mounts the view twice (React's Strict
+    // Mode) and aborts the first mount's request, so there it is two.
+    const asked = pairPath(`${id}@${first}`, `${id}@${second}`);
+    expect(pairs).toEqual(process.env.E2E_TARGET === "prod" ? [asked] : [asked, asked]);
+    // Its sliders are where the address puts them.
+    await sliderOf(page, "left").focus();
+    await expect(right).toHaveValue("1");
+    await expect(sliderOf(page, "left")).toHaveValue("0");
+  });
+
+  test("a link followed before the address is written: Back returns to the pair last slid to, and the page gone to keeps its address", async ({
+    page,
+    sharedDoc,
+  }) => {
+    const id = sharedDoc.id;
+    const [first] = await getDocYdocUpdateIds(id);
+    const second = await appendTestDocParagraph({ docId: id, text: FIRST });
+    await appendTestDocParagraph({ docId: id, text: SECOND });
+
+    await gotoOk(page, `/diff/${id}@${first}/${id}`);
+    await done(page);
+    await sliderOf(page, "right").focus();
+    await expect(loadedHalf(page, "right")).toHaveCount(1);
+
+    // The left header's link goes to the doc at the left side's version, which this move doesn't change.
+    const away = page.locator("main").getByRole("link", { name: sharedDoc.title }).first();
+    await page.keyboard.press("ArrowLeft");
+    await away.click();
+    await expect(page).toHaveURL(new RegExp(`/doc/${sharedDoc.slug}\\?at=${first}$`));
+    await expect(bodyEditor(page)).toBeVisible();
+    // Past the wait: the write that was pending was made before leaving, and none is made after.
+    await page.waitForTimeout(1000);
+    await expect(page).toHaveURL(new RegExp(`/doc/${sharedDoc.slug}\\?at=${first}$`));
+
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${first}/${id}@${second}$`));
+    const island = await done(page);
+    await expect(island.locator('[data-kind="added"] [data-side="new"]')).toHaveText([FIRST]);
+  });
+
+  test("one request at a time: positions passed while one is out are never asked for", async ({ page, sharedDoc }) => {
+    const id = sharedDoc.id;
+    const [first] = await getDocYdocUpdateIds(id);
+    await appendTestDocParagraph({ docId: id, text: FIRST });
+    const third = await appendTestDocParagraph({ docId: id, text: SECOND });
+    await appendTestDocParagraph({ docId: id, text: THIRD });
+    const right = sliderOf(page, "right");
+
+    await gotoOk(page, `/diff/${id}@${first}/${id}`);
+    await done(page);
+    await right.focus();
+    await expect(loadedHalf(page, "right")).toHaveCount(1);
+    await expect(right).toHaveValue("3");
+
+    // Every request for a pair is held until released.
+    const asked: string[] = [];
+    const release: (() => void)[] = [];
+    await page.route(/\/api\/diff\//, async (route) => {
+      asked.push(new URL(route.request().url()).pathname);
+      await new Promise<void>((resolve) => release.push(resolve));
+      await route.continue();
+    });
+
+    await page.keyboard.press("ArrowLeft");
+    const firstAsked = pairPath(`${id}@${first}`, `${id}@${third}`);
+    await expect.poll(() => asked).toEqual([firstAsked]);
+    // Two more positions while that one is out.
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await expect(right).toHaveValue("0");
+    // The address rests on the last position, though no rows have come for it…
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${first}/${id}@${first}$`));
+    // …the rows are still the first pair's, and say they trail…
+    await expect(page.locator('[data-state="comparing"] [data-kind="added"] [data-side="new"]')).toHaveText([FIRST, SECOND, THIRD]);
+    // …and nothing else was asked for.
+    expect(asked).toEqual([firstAsked]);
+
+    // Its answer lands, and the next request is for where the slider is now. The one between was never sent.
+    release.shift()!();
+    const lastAsked = pairPath(`${id}@${first}`, `${id}@${first}`);
+    await expect.poll(() => asked).toEqual([firstAsked, lastAsked]);
+    release.shift()!();
+    const island = await done(page);
+    await expect(island.locator('[data-kind="no-differences"]')).toBeVisible();
+    expect(asked).toEqual([firstAsked, lastAsked]);
+  });
+
+  test("a drag is followed while the pointer is down", async ({ page, sharedDoc }) => {
+    const id = sharedDoc.id;
+    const [first] = await getDocYdocUpdateIds(id);
+    const second = await appendTestDocParagraph({ docId: id, text: FIRST });
+    await appendTestDocParagraph({ docId: id, text: SECOND });
+    const right = sliderOf(page, "right");
+
+    await gotoOk(page, `/diff/${id}@${first}/${id}`);
+    await done(page);
+    await right.focus();
+    await expect(loadedHalf(page, "right")).toHaveCount(1);
+
+    // Three positions: the track's right end, its middle and its left end.
+    const box = (await right.boundingBox())!;
+    const y = box.y + box.height / 2;
+    await page.mouse.move(box.x + box.width - 8, y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, y, { steps: 5 });
+    // The rows follow with the pointer still down…
+    let island = await done(page);
+    await expect(island.locator('[data-kind="added"] [data-side="new"]')).toHaveText([FIRST]);
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${first}/${id}@${second}$`));
+    // …on the same input, which goes on following it.
+    await page.mouse.move(box.x + 8, y, { steps: 5 });
+    await expect(right).toHaveValue("0");
+    island = await done(page);
+    await expect(island.locator('[data-kind="no-differences"]')).toBeVisible();
+    await page.mouse.up();
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${first}/${id}@${first}$`));
+  });
+
+  test("a slid side keeps the reader's place on a long page", async ({ page, sharedDoc }) => {
+    const [first] = await getDocYdocUpdateIds(sharedDoc.id);
+    await appendTestDocParagraph({ docId: sharedDoc.id, text: FIRST });
+    // Sixty paragraphs the other side lacks: sixty rows, taller than the window.
+    const long = await createTestDoc({
+      authorEmail: ADMIN_EMAIL,
+      visibility: "SHARED",
+      body: {
+        type: "doc",
+        content: Array.from({ length: 60 }, (_, i) => ({
+          type: "paragraph",
+          content: [{ type: "text", text: `Paragraph ${i + 1} of a long doc, which the other side never had.` }],
+        })),
+      },
+    });
+    try {
+      await gotoOk(page, `/diff/${long.id}/${sharedDoc.id}`);
+      let island = await done(page);
+      await expect(island.locator('[data-side="old"]')).toHaveCount(60);
+      await page.evaluate(() => window.scrollTo(0, 700));
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(700);
+
+      // A key on an untouched slider moves nothing: its index has to be there first.
+      await sliderOf(page, "right").focus();
+      await expect(loadedHalf(page, "right")).toHaveCount(1);
+      await page.keyboard.press("ArrowLeft");
+      await expect(page).toHaveURL(new RegExp(`/diff/${long.id}/${sharedDoc.id}@${first}$`));
+      island = await done(page);
+      await expect(island.locator('[data-side="old"]')).toHaveCount(60);
+      expect(await page.evaluate(() => window.scrollY)).toBe(700);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(long.id);
+    }
+  });
+
+  test("an index fetched before the doc's latest update is fetched again", async ({ page, sharedDoc }) => {
+    const id = sharedDoc.id;
+    const [first] = await getDocYdocUpdateIds(id);
+    const second = await appendTestDocParagraph({ docId: id, text: FIRST });
+    await appendTestDocParagraph({ docId: id, text: SECOND });
+    const requests = indexRequests(page);
+    const left = sliderOf(page, "left");
+    const right = sliderOf(page, "right");
+
+    await gotoOk(page, `/diff/${id}@${first}/${id}`);
+    await done(page);
+    await left.focus();
+    await expect(right).toHaveAttribute("max", "2");
+    expect(requests).toHaveLength(1);
+
+    // The doc moves on, and nothing tells this page: it has no connection.
+    await appendTestDocParagraph({ docId: id, text: THIRD });
+    await expect(right).toHaveAttribute("max", "2");
+
+    // A move reads both sides again, and the side with no version is now at
+    // an update the index doesn't hold: the index is fetched again, and has it.
+    await left.press("ArrowRight");
+    await expect(page).toHaveURL(new RegExp(`/diff/${id}@${second}/${id}$`));
+    const island = await done(page);
+    await expect(island.locator('[data-kind="added"] [data-side="new"]')).toHaveText([SECOND, THIRD]);
+    await expect(right).toHaveAttribute("max", "3");
+    await expect(right).toHaveValue("3");
+    await expect(left).toHaveValue("1");
+    expect(requests).toHaveLength(2);
+  });
+
+  test("a request that fails leaves the rows under a line saying so, and Try again or the next move recovers", async ({
+    page,
+    sharedDoc,
+  }) => {
+    const id = sharedDoc.id;
+    const [first] = await getDocYdocUpdateIds(id);
+    await appendTestDocParagraph({ docId: id, text: FIRST });
+    await appendTestDocParagraph({ docId: id, text: SECOND });
+    const failure = page.locator('[data-kind="load-failed"]');
+
+    await gotoOk(page, `/diff/${id}@${first}/${id}`);
+    await done(page);
+    await sliderOf(page, "right").focus();
+    await expect(loadedHalf(page, "right")).toHaveCount(1);
+
+    let failing = true;
+    await page.route(/\/api\/diff\//, (route) => (failing ? route.abort() : route.continue()));
+
+    await page.keyboard.press("ArrowLeft");
+    await expect(failure).toBeVisible();
+    // The rows of the pair before, not marked done.
+    await expect(page.locator('[data-state="comparing"] [data-kind="added"] [data-side="new"]')).toHaveText([FIRST, SECOND]);
+    await expect(page.locator('[data-state="done"]')).toHaveCount(0);
+
+    failing = false;
+    await failure.getByRole("button", { name: "Try again" }).click();
+    let island = await done(page);
+    await expect(island.locator('[data-kind="added"] [data-side="new"]')).toHaveText([FIRST]);
+    await expect(failure).toHaveCount(0);
+
+    // Failed again, and this time left alone: a move asks for the pair moved
+    // to. The button took the focus when clicked, so the slider is pressed.
+    failing = true;
+    await sliderOf(page, "right").press("ArrowLeft");
+    await expect(failure).toBeVisible();
+    failing = false;
+    await page.keyboard.press("End");
+    island = await done(page);
+    await expect(island.locator('[data-kind="added"] [data-side="new"]')).toHaveText([FIRST, SECOND]);
+    await expect(failure).toHaveCount(0);
+  });
+
+  test("a refusal between two moves ends on the page that says it, at the address moved to", async ({ page, secondUser, sharedDoc }) => {
+    const other = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: QUOTED_BODY });
+    try {
+      // The doc deleted under an open diff: the next move is its 404.
+      const [first] = await getDocYdocUpdateIds(other.id);
+      const second = await appendTestDocParagraph({ docId: other.id, text: FIRST });
+      await appendTestDocParagraph({ docId: other.id, text: SECOND });
+      await gotoOk(page, `/diff/${other.id}@${first}/${other.id}`);
+      await done(page);
+      await sliderOf(page, "right").focus();
+      await expect(loadedHalf(page, "right")).toHaveCount(1);
+      await page.keyboard.press("ArrowLeft");
+      await expect(page).toHaveURL(new RegExp(`/diff/${other.id}@${first}/${other.id}@${second}$`));
+      await done(page);
+
+      await softDeleteTestDoc(other.id);
+      const gone = `/diff/${other.id}@${first}/${other.id}@${first}`;
+      const answered = page.waitForResponse((res) => res.request().isNavigationRequest() && new URL(res.url()).pathname === gone);
+      await page.keyboard.press("ArrowLeft");
+      expect((await answered).status()).toBe(404);
+      await expect(page).toHaveURL(new RegExp(`${gone}$`));
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(other.id);
+    }
+
+    // The history taken away: an EDITOR sees a SHARED doc's, an AUTHORIZED reader doesn't.
+    const id = sharedDoc.id;
+    const [first] = await getDocYdocUpdateIds(id);
+    const second = await appendTestDocParagraph({ docId: id, text: FIRST });
+    await appendTestDocParagraph({ docId: id, text: SECOND });
+    const { user, page: editor } = await secondUser({ role: "EDITOR" });
+    const open = async (viewer: Page) => {
+      await gotoOk(viewer, `/diff/${id}@${first}/${id}`);
+      await done(viewer);
+      await sliderOf(viewer, "right").focus();
+      await expect(loadedHalf(viewer, "right")).toHaveCount(1);
+    };
+    await open(editor);
+    await setTestUserRole(user.email, "AUTHORIZED");
+    // A role reaches a session already issued when the session is refreshed,
+    // which /dashboard does, here in another tab.
+    const tab = await editor.context().newPage();
+    const refreshed = tab.waitForResponse((res) => res.request().method() === "POST" && res.url().includes("/api/auth/session"));
+    await tab.goto("/dashboard");
+    await refreshed;
+    await tab.close();
+    await editor.keyboard.press("ArrowLeft");
+    await expect(editor.getByRole("heading", { name: "Forbidden" })).toBeVisible();
+    await expect(editor).toHaveURL(new RegExp(`/diff/${id}@${first}/${id}@${second}$`));
+    await expect(editor.locator("[data-state]")).toHaveCount(0);
+
+    // Signed out: sign-in, with the pair moved to as its way back.
+    const { page: leaver } = await secondUser({ role: "EDITOR" });
+    await open(leaver);
+    await leaver.context().clearCookies();
+    await leaver.keyboard.press("ArrowLeft");
+    await expect(leaver).toHaveURL(/\/sign-in\?/);
+    expect(new URL(leaver.url()).searchParams.get("callbackUrl")).toBe(`/diff/${id}@${first}/${id}@${second}`);
+  });
+
+  test("the pair route answers as the page does, and says which update a side was read at only to a viewer with its history", async ({
+    page,
+    browser,
+    sharedDoc,
+    draftDoc,
+    secondUser,
+  }) => {
+    const id = sharedDoc.id;
+    const [first] = await getDocYdocUpdateIds(id);
+    const second = await appendTestDocParagraph({ docId: id, text: FIRST });
+    const [foreign] = await getDocYdocUpdateIds(draftDoc.id);
+    type Side = { docId: string; updateId: string | null; history: boolean; nowVersion: string | null; blocks: { text: string }[] | null };
+    type Body = { order: string | null; diverged: boolean; readAt: string; left: Side; right: Side };
+
+    // An editor: both sides as the page reads them, and never cached.
+    const res = await page.request.get(pairPath(`${id}@${first}`, id));
+    expect(res.status()).toBe(200);
+    expect(res.headers()["cache-control"]).toContain("no-store");
+    const body = (await res.json()) as Body;
+    expect(body.order).toBe("left-earlier");
+    expect(body.left).toMatchObject({ docId: id, updateId: first, history: true, nowVersion: null });
+    expect(body.right).toMatchObject({ docId: id, updateId: null, history: true, nowVersion: second });
+    expect(body.left.blocks!.map((block) => block.text)).toEqual([QUOTED_BODY]);
+    expect(body.right.blocks!.map((block) => block.text)).toEqual([QUOTED_BODY, FIRST]);
+    expect(Number.isNaN(Date.parse(body.readAt))).toBe(false);
+    // The segment with its @ percent-encoded is the same pair.
+    expect((await page.request.get(pairPath(`${id}%40${first}`, id))).status()).toBe(200);
+
+    // The page's 404s: a version outside the doc's log, one past the bound, a slug, a deleted side.
+    for (const left of [`${id}@${foreign}`, `${id}@${MAX_UPDATE_ID}`, `${id}@${PAST_THE_BOUND}`, sharedDoc.slug, "nosuchdoc0000"]) {
+      expect((await page.request.get(pairPath(left, id))).status(), left).toBe(404);
+    }
+    const deleted = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: FIRST });
+    try {
+      await softDeleteTestDoc(deleted.id);
+      expect((await page.request.get(pairPath(id, deleted.id))).status()).toBe(404);
+      expect((await page.request.get(pairPath(deleted.id, id))).status()).toBe(404);
+    } finally {
+      await deleteTestDoc(deleted.id);
+    }
+
+    // AUTHORIZED reads every SHARED doc and has no doc's history: two docs as
+    // they are now, and nothing about either log, its newest update included.
+    const { page: reader } = await secondUser({ role: "AUTHORIZED" });
+    const now = await reader.request.get(pairPath(id, id));
+    expect(now.status()).toBe(200);
+    const nowBody = (await now.json()) as Body;
+    for (const side of [nowBody.left, nowBody.right]) {
+      expect(side).toMatchObject({ docId: id, updateId: null, history: false, nowVersion: null });
+      expect(side.blocks!.map((block) => block.text)).toEqual([QUOTED_BODY, FIRST]);
+    }
+    // Any version is Forbidden, whatever the id: in the log, another doc's, nobody's.
+    for (const version of [first, foreign, MAX_UPDATE_ID]) {
+      const refused = await reader.request.get(pairPath(`${id}@${version}`, id));
+      expect(refused.status(), version).toBe(403);
+      expect(await refused.json(), version).toEqual({ error: "Forbidden" });
+    }
+    // A doc that reader can't read refuses the pair, with a version or without.
+    expect((await reader.request.get(pairPath(id, draftDoc.id))).status()).toBe(403);
+    expect((await reader.request.get(pairPath(`${draftDoc.id}@${foreign}`, id))).status()).toBe(403);
+
+    // Signed out: refused before either doc is looked at.
+    const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    try {
+      expect((await context.request.get(pairPath(id, id))).status()).toBe(401);
+      expect((await context.request.get(pairPath("nosuchdoc0000", id))).status()).toBe(401);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("the index is for whoever may see the doc's history, and answers everyone else alike", async ({
+    page,
+    browser,
+    sharedDoc,
+    draftDoc,
+    secondUser,
+  }) => {
+    const ids = await getDocYdocUpdateIds(sharedDoc.id);
+    const path = (docId: string) => `/api/doc/${docId}/versions`;
+
+    // An editor: the log's ids and times, oldest first, and none of its bytes.
+    const res = await page.request.get(path(sharedDoc.id));
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as { updates: Record<string, unknown>[] };
+    expect(body.updates.map((update) => update.id)).toEqual(ids);
+    expect(Object.keys(body.updates[0]).sort()).toEqual(["createdAt", "id"]);
+    expect(Number.isNaN(Date.parse(body.updates[0].createdAt as string))).toBe(false);
+
+    // AUTHORIZED reads every SHARED doc and edits none. A doc it can read, one
+    // it can't, a deleted one and an id that is nobody's all answer the same.
+    const { page: reader } = await secondUser({ role: "AUTHORIZED" });
+    const deleted = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: FIRST });
+    try {
+      await softDeleteTestDoc(deleted.id);
+      for (const docId of [sharedDoc.id, draftDoc.id, deleted.id, "nosuchdoc0000"]) {
+        const refused = await reader.request.get(path(docId));
+        expect(refused.status(), docId).toBe(403);
+        expect(await refused.json(), docId).toEqual({ error: "Forbidden" });
+      }
+      // A deleted doc has no history for its own editor either.
+      expect((await page.request.get(path(deleted.id))).status()).toBe(403);
+
+      // That reader's diff of two docs as they are has no bar, and makes no room for one.
+      await gotoOk(reader, `/diff/${sharedDoc.id}/${sharedDoc.id}`);
+      await done(reader);
+      await expect(bar(reader)).toHaveCount(0);
+    } finally {
+      await deleteTestDoc(deleted.id);
+    }
+
+    // Signed out: refused before the doc is looked at.
+    const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    try {
+      expect((await context.request.get(path(sharedDoc.id))).status()).toBe(401);
+    } finally {
+      await context.close();
     }
   });
 });

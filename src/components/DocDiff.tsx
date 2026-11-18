@@ -1,21 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { hasChanges, type DiffBlock, type DiffCell, type DiffRow } from "@/lib/doc-diff";
-import type { DiffAnswer, DiffRequest } from "@/lib/doc-diff.worker";
+import { memo } from "react";
+import { hasChanges, type DiffCell, type DiffRow } from "@/lib/doc-diff";
+import type { DiffAnswer } from "@/lib/doc-diff.worker";
+import { sameJson } from "@/lib/same-json";
 import styles from "./DocDiff.module.css";
 
-// docs/FORKS.md "Where the comparing is done" — the rows of the diff page.
-// The server has gated both sides and read their blocks; this island hands
-// them to a worker, which compares them once, and draws the rows it posts
-// back. Nothing is compared on the page's own thread, a small diff included,
-// so there is one place `diffRows` runs.
+// docs/FORKS.md "Where the comparing is done" — the rows of the diff page,
+// drawn from one answer of the worker's. `DiffView` asks the worker and
+// decides which answer is on the page; nothing here compares anything.
 //
-// `data-state` is "comparing" until the rows arrive, then "done", or "failed"
-// for a worker that couldn't start or threw: what a spec waits on before it
-// reads a row.
-
-type State = { status: "comparing" } | { status: "done"; answer: DiffAnswer } | { status: "failed" };
+// **A row is drawn again only when it differs from the row before it in that
+// place**, compared throughout: an answer is a structured clone, so no row
+// keeps its identity from one answer to the next. A slider moved one update
+// along changes a row or two, and the rest of a long page is left alone.
 
 function Cell({ cell, side }: { cell: DiffCell | undefined; side: "old" | "new" }) {
   if (!cell) return <div className={styles.empty} />;
@@ -34,7 +32,7 @@ function Cell({ cell, side }: { cell: DiffCell | undefined; side: "old" | "new" 
   );
 }
 
-function Row({ row }: { row: DiffRow }) {
+const Row = memo(function Row({ row }: { row: DiffRow }) {
   if (row.kind === "unchanged") {
     return <div className={styles.note}>{row.count} unchanged blocks</div>;
   }
@@ -58,47 +56,17 @@ function Row({ row }: { row: DiffRow }) {
       </div>
     </>
   );
+}, sameRow);
+
+function sameRow(before: { row: DiffRow }, after: { row: DiffRow }): boolean {
+  return sameJson(before.row, after.row);
 }
 
-export default function DocDiff({ left, right }: { left: DiffBlock[]; right: DiffBlock[] }) {
-  const [state, setState] = useState<State>({ status: "comparing" });
-
-  useEffect(() => {
-    let worker: Worker;
-    try {
-      worker = new Worker(new URL("../lib/doc-diff.worker.ts", import.meta.url), { type: "module" });
-    } catch {
-      // A sandboxed frame, or a browser with workers turned off.
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- reporting a failure of this effect's own setup
-      setState({ status: "failed" });
-      return;
-    }
-    worker.onmessage = (event: MessageEvent<DiffAnswer>) => setState({ status: "done", answer: event.data });
-    worker.onerror = () => setState({ status: "failed" });
-    worker.postMessage({ old: left, new: right } satisfies DiffRequest);
-    return () => worker.terminate();
-  }, [left, right]);
-
-  if (state.status === "comparing") {
-    return (
-      <p className={styles.status} data-state="comparing">
-        Comparing…
-      </p>
-    );
-  }
-  if (state.status === "failed") {
-    return (
-      <p className={styles.status} data-state="failed">
-        Couldn&apos;t compare these two texts in this browser.{" "}
-        {/* A plain link to the page's own address: a reload, with nothing to hydrate before it works. */}
-        <a href="">Reload</a> to try again.
-      </p>
-    );
-  }
-
-  const { rows, caps } = state.answer;
+/** One answer's rows. Memoized on the answer, so a slider's own moves, which re-render the view above, draw nothing here. */
+export default memo(function DocDiff({ answer }: { answer: DiffAnswer }) {
+  const { rows, caps } = answer;
   return (
-    <div data-state="done">
+    <>
       {(caps.includes("alignment") || caps.includes("pairing")) && (
         <p className={styles.status} data-kind="unmatched">
           These two texts are too large to match block by block throughout: some blocks are shown removed and added
@@ -116,6 +84,6 @@ export default function DocDiff({ left, right }: { left: DiffBlock[]; right: Dif
           No differences.
         </p>
       )}
-    </div>
+    </>
   );
-}
+});

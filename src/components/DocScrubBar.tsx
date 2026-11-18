@@ -112,7 +112,6 @@ export default function DocScrubBar({ docId, onScrub, resetSignal, initialUpdate
   return (
     <div className={styles.bar}>
       <div className={styles.inner}>
-        {state === "loading" && <p className={styles.loadingLine}>Loading history…</p>}
         <input
           type="range"
           className={`${styles.slider} ${styles.sliderGrayed}`}
@@ -123,6 +122,9 @@ export default function DocScrubBar({ docId, onScrub, resetSignal, initialUpdate
           onPointerDown={activate}
           onFocus={activate}
         />
+        {/* Under the slider, and always there, so the touch that asked for the
+            history doesn't push the slider up from under itself. */}
+        <p className={styles.loadingLine}>{state === "loading" && "Loading history…"}</p>
       </div>
     </div>
   );
@@ -315,6 +317,30 @@ function LoadedScrubBar({
             </button>
           </p>
         )}
+        <div className={styles.track}>
+          <input
+            type="range"
+            className={styles.slider}
+            min={0}
+            max={total - 1}
+            value={index}
+            aria-label="Scrub through this doc's edit history"
+            onChange={(e) => {
+              setHasScrubbed(true);
+              seek(Number(e.target.value));
+            }}
+          />
+          {pinnedIndex !== null && (
+            <span
+              className={styles.pinTick}
+              data-kind="pin-tick"
+              aria-hidden="true"
+              style={{ "--pin-at": total > 1 ? pinnedIndex / (total - 1) : 0 } as CSSProperties}
+            />
+          )}
+        </div>
+        {/* The slider above its position and links, not under them: at the
+            window's bottom edge iPadOS takes a drag as its own gesture. */}
         <div className={styles.controls}>
           {hasScrubbed && current && (
             <span className={styles.positionLine} data-kind="position">
@@ -338,28 +364,6 @@ function LoadedScrubBar({
               </a>
             )}
           </span>
-        </div>
-        <div className={styles.track}>
-          <input
-            type="range"
-            className={styles.slider}
-            min={0}
-            max={total - 1}
-            value={index}
-            aria-label="Scrub through this doc's edit history"
-            onChange={(e) => {
-              setHasScrubbed(true);
-              seek(Number(e.target.value));
-            }}
-          />
-          {pinnedIndex !== null && (
-            <span
-              className={styles.pinTick}
-              data-kind="pin-tick"
-              aria-hidden="true"
-              style={{ "--pin-at": total > 1 ? pinnedIndex / (total - 1) : 0 } as CSSProperties}
-            />
-          )}
         </div>
       </div>
     </div>

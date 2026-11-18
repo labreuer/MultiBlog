@@ -53,7 +53,15 @@
 .positionLine,
 .loadingLine {
   font-size: 0.8rem;
+}
+
+.loadingLine {
   margin-bottom: 0.35rem;
+}
+
+/* Under the slider and its dots. */
+.positionLine {
+  margin-top: 0.35rem;
 }
 
 .positionLine {
