@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { diffPath, parseDiffSide, parseUpdateId, pastForkPoint, sideOrder, type PairLineage } from "./diff-side";
+import { diffPath, parseDiffPath, parseDiffSide, parseUpdateId, pastForkPoint, sideOrder, type PairLineage } from "./diff-side";
 
 // docs/FORKS.md "The route" — a diff side, and what it refuses: anything but
 // a doc id, or a doc id and one version within Postgres's bigint. And "Which
@@ -123,4 +123,16 @@ test("the fork point is compared as a bigint", () => {
   const parentAt = { docId: DOC, updateId: BigInt("9007199254740993") };
   assert.equal(sideOrder(parentAt, side(FORK, null), big), null);
   assert.equal(pastForkPoint(parentAt, side(FORK, null), big), true);
+});
+
+test("a diff page's pathname names its pair, however its @ is written", () => {
+  const pair = { left: { docId: DOC, updateId: BigInt("12") }, right: { docId: DOC, updateId: null } };
+  assert.deepEqual(parseDiffPath(`/diff/${DOC}@12/${DOC}`), pair);
+  assert.deepEqual(parseDiffPath(`/diff/${DOC}%4012/${DOC}`), pair);
+  assert.deepEqual(parseDiffPath(`/diff/${DOC}@12/${DOC}/`), pair);
+  // Written out again, both forms are one address.
+  assert.equal(diffPath(pair.left, pair.right), `/diff/${DOC}@12/${DOC}`);
+  for (const path of ["/diff", `/diff/${DOC}`, `/diff/${DOC}/${DOC}/more`, `/doc/${DOC}/${DOC}`, `/api/diff/${DOC}/${DOC}`, `/diff/${DOC}@0/${DOC}`, `/diff/${DOC}@x/${DOC}`]) {
+    assert.equal(parseDiffPath(path), null, path);
+  }
 });

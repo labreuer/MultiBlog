@@ -54,6 +54,21 @@ export function diffPath(left: DiffSide, right: DiffSide): string {
   return `/diff/${diffSideSegment(left)}/${diffSideSegment(right)}`;
 }
 
+export type DiffPairSides = { left: DiffSide; right: DiffSide };
+
+/**
+ * The pair a diff page's pathname names; null for any other path. Parsed, so
+ * that two addresses of one pair compare equal through `diffPath`: a pasted
+ * address has `%40` where `diffPath` writes `@`.
+ */
+export function parseDiffPath(pathname: string): DiffPairSides | null {
+  const match = /^\/diff\/([^/]+)\/([^/]+)\/?$/.exec(pathname);
+  if (!match) return null;
+  const left = parseDiffSide(match[1]);
+  const right = parseDiffSide(match[2]);
+  return left && right ? { left, right } : null;
+}
+
 /** Which side of a pair is the earlier, when the pair has an order. */
 export type SideOrder = "left-earlier" | "right-earlier";
 
