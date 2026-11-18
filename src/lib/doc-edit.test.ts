@@ -259,6 +259,17 @@ test("bold and linked code keep both marks through an edit to their paragraph", 
   ]);
 });
 
+test("a code block an edit writes keeps its lines, where a paragraph's soft break is a space", () => {
+  const d = doc(p("Replace me."), p("And me."));
+  const { next } = plan(d, [
+    { kind: "replace", target: { quote: "Replace me." }, blocks: md("```\nline one\nline two\n```") },
+    { kind: "replace", target: { quote: "And me." }, blocks: md("one\ntwo") },
+  ]);
+  assert.equal(next.child(0).type.name, "codeBlock");
+  assert.equal(next.child(0).textContent, "line one\nline two");
+  assert.equal(next.child(1).textContent, "one two");
+});
+
 // The size guards (docs/MCP.md §6, "Size guards"): a code block is taken
 // whole, and an edit past any cap is refused with nothing to write.
 

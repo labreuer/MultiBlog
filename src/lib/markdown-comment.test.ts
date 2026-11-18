@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { commentContentToMarkdown, markdownToCommentContent } from "./markdown-import";
+import { commentContentToMarkdown, markdownToAnnotationContent, markdownToCommentContent } from "./markdown-import";
 import { isCommentBodyError, parseCommentBody } from "./comment-body";
 
 // PLAN.md §23m — what each piece of Markdown syntax becomes in a comment, and
@@ -77,6 +77,13 @@ test("an image keeps its alt text, a rule is dropped, and raw HTML stays literal
 
 test("a soft line break becomes a space, not a newline inside the text node", () => {
   assert.equal(parse("line one\nline two")[0].content![0].text, "line one line two");
+});
+
+test("an annotation body's code block keeps its lines, which share the soft-break collapse's walk", () => {
+  const body = markdownToAnnotationContent("one\ntwo\n\n```\nline one\nline two\n```");
+  assert.equal(body.content![0].content![0].text, "one two");
+  assert.equal(body.content![1].type, "codeBlock");
+  assert.equal(body.content![1].content![0].text, "line one\nline two");
 });
 
 test("entities are decoded outside code and left alone inside it", () => {
