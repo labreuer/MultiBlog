@@ -191,6 +191,8 @@ model User {
   docUpdates             Doc[]                    @relation("DocUpdatedBy")
   docDeletions           Doc[]                    @relation("DocDeletedBy")
   wikiPages              Doc[]                    @relation("DocWikiOwner")
+  wikiAddressesOwned     WikiAddressHistory[]     @relation("WikiAddressHistoryOwner")
+  wikiAddressesLeft      WikiAddressHistory[]     @relation("WikiAddressHistoryMovedBy")
   fileOwners             FileOwner[]
   filesCreated           StoredFile[]             @relation("FileCreatedBy")
   fileUpdates            StoredFile[]             @relation("FileUpdatedBy")
@@ -929,6 +931,7 @@ model Doc {
   wikiOwner           User?                  @relation("DocWikiOwner", fields: [wikiOwnerUserId], references: [id], onDelete: Restrict)
   mentions            Mention[]
   citations           Citation[]
+  wikiAddressHistory  WikiAddressHistory[]
 
   @@index([searchVector], type: Gin)
   @@index([importKey])
@@ -1020,6 +1023,40 @@ model DocSlugHistory {
 
   @@index([docId])
   @@map("doc_slug_history")
+}
+
+// docs/WIKI.md "Renaming" — an address a wiki page has left: its owner (null
+// for the commons), name and variant, who moved the page off it and when, and
+// whether the row is **reserved**. A rename within a namespace reserves the
+// address it leaves, which every claim then counts as taken (wiki-claim.ts)
+// until the row is deleted or released; leaving a namespace releases the
+// page's rows there, which then only redirect when nothing else answers. The
+// key is written by its trigger, as Doc.wikiNameKey is; the CHECKs on the
+// name and variant and the partial unique indexes on reserved rows are
+// hand-written in migration wiki_address_history.
+//
+// Cascade on the owner, not Prisma's SetNull: a hard-deleted person's rows
+// would otherwise become the commons', held there and redirecting.
+model WikiAddressHistory {
+  id            String   @id @default(cuid())
+  docId         String   @map("doc_id")
+  ownerUserId   String?  @map("owner_user_id")
+  name          String
+  // wiki_name_key(name), by the wiki_address_history_sync_name_key trigger.
+  // Never assign to it.
+  nameKey       String?  @map("name_key")
+  variant       String   @default("")
+  reserved      Boolean
+  movedByUserId String?  @map("moved_by_user_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  doc     Doc   @relation(fields: [docId], references: [id], onDelete: Cascade)
+  owner   User? @relation("WikiAddressHistoryOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  movedBy User? @relation("WikiAddressHistoryMovedBy", fields: [movedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([nameKey, variant, ownerUserId], map: "wiki_address_history_address_idx")
+  @@index([docId], map: "wiki_address_history_doc_idx")
+  @@map("wiki_address_history")
 }
 
 // PLAN.md §12c/§12i — a root annotation (parentAnnotationId null) *is* the

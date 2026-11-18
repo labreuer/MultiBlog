@@ -12,6 +12,7 @@ import DocEditor from "@/components/DocEditor";
 import { ChipSurfaceProvider } from "@/lib/entity-chips/chip-surface";
 import { displayNameOf, staffDisplayNameOf } from "@/lib/display-name";
 import { wikiAddressOfDoc } from "@/lib/wiki-address";
+import { wikiAddressHistoriesOf } from "@/lib/wiki-rename";
 
 // The editor over a doc already resolved and gated: what /doc/[slug]/edit
 // renders, and what a wiki page's `/edit` renders (docs/WIKI.md "The doc view
@@ -47,7 +48,7 @@ export function canEditLoadedDoc(doc: DocForEditing, user: Session["user"]): boo
 }
 
 export default async function DocEditView({ doc, user }: { doc: DocForEditing; user: Session["user"] }) {
-  const [eligibleUsers, threads] = await Promise.all([
+  const [eligibleUsers, threads, addressHistories] = await Promise.all([
     prisma.user
       .findMany({
         where: { role: { in: ["ADMIN", "EDITOR", "AUTHOR"] } },
@@ -56,6 +57,10 @@ export default async function DocEditView({ doc, user }: { doc: DocForEditing; u
       })
       .then((users) => users.map((u) => ({ id: u.id, role: u.role, label: staffDisplayNameOf(u, user.role) }))),
     getDocAnnotationsAsThreads(doc.id),
+    // The doc's past wiki addresses, which Delete lists before deleting them
+    // with it (docs/WIKI.md "Deleting a page"); a doc moved out of the wiki
+    // can have some too.
+    wikiAddressHistoriesOf([doc.id], (u) => staffDisplayNameOf(u, user.role)),
   ]);
 
   // "focus mode" pulls all annotations rather than just anchored ones and we
@@ -86,6 +91,7 @@ export default async function DocEditView({ doc, user }: { doc: DocForEditing; u
               initialTitle={doc.title}
               visibility={doc.visibility}
               wiki={address && { address, ownerUserId: doc.wikiOwnerUserId }}
+              addressHistory={addressHistories.get(doc.id) ?? []}
               createdAt={doc.createdAt}
               userId={user.id}
               userName={displayNameOf(user)}

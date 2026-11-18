@@ -17,6 +17,8 @@ import { markMouseDownInside } from "@/lib/outside-mousedown";
 import CollabEditorBody, { type AuthorStat } from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
 import WikiAddressLine from "./wiki/WikiAddressLine";
+import WikiNameField from "./wiki/WikiNameField";
+import type { WikiAddressHistoryEntry } from "@/lib/wiki-rename";
 import { wikiPagePath, type WikiAddress } from "@/lib/wiki-address";
 import DocSettingsPanel, { type EligibleUser } from "./DocSettingsPanel";
 import EditorAnnotationRail from "./annotation/EditorAnnotationRail";
@@ -72,6 +74,8 @@ type Props = {
    * PUBLIC notice above it, and its own links go to its address.
    */
   wiki: { address: WikiAddress; ownerUserId: string | null } | null;
+  /** The doc's past wiki addresses, which the Settings panel's Delete lists first (docs/WIKI.md "Deleting a page"). */
+  addressHistory: WikiAddressHistoryEntry[];
   createdAt: Date;
   userId: string;
   userName: string;
@@ -104,6 +108,7 @@ export default function DocEditor({
   initialTitle,
   visibility,
   wiki,
+  addressHistory,
   createdAt,
   userId,
   userName,
@@ -342,11 +347,16 @@ export default function DocEditor({
         {wiki ? (
           // A wiki page's title is its name, shown where a doc's title field
           // is, and not its title fragment, which nothing on a wiki page
-          // shows. Read-only: a page is renamed from here once renaming
-          // exists (docs/WIKI.md, "Renaming").
-          <div className={`${styles.titleInput} ${styles.titleInputDisabled}`} data-wiki-name="">
-            {wiki.address.name}
-          </div>
+          // shows. The field is the page's rename control (docs/WIKI.md
+          // "The name is the title"); keyed on the name, so a rename that
+          // lands as a new address starts it afresh.
+          <WikiNameField
+            key={wiki.address.name}
+            docId={docId}
+            name={wiki.address.name}
+            editable={!deleted}
+            className={`${styles.titleInput} ${deleted ? styles.titleInputDisabled : ""}`}
+          />
         ) : provider ? (
           <CollabTitleField
             ydoc={ydoc}
@@ -473,6 +483,7 @@ export default function DocEditor({
           docId={docId}
           visibility={visibility}
           wiki={wiki && { name: wiki.address.name, ownerUserId: wiki.ownerUserId, path: wikiPath! }}
+          addressHistory={addressHistory}
           onVisibilityChange={setCurrentVisibility}
           viewerId={userId}
           createdAt={createdAt}

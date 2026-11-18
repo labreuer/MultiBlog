@@ -64,7 +64,7 @@ async function pdfNotePath(file: { slug: string; title: string }, annotationId: 
 
 /** What `on` names: a doc or PDF to annotate, or an annotation (by id, or its card's URL) to reply to. */
 async function resolveOn(ctx: McpContext, on: string): Promise<Target> {
-  const parsed = await parseDocRef(on);
+  const parsed = await parseDocRef(on, ctx.actor);
   let parentId: string | null = null;
   if (parsed.kind === "id") {
     const annotation = await prisma.annotation.findUnique({ where: { id: parsed.id }, select: { id: true } });

@@ -10,6 +10,8 @@ import TagStrip from "@/components/tags/TagStrip";
 import { CitationStyleSelect, MentionStyleSelect } from "@/components/ChipStyleSettings";
 import type { DocVisibility, Role } from "@/generated/prisma/enums";
 import { allowedVisibilities, PUBLIC_VISIBILITY_NOTE } from "@/lib/doc-visibility";
+import type { WikiAddressHistoryEntry } from "@/lib/wiki-rename";
+import DeleteAddressesConfirm from "@/components/wiki/DeleteAddressesConfirm";
 import styles from "./DocSettingsPanel.module.css";
 
 export type EligibleUser = {
@@ -28,6 +30,11 @@ type Props = {
    * where Delete and Undelete go on to (docs/WIKI.md "Deleting a page").
    */
   wiki: { name: string; ownerUserId: string | null; path: string } | null;
+  /**
+   * The doc's past wiki addresses, newest first, which Delete lists before it
+   * deletes them with the doc (docs/WIKI.md "Deleting a page").
+   */
+  addressHistory: WikiAddressHistoryEntry[];
   /** Told each visibility the server accepts, for the editor's address line and PUBLIC notice. */
   onVisibilityChange?: (visibility: DocVisibility) => void;
   /** The viewer, whom allowedVisibilities asks about on a person's page. */
@@ -53,6 +60,7 @@ export default function DocSettingsPanel({
   docId,
   visibility,
   wiki,
+  addressHistory,
   onVisibilityChange,
   viewerId,
   createdAt,
@@ -66,6 +74,7 @@ export default function DocSettingsPanel({
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [visibilityValue, setVisibilityValue] = useState(visibility);
   const [authors, setAuthors] = useState(new Set(authorIds));
   const [order, setOrder] = useState<string[]>(() => {
@@ -166,6 +175,14 @@ export default function DocSettingsPanel({
   // which may be the next free variant (docs/WIKI.md "Deleting a page").
   function handleDeleteToggle() {
     setError(null);
+    // A doc with past addresses asks first, since deleting it deletes them
+    // and a restore doesn't bring them back; one with none doesn't, since
+    // Undelete undoes all of it.
+    if (!deleted && addressHistory.length > 0 && !confirmingDelete) {
+      setConfirmingDelete(true);
+      return;
+    }
+    setConfirmingDelete(false);
     startTransition(async () => {
       try {
         if (deleted) {
@@ -341,9 +358,18 @@ export default function DocSettingsPanel({
           </tbody>
         </table>
 
-        <button type="button" onClick={handleDeleteToggle} disabled={pending} className={styles.deleteButton}>
-          {deleted ? "Undelete" : "Delete"}
-        </button>
+        {confirmingDelete ? (
+          <DeleteAddressesConfirm
+            docs={[{ history: addressHistory }]}
+            pending={pending}
+            onConfirm={handleDeleteToggle}
+            onCancel={() => setConfirmingDelete(false)}
+          />
+        ) : (
+          <button type="button" onClick={handleDeleteToggle} disabled={pending} className={styles.deleteButton}>
+            {deleted ? "Undelete" : "Delete"}
+          </button>
+        )}
 
         {error && <p className={styles.errorMessage}>{error}</p>}
       </div>

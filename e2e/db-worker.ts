@@ -80,6 +80,7 @@ import { setDocByline, setDocDeleted, setDocSlug, setDocVisibility } from "@/lib
 import { wikiPathOfDoc } from "@/lib/wiki-address";
 import { foldWikiName, type FoldedWikiName } from "@/lib/wiki-claim";
 import { createWikiPage } from "@/lib/wiki-create";
+import { deleteWikiAddressRow, renameWikiPage, revertWikiAddress } from "@/lib/wiki-rename";
 import { getFrontPagePreamble } from "@/lib/front-page";
 import { createBot, moveBot, requireBotRole, requireInvitable, restoreAccount, setBotAgent } from "@/lib/bots";
 import { prosemirrorToYXmlFragment } from "y-prosemirror";
@@ -3933,7 +3934,10 @@ export async function changeTestDocSetting(opts: {
   sessionRole?: Role;
   docId: string;
   change: { visibility: string } | { deleted: boolean } | { byline: string[] } | { slug: string };
-}): Promise<{ ok: true; wikiPath?: string | null; renamedFrom?: string | null } | { ok: false; code: string; message: string }> {
+}): Promise<
+  | { ok: true; wikiPath?: string | null; renamedFrom?: string | null; removedAddresses?: string[] }
+  | { ok: false; code: string; message: string }
+> {
   assertSafe(opts.actorEmail);
   const user = await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email: opts.actorEmail }, select: { id: true, role: true } });
   const actor = { userId: user.id, role: opts.sessionRole ?? user.role };
@@ -4219,6 +4223,63 @@ export async function findTestWikiPageId(ownerEmail: string | null, name: string
   return doc?.id ?? null;
 }
 
+/**
+ * docs/WIKI.md "Renaming": renameWikiPage, revertWikiAddress or
+ * deleteWikiAddressRow (src/lib/wiki-rename.ts) as an actor the spec names,
+ * the functions the editor's name field and /doc/<slug>/slug's actions wrap.
+ */
+export async function renameWikiPageAs(opts: {
+  actorEmail: string;
+  sessionRole?: Role;
+  docId: string;
+  change: { name: string; variant?: string } | { revert: true } | { deleteRow: string };
+}): Promise<
+  { ok: true; path?: string; renamedFrom?: string | null } | { ok: false; code: string; message: string; path?: string }
+> {
+  assertSafe(opts.actorEmail);
+  const user = await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email: opts.actorEmail }, select: { id: true, role: true } });
+  const actor = { userId: user.id, role: opts.sessionRole ?? user.role };
+  const { change } = opts;
+  try {
+    if ("deleteRow" in change) {
+      await deleteWikiAddressRow(actor, opts.docId, change.deleteRow);
+      return { ok: true };
+    }
+    const result = "revert" in change ? await revertWikiAddress(actor, opts.docId) : await renameWikiPage(actor, opts.docId, change);
+    return { ok: true, path: result.path, renamedFrom: result.renamedFrom };
+  } catch (err) {
+    const e = err as { code?: string; message?: string; details?: { path?: unknown } };
+    const path = typeof e.details?.path === "string" ? e.details.path : undefined;
+    return { ok: false, code: e.code ?? "error", message: e.message ?? String(err), ...(path ? { path } : {}) };
+  }
+}
+
+/** A doc's wiki address history, newest first; `ownerEmail` null for the commons. */
+export async function getTestWikiAddressHistory(docId: string): Promise<
+  { id: string; ownerEmail: string | null; name: string; nameKey: string | null; variant: string; reserved: boolean; movedByEmail: string | null }[]
+> {
+  const rows = await prismaIncludingDeleted.wikiAddressHistory.findMany({
+    where: { docId },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      name: true,
+      nameKey: true,
+      variant: true,
+      reserved: true,
+      owner: { select: { email: true } },
+      movedBy: { select: { email: true } },
+    },
+  });
+  return rows.map(({ owner, movedBy, ...row }) => ({ ...row, ownerEmail: owner?.email ?? null, movedByEmail: movedBy?.email ?? null }));
+}
+
+/** Moves every one of a doc's address history rows `ms` into the past: a rename made an hour ago, for Revert's window. */
+export async function ageTestWikiAddressHistory(docId: string, ms: number): Promise<void> {
+  await prismaIncludingDeleted.$executeRaw`
+    UPDATE wiki_address_history SET created_at = created_at - make_interval(secs => ${ms / 1000}) WHERE doc_id = ${docId}`;
+}
+
 /** Renames a throwaway user's slug through changeUserSlug, so the old one is in their history. */
 export async function renameTestUserSlug(email: string): Promise<{ oldSlug: string; newSlug: string }> {
   assertSafe(email);
@@ -4241,6 +4302,9 @@ const handlers = {
   createWikiPageAs,
   findTestWikiPageId,
   renameTestUserSlug,
+  renameWikiPageAs,
+  getTestWikiAddressHistory,
+  ageTestWikiAddressHistory,
   getTestUserSlug,
   addTestDocSlugHistory,
   createTestWikiPage,

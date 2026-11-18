@@ -19,7 +19,7 @@ import {
   type NamespaceFilter,
   type WikiPagesFilters,
 } from "@/lib/wiki-pages-query";
-import { decodeSegment, ownerSegment, wikiNamespacePath, type WikiOwner } from "@/lib/wiki-address";
+import { decodeSegment, ownerSegment, wikiLabel, wikiNamespacePath, type WikiOwner } from "@/lib/wiki-address";
 import { sameCols, type TablePrefs } from "@/lib/table-query";
 import { useTableFilters } from "@/components/table/use-table-filters";
 import { useRevealedRows } from "@/components/table/use-revealed-rows";
@@ -58,6 +58,8 @@ import { TagListCell } from "@/components/tags/TagChipList";
 import BulkTagPicker from "@/components/tags/BulkTagPicker";
 import { bulkTagObjects } from "@/app/actions/tags";
 import type { TagLink } from "@/lib/tag-data";
+import type { WikiAddressHistoryEntry } from "@/lib/wiki-rename";
+import DeleteAddressesConfirm, { AddressHistoryList } from "@/components/wiki/DeleteAddressesConfirm";
 import styles from "./WikiPagesTable.module.css";
 
 export type WikiPageRow = {
@@ -95,6 +97,10 @@ export type WikiPageRow = {
   // Its read rule (docs/TAGS.md, "Who may tag"). False only on a row the ADMIN
   // "Show all" override lists.
   canTag: boolean;
+  // Its past addresses, newest first, which Delete lists before deleting them
+  // with the page (docs/WIKI.md "Deleting a page"); empty on a row the viewer
+  // may not delete, and on a deleted one.
+  addressHistory: WikiAddressHistoryEntry[];
 };
 
 const SORTABLE_KEYS = [
@@ -110,6 +116,11 @@ const SORTABLE_KEYS = [
   "deletedAt",
   "deleted",
 ] as const;
+
+/** A page as a confirmation names it: its label, `commons/Name~variant`. */
+function wikiLabelOf(row: WikiPageRow): string {
+  return wikiLabel({ owner: row.namespace, name: row.name, variant: row.variant });
+}
 
 /** A restored page's address as a reader sees it: decoded, so a name reads with its `_` and nothing else encoded. */
 function readablePath(path: string): string {
@@ -137,6 +148,8 @@ export default function WikiPagesTable({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // The row whose Delete is asking first, while it is.
+  const [confirmingRow, setConfirmingRow] = useState<WikiPageRow | null>(null);
 
   const { navigate, updateFilters, searchDraft, onSearchChange, handleSort, searchParams } = useTableFilters({
     filters,
@@ -165,7 +178,21 @@ export default function WikiPagesTable({
       applicableTo: (row) => !row.deleted && row.canSetVisibility,
       run: (ids, value) => bulkSetDocVisibility(ids, value as DocVisibility),
     },
-    ...softDeleteBulkActions<WikiPageRow>("pages", bulkDeleteDocs, bulkRestoreDocs, (row) => row.canDelete),
+    ...softDeleteBulkActions<WikiPageRow>(
+      "pages",
+      bulkDeleteDocs,
+      bulkRestoreDocs,
+      (row) => row.canDelete,
+      // The selected pages that have past addresses, listed before any is
+      // deleted; with none, the delete runs at once, as every bulk delete does.
+      (targets) => {
+        const withHistory = targets.filter((row) => row.addressHistory.length > 0);
+        if (withHistory.length === 0) return null;
+        return (
+          <AddressHistoryList docs={withHistory.map((row) => ({ label: wikiLabelOf(row), history: row.addressHistory }))} />
+        );
+      },
+    ),
   ];
 
   // What each movable column does, keyed by its entry in src/lib/admin-table-columns.ts, which
@@ -270,9 +297,15 @@ export default function WikiPagesTable({
   ];
   const visibleColumns = resolveColumns(columns, filters.cols);
 
-  function handleDeleteToggle(row: WikiPageRow) {
+  function handleDeleteToggle(row: WikiPageRow, confirmed = false) {
     setError(null);
     setNotice(null);
+    setConfirmingRow(null);
+    // A page with past addresses asks first (docs/WIKI.md "Deleting a page").
+    if (!row.deleted && !confirmed && row.addressHistory.length > 0) {
+      setConfirmingRow(row);
+      return;
+    }
     startTransition(async () => {
       try {
         await runWithStatus(row.id, async () => {
@@ -354,6 +387,14 @@ export default function WikiPagesTable({
         />
       </div>
 
+      {confirmingRow && (
+        <DeleteAddressesConfirm
+          docs={[{ label: wikiLabelOf(confirmingRow), history: confirmingRow.addressHistory }]}
+          pending={pending}
+          onConfirm={() => handleDeleteToggle(confirmingRow, true)}
+          onCancel={() => setConfirmingRow(null)}
+        />
+      )}
       <BulkToolbar
         selectedRows={selectedRows}
         actions={bulkActions}

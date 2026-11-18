@@ -111,8 +111,12 @@ async function manageDoc(ctx: McpContext, docId: string, args: Args): Promise<To
     slug = await setDocSlug(ctx.actor, docId, args.slug);
     changed.push("slug");
   }
+  // docs/WIKI.md "Deleting a page": the editor asks before deleting a doc
+  // with past wiki addresses, which stop redirecting and are freed; this
+  // can't ask, so its answer lists them.
+  let removedAddresses: string[] = [];
   if (args.delete) {
-    await setDocDeleted(ctx.actor, docId, true);
+    ({ removedAddresses } = await setDocDeleted(ctx.actor, docId, true));
     changed.push("deleted");
   }
   const doc = await prisma.doc.findFirst({
@@ -135,6 +139,7 @@ async function manageDoc(ctx: McpContext, docId: string, args: Args): Promise<To
           ...(doc.record ? { record: true } : {}),
         }
       : { deleted: true }),
+    ...(removedAddresses.length > 0 ? { removedAddresses } : {}),
   };
 }
 
@@ -184,7 +189,7 @@ async function manageFile(ctx: McpContext, fileId: string, args: Args): Promise<
 
 /** An annotation by id or card URL, found deleted or not, and not_found to anyone who can't read it. */
 async function managedAnnotation(ctx: McpContext, ref: string): Promise<string | null> {
-  const parsed = await parseDocRef(ref);
+  const parsed = await parseDocRef(ref, ctx.actor);
   let id: string | null = null;
   if (parsed.kind === "id") id = parsed.id;
   else if (parsed.kind === "doc" && parsed.fragment) {
@@ -228,7 +233,7 @@ export const manageTool = defineTool({
 async function runManage(ctx: McpContext, args: Args): Promise<ToolResult> {
   if (args.delete && args.restore) throw invalid("delete and restore undo each other; send one.");
   if (!FIELDS.some((field) => args[field] !== undefined)) throw invalid("Say what to change.");
-  const parsed = await parseDocRef(args.target);
+  const parsed = await parseDocRef(args.target, ctx.actor);
 
   if (parsed.kind === "link" || (parsed.kind === "id" && (await prisma.anchoredLink.findUnique({ where: { id: parsed.id }, select: { id: true } })))) {
     onlyFieldsFor("link", args);

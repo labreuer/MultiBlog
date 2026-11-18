@@ -1,8 +1,9 @@
 import type { Session } from "next-auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
+import type { DocVisibility } from "@/generated/prisma/enums";
 import type { AccessRejection } from "@/lib/route-access";
-import { readableWikiDocsWhere } from "@/lib/doc-authz";
+import { canReadWikiDoc, readableWikiDocsWhere } from "@/lib/doc-authz";
 import { userByOldSlug } from "@/lib/user-slug";
 import { foldWikiName } from "@/lib/wiki-claim";
 import {
@@ -14,6 +15,7 @@ import {
   type WikiOwner,
   type WikiPageName,
   type WikiRedirect,
+  wikiPathOfDoc,
 } from "@/lib/wiki-address";
 
 // docs/WIKI.md "URLs", "Requests and responses" — the server half of a wiki
@@ -85,6 +87,46 @@ export async function findWikiPage<S extends Prisma.DocSelect>(
   }) as Promise<Prisma.DocGetPayload<{ select: S }> | null>;
 }
 
+/** What an old address's lookup reads of each page it might send a viewer to. */
+const OLD_ADDRESS_DOC_SELECT = {
+  id: true,
+  slug: true,
+  visibility: true,
+  wikiName: true,
+  wikiVariant: true,
+  deletedByUserId: true,
+  wikiOwner: { select: { slug: true } },
+} as const;
+
+/**
+ * Where an old address sends a viewer (docs/WIKI.md "Renaming"): the page
+ * whose reserved row holds it, else the newest page whose released row names
+ * it, the first of those `readable` says the viewer may read. Asked only once
+ * no live page at the address answers. The path is the page's address now, or
+ * `/doc/<slug>` for a doc moved out of the wiki. Null when there is none the
+ * viewer may read, which answers as a missing page does, so an old address
+ * never says whether a page they can't read was there.
+ */
+export async function oldAddressTarget(
+  ownerId: string | null,
+  name: string,
+  variant: string,
+  readable: (doc: { id: string; visibility: DocVisibility; wikiName: string | null; deletedByUserId: string | null }) => Promise<boolean>,
+): Promise<{ docId: string; path: string } | null> {
+  const { key } = await foldWikiName(prismaIncludingDeleted, name);
+  const rows = await prismaIncludingDeleted.wikiAddressHistory.findMany({
+    where: { ownerUserId: ownerId, nameKey: key, variant, doc: { deletedByUserId: null } },
+    orderBy: [{ reserved: "desc" }, { createdAt: "desc" }],
+    select: { doc: { select: OLD_ADDRESS_DOC_SELECT } },
+  });
+  for (const { doc } of rows) {
+    if (!(await readable(doc))) continue;
+    const path = wikiPathOfDoc({ wikiName: doc.wikiName, wikiVariant: doc.wikiVariant, ownerSlug: doc.wikiOwner?.slug ?? null });
+    return { docId: doc.id, path: path ?? `/doc/${doc.slug}` };
+  }
+  return null;
+}
+
 /** What a namespace list shows of each page. */
 export const WIKI_LIST_SELECT = { id: true, wikiName: true, wikiVariant: true, visibility: true } as const;
 export type WikiListPage = Prisma.DocGetPayload<{ select: typeof WIKI_LIST_SELECT }>;
@@ -154,7 +196,10 @@ export type WikiFound<T> = { value: T; page?: WikiPageName };
  *   not spelled as wikiPagePath spells it.
  * - **The reader-only hops**, added only when the viewer may read what the
  *   path names: the page's stored name, when the path named it in other
- *   capitals ("Case"). Each makes the one hop a 307.
+ *   capitals ("Case"); and, given `viewer`, the page an old address sends
+ *   them to, when no live page there answers ("Renaming"), by the wiki read
+ *   rule. Each makes the one hop a 307, and an old address's keeps the
+ *   sub-path.
  * - **An old user slug** sends everyone on to the current one, as a 307,
  *   but **a deleted account's only a viewer who may read what the path
  *   names**; anyone else gets the answer for an unknown owner, since
@@ -165,6 +210,7 @@ export type WikiFound<T> = { value: T; page?: WikiPageName };
 export async function resolveWikiPath<T>(
   segments: readonly string[],
   find: (owner: FoundOwner, page: WikiPageName | null) => Promise<WikiFound<T> | null>,
+  opts: { oldAddressesFor?: { viewer: Viewer } } = {},
 ): Promise<WikiPathAnswer<T>> {
   if (segments.length === 0) return { kind: "not-found" };
   const fixed = wikiRedirect(segments);
@@ -194,6 +240,16 @@ export async function resolveWikiPath<T>(
   if (found) {
     const hopped = wikiRedirect(segments, "", { ...ownerHop, page: found.page });
     return hopped ? { kind: "redirect", redirect: hopped } : { kind: "ok", owner, page: found.page ?? page, value: found.value };
+  }
+  if (page && opts.oldAddressesFor) {
+    const { viewer } = opts.oldAddressesFor;
+    const target = await oldAddressTarget(ownerIdOf(owner), page.name, page.variant, (doc) => canReadWikiDoc(viewer, doc));
+    // The sub-path as the fixed redirects would leave it, lowercased; one
+    // outside the grammar is a 404, as it would be at the page itself.
+    const rest = segments.slice(2).map((sub) => sub.toLowerCase());
+    if (target && rest.every((sub) => /^[a-z0-9]+(-[a-z0-9]+)*$/.test(sub))) {
+      return { kind: "redirect", redirect: { path: [target.path, ...rest].join("/"), permanent: false } };
+    }
   }
   if (owner.kind === "person" && owner.viaOldSlug && !owner.deleted) {
     const moved = wikiRedirect(segments, "", ownerHop);

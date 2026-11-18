@@ -5,7 +5,7 @@ import { BYLINE_ELIGIBLE_ROLES } from "@/lib/role-checks";
 import { ApiError, forbidden, invalid } from "@/lib/api/errors";
 import { allowedVisibilities } from "@/lib/doc-visibility";
 import { isAdmin } from "@/lib/role-checks";
-import { wikiPathOfDoc } from "@/lib/wiki-address";
+import { wikiPagePath, wikiPathOfDoc } from "@/lib/wiki-address";
 import { claimWikiAddress, ownerWhoCanAct } from "@/lib/wiki-claim";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
@@ -242,8 +242,13 @@ export async function setDocRecord(actor: Actor, docId: string, record: boolean)
   });
 }
 
-/** Where a doc lives after setDocDeleted: a wiki page's address, and the one it had when a restore found that taken. */
-export type DocDeletedResult = { wikiPath: string | null; renamedFrom: string | null };
+/**
+ * Where a doc lives after setDocDeleted: a wiki page's address, and the one it
+ * had when a restore found that taken. A delete says which past addresses it
+ * deleted with the doc (`removedAddresses`), which MCP's `manage`, having no
+ * way to ask first, answers with.
+ */
+export type DocDeletedResult = { wikiPath: string | null; renamedFrom: string | null; removedAddresses: string[] };
 
 /**
  * Soft delete or restore — each other's undo. Restoring is a question about
@@ -262,7 +267,12 @@ export type DocDeletedResult = { wikiPath: string | null; renamedFrom: string | 
  *   unique index never refuses the restore as a raw duplicate key. The claim
  *   asks the held commons names too: restoring a deleted `About` in the
  *   commons is an ADMIN's or EDITOR's. The result says where it now lives,
- *   and the address it had.
+ *   and the address it had;
+ * - **deleting a doc deletes its address history with it** (docs/WIKI.md
+ *   "Deleting a page"), reserved rows and released ones, in this
+ *   transaction, so its old addresses stop redirecting and are free at once.
+ *   A restore brings back the live address and not the rows. A doc moved out
+ *   of the wiki keeps released rows, so this isn't a wiki page's alone.
  */
 export async function setDocDeleted(actor: Actor, docId: string, deleted: boolean): Promise<DocDeletedResult> {
   return prismaIncludingDeleted.$transaction(async (tx) => {
@@ -280,11 +290,24 @@ export async function setDocDeleted(actor: Actor, docId: string, deleted: boolea
     }
 
     if (deleted) {
+      const history = await tx.wikiAddressHistory.findMany({
+        where: { docId },
+        orderBy: { createdAt: "desc" },
+        select: { name: true, variant: true, owner: { select: { slug: true } } },
+      });
+      await tx.wikiAddressHistory.deleteMany({ where: { docId } });
       await tx.doc.update({
         where: { id: docId },
         data: { deletedByUserId: actor.userId, deletedAt: new Date(), updatedByUserId: actor.userId },
       });
-      return { wikiPath: null, renamedFrom: null };
+      const removedAddresses = history.map((row) =>
+        wikiPagePath({
+          owner: row.owner ? { kind: "person", slug: row.owner.slug } : { kind: "commons" },
+          name: row.name,
+          variant: row.variant,
+        }),
+      );
+      return { wikiPath: null, renamedFrom: null, removedAddresses };
     }
 
     let variant = doc.wikiVariant;
@@ -301,12 +324,16 @@ export async function setDocDeleted(actor: Actor, docId: string, deleted: boolea
       where: { id: docId },
       data: { deletedByUserId: null, deletedAt: null, wikiVariant: variant, updatedByUserId: actor.userId },
     });
-    if (doc.wikiName === null) return { wikiPath: null, renamedFrom: null };
+    if (doc.wikiName === null) return { wikiPath: null, renamedFrom: null, removedAddresses: [] };
     const ownerSlug =
       doc.wikiOwnerUserId === null
         ? null
         : ((await tx.user.findUnique({ where: { id: doc.wikiOwnerUserId }, select: { slug: true } }))?.slug ?? null);
     const pathOf = (v: string) => wikiPathOfDoc({ wikiName: doc.wikiName, wikiVariant: v, ownerSlug });
-    return { wikiPath: pathOf(variant), renamedFrom: variant === doc.wikiVariant ? null : pathOf(doc.wikiVariant) };
+    return {
+      wikiPath: pathOf(variant),
+      renamedFrom: variant === doc.wikiVariant ? null : pathOf(doc.wikiVariant),
+      removedAddresses: [],
+    };
   });
 }

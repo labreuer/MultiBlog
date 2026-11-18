@@ -13,7 +13,7 @@ import { ApiError, invalid, notFound } from "@/lib/api/errors";
 import { listedName } from "./tool";
 import { parseRef, type ParsedRef } from "./url";
 import { parseOwnerSegment, parsePageSegment } from "@/lib/wiki-address";
-import { findWikiOwner, findWikiPage, ownerIdOf } from "@/lib/wiki-pages";
+import { findWikiOwner, findWikiPage, oldAddressTarget, ownerIdOf } from "@/lib/wiki-pages";
 
 // docs/MCP.md §15 — what a URL or id names, followed through slug history as
 // its own reading route follows it, and gated by that kind's read rule.
@@ -49,14 +49,14 @@ export type DocParsedRef = Exclude<ParsedRef, { kind: "wiki" }>;
  * one is, which an id no doc has also answers. PUBLIC adds nothing: the wiki
  * read rule stays on the wiki's routes ("Public pages").
  */
-export async function parseDocRef(ref: string): Promise<DocParsedRef> {
+export async function parseDocRef(ref: string, actor: Actor): Promise<DocParsedRef> {
   const parsed = parse(ref);
   if (parsed.kind !== "wiki") return parsed;
-  const id = await wikiDocIdOf(parsed.owner, parsed.page);
+  const id = await wikiDocIdOf(actor, parsed.owner, parsed.page);
   return { kind: "doc", param: id ?? "", fragment: parsed.fragment };
 }
 
-async function wikiDocIdOf(ownerText: string, pageText: string): Promise<string | null> {
+async function wikiDocIdOf(actor: Actor, ownerText: string, pageText: string): Promise<string | null> {
   let lowered = ownerText.toLowerCase();
   if (lowered === "common") lowered = "commons";
   const owner = parseOwnerSegment(lowered);
@@ -66,7 +66,14 @@ async function wikiDocIdOf(ownerText: string, pageText: string): Promise<string 
   const found = await findWikiOwner(owner);
   if (!found) return null;
   const doc = await findWikiPage(ownerIdOf(found), page.name, page.variant, { id: true });
-  return doc?.id ?? null;
+  if (doc) return doc.id;
+  // An old address reaches the page that left it, as a slug in a doc's
+  // history does (docs/WIKI.md "Renaming"): the first such page the actor
+  // may read, by the rule every tool then gates on.
+  const moved = await oldAddressTarget(ownerIdOf(found), page.name, page.variant, (candidate) =>
+    canUserReadDoc(actor.userId, actor.role, candidate),
+  );
+  return moved?.docId ?? null;
 }
 
 export type ResolvedDoc = {
@@ -203,7 +210,7 @@ export type ResolvedContainer = { kind: "doc"; doc: ResolvedDoc } | { kind: "fil
  * `search`'s `within` take. A bare id is tried as a doc, then as a file.
  */
 export async function readableContainer(actor: Actor, ref: string): Promise<ResolvedContainer> {
-  const parsed = await parseDocRef(ref);
+  const parsed = await parseDocRef(ref, actor);
   switch (parsed.kind) {
     case "doc":
       return { kind: "doc", doc: await readableDocByParam(actor, parsed.param) };

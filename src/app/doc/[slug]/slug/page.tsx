@@ -8,7 +8,10 @@ import { uniqueDocSlug } from "@/lib/doc-slug";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { signInPath } from "@/lib/sign-in-redirect";
 import { wikiPathOfDoc } from "@/lib/wiki-address";
+import { staffDisplayNameOf } from "@/lib/display-name";
+import { wikiAddressHistoriesOf } from "@/lib/wiki-rename";
 import SlugManager from "@/components/SlugManager";
+import WikiAddressManager from "@/components/wiki/WikiAddressManager";
 
 export const metadata: Metadata = { title: "Doc url" };
 
@@ -53,6 +56,9 @@ export default async function DocSlugPage({ params }: { params: Promise<{ slug: 
   // untitled doc's standardSlug would be slugify("", "doc") -> "doc" ->
   // reserved -> "doc-doc", which reads as a typo rather than a fallback.
   const standardSlug = await uniqueDocSlug(docTitleOrFallback(doc.title), doc.id);
+  const addressHistory = wikiPath
+    ? ((await wikiAddressHistoriesOf([doc.id], (u) => staffDisplayNameOf(u, session.user.role))).get(doc.id) ?? [])
+    : [];
 
   return (
     <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
@@ -61,13 +67,23 @@ export default async function DocSlugPage({ params }: { params: Promise<{ slug: 
         <Link href={wikiPath ? `${wikiPath}/edit` : `/doc/${doc.id}/edit`}>Back to editor</Link>
       </p>
       {wikiPath && (
-        // docs/WIKI.md "URLs" — a wiki page's url is its address. Its slug is
+        // docs/WIKI.md "URLs", "Renaming" — a wiki page's url is its address,
+        // renamed here and in the editor, with its past addresses. Its slug is
         // an internal handle, frozen while it is in the wiki, whose past urls
         // still redirect on to the address.
-        <p style={{ marginBottom: "1.5em" }}>
-          This is a wiki page, at <Link href={wikiPath}>{wikiPath}</Link>. Its doc url below is frozen while it is in the
-          wiki; links to it, and to its past urls, go on to the page.
-        </p>
+        <>
+          <WikiAddressManager
+            docId={doc.id}
+            path={wikiPath}
+            name={doc.wikiName!}
+            variant={doc.wikiVariant}
+            history={addressHistory}
+          />
+          <h2 style={{ fontSize: "1rem", marginBottom: "0.5em" }}>Doc url</h2>
+          <p style={{ marginBottom: "1.5em" }}>
+            Its doc url below is frozen while it is in the wiki; links to it, and to its past urls, go on to the page.
+          </p>
+        </>
       )}
       <SlugManager
         entityType="doc"

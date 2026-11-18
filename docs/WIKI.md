@@ -456,8 +456,9 @@ to pass.
   without a variant, `/edit` and a fragment. It decodes the path, as it does a doc's, and hands
   on decoded segments ("The owner segment").
 - **`src/lib/mcp/resolve.ts` resolves it to the doc** through the wiki routes' shared resolution
-  (`src/lib/wiki-pages.ts`), so a name in other capitals reaches its page, and from PR 3 an old
-  address does, as a slug in history does now. The doc is then gated as any is, by
+  (`src/lib/wiki-pages.ts`), so a name in other capitals reaches its page, and so does an old
+  address, as a slug in history does: the first page holding or naming it that the actor may
+  read, by `canUserReadDoc` (`parseDocRef` takes the actor for it). The doc is then gated as any is, by
   `canUserReadDoc`, and an unreadable page is `not_found`, as a missing one is. `PUBLIC` adds
   nothing here: the wiki read rule stays on the wiki's routes ("Public pages").
 - **Every switch that answers a parsed `doc` answers `wiki` alike**: `readableContainer`, which
@@ -723,7 +724,8 @@ partial unique indexes stay as the backstop.
   field holding the name, checked by the rules as it is typed, with a Rename button once it
   differs ("Renaming"). A rename goes on to the editor at the new address. The variant changes
   on `/doc/<slug>/slug`, whose Rename takes both ("Renaming"), and the namespace through the
-  menu's Move… ("The Actions menu"). Until renaming lands (PR 3) the field is read-only.
+  menu's Move… ("The Actions menu"). A deleted page's field is read-only, since it is renamed
+  after it is restored (`src/components/wiki/WikiNameField.tsx`).
 - **MCP's `edit_doc` refuses a `title` for a wiki page**, pointing at the rename. A revert that
   restores a title is harmless, since nothing shows the fragment.
 - **Scrubbing, `?at=` and a diff's version show the text at that version under the current
@@ -1138,8 +1140,9 @@ wiki page**, by decision (2026-11-17): the two are kept apart.
   an action doesn't apply to, as the kit does.
 - **`/docs` adds `wikiName: null` to its scope.** It keeps the delete confirmation, for a doc
   moved out of the wiki that still has released rows ("Moving out of the wiki").
-- **The header's menu links to it beside "Docs"** from PR 3 on, when the wiki is first linked
-  ("Build order").
+- **The header's Docs menu links to it**, as "Wiki pages", beside Annotations, Tags and
+  References; and the header links to `/wiki`, as "Wiki", for anyone signed in. Signed out the
+  header stays the blog's.
 
 **Search has a "Wiki pages" section.** `src/lib/search/` gains a `wiki` kind beside `docs`, and
 the two split on `wikiName`: the docs kind's readable ids add `wikiName: null`, and the wiki
@@ -1866,10 +1869,25 @@ not the wiki's; the other five are its, in an order in which each deployed state
    row and bulk Delete ask nothing first, since a page has no address history until PR 3. MCP
    resolves an address through `parseDocRef` before any tool's switch, and its search asks the
    docs and wiki kinds ranked together (`wikiInDocs`), so its results are unchanged.
-3. **Renaming within a namespace.** `wiki_address_history`; `wiki-rename.ts`; reserved rows
-   counted by every claim; the old-address 307s; Revert; the editor's name as the rename
-   control; the history on `/doc/<slug>/slug`; a deleted page's rows deleted with it, after the
-   confirmation that lists them; the header's links to `/wiki` and the wiki table.
+3. **Renaming within a namespace. Built 2026-11-18.** `wiki_address_history`; `wiki-rename.ts`;
+   reserved rows counted by every claim; the old-address 307s; Revert; the editor's name as the
+   rename control; the history on `/doc/<slug>/slug`; a deleted page's rows deleted with it,
+   after the confirmation that lists them; the header's links to `/wiki` and the wiki table.
+   **As built**: `renameWikiPage`, `revertWikiAddress` and `deleteWikiAddressRow` take an
+   `Actor`, wrapped by `src/app/actions/wiki.ts`; the editor's field is
+   `src/components/wiki/WikiNameField.tsx` and the slug page's controls
+   `WikiAddressManager.tsx`. The old-address hop is `resolveWikiPath`'s, asked by the page and
+   its editor through `oldAddressesFor` and answered by `oldAddressTarget`
+   (`src/lib/wiki-pages.ts`), which MCP's `parseDocRef` asks too; it already walks released rows
+   after the reserved one, for PR 5. Revert measures the hour from the newest row of any kind,
+   which is when the page went live where it is. A change of case alone claims nothing, so it
+   meets no held-name check: the page holds that name already. The confirmation is
+   `src/components/wiki/DeleteAddressesConfirm.tsx`, and the table kit's button actions gain a
+   `confirm` for the bulk one (`BulkToolbar.tsx`), drawn under the toolbar with its own Confirm
+   and Cancel, since nothing in the app uses `window.confirm`. `/docs`' confirmation waits for
+   PR 5, since only a doc moved out of the wiki has rows and still lists there. The rename
+   field and the Settings panel's notes about the front page wait for PR 4, which brings the
+   front page.
 4. **Into the wiki.** Forking into the wiki and moving a doc in, on main's `readForkSource`,
    `forkSeed` and `createDocWithContent`; the Fork dialog's Where and "Move into the wiki…";
    the family line on the public render, for a null viewer and in its wording, which no page

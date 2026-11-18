@@ -34,6 +34,14 @@ export type BulkAction<T> = BulkActionBase<T> &
         className?: string;
         /** Sets destructive actions apart from the rest of the toolbar. */
         separated?: boolean;
+        /**
+         * Asked of the rows the action applies to before it runs: a node to
+         * show in place of running at once, with the toolbar's own Confirm and
+         * Cancel, or null to run. For a delete whose loss a restore won't
+         * give back (docs/WIKI.md "Deleting a page"); every other action runs
+         * at once, since its own undo is the safety net.
+         */
+        confirm?: (rows: T[]) => ReactNode | null;
         run: (ids: string[]) => Promise<BulkResult>;
       }
     | {
@@ -98,6 +106,9 @@ export function BulkToolbar<T extends { id: string }>({
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A button action's confirmation, while it is shown: the action, and what
+  // its `confirm` gave for the rows it applied to then.
+  const [confirming, setConfirming] = useState<{ action: BulkAction<T>; node: ReactNode } | null>(null);
 
   if (selectedRows.length === 0) return null;
 
@@ -105,11 +116,19 @@ export function BulkToolbar<T extends { id: string }>({
   const takes = (action: BulkAction<T>, row: T, value?: string) =>
     action.applicableTo(row) && (action.kind !== "select" || !action.allows || action.allows(row, value!));
 
-  async function handle(action: BulkAction<T>, value?: string) {
+  async function handle(action: BulkAction<T>, value?: string, confirmed = false) {
     setError(null);
+    setConfirming(null);
     const targetRows = selectedRows.filter((row) => takes(action, row, value));
     if (targetRows.length === 0) return;
     const ids = targetRows.map((r) => r.id);
+    if (!confirmed && action.kind === "button" && action.confirm) {
+      const node = action.confirm(targetRows);
+      if (node !== null) {
+        setConfirming({ action, node });
+        return;
+      }
+    }
 
     setPending(true);
     let ok = false;
@@ -159,6 +178,7 @@ export function BulkToolbar<T extends { id: string }>({
   }
 
   return (
+    <>
     <div className={styles.bulkToolbar}>
       <span>{selectedRows.length} selected</span>
       {actions.map((action) => {
@@ -227,6 +247,25 @@ export function BulkToolbar<T extends { id: string }>({
       })}
       {error && <span style={{ color: "var(--error)" }}>{error}</span>}
     </div>
+      {confirming && (
+        <div className={styles.bulkToolbar} style={{ display: "block" }} data-bulk-confirm="">
+          {confirming.node}
+          <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => void handle(confirming.action, undefined, true)}
+              style={{ color: "var(--danger)" }}
+            >
+              {confirming.action.label}
+            </button>
+            <button type="button" disabled={pending} onClick={() => setConfirming(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -235,12 +274,15 @@ export function BulkToolbar<T extends { id: string }>({
 // is for a table whose rows differ in who may delete them (the wiki table,
 // where a person's page is its owner's alone to delete or restore): a row it
 // refuses is dropped from both actions, as any row an action doesn't apply to
-// is, rather than sent to be refused.
+// is, rather than sent to be refused. `confirmDelete` is the delete's
+// `confirm`: the wiki table's, which lists the past addresses a delete takes
+// with it.
 export function softDeleteBulkActions<T extends { deleted: boolean }>(
   noun: string,
   bulkDelete: (ids: string[]) => Promise<BulkResult>,
   bulkRestore: (ids: string[]) => Promise<BulkResult>,
   canToggle: (row: T) => boolean = () => true,
+  confirmDelete?: (rows: (T & { id: string })[]) => ReactNode | null,
 ): BulkAction<T & { id: string }>[] {
   return [
     {
@@ -250,6 +292,7 @@ export function softDeleteBulkActions<T extends { deleted: boolean }>(
       icon: "delete",
       separated: true,
       applicableTo: (row) => !row.deleted && canToggle(row),
+      confirm: confirmDelete,
       run: bulkDelete,
     },
     {

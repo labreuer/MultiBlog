@@ -174,8 +174,9 @@ read as `SHARED`, but where these say otherwise. Two namespaces: a person's,
 | See history | as Edit (the interim rule, "Who may see a doc's history"), with its fork-point exception ‡ | as Edit, with the same exception ‡ |
 | Change visibility | `x` may raise it; its byline and ADMIN may lower it | as for any doc, within `allowedVisibilities` |
 | Byline | its byline, which may add to it; `x` stays on it | as for any doc |
+| Rename within the namespace, revert, or delete a past address | its byline | its byline, plus ADMIN and EDITOR |
 | Delete or restore | `x` alone | its byline, plus ADMIN and EDITOR |
-| Claim a held commons name (`Front Page`, `About`), creating or restoring | — (a person's namespace holds none) | ADMIN or EDITOR |
+| Claim a held commons name (`Front Page`, `About`), creating, renaming or restoring | — (a person's namespace holds none) | ADMIN or EDITOR |
 | Listed in `/docs` | never: the wiki table, `/wiki/special/pages`, lists wiki pages | never |
 
 - **`x`'s powers are judged by their account as it is now**: raising, deleting, restoring

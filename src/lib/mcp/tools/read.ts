@@ -148,7 +148,7 @@ export const readTool = defineTool({
   maxResultSizeChars: MAX_READ_CHARS,
   searchHint: "open url doc pdf page outline section blocks quote around thread annotation link post comment tag",
   async run(args, ctx) {
-    const parsed = await parseDocRef(args.url);
+    const parsed = await parseDocRef(args.url, ctx.actor);
     switch (parsed.kind) {
       case "doc":
         return readDocRef(ctx, parsed.param, parsed.fragment, args);
