@@ -5028,5 +5028,7 @@ scrub bar, word by word. Both are taken from the `wiki` branch without the wiki,
 addresses on top when it is rebuilt. Built 2026-11-17: the diffs, at `/diff/<left>/<right>`,
 with the scrub bar's pin and links and side-by-side's link. Built 2026-11-17: forks, from the
 doc view's Actions menu, with a doc's family lines and their diffs; how a diff shows a fork
-against its parent is still to choose. **Plan and what is built:
+against its parent is still to choose. Built 2026-11-17: a slider for each side of a diff
+whose history its viewer may see, which fetches the log's ids and times and names a pair the
+page then asks the server for, with no navigation. **Plan and what is built:
 [docs/FORKS.md](docs/FORKS.md).**

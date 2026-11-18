@@ -528,6 +528,73 @@ development machine.
 - **If long logs do make a replay slow**, snapshots along the log at a fixed spacing may serve
   better than one per fork point, since they bound the scrub bar's and a diff's replay too.
 
+## A diff slider replays its side's log at every pair
+
+**Status:** not measured where it could matter. Nothing is built for it, on purpose
+(docs/FORKS.md, "Sliders on the diff page").
+
+The diff page asks the server for each pair its sliders name, one request at a time, so a
+drag is a run of reads of both sides, and a side at a version is one replay from the newest
+`ydoc_snapshot` at or before it, or from row #1. Docs have no snapshots but the ones
+publishing a post leaves. In a copy of a production database the logs are short (the median
+doc has 2 updates, the 99th percentile 40, the longest 1,270), and `loadDocStateAt` at the end
+of the longest takes 11 ms on a development machine; near the end of a made-up log of 10,000
+it takes 87 ms. An instance whose docs are typed by hand, a keystroke or a burst to an update,
+has not been measured, and an instance's one vCPU serves every reader from the event loop a
+replay holds.
+
+- **Next:** count `ydoc_update` rows per doc on such an instance, time `loadDocStateAt` at
+  the tail of its longest log, on the instance, and watch its web process while a slider is
+  dragged there.
+- **If a replay per pair is slow there, the fix is snapshots along the log** at a fixed
+  spacing, which `materializeYdocAt` already starts from, and which bound the doc page's
+  scrub bar and a fork's read too ("A snapshot at a fork point", above, has what they cost
+  the replay routes).
+- **Each answer carries both sides' blocks**, about half a megabyte of JSON for 300 long
+  paragraphs a side, though a slider moves one side. Naming in the request the side the
+  browser already holds would halve it, and spare that side's read.
+- **The index is the log's length too**, about 60 bytes an update, sent once a doc per visit
+  (`/api/doc/[id]/versions`), and a range input with a position per update. Neither is
+  capped.
+
+## A diff slider keeps the reader's place in pixels alone
+
+**Status:** not built. Wanted if sliding to find when a paragraph came in proves hard to
+follow (docs/FORKS.md, "Sliders on the diff page").
+
+A moved slider leaves the page scrolled where it was, and draws the new pair's rows in place
+of the old. Those are other rows, of other heights, and unchanged stretches fold, so the
+paragraph a reader was watching can move, or fold away.
+
+- **What would hold it:** the side that didn't move has the same blocks before and after. A
+  row would carry its blocks' indexes on each side; before the new rows are drawn, note the
+  first row in view and its unmoved side's block, and afterwards scroll that block's row back
+  to where it was.
+- **Folding works against it.** A watched paragraph that is unchanged in the new pair sits
+  inside an "N unchanged blocks" row. Keeping the place may mean leaving that block out of
+  the fold.
+
+## A native `replaceState` is two history calls
+
+**Status:** the diff page allows for it, and the doc page's scrub bar does not. On the diff
+page a real Safari counted 22 history calls in 30 seconds of scrubbing (2026-11-17, with
+Safari 27.2 and iOS 18.6.2 the two tried). No Safari has been driven to the budget on the doc
+page.
+
+Next's router answers a `history.replaceState` the page makes with a `replaceState` of its
+own, so each address a page writes that way costs two calls of the browser's budget. WebKit
+throws past roughly 100 history calls in 30 seconds (`src/lib/scrub-url.ts`), and the
+router's call is made inside the router, where the page's `try` doesn't reach.
+
+- **The diff page's sliders** write at most once every 750 ms for that reason
+  (`DIFF_ADDRESS_MIN_INTERVAL_MS`; docs/FORKS.md, "Sliders on the diff page").
+- **The doc page's scrub bar** writes `?at=` 400 ms after the slider rests, with no floor
+  between writes. A reader who rests on a position and moves on, again and again for half a
+  minute, makes up to 150 calls.
+- **Next:** on a real Safari, scrub a short history on the doc page slowly for 30 seconds,
+  resting on each position, and read the console (`scripts/remote-console.ts`). If the
+  router's call throws there, give `replaceScrubParam` the same floor.
+
 ## The diff engine's size guards are first guesses
 
 **Status:** decided 2026-10-22, in the wiki plan's final review, and carried into
@@ -577,21 +644,20 @@ What the first set leaves:
   cap on the oldest phone the baseline claims (`npx tsx scripts/remote-console.ts`), and lower
   the worker's caps, apart from the server's, if a tab dies or the deadline always bites.
 
-## The diff page's worker has not run in a real Safari
+## The diff page's worker has not run on an iPad, or on the oldest engines in the baseline
 
-**Status:** not tried. `src/lib/doc-diff.worker.ts` is the first worker the repo makes itself
-(docs/FORKS.md, "Where the comparing is done"), a module worker built by
-`new Worker(new URL(…), { type: "module" })`.
+**Status:** it runs in Safari 27.2 and on an iPhone on iOS 18.6.2 (2026-11-17), as in
+Chromium, Firefox and Playwright's WebKit build. The baseline is Safari 26 / iPadOS 18.4+
+(docs/PDF.md §10), and nothing that old has opened a diff; nor has any iPad.
 
-A production build serves it to Chromium, Firefox and Playwright's WebKit build, and it answers
-in each. Playwright's WebKit is neither desktop Safari nor iOS Safari (e2e/README.md, "Firefox
-and WebKit"), and what the worker's bundle assumes of the engine underneath is exactly what
-those differ in. A browser where it can't start shows "Couldn't compare these two texts in
-this browser", with no diff.
+`src/lib/doc-diff.worker.ts` is the first worker the repo makes itself (docs/FORKS.md, "Where
+the comparing is done"), a module worker built by `new Worker(new URL(…), { type: "module" })`.
+What its bundle assumes of the engine underneath is what an older WebKit may lack. A browser
+where it can't start shows "Couldn't compare these two texts in this browser", with no diff.
 
-- **Next:** open a diff of two versions on a real Safari (e2e/MACOS.md) and on the oldest
-  iPhone and iPad the baseline claims (`npx tsx scripts/remote-console.ts`), and read
-  `data-state` on the island: `done`, or `failed`.
+- **Next:** open a diff of two versions on an iPad, and on the oldest Safari and iPhone to
+  hand (`npx tsx scripts/remote-console.ts`), and read `data-state` on the island: `done`, or
+  `failed`.
 
 ## The claude.ai trial: what to undo
 
