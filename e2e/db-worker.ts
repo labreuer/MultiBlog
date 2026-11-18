@@ -72,6 +72,7 @@ import { ensureYdocSnapshotAt, materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
+import { applyAnnotationMark } from "@/lib/annotation-admin";
 import { issueApiToken } from "@/lib/api/tokens";
 import { softDeleteUser } from "@/lib/user-delete";
 import { setDocDeleted } from "@/lib/doc-manage";
@@ -2101,6 +2102,44 @@ export async function markPresentAtStamp(docId: string, annotationId: string): P
   }
 }
 
+/**
+ * applyAnnotationMark as postAnnotation calls it, for a throwaway user — the
+ * hand-made `"mark"` that no UI path sends for someone who can't edit the
+ * doc, which a spec can make only from here. Answers whether the mark
+ * landed, and whether the doc's log, replayed to its head, now carries a mark
+ * with the annotation's id.
+ */
+export async function applyTestAnnotationMark(opts: {
+  docId: string;
+  annotationId: string;
+  userEmail: string;
+  from: number;
+  to: number;
+  quotedText: string;
+}): Promise<{ applied: boolean; markInDoc: boolean }> {
+  assertSafe(opts.userEmail);
+  const user = await prisma.user.findUniqueOrThrow({ where: { email: opts.userEmail }, select: { id: true, role: true } });
+  const { applied } = await applyAnnotationMark({
+    docId: opts.docId,
+    userId: user.id,
+    role: user.role,
+    annotationId: opts.annotationId,
+    from: opts.from,
+    to: opts.to,
+    quotedText: opts.quotedText,
+  });
+  const ydocId = ydocIdForDoc(opts.docId);
+  const head = await ydocStore.maxUpdateId(ydocId);
+  if (head === null) return { applied, markInDoc: false };
+  const ydoc = await materializeYdocAt(ydocId, head);
+  try {
+    const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(ydoc, "default") as JSONContent;
+    return { applied, markInDoc: collectMarkAttrValues(json, "annotation", "id").includes(opts.annotationId) };
+  } finally {
+    ydoc.destroy();
+  }
+}
+
 // The same replay-and-compare check-annotation-anchors.ts does, for one row,
 // so a spec can assert the invariant at the exact moment it posted rather
 // than trusting a bulk script run later.
@@ -3964,6 +4003,7 @@ const handlers = {
   getTestReference,
   getDocChipIids,
   markPresentAtStamp,
+  applyTestAnnotationMark,
   createTestAnnotation,
   getReplyAnchorFacts,
   getAnnotationEditFacts,

@@ -193,9 +193,9 @@ after authorizing the write, and every handler checks it with **`verifyAdminToke
   requires its own audience, so neither passes for the other.
 - **The document**, which must be the one the request names.
 - **Writable.** A read-only token is what the token routes give a reader's browser for its
-  websocket, so it never authorizes a write here, even one made on a reader's behalf:
-  `/admin/annotation-mark` exists so a reader can annotate, and Next mints that request a
-  writable token of its own.
+  websocket, so it never authorizes a write here. Next mints each request a writable token of
+  its own, after authorizing the write: `/admin/annotation-mark`'s only for someone who may
+  edit the doc (`applyAnnotationMark`), since a mark is an edit.
 
 A new endpoint calls `verifyAdminToken`. `verifyYdocToken` alone is the websocket's check
 (`ydocOnAuthenticate`), which lets a read-only token through and narrows the connection

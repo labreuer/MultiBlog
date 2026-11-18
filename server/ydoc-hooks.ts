@@ -628,11 +628,11 @@ export async function handleApplyDocUpdate(
 }
 
 // POST /admin/annotation-mark (PLAN.md §12i) — applies a mark carrying
-// annotationId over [from, to) in documentName's "default" fragment, via
-// the collab server so a read-only reader (§12g) can annotate without a
-// writable connection. The token is Next's, minted writable for the poster
-// (src/lib/annotation-admin.ts); a reader's own read-only token is refused
-// here as anywhere else (verifyAdminToken).
+// annotationId over [from, to) in documentName's "default" fragment, for the
+// doc editor's annotations, through the collab server so the write reaches
+// every connected client. The token is Next's, minted writable only for a
+// poster who may edit the doc (src/lib/annotation-admin.ts); a reader's own
+// read-only token is refused here as anywhere else (verifyAdminToken).
 //
 // Row-first-mark-second is the caller's job
 // (src/lib/annotation-admin.ts): if this returns applied:false — offsets no

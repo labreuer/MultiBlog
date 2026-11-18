@@ -1751,7 +1751,7 @@ not the wiki's; the other five are its, in an order in which each deployed state
    - **An annotation's mark is written only for someone who may edit the doc** (`f3ebfc6`):
      `applyAnnotationMark` asks `canUserEditDoc` where it mints the writable token, and answers
      a refusal as `applied: false`, with the empty `chips` main's return has gained since.
-     TODO.md's "Posting an annotation trusts three things the client sends", item 1. On a
+     TODO.md's "Posting an annotation trusts two things the client sends" keeps the rest. On a
      person's page, which no ADMIN may edit, this is what keeps a hand-made `postAnnotation`
      from writing into it. **Removing a mark stays as it is**: `removeAnnotationMark` mints its
      token for whoever may delete the annotation, its writer or an ADMIN, and takes from the doc

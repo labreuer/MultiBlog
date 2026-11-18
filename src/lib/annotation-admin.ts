@@ -1,5 +1,6 @@
 import { parseChipRecords, type ChipRecord } from "@/lib/anchors";
 import type { Role } from "@/generated/prisma/enums";
+import { canUserEditDoc } from "./doc-authz";
 import { signYdocToken } from "./ydoc-token";
 import { collabHttpOrigin } from "./collab-http-origin";
 import {
@@ -31,6 +32,14 @@ import {
  * an expected outcome the caller (postAnnotation) already renders as a
  * document-level annotation, not a failure to surface.
  *
+ * **Only for someone who may edit the doc.** A mark is an edit, and the
+ * token minted below is writable whoever is posting, so the check sits here,
+ * where the token is made, and no caller can have a mark written for someone
+ * who can't edit — postAnnotation takes `anchorMode` from the client, and a
+ * hand-made "mark" from a reader would otherwise be one. A refusal is
+ * `applied: false` like any other, so that annotation posts document-level
+ * and nothing is written to the doc.
+ *
  * Never throws. An unreachable collab server, a non-2xx, and an unparseable
  * body all collapse to `applied: false` and a log line — the annotation row
  * the caller already inserted is valid either way (row-first-mark-second,
@@ -59,6 +68,10 @@ export async function applyAnnotationMark(opts: {
 }): Promise<{ applied: boolean; markUpdateId: string | null; chips: ChipRecord[] }> {
   const { docId, userId, role, annotationId, from, to, quotedText } = opts;
   const documentName = ydocIdForDoc(docId);
+  if (!(await canUserEditDoc(userId, role, docId))) {
+    console.warn(`[annotation-admin] refused a mark in ${documentName} for ${userId}, who can't edit it`);
+    return { applied: false, markUpdateId: null, chips: [] };
+  }
   const token = await signYdocToken({ sub: userId, documentName, role });
 
   let response: Response;

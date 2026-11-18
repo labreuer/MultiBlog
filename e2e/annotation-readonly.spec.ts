@@ -3,7 +3,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { COLLAB_PORT, DEV_HOST } from "../scripts/dev-ports";
 import { withSchemaVersion } from "../src/lib/schema-version";
 import { test, expect, QUOTED_BODY, QUOTED_TEXT, QUOTE_FROM, QUOTE_TO } from "./fixtures";
-import { ADMIN_EMAIL, createTestAnnotation } from "./db";
+import { ADMIN_EMAIL, applyTestAnnotationMark, createTestAnnotation } from "./db";
 import type { Page } from "@playwright/test";
 
 // PLAN.md §22e PR 1 — a posted annotation's body is writable by its author or
@@ -146,4 +146,25 @@ test.describe("a posted annotation's body is not writable by every reader", () =
     const res = await readerPage.request.post(`/api/annotation/${id}/token`);
     expect(res.status()).toBe(403);
   });
+});
+
+// A mark is an edit, so the server writes one into a doc only for someone who
+// may edit it (applyAnnotationMark, docs/ANNOTATIONS.md "Anchoring"). The UI
+// sends "mark" only from the doc editor, so the reader's call below is the
+// hand-made one the gate exists for, made from Node as above.
+test("the server writes an annotation's mark only for someone who may edit the doc", async ({ sharedDoc, secondUser }) => {
+  const anchor = { from: QUOTE_FROM, to: QUOTE_TO, quotedText: QUOTED_TEXT };
+
+  // An AUTHOR off the byline reads a SHARED doc and can't edit it.
+  const { user: reader } = await secondUser({ role: "AUTHOR" });
+  const ofReader = await createTestAnnotation({ docId: sharedDoc.id, authorEmail: reader.email, bodyText: "E2E reader's mark" });
+  expect(
+    await applyTestAnnotationMark({ docId: sharedDoc.id, annotationId: ofReader.id, userEmail: reader.email, ...anchor }),
+  ).toEqual({ applied: false, markInDoc: false });
+
+  // The doc's author can, and the same call writes the mark.
+  const ofAuthor = await createTestAnnotation({ docId: sharedDoc.id, authorEmail: ADMIN_EMAIL, bodyText: "E2E author's mark" });
+  expect(
+    await applyTestAnnotationMark({ docId: sharedDoc.id, annotationId: ofAuthor.id, userEmail: ADMIN_EMAIL, ...anchor }),
+  ).toEqual({ applied: true, markInDoc: true });
 });

@@ -344,6 +344,10 @@ export const setAnchorChipLabels = (...args: Parameters<DbHandlers["setAnchorChi
 export const markPresentAtStamp = (...args: Parameters<DbHandlers["markPresentAtStamp"]>): Promise<boolean> =>
   call("markPresentAtStamp", ...args);
 
+export const applyTestAnnotationMark = (
+  ...args: Parameters<DbHandlers["applyTestAnnotationMark"]>
+): Promise<{ applied: boolean; markInDoc: boolean }> => call("applyTestAnnotationMark", ...args);
+
 // PLAN.md §22e — an annotation body's settled-state history, and the two
 // knobs the grace window and the abandoned-session UI are tested with.
 export const getAnnotationEditFacts = (
