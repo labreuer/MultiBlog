@@ -1,0 +1,14 @@
+-- Hand-written: Prisma has no DSL for an expression index. docs/EMAIL.md
+-- §10, "Mistakes that fail no check" and "Deploying PR 4, everywhere".
+--
+-- No two accounts hold one email in two cases, deleted accounts included:
+-- `user.email`'s own unique index compares case, so on its own it lets
+-- `Foo@x.com` beside `foo@x.com` through. createPasswordAccount
+-- (src/lib/accounts.ts) refuses such an email inside its transaction; this is
+-- what holds against two requests racing it, and what makes a lookup by
+-- `lower(email)` find at most one account.
+--
+-- In a migration of its own, so that an instance with such a pair fails here
+-- alone: find them first with
+--   SELECT lower(email), count(*) FROM "user" GROUP BY lower(email) HAVING count(*) > 1;
+CREATE UNIQUE INDEX "user_email_lower_key" ON "user" (lower("email"));

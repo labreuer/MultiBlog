@@ -16,7 +16,7 @@ import {
 // param is parsed and ignored, since a collision row is never deleted.
 //
 // Every column sorts: the row's own columns and its to-one relations through
-// Prisma, and the anonymous identity's comment count and the three IP
+// Prisma (the card by its batch's label, then its serial), and the anonymous identity's comment count and the three IP
 // address lists through the `email_collision_listing` view.
 export type EmailCollisionsSortKey =
   | "lastSeen"
@@ -29,6 +29,8 @@ export type EmailCollisionsSortKey =
   | "requestIps"
   | "anonymousIps"
   | "accountIps"
+  | "card"
+  | "claimIp"
   | "post"
   | "firstSeen"
   | "reviewedAt"
@@ -44,6 +46,8 @@ const SORT_KEYS: readonly EmailCollisionsSortKey[] = [
   "requestIps",
   "anonymousIps",
   "accountIps",
+  "card",
+  "claimIp",
   "post",
   "firstSeen",
   "reviewedAt",

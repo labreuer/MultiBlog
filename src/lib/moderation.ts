@@ -28,14 +28,17 @@ function resolveCascadePolicy({ postPolicy, authorPolicies, sitePolicy }: Cascad
 type ResolveCommentStatusInput = CascadeInput & {
   commenterIsAdmin: boolean;
   commenterForceModerate: boolean;
+  /** `commenter.trusted`: a join card's account (docs/EMAIL.md §10, "Trusted commenters"). */
+  commenterTrusted: boolean;
   commenterApprovedCount: number;
   trustThreshold: number;
 };
 
 // Resolution order per PLAN.md §6: ADMIN commenters always publish
 // immediately, ahead of force_moderate; otherwise force_moderate always
-// queues; otherwise a trusted commenter (>= trustThreshold prior approvals)
-// publishes immediately; otherwise the moderation cascade decides.
+// queues; otherwise a trusted commenter (`trusted`, or >= trustThreshold
+// prior approvals) publishes immediately; otherwise the moderation cascade
+// decides. docs/COMMENTS.md, "Identity, moderation and abuse".
 export function resolveCommentStatus(input: ResolveCommentStatusInput): "PENDING" | "APPROVED" {
   if (input.commenterIsAdmin) {
     return "APPROVED";
@@ -43,7 +46,7 @@ export function resolveCommentStatus(input: ResolveCommentStatusInput): "PENDING
   if (input.commenterForceModerate) {
     return "PENDING";
   }
-  if (input.commenterApprovedCount >= input.trustThreshold) {
+  if (input.commenterTrusted || input.commenterApprovedCount >= input.trustThreshold) {
     return "APPROVED";
   }
   return resolveCascadePolicy(input) === "AUTO" ? "APPROVED" : "PENDING";

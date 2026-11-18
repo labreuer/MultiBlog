@@ -45,6 +45,10 @@ export type EmailCollisionRow = {
   /** The account's own comments' IP addresses, read live. */
   accountIps: string;
   post: { id: string; title: string } | null;
+  /** The join card a claim or confirmation used (docs/EMAIL.md §10); null once its batch is deleted. */
+  card: { batchLabel: string; serial: number } | null;
+  /** A confirmation's claim's IP address. */
+  claimIp: string;
   reviewedAt: Date | null;
   reviewedByName: string;
 };
@@ -60,6 +64,8 @@ const SORTABLE_KEYS = [
   "requestIps",
   "anonymousIps",
   "accountIps",
+  "card",
+  "claimIp",
   "post",
   "firstSeen",
   "reviewedAt",
@@ -70,6 +76,8 @@ const SOURCE_LABELS: Record<EmailCollisionSource, string> = {
   SIGNED_OUT_COMMENT: "Signed-out comment (refused)",
   SIGNED_IN_COMMENT: "Signed-in comment (kept apart)",
   EXISTING: "Found at deploy",
+  CARD_CLAIM: "Card claim (refused)",
+  CARD_CONFIRM: "Card confirmed (kept apart)",
 };
 
 const dateTime = (date: Date) => formatDate(date, "yyyy-MM-dd HH:mm");
@@ -158,6 +166,11 @@ export default function EmailCollisionsTable({
     requestIps: { sortKey: "requestIps", cell: (row) => row.requestIps },
     anonymousIps: { sortKey: "anonymousIps", cell: (row) => row.anonymousIps },
     accountIps: { sortKey: "accountIps", cell: (row) => row.accountIps },
+    card: {
+      sortKey: "card",
+      cell: (row) => (row.card ? `${row.card.batchLabel}, No. ${row.card.serial}` : ""),
+    },
+    claimIp: { sortKey: "claimIp", cell: (row) => row.claimIp },
     post: {
       sortKey: "post",
       cell: (row) => (row.post ? <Link href={`/post/${row.post.id}/comments`}>{row.post.title}</Link> : ""),
@@ -274,7 +287,7 @@ export default function EmailCollisionsTable({
       <FilterHelp
         sortKeys={SORTABLE_KEYS}
         defaultPageSize={prefs.pageSize}
-        searchDescription="Free-text search over the email given, the account's name and email, the anonymous identity's name and email, and the last request's IP address; an exact IP address also matches any request's."
+        searchDescription="Free-text search over the email given, the account's name and email, the anonymous identity's name and email, the last request's IP address and a claim's; an exact IP address also matches any request's."
         filters={[
           {
             param: "reviewed",
@@ -288,7 +301,10 @@ export default function EmailCollisionsTable({
             &ldquo;The log&rdquo;). <strong>Signed-out comment</strong>: a comment typed with an account&apos;s
             email while signed out, which was refused. <strong>Signed-in comment</strong>: an account&apos;s first
             comment, while an anonymous identity held its email; the two were kept apart.{" "}
-            <strong>Found at deploy</strong>: such a pair from before the fix. Repeats of one source and email fold
+            <strong>Found at deploy</strong>: such a pair from before the fix. <strong>Card claim</strong>: a join
+            card scanned with an account&apos;s email, which was refused. <strong>Card confirmed</strong>: an account
+            made from a card while an anonymous identity held its email; the two were kept apart, and{" "}
+            <strong>Claim IP</strong> is the scan&apos;s address beside the confirmation&apos;s. Repeats of one source and email fold
             into one row while it waits, whatever the IP address, so <strong>Times</strong> counts them and{" "}
             <strong>Request IPs</strong> keeps up to 20 of their addresses. The two comment IP columns are read live
             from the comments themselves. Marking a row reviewed can&apos;t be undone; the next meeting on the same

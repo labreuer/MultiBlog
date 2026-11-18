@@ -12,8 +12,8 @@ rules, and sign-in's session/JWT mechanics, without repeating them.
 
 Email verification (double opt-in) is **not built** — see §7. `emailVerified` gates
 nothing today and still gates nothing after this work; it is display-only on `/users`,
-plus (new) written by `acceptInvite`. §10 plans one-off join codes: printed cards that make
-an account only once the email given is confirmed.
+written by `acceptInvite` and by a join card's confirmation. §10 is one-off join codes:
+printed cards that make an account only once the email given is confirmed.
 
 ## 1. Why Resend, and what actually determines deliverability
 
@@ -308,11 +308,15 @@ once the single-row path has seen real use — TODO.md.
   account that already exists, including whichever admin is reading this. That needs an
   explicit backfill migration and explicit sign-off before it's even a live option — not
   something to arrive at by accretion.
-- **One write path already exists going into this deferred work.** `acceptInvite`
-  (built in this pass) stamps `emailVerified` on acceptance — clicking a link delivered to
-  an inbox is exactly what the column claims to mean, so an accepted invite already makes
-  it truthful for that user. The verification pass adds the remaining paths (sign-up,
-  on-demand, `/verify-email` itself); it doesn't need to invent this one.
+- **Two write paths already exist going into this deferred work.** `acceptInvite` stamps
+  `emailVerified` on acceptance — clicking a link delivered to an inbox is exactly what the
+  column claims to mean, so an accepted invite already makes it truthful for that user. A
+  join card's confirmation (§10) makes its account with the column set, since the account
+  exists only once its email has been proven. The verification pass adds the remaining
+  paths (sign-up, on-demand, `/verify-email` itself); it doesn't need to invent these.
+- **`/sign-up` stores its email trimmed, as typed, and refuses one any account has in any
+  case**, and sign-in and password reset find an account by its email in any case (§10,
+  "Mistakes that fail no check"). Verification changes none of that.
 
 **Also deferred:** bulk invites (§6); auto-sign-in immediately after accepting an invite
 (sign-in here is client-side via `next-auth/react`, and calling `signIn` with the
@@ -384,9 +388,10 @@ determinant of whether the mail described in §1 actually reaches an inbox.
 the `pg_dump` output DEPLOY.md §9 already produces now carries usable credentials for
 whatever invites are pending at backup time — see §5's residual for the full trade.
 
-## 10. Planned: accounts from one-off join codes
+## 10. Accounts from one-off join codes
 
-**Not built.** An ADMIN prints a batch of cards, each with a QR code and a code that works
+**Built through PR 4 of the build order below; the admin table, PR 5, is planned.** An ADMIN
+prints a batch of cards, each with a QR code and a code that works
 once. Whoever scans one gives a name, an email and a password, confirms the email from a link,
 and only then has an account: an AUTHOR, whose comments publish without waiting for
 moderation, and whose first sign-in lands on a welcome page showing the commons wiki page
@@ -398,7 +403,7 @@ anywhere else. The trust it grants is a column beside `forceModerate` (docs/COMM
 "Identity, moderation and abuse"), and the welcome page is a held commons name, found as the
 front page is (docs/WIKI.md, "Permissions" and "The front page").
 
-**It stands on three changes that come first, and each deploys everywhere on its own**
+**It stands on three changes that came first, and each deploys everywhere on its own**
 ("Build order"):
 
 - **a session that reads its account again every five minutes**, so that deleting or demoting
@@ -495,8 +500,13 @@ reconnects.
   someone's comments and approvals on the strength of an email alone, so the two are kept apart
   and the meeting is logged (step 6).
 - **The welcome page shown past the wiki read rule.** Rendered without `readableWikiDocsWhere`
-  for its viewer, a `PRIVATE` page's text goes to every new account. Rendered without
-  `docJsonForPostSide`, a page holding a mention or a citation 500s.
+  for its viewer, a `SHARED` page's text goes to every account, a COMMENTER's included, which
+  can read no `SHARED` doc. A commons page is never `PRIVATE` (docs/WIKI.md), so that is the
+  line the rule draws here. Rendered without `docJsonForPostSide`, a page holding a mention or
+  a citation 500s.
+- **A card's code carried into a `callbackUrl`.** `SiteHeader`'s "Log in" link builds its
+  `callbackUrl` from wherever the reader is, and a card's path holds its code. `/join` is one
+  of `NON_DESTINATIONS` (`src/lib/sign-in-redirect.ts`), as `/reset-password` is.
 - **`New Account Welcome` not held.** Without it in `HELD_COMMONS_NAMES`, an AUTHOR on any
   commons page's byline could rename that page to it while the name is free, and greet every
   new account with their own text. It is the hole the front page's held name closes.
@@ -523,8 +533,10 @@ two in constant time. A mismatch answers as a card that can no longer be used. S
   card is spent at confirmation, so the codes it holds are those of cards opened and never
   confirmed;
 - rotating `AUTH_SECRET` voids every unclaimed card, as it already ends every session and access
-  token. docs/ENV.md's row for it gains the clause. Reprinting refuses a batch whose stored
-  hashes don't match the current key, rather than print cards that match no row.
+  token (docs/ENV.md). A claim pending at the rotation can't be confirmed after it either:
+  the confirmation checks that the card's stored hash is still the one its batch and serial
+  derive. Reprinting refuses a batch whose stored hashes don't match the current key, rather
+  than print cards that match no row.
 
 **A code can be typed as easily as scanned.** The card prints `<host>/join` and the code under
 the QR, and `/join` takes it typed. Input is normalized as Crockford's alphabet intends: case
@@ -536,6 +548,9 @@ normalized, since a hash of a dashed code would match no row and fail no check.
 
 **80 bits needs no guessing limit.** At a thousand guesses a second against a batch of a
 thousand cards, the first hit is expected after about 4 × 10^10 years.
+
+The code's pure functions are `src/lib/join-codes/code.ts`, and the key under this instance's
+secret is `key.ts` beside it; everything that reads or writes a row is `cards.ts`.
 
 **The QR holds `https://<host>/join/<code>`**, without the dashes, at error-correction level M,
 always `https`. The encoder puts the host in a byte segment and the code in an alphanumeric
@@ -589,10 +604,13 @@ model JoinCode {
 }
 ```
 
-`commenter` gains `trusted Boolean @default(false)`. A hand-written CHECK keeps `pending_email`,
-`pending_name`, `pending_password_hash` and `confirm_token_hash` all set or all null, and
-another keeps them null on a claimed card. `pending_ip_address` can be unknown while a claim is
-pending, and `confirm_sent_at` stays null until a send is delivered.
+`commenter` gains `trusted Boolean @default(false)`. A hand-written CHECK
+(`join_code_pending_claim_whole`) keeps `pending_email`, `pending_name`,
+`pending_password_hash` and `confirm_token_hash` all set or all null, and another
+(`join_code_claimed_has_no_claim`) keeps them and `pending_ip_address` null on a claimed card.
+`pending_ip_address` can be unknown while a claim is pending, and `confirm_sent_at` is null
+until a send is delivered. `user` gains a hand-written unique index on `lower(email)`,
+`user_email_lower_key`, in a migration of its own ("Deploying PR 4, everywhere").
 
 **A batch has no role and no trust switch.** Every card makes a trusted AUTHOR. A column for
 either comes with the first batch that needs something else.
@@ -622,7 +640,12 @@ ADMIN finds the row to revoke before handing over another card.
      them.
 
    A signed-in viewer is told whose session they have and that a card makes a new account, with
-   a sign-out link and no form. A card never changes an existing account.
+   a sign-out button and no form. A card never changes an existing account, so the claim's
+   POST refuses a request with a session too, not only the page.
+
+   `/join` takes a code typed. It normalizes it and goes to `/join/<code>`, which looks it up;
+   input that isn't a code is refused there, before any query. The `/join` pages are not
+   indexed.
 2. **The form asks for a name, an email and a password.**
    - **The password** follows `/sign-up`'s rule (8 characters or more).
    - **The name is required**, unlike on `/sign-up`. An AUTHOR's name goes on every byline they
@@ -658,12 +681,19 @@ ADMIN finds the row to revoke before handing over another card.
      `confirm_failures`;
    - sends the mail.
 
+   **The send is reserved before it is made.** The write that puts the claim on the card also
+   stamps `confirm_sent_at` and counts the send, on condition that neither has moved since
+   the card was read. So two submits at once can't both pass the 60-second rule or the
+   five-send cap: the second matches no row and is told to try again in a minute. A failed
+   send then takes the stamp and the count back, on condition that the claim is still this
+   one.
+
    The page answers with the email the mail went to, so a typo shows, and says that scanning
    the card again replaces the claim. **A failed send is reported as failed.** On a provider
    error, a daily cap included ("Mail volume"), `sendMail` returns `{ delivered: false }`. The
    page then says the mail couldn't be sent and to try again shortly. It keeps the claim, and
-   neither stamps `confirm_sent_at` nor counts the send, so the retry isn't refused by the
-   60-second rule.
+   takes back the reserved stamp and count, so the retry isn't refused by the 60-second rule.
+   A refusal gives the form back its name and email, never its password.
 4. **The mail is plain text**, subject `Confirm your email for <SITE_TITLE>`. It holds the link,
    says the link works for seven days, and says that nothing is made if the mail is ignored. It
    carries no welcome text, because its job is the link ("Rejected").
@@ -672,8 +702,9 @@ ADMIN finds the row to revoke before handing over another card.
    live claim gets one message saying to scan the card again. That covers a replaced claim, a
    link older than seven days, a used or revoked card, and an expired or revoked batch.
 6. **The POST** (`confirmJoinClaim`) first checks the password against the pending hash. A
-   wrong one is counted in `confirm_failures` by a write of its own, and the fifth ends the
-   claim, nulling all of it, so the holder scans again. The person who typed the email knows the
+   wrong one is counted in `confirm_failures` by a write of its own, one statement, and the
+   fifth ends the claim, nulling all of it, so the holder scans again. The page says how many
+   tries are left. The person who typed the email knows the
    password; a stranger who only received the mail doesn't. Then it does everything else in
    one transaction:
    - It takes the card with a conditional `updateMany` that sets `claimed_at`. The `where`
@@ -686,8 +717,9 @@ ADMIN finds the row to revoke before handing over another card.
      step 2's name check when asked to, as a card is. If an account with the email, in any case, was made after the
      claim, everything rolls back and the page says so. The `lower(email)` index is what holds
      against a concurrent `/sign-up`.
-   - It gives the user a trusted `commenter` row of their own. The row is always new. An
-     anonymous identity with this email keeps its comments and approvals.
+   - It gives the user a trusted `commenter` row of their own, its display name the card's
+     name. The row is always new. An anonymous identity with this email keeps its comments
+     and approvals.
    - It sets `claimed_user_id`, and nulls the pending claim, its IP address and its token.
 
    **After the commit, if an anonymous identity has the email, the meeting is logged** as a
@@ -712,14 +744,14 @@ account won't exist until the link is used.
 gates a signed-out one with `signInPath("/welcome")`. The page sits under a "Welcome, <name>"
 heading, with a link to `/dashboard`. It is found the way the front page is
 (`src/lib/front-page.ts`): in the commons, with variant `''`, the name matched by its key, and
-the body rendered through `docJsonForPostSide` inside `.prose`. The two lookups become one
-function that takes a held name.
+the body rendered through `docJsonForPostSide` inside `.prose`. The two lookups are one
+function that takes a held name, `heldCommonsPageBody`.
 
 **One difference from the front page: which reader the visibility is checked for.** The front
 page requires `PUBLIC`, because anyone reads it. The welcome page asks the wiki read rule for
 *this viewer* (`readableWikiDocsWhere(viewer)`), so it shows exactly when they could read the
 page at its address. `SHARED` reaches every AUTHOR and AUTHORIZED account, and `PUBLIC` reaches
-every account.
+every account, a COMMENTER's included. A commons page is never `PRIVATE`.
 
 - **If no page answers, it shows a sentence and the dashboard link**, not an error. That covers
   a page with no `prose_json` yet, which is skipped as the front page skips it, rather than
@@ -735,25 +767,26 @@ every account.
 ### Trusted commenters
 
 **`commenter.trusted`, beside `force_moderate`, publishes a comment the way reaching
-`trust_threshold` does.** `resolveCommentStatus` becomes: an ADMIN publishes; otherwise
+`trust_threshold` does.** `resolveCommentStatus` is: an ADMIN publishes; otherwise
 `forceModerate` queues; otherwise `trusted`, or `approvedCount >= trustThreshold`, publishes;
 otherwise the cascade decides. So `force_moderate` still overrides it, and an ADMIN can rein in
-one account without touching its batch. The spam check still runs. The comment form's `upsert`
-by `userId` writes nothing on update, so a row made trusted at confirmation stays trusted.
+one account without touching its batch. The spam check still runs. A signed-in commenter's row
+is found by its user and never rewritten (`findOrCreateSignedInCommenter`), so a row made
+trusted at confirmation stays trusted.
 
-**Trust waits on the identity fix.** Today a signed-out comment that gives a trusted commenter's
-email is posted as that commenter, and published at once (docs/COMMENTS.md, "What is wrong").
-Trusting a batch of new accounts before that fix is deployed would let anyone post as any of
-them.
+**Trust stands on the identity fix** (docs/COMMENTS.md, "Identities kept apart"): before it, a
+signed-out comment that gave a trusted commenter's email was posted as that commenter, and
+published at once.
 
 No UI sets `trusted`, just as none sets `force_moderate`. A `/users` column for both is
 deferred.
 
 ### Minting and printing
 
-**`mintJoinBatch(actor, { label, count, expiresAt })`** in `src/lib/join-codes/` takes an ADMIN
-only, at most 500 cards, and a required `expiresAt` in the future. It writes the batch and its
-rows in one transaction.
+**`mintJoinBatch(actor, { label, count, expiresAt })`** in `src/lib/join-codes/cards.ts` takes
+an ADMIN only, a label of 1 to 200 characters, at most 500 cards, and a required `expiresAt` in
+the future. It writes the batch and its rows in one transaction. `liveCardsForPrinting` and
+`revokeJoinCards` beside it take an ADMIN too.
 
 **The card sheet is one function returning a whole HTML document.** It lays out business cards
 of 3.5 × 2 inches, ten to a US Letter page in the common two-by-five label layout. Each card has:
@@ -777,10 +810,16 @@ larger splits it over two lines.
 
 **Minting starts as a script, and an admin table follows:**
 
-- `scripts/join-codes/mint.ts` mints a batch on behalf of a named ADMIN, and writes the sheet to
-  a directory outside the tree. The sheet holds live codes, so it is deleted once the cards are
-  printed. `--print <batch>` writes it again for the live cards, and
-  `--revoke <batch>[:<serial>]` revokes a batch or one card.
+- `scripts/join-codes/mint.ts` mints a batch on behalf of a named ADMIN (`--admin <email>`),
+  and writes the sheet to a directory outside the tree, `~/join-cards` unless `--out` says
+  otherwise; it refuses one inside it, and writes the file readable by its owner alone. The
+  sheet holds live codes, so it is deleted once the cards are printed. `--print <batch>`
+  writes it again for the live cards, `--revoke <batch>[:<serial>]` revokes a batch or one
+  card, and `--list` lists the batches. `--expires` takes a date, read as the end of that
+  day, UTC, or a date-time; `--host` defaults to `APP_URL`'s. It warns before printing when
+  no `New Account Welcome` page is `SHARED` or `PUBLIC`. Its header has the usage.
+  `scripts/join-codes/demo-sheet.ts` draws a sheet of fake cards under a fake secret, with no
+  database, for looking at the layout.
 - `/join-codes` is an admin table through the kit (`join-codes-query.ts`), one row per card,
   gated with `signInPath`. Its columns are batch, serial, status, the pending email, and who
   claimed the card and when. From it an ADMIN revokes a card, or a batch in bulk, and mints from
@@ -790,8 +829,9 @@ larger splits it over two lines.
   kit asks (CLAUDE.md, "Admin tables are one kit").
 
 **Revoking nulls any pending claim; expiry doesn't.** An expired batch's pending password hashes
-stay until the batch is revoked, so revoking a batch once its event is over is the clean-up. The
-table says so beside any expired batch that isn't revoked.
+stay until the batch is revoked, so revoking a batch once its event is over is the clean-up.
+`--list` says "expired, not revoked" beside such a batch, and the table will too. A claimed
+card is left as it is by a revoke: its account is managed on `/users`.
 
 ### Mail volume
 
@@ -860,7 +900,12 @@ and a change to the web unit's `ExecStart` (that section's "Deploying").
 mail"). Built 2026-11-18. It deploys everywhere on its own, with no migration, after listing
 who has been publishing as an AUTHOR (PLAN.md §38, "Deploying").
 
-**PR 4: everything a card holder meets, with minting by script.**
+**PR 4: everything a card holder meets, with minting by script.** Built 2026-11-18. Checking
+its plan against the code found what the sections above now say: the send reserved before it
+is made; the claim's POST refusing a session; a pending claim refused after a rotated secret;
+`/join` kept out of a `callbackUrl`; the welcome page's read rule drawn between `SHARED` and a
+COMMENTER, since a commons page is never `PRIVATE`; and the bots' email checks, which compared
+case (below). It was:
 
 1. The migrations:
    - `join_batch` and `join_code`, with their CHECKs, and `commenter.trusted`;
@@ -878,16 +923,18 @@ who has been publishing as an AUTHOR (PLAN.md §38, "Deploying").
    email in another case. Sign-in (`authorize`, `src/lib/auth.ts`) and password reset
    (`requestPasswordReset`, `src/app/actions/forgot-password.ts`) find the account by raw
    `lower(email) = lower($1)` among live accounts, so an email typed in any case signs in and
-   resets. Reset stays as enumeration-safe as it is. Every other writer of `user.email`, such
-   as a bot made at Approve or an ADMIN's new account, meets the index; each one's refusal
-   says the email is taken, rather than surfacing as a 500.
+   resets. Reset stays as enumeration-safe as it is. The other writers of `user.email` are the
+   bots (`createBot`, and `ensureAgentBot` at Approve), whose address checks compare without
+   case through `anyAccountIdWithEmail`, as the index does; no UI makes a person's account
+   besides `/sign-up` and a card. `/sign-up` trims its name too.
 3. `trusted` in `resolveCommentStatus`.
 4. `/join`, `/join/[code]`, `/join/confirm`, and the mail.
 5. `New Account Welcome` held, the lookup shared with the front page, `/welcome`, and its link
    on `/dashboard`.
 6. The sheet and the QR dependency, and `scripts/join-codes/mint.ts`.
-7. `/email-collisions` taught the card sources: the card and the claim's IP address in its
-   columns and its view.
+7. `/email-collisions` taught the card sources: Card (its batch's label and serial) and Claim IP
+   columns. Both are the row's own or a to-one relation, so they sort through Prisma and the
+   view is unchanged.
 8. The tests below, and the docs:
    - this section rewritten as built;
    - docs/COMMENTS.md's resolution order and the log's card sources;
@@ -908,11 +955,13 @@ is a PR of its own so that PR 4 can be used at an event without it.
 - **Unit tests** (`npm run test:unit`), where the point is what is refused:
   - the derivation: stable for one secret, batch and serial, and different when any of them
     changes; a code from one key fails re-derivation under another; two codes pinned to values
-    computed apart;
+    computed apart (`src/lib/join-codes/code.test.ts`);
   - the normalization table: case, dashes (Unicode ones too), spaces, `O`/`I`/`L`, `U`, wrong
     lengths, and characters outside the alphabet;
-  - the sheet: ten cards to a page, and no color literal in what it writes;
-  - `resolveCommentStatus`'s table, gaining `trusted`, with `forceModerate` above it.
+  - the sheet: ten cards to a page, and no color property in what it writes (`sheet.test.ts`);
+  - `resolveCommentStatus`'s table, with `trusted`, and `forceModerate` above it
+    (`src/lib/moderation.test.ts`);
+  - an email trimmed and its case kept (`src/lib/account-email.test.ts`).
 - **`e2e/join-codes.spec.ts`**, run in fresh contexts with no session, and reading no mail:
   every address is `@example.com` (§2). The fixture mints a batch in the database through the
   derivation, so lookups re-derive as they will in use. It then sets a claim's token hash to one
@@ -939,14 +988,15 @@ is a PR of its own so that PR 4 can be used at an event without it.
      comments hold. The account gets a commenter row of its own, the anonymous comments stay on
      the anonymous identity, and one `CARD_CONFIRM` row is logged holding the claim's IP
      address.
-  5. **The welcome page's rules:** `/welcome` withholds a `PRIVATE` page of the held name, and an
-     AUTHOR on a commons page's byline can't rename it to the held name.
-- **`/sign-up`'s spec** gains a refusal of an email in another case, and a trimmed email.
-- **Sign-in and reset ignore case:** an account signs in with its email typed in another case,
-  and a reset requested that way reaches it (the logged link, since the address is
-  `@example.com`).
-- **The welcome fixture** uses the instance's `New Account Welcome` page if there is one, and
-  otherwise makes and deletes its own, since the name is unique.
+  5. **The welcome page's rules:** `/welcome` shows a `SHARED` page of the held name to an
+     AUTHOR and withholds it from a COMMENTER, shows it to both once `PUBLIC`, and an AUTHOR on
+     a commons page's byline can't rename it to the held name. The test is skipped on an
+     instance with its own page, which it won't change.
+- **Emails ignore case**, in the same file: `/sign-up` stores an email trimmed and refuses it
+  in another case, a reset requested in another case makes the account's token, and the
+  account signs in with its email in another case. No spec covered `/sign-up` before.
+- **The welcome fixture** (`ensureTestWelcomePage`) uses the instance's `New Account Welcome`
+  page if there is one, and otherwise makes and deletes its own, since the name is unique.
 - **By hand, once, with a real key:** run one card, with one real address, from a phone, before a
   batch is printed.
 

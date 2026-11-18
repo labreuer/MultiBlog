@@ -199,7 +199,8 @@ export const ADMIN_TABLE_COLUMNS = {
   ],
   // docs/COMMENTS.md, "The log" — /email-collisions, ADMIN-only. The comment
   // counts and IP addresses are read live through the
-  // `email_collision_listing` view, which is what lets them sort.
+  // `email_collision_listing` view, which is what lets them sort; the card
+  // and its claim's IP address are the row's own (docs/EMAIL.md §10).
   "email-collisions": [
     { key: "lastSeen", label: "Last seen" },
     { key: "count", label: "Times" },
@@ -211,6 +212,8 @@ export const ADMIN_TABLE_COLUMNS = {
     { key: "requestIps", label: "Request IPs" },
     { key: "anonymousIps", label: "Its comments' IPs" },
     { key: "accountIps", label: "Account's comments' IPs" },
+    { key: "card", label: "Card" },
+    { key: "claimIp", label: "Claim IP" },
     { key: "post", label: "Post", defaultHidden: true },
     { key: "firstSeen", label: "First seen", defaultHidden: true },
     { key: "reviewedAt", label: "Reviewed at", defaultHidden: true },

@@ -1,6 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
+import { liveAccountIdWithEmail } from "@/lib/accounts";
 import { generateToken } from "@/lib/tokens";
 import { sendMail } from "@/lib/mail";
 import { appUrl } from "@/lib/app-url";
@@ -26,7 +27,10 @@ export async function requestPasswordReset(
     return { error: "Email is required." };
   }
 
-  const user = await prisma.user.findUnique({ where: { email } });
+  // In any case, among live accounts (src/lib/accounts.ts); the mail goes to
+  // the email as the account holds it.
+  const id = await liveAccountIdWithEmail(email);
+  const user = id ? await prisma.user.findUnique({ where: { id } }) : null;
   if (user?.passwordHash) {
     const existing = await prisma.passwordResetToken.findFirst({
       where: { userId: user.id },

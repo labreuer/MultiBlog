@@ -6,6 +6,13 @@ self-service — the page never edits anyone but the signed-in user, and every
 write re-derives its permission from the session server-side rather than
 trusting which fields the form rendered.
 
+## Welcome
+
+The header line ends with a link to `/welcome`, for every account: the commons page
+`New Account Welcome` under a greeting (docs/EMAIL.md §10, "The welcome page"). A join card's
+first sign-in lands there; one made on another device lands here, and the link is how it
+gets there.
+
 ## Email collisions
 
 An ADMIN sees one line under the header: how many rows of the email-collision log wait for

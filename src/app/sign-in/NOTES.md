@@ -24,8 +24,16 @@ active), rate-limited per address. `sendMail()` sends through Resend when config
 (`RESEND_API_KEY`/`MAIL_FROM`) and otherwise logs the link instead — see
 [docs/EMAIL.md](../../../docs/EMAIL.md) for the seam's contract, and DEPLOY.md §4 for what
 configuring it means in production. `User.emailVerified` is written by `acceptInvite`
-(admin-issued email invites, same doc) and by nothing in this file's own flows; it gates
-nothing anywhere today.
+(admin-issued email invites, same doc) and by a join card's confirmation (docs/EMAIL.md §10),
+and by nothing in this file's own flows; it gates nothing anywhere today.
+
+**An email is found in any case.** `authorize` and the forgot-password action find the
+account by `liveAccountIdWithEmail` (`src/lib/accounts.ts`), raw `lower(email) = lower($1)`
+among live accounts, so `Foo@x.com` signs in as `foo@x.com`'s account; the unique index on
+`lower(email)` makes that one account at most. `/sign-up` makes its account through
+`createPasswordAccount` there, which stores the email trimmed, as typed, and refuses one any
+account has in any case, deleted or not. Why raw SQL and not Prisma's `mode: "insensitive"`:
+docs/EMAIL.md §10, "Mistakes that fail no check".
 
 ## The session is a JWT, and reads its account again every five minutes
 

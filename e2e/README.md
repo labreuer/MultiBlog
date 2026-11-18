@@ -277,6 +277,15 @@ DB helpers worth knowing beyond the fixtures (all from `./db`):
 `getCommentFacts()`, `getAnnotationEditFacts()`, `backdateComment()`,
 `backdateAnnotationPosting()`, `setAnnotationEditingSince()`.
 
+**Join cards** (`join-codes.spec.ts`, docs/EMAIL.md §10): `mintTestJoinBatch()` mints through
+the app's own `mintJoinBatch`, so a card's code is derived from its row under this `.env`'s
+`AUTH_SECRET`, as the server derives it; the e2e server and the DB worker must therefore read
+one `.env`. A claim's mail is never read: `setTestJoinClaimToken()` gives the pending claim a
+token the spec knows and returns the link's path. `ageTestJoinSend()` moves the last send back
+past the minute's rule or the link's seven days. `ensureTestWelcomePage()` uses the
+instance's `New Account Welcome` page if there is one and otherwise makes one, which the spec
+deletes; the teardown sweep removes a leaked one, and any batch labelled `E2E …`.
+
 Plus helpers: `bodyEditor(page)`, `titleEditor(page)`, `statusLine(page)`,
 `visibleText(page, text)`, `deleteTextInBody(page, needle)`,
 `selectTextInBody(page, needle)`, `collapseToBodyStart(page)` (never

@@ -13,9 +13,9 @@ import {
   anonymousCommenterIdWithEmail,
   findOrCreateAnonymousCommenter,
   findOrCreateSignedInCommenter,
-  liveAccountIdWithEmail,
 } from "@/lib/commenter-identity";
 import { logEmailCollision } from "@/lib/email-collision-log";
+import { liveAccountIdWithEmail } from "@/lib/accounts";
 import { isCommentEditRateLimited, isCommentRateLimited } from "@/lib/rate-limit";
 import { checkSpam } from "@/lib/spam-check";
 import type { CommentStatus, Role } from "@/generated/prisma/enums";
@@ -238,6 +238,7 @@ export async function submitComment(
     : resolveCommentStatus({
         commenterIsAdmin,
         commenterForceModerate: commenter.forceModerate,
+        commenterTrusted: commenter.trusted,
         commenterApprovedCount: commenter.approvedCount,
         trustThreshold: siteSettings.trustThreshold,
         postPolicy: post.moderationPolicy,

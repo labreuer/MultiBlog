@@ -53,10 +53,12 @@ export type ReservedOwnerSegment = (typeof RESERVED_OWNER_SEGMENTS)[number];
 /**
  * docs/WIKI.md "Permissions" — commons names whose claim needs an ADMIN or
  * EDITOR, whatever the variant: `Front Page`, whose page is the landing
- * page's preamble, and `About`. Compared by key, in the claim's statement, so
- * any capitals are held too. A person's namespace holds none.
+ * page's preamble, `About`, and `New Account Welcome`, whose page `/welcome`
+ * shows every new account (docs/EMAIL.md §10). Compared by key, in the
+ * claim's statement, so any capitals are held too. A person's namespace
+ * holds none.
  */
-export const HELD_COMMONS_NAMES = ["Front Page", "About"] as const;
+export const HELD_COMMONS_NAMES = ["Front Page", "About", "New Account Welcome"] as const;
 
 /** Whose namespace a page is in. */
 export type WikiOwner = { kind: "person"; slug: string } | { kind: "commons" };

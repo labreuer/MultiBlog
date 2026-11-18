@@ -72,9 +72,12 @@ anyone has typed a sentence.
 
 **Moderation.** Each comment's required policy resolves as post override → author override
 → site default, each level `always`, `auto` or `inherit`. Independently, a commenter with
-`approvedCount >= trustThreshold` (site setting, default 3) auto-approves, and
-`forceModerate` on the commenter always queues. Resolution for a new comment: an `ADMIN`
-publishes and skips the spam check; else `forceModerate` queues; else a trusted commenter
+`approvedCount >= trustThreshold` (site setting, default 3) auto-approves, as does one with
+`commenter.trusted` set, and `forceModerate` on the commenter always queues. `trusted` is set
+on the row a join card's account is given at confirmation, and by no UI (docs/EMAIL.md §10,
+"Trusted commenters"). Resolution for a new comment (`resolveCommentStatus`,
+`src/lib/moderation.ts`, with a unit table): an `ADMIN` publishes and skips the spam check;
+else `forceModerate` queues; else a trusted commenter, by `trusted` or by the threshold,
 publishes; else the cascade decides. The threshold changes an outcome only where the
 cascade resolves to `always` ("Decisions" below). `/site-settings` edits the default
 policy and the threshold.
@@ -758,10 +761,15 @@ Every key is `ON DELETE SET NULL`, so a row outlives what it names.
 | `SIGNED_OUT_COMMENT` | a signed-out comment gives a live account's email | refused |
 | `SIGNED_IN_COMMENT` | a signed-in commenter's row is created, and an anonymous identity has their email | allowed, kept apart |
 | `EXISTING` | found at deploy: an anonymous identity with a live account's email | as it was |
+| `CARD_CLAIM` | a join card is scanned with an email an account has, in any case, deleted or not | refused |
+| `CARD_CONFIRM` | a join card's account is made, and an anonymous identity has its email | allowed, kept apart |
 
-- **The card sources arrive with the cards**: `CARD_CLAIM`, `CARD_CONFIRM`, `join_code_id`
-  (`onDelete: SetNull`) and `claim_ip_address` are added by docs/EMAIL.md §10's migrations,
-  the enum values in a migration of their own.
+- **The card sources** (docs/EMAIL.md §10) also fill `join_code_id`, the card used
+  (`ON DELETE SET NULL`, since deleting a batch deletes its cards), and, for `CARD_CONFIRM`,
+  `claim_ip_address`, the scan's address beside the confirmation's in `last_ip_address`. A
+  `CARD_CONFIRM` is written after the confirmation's transaction commits, so it can carry
+  the claim's address, read inside it. `/email-collisions` shows both as its Card and Claim
+  IP columns.
 - **The row keeps the requests' IP addresses; the comments' are read live.** A refused request
   leaves no other trace, so its IP address is stored. Each side's comments carry theirs in
   `comment.ip_address` already, and the review page reads them from there through its view,

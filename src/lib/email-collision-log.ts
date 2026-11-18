@@ -10,10 +10,11 @@ import { prisma } from "@/lib/prisma";
 // comment limiter never counts it, and a host with many addresses would make
 // a row per address if the address were part of the key. A repeat counts,
 // moves `last_seen_at`, sets `last_ip_address`, adds its address to
-// `ip_addresses` while there are fewer than 20, and sets the three ids to its
-// own. The fold is a raw `INSERT … ON CONFLICT`, since Prisma's `upsert` can
-// target neither an expression nor a partial index; the conflict target names
-// `email_collision_unreviewed_key`'s columns and predicate exactly.
+// `ip_addresses` while there are fewer than 20, and sets the four ids and the
+// claim's IP address to its own. The fold is a raw `INSERT … ON CONFLICT`,
+// since Prisma's `upsert` can target neither an expression nor a partial
+// index; the conflict target names `email_collision_unreviewed_key`'s columns
+// and predicate exactly.
 //
 // **A failed write changes no answer.** The caller has already decided, and
 // this runs outside any transaction it has open: a failed statement aborts a
@@ -38,6 +39,10 @@ export type EmailCollisionMeeting = {
   /** The post a comment was tried on. */
   postId: string | null;
   ipAddress: string | null;
+  /** The join card a claim or confirmation used (docs/EMAIL.md §10). */
+  joinCodeId?: string | null;
+  /** A confirmation's claim's IP address; `ipAddress` is the confirmation's own. */
+  claimIpAddress?: string | null;
 };
 
 /** The most addresses a row keeps in `ip_addresses`; a CHECK holds it there too. */
@@ -45,15 +50,18 @@ export const MAX_COLLISION_IPS = 20;
 
 export async function logEmailCollision(meeting: EmailCollisionMeeting): Promise<void> {
   const { source, email, userId, commenterId, postId, ipAddress } = meeting;
+  const joinCodeId = meeting.joinCodeId ?? null;
+  const claimIpAddress = meeting.claimIpAddress ?? null;
   const firstIps = ipAddress ? [ipAddress] : [];
   try {
     await prisma.$executeRaw(Prisma.sql`
       INSERT INTO "email_collision"
-        ("id", "source", "email", "user_id", "commenter_id", "post_id", "last_ip_address", "ip_addresses",
-         "first_seen_at", "last_seen_at")
+        ("id", "source", "email", "user_id", "commenter_id", "post_id", "join_code_id", "claim_ip_address",
+         "last_ip_address", "ip_addresses", "first_seen_at", "last_seen_at")
       VALUES (
         gen_random_uuid()::text, ${source}::"email_collision_source", ${email}, ${userId}, ${commenterId}, ${postId},
-        ${ipAddress}, ${firstIps}::text[], now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC'
+        ${joinCodeId}, ${claimIpAddress}, ${ipAddress}, ${firstIps}::text[], now() AT TIME ZONE 'UTC',
+        now() AT TIME ZONE 'UTC'
       )
       ON CONFLICT ("source", lower("email")) WHERE "reviewed_at" IS NULL DO UPDATE SET
         "count" = "email_collision"."count" + 1,
@@ -61,6 +69,8 @@ export async function logEmailCollision(meeting: EmailCollisionMeeting): Promise
         "user_id" = EXCLUDED."user_id",
         "commenter_id" = EXCLUDED."commenter_id",
         "post_id" = EXCLUDED."post_id",
+        "join_code_id" = EXCLUDED."join_code_id",
+        "claim_ip_address" = EXCLUDED."claim_ip_address",
         "last_ip_address" = EXCLUDED."last_ip_address",
         "ip_addresses" = CASE
           WHEN EXCLUDED."last_ip_address" IS NULL

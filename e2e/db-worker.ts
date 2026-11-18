@@ -85,7 +85,8 @@ import { createWikiPage } from "@/lib/wiki-create";
 import { forkIntoWiki } from "@/lib/wiki-fork";
 import { moveDocIntoWiki, moveWikiPage } from "@/lib/wiki-move";
 import { deleteWikiAddressRow, renameWikiPage, revertWikiAddress } from "@/lib/wiki-rename";
-import { getFrontPagePreamble } from "@/lib/front-page";
+import { getFrontPagePreamble, heldCommonsPageBody, WELCOME_PAGE_NAME } from "@/lib/front-page";
+import { mintJoinBatch } from "@/lib/join-codes/cards";
 import { createBot, moveBot, requireBotRole, requireInvitable, restoreAccount, setBotAgent } from "@/lib/bots";
 import { prosemirrorToYXmlFragment } from "y-prosemirror";
 import type { Agent, ApiScope, ApiTokenClient } from "@/generated/prisma/enums";
@@ -3331,6 +3332,23 @@ export async function sweepTestData(): Promise<{
     if (post.authors.length > 0) await prisma.post.delete({ where: { id: post.id } });
   }
 
+  // Join batches the suite minted, their cards with them (docs/EMAIL.md §10).
+  await prisma.joinBatch.deleteMany({ where: { label: { startsWith: E2E_TITLE_PREFIX } } });
+
+  // A welcome page join-codes.spec.ts made: its title is the held name, not
+  // E2E-prefixed, so the doc sweep below would miss it, and a leaked one
+  // would have the next run skip the test that needs its own.
+  const { key: welcomeKey } = await foldWikiName(prisma, WELCOME_PAGE_NAME);
+  const staleWelcome = await prismaIncludingDeleted.doc.findMany({
+    where: {
+      wikiOwnerUserId: null,
+      wikiNameKey: welcomeKey,
+      authors: { some: {}, every: { user: { email: { startsWith: E2E_PREFIX, endsWith: "@example.com" } } } },
+    },
+    select: { id: true },
+  });
+  for (const doc of staleWelcome) await deleteTestDoc(doc.id);
+
   // A doc's ydoc row is named ydoc:<docId> — not ydoc:test-<uuid> — so it
   // isn't caught by the ydoc:test- sweep below (same trap PLAN.md §12b
   // documents for scripts/test-doc.ts). Delete each one alongside its doc.
@@ -4422,6 +4440,8 @@ export type EmailCollisionFacts = {
   userId: string | null;
   commenterId: string | null;
   postId: string | null;
+  joinCodeId: string | null;
+  claimIpAddress: string | null;
   ipAddresses: string[];
   reviewed: boolean;
 };
@@ -4429,9 +4449,9 @@ export type EmailCollisionFacts = {
 export async function getTestEmailCollisions(email: string): Promise<EmailCollisionFacts[]> {
   assertSafe(email.toLowerCase());
   const rows = await prisma.$queryRaw<
-    { source: string; email: string; count: number; user_id: string | null; commenter_id: string | null; post_id: string | null; ip_addresses: string[]; reviewed_at: Date | null }[]
+    { source: string; email: string; count: number; user_id: string | null; commenter_id: string | null; post_id: string | null; join_code_id: string | null; claim_ip_address: string | null; ip_addresses: string[]; reviewed_at: Date | null }[]
   >`
-    SELECT source::text, email, count, user_id, commenter_id, post_id, ip_addresses, reviewed_at
+    SELECT source::text, email, count, user_id, commenter_id, post_id, join_code_id, claim_ip_address, ip_addresses, reviewed_at
     FROM "email_collision" WHERE lower(email) = lower(${email}) ORDER BY first_seen_at, id
   `;
   return rows.map((row) => ({
@@ -4441,6 +4461,8 @@ export async function getTestEmailCollisions(email: string): Promise<EmailCollis
     userId: row.user_id,
     commenterId: row.commenter_id,
     postId: row.post_id,
+    joinCodeId: row.join_code_id,
+    claimIpAddress: row.claim_ip_address,
     ipAddresses: row.ip_addresses,
     reviewed: row.reviewed_at !== null,
   }));
@@ -4458,6 +4480,168 @@ export async function getTestCommenters(
     orderBy: { id: "asc" },
   });
   return rows.map((row) => ({ id: row.id, userId: row.userId, comments: row.comments.map((c) => c.bodyText) }));
+}
+
+
+// ─── Join cards (docs/EMAIL.md §10) ────────────────────────────────────────
+
+/**
+ * A batch minted through the app's own mintJoinBatch, as the suite's admin,
+ * so its codes are derived from the rows under this .env's AUTH_SECRET, as
+ * the server derives them. Labelled `E2E join …`.
+ */
+export async function mintTestJoinBatch(opts: { count: number; expiresInMs?: number }): Promise<{
+  batchId: string;
+  cards: { serial: number; code: string }[];
+}> {
+  return mintJoinBatch(await adminActor(), {
+    label: uniqueTitle("join"),
+    count: opts.count,
+    expiresAt: new Date(Date.now() + (opts.expiresInMs ?? 24 * 60 * 60 * 1000)),
+  });
+}
+
+/** Deletes a batch, its cards with it. Accounts made from them are deleted by their emails. */
+export async function deleteTestJoinBatch(batchId: string): Promise<void> {
+  const batch = await prisma.joinBatch.findUnique({ where: { id: batchId }, select: { label: true } });
+  if (!batch) return;
+  if (!batch.label.startsWith(E2E_TITLE_PREFIX)) throw new Error(`Refusing to delete join batch "${batch.label}".`);
+  await prisma.joinBatch.delete({ where: { id: batchId } });
+}
+
+export type JoinCodeFacts = {
+  id: string;
+  pendingEmail: string | null;
+  pendingName: string | null;
+  pendingIpAddress: string | null;
+  hasPasswordHash: boolean;
+  hasToken: boolean;
+  confirmSends: number;
+  confirmFailures: number;
+  confirmSent: boolean;
+  claimed: boolean;
+  claimedUserId: string | null;
+  revoked: boolean;
+};
+
+export async function getTestJoinCode(batchId: string, serial: number): Promise<JoinCodeFacts> {
+  const row = await prisma.joinCode.findUniqueOrThrow({ where: { batchId_serial: { batchId, serial } } });
+  return {
+    id: row.id,
+    pendingEmail: row.pendingEmail,
+    pendingName: row.pendingName,
+    pendingIpAddress: row.pendingIpAddress,
+    hasPasswordHash: row.pendingPasswordHash !== null,
+    hasToken: row.confirmTokenHash !== null,
+    confirmSends: row.confirmSends,
+    confirmFailures: row.confirmFailures,
+    confirmSent: row.confirmSentAt !== null,
+    claimed: row.claimedAt !== null,
+    claimedUserId: row.claimedUserId,
+    revoked: row.revokedAt !== null,
+  };
+}
+
+/**
+ * Gives a card's pending claim a confirmation token the spec knows, as
+ * invite.spec.ts mints its invite: the real one went out in a mail the suite
+ * never reads. Returns the link's path.
+ */
+export async function setTestJoinClaimToken(batchId: string, serial: number): Promise<string> {
+  const { raw, hash } = generateToken();
+  const updated = await prisma.joinCode.updateMany({
+    where: { batchId, serial, confirmTokenHash: { not: null } },
+    data: { confirmTokenHash: hash },
+  });
+  if (updated.count !== 1) throw new Error(`Card ${serial} has no pending claim.`);
+  return `/join/confirm?token=${raw}`;
+}
+
+/** Moves a card's last send back, past the minute's rule or the link's seven days. */
+export async function ageTestJoinSend(batchId: string, serial: number, ms: number): Promise<void> {
+  const row = await prisma.joinCode.findUniqueOrThrow({ where: { batchId_serial: { batchId, serial } }, select: { confirmSentAt: true } });
+  if (!row.confirmSentAt) throw new Error(`Card ${serial} has no send to age.`);
+  await prisma.joinCode.update({
+    where: { batchId_serial: { batchId, serial } },
+    data: { confirmSentAt: new Date(row.confirmSentAt.getTime() - ms) },
+  });
+}
+
+/** Sets a card's or its batch's state behind the app's back. */
+export async function setTestJoinState(
+  batchId: string,
+  change: { serial: number; revoked?: boolean; confirmSends?: number } | { batchExpired?: boolean; batchRevoked?: boolean },
+): Promise<void> {
+  if ("serial" in change) {
+    await prisma.joinCode.update({
+      where: { batchId_serial: { batchId, serial: change.serial } },
+      data: {
+        ...(change.revoked !== undefined ? { revokedAt: change.revoked ? new Date() : null } : {}),
+        ...(change.confirmSends !== undefined ? { confirmSends: change.confirmSends } : {}),
+      },
+    });
+    return;
+  }
+  await prisma.joinBatch.update({
+    where: { id: batchId },
+    data: {
+      ...(change.batchExpired !== undefined ? { expiresAt: new Date(Date.now() + (change.batchExpired ? -60_000 : 86_400_000)) } : {}),
+      ...(change.batchRevoked !== undefined ? { revokedAt: change.batchRevoked ? new Date() : null } : {}),
+    },
+  });
+}
+
+/** What a card's account looks like, found by its email as typed. */
+export async function getTestJoinAccount(email: string): Promise<{
+  id: string;
+  role: Role;
+  name: string | null;
+  emailVerified: boolean;
+  commenter: { trusted: boolean; displayName: string } | null;
+} | null> {
+  assertSafe(email.toLowerCase());
+  const user = await prismaIncludingDeleted.user.findUnique({
+    where: { email },
+    select: { id: true, role: true, name: true, emailVerified: true, commenter: { select: { trusted: true, displayName: true } } },
+  });
+  return user ? { ...user, emailVerified: user.emailVerified !== null } : null;
+}
+
+/**
+ * The commons page `New Account Welcome`: the instance's own if it has one,
+ * live, at the page's address, and otherwise one made here with `text`, as
+ * the suite's admin, SHARED. `created` says whether the spec should delete it.
+ */
+export async function ensureTestWelcomePage(text: string): Promise<{ docId: string; created: boolean }> {
+  const { key } = await foldWikiName(prisma, WELCOME_PAGE_NAME);
+  const existing = await prisma.doc.findFirst({
+    where: { wikiOwnerUserId: null, wikiName: { not: null }, wikiNameKey: key, wikiVariant: "", deletedByUserId: null },
+    select: { id: true },
+  });
+  if (existing) return { docId: existing.id, created: false };
+  const page = await createTestWikiPage({
+    authorEmail: ADMIN_EMAIL,
+    namespace: "commons",
+    name: WELCOME_PAGE_NAME,
+    visibility: "SHARED",
+    bodyText: text,
+  });
+  return { docId: page.id, created: true };
+}
+
+/** The welcome page's text as `/welcome` shows it to this account, or null when it shows none. */
+export async function welcomeTextFor(email: string): Promise<string | null> {
+  assertSafe(email.toLowerCase());
+  const user = await prisma.user.findUniqueOrThrow({ where: { email }, select: { id: true, role: true } });
+  const body = await heldCommonsPageBody(WELCOME_PAGE_NAME, { id: user.id, role: user.role });
+  return body ? extractText(body) : null;
+}
+
+/** Whether an account, found by its email as typed, has a live password reset token. */
+export async function hasTestResetToken(email: string): Promise<boolean> {
+  assertSafe(email.toLowerCase());
+  const count = await prisma.passwordResetToken.count({ where: { user: { email } } });
+  return count > 0;
 }
 
 const handlers = {
@@ -4629,6 +4813,16 @@ const handlers = {
   getTestForkFacts,
   deleteTestDocYdoc,
   setTestDocForkedFrom,
+  mintTestJoinBatch,
+  deleteTestJoinBatch,
+  getTestJoinCode,
+  setTestJoinClaimToken,
+  ageTestJoinSend,
+  setTestJoinState,
+  getTestJoinAccount,
+  ensureTestWelcomePage,
+  welcomeTextFor,
+  hasTestResetToken,
 };
 
 export type DbHandlers = typeof handlers;

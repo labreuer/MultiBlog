@@ -5058,8 +5058,10 @@ AUTHOR account only after its holder confirms the email they gave. The account's
 `/welcome`, which shows the commons page `New Account Welcome`. A card never changes an
 existing account. It comes after three changes that deploy everywhere on their own: §39's
 session re-read with §38's wiki part; commenter identities kept apart, with a log of where they
-meet (docs/COMMENTS.md, built 2026-11-18); and §38's posts (built 2026-11-18). **The plan:
-[docs/EMAIL.md](docs/EMAIL.md) §10.**
+meet (docs/COMMENTS.md, built 2026-11-18); and §38's posts (built 2026-11-18). Built
+2026-11-18: everything a card holder meets, with minting by script (PR 4 of the build order);
+the `/join-codes` admin table (PR 5) is still planned. **What is built, and the plan for the
+rest: [docs/EMAIL.md](docs/EMAIL.md) §10.**
 
 ## 38. Publishing becomes an EDITOR's
 

@@ -3,6 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { liveAccountIdWithEmail } from "@/lib/accounts";
 import { isSessionRecheckDue, sessionRecheckSeconds } from "@/lib/session-recheck";
 import type { JWT } from "next-auth/jwt";
 import type { Role } from "@/generated/prisma/enums";
@@ -24,7 +25,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
-        const user = await prisma.user.findUnique({ where: { email } });
+        // In any case, among live accounts (src/lib/accounts.ts).
+        const id = await liveAccountIdWithEmail(email);
+        const user = id ? await prisma.user.findUnique({ where: { id } }) : null;
         if (!user?.passwordHash) {
           return null;
         }
