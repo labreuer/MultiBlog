@@ -4,30 +4,46 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { diffPath, parseDiffPath, type DiffPairSides, type DiffSide, type SideOrder } from "@/lib/diff-side";
-import { DIFF_ADDRESS_MIN_INTERVAL_MS, isDiffPairRead, sideOfRead, type DiffPairRead, type DiffSideRead } from "@/lib/diff-slider";
+import {
+  DIFF_ADDRESS_MIN_INTERVAL_MS,
+  assemblePair,
+  isDiffPairRead,
+  planPair,
+  sideOfRead,
+  type BuiltSide,
+  type DiffPairRead,
+  type DiffSideRead,
+} from "@/lib/diff-slider";
 import type { DiffBlock } from "@/lib/doc-diff";
 import type { DiffAnswer, DiffRequest } from "@/lib/doc-diff.worker";
 import { SCRUB_PARAM, SCRUB_URL_DEBOUNCE_MS } from "@/lib/scrub-url";
 import DocDiff from "./DocDiff";
-import { DiffSliderBar, type BarSide, type Which } from "./DiffSliders";
+import { DiffSliderBar, useBuildVersion, type BarSide, type Which } from "./DiffSliders";
 import LocalTime from "./LocalTime";
 import styles from "./DiffView.module.css";
 
 // docs/FORKS.md "Sliders on the diff page" — everything on the diff page that
 // depends on its pair: the two headers, "Swap sides", the rows and the
 // sliders' bar. The page seeds it with the pair the server read; a slider
-// then names another, and this asks `/api/diff/<left>/<right>` for it, hands
-// both sides' blocks to the worker and draws the rows that come back. No
-// navigation is in a slider's path, so nothing under the page is mounted
-// anew while one moves: the rows, the reader's place and the slider's
-// pointer are kept by not being touched.
+// then names another, and this gets it, hands both sides' blocks to the
+// worker and draws the rows that come back. No navigation is in a slider's
+// path, so nothing under the page is mounted anew while one moves: the rows,
+// the reader's place and the slider's pointer are kept by not being touched.
 //
-// Three rules, each undone by a change that looks like a tidy-up:
+// Four rules, each undone by a change that looks like a tidy-up:
 //
+// - **A pair is put together here when it can be, whole, and is the server's
+//   otherwise, whole.** A side the page already shows is kept, and a side
+//   moved to a version is built in this browser from its doc's log
+//   (`planPair` and `assemblePair`, src/lib/diff-slider.ts;
+//   src/lib/doc-version.worker.ts), so a move makes no request. Any side
+//   neither covers, or a build that can't be made from every record it needs,
+//   sends the pair to `/api/diff/<left>/<right>`. Never a pair with a side
+//   built from part of what the server would build it from.
 // - **One job at a time, and never abandoned for a newer position.** A job is
-//   fetch, compare, draw. A slider moved meanwhile changes which pair is
-//   wanted and nothing else; when the job ends, the next starts for the pair
-//   wanted then. Aborting on each move would land nothing until a drag
+//   get the pair, compare, draw. A slider moved meanwhile changes which pair
+//   is wanted and nothing else; when the job ends, the next starts for the
+//   pair wanted then. Aborting on each move would land nothing until a drag
 //   paused, since moves arrive faster than a job runs.
 // - **The address is written apart from the rows**, by `history.replaceState`
 //   once the sliders have rested, since browsers ration history calls
@@ -41,7 +57,7 @@ type Pair = DiffPairSides;
 const keyOf = (pair: Pair): string => diffPath(pair.left, pair.right);
 const pairOfRead = (read: DiffPairRead): Pair => ({ left: sideOfRead(read.left), right: sideOfRead(read.right) });
 
-/** The pair on the page: the server's read, and the worker's rows for it, null until compared or when a side has no text. */
+/** The pair on the page: its read, the server's or one put together here, and the worker's rows for it, null until compared or when a side has no text. */
 type Shown = { pair: DiffPairRead; answer: DiffAnswer | null };
 
 type Job = { cancelled: boolean; abort: AbortController };
@@ -127,6 +143,36 @@ export default function DiffView({ initial }: { initial: DiffPairRead }) {
 
   const jobRef = useRef<Job | null>(null);
   const workerRef = useRef<Worker | null>(null);
+  // The pair on the page, for a job to keep sides from. Set before the effect
+  // that starts the next job, which is declared below it.
+  const shownRef = useRef<DiffPairRead | null>(null);
+  useEffect(() => {
+    shownRef.current = shown?.pair ?? null;
+  }, [shown]);
+  const buildVersion = useBuildVersion();
+
+  /**
+   * `pair` without the server, or null when the server is to read it: each
+   * side kept from the page or built here, as `planPair` says, and no pair at
+   * all when a side that needs building can't be built.
+   */
+  const assemble = useCallback(
+    async (pair: Pair): Promise<DiffPairRead | null> => {
+      const base = shownRef.current;
+      const plan = base && planPair(base, pair);
+      if (!base || !plan) return null;
+      const built: Partial<Record<Which, BuiltSide>> = {};
+      for (const which of ["left", "right"] as const) {
+        const side = pair[which];
+        if (plan[which] !== "build" || side.updateId === null) continue;
+        const made = await buildVersion(side.docId, side.updateId.toString());
+        if (!made) return null;
+        built[which] = made;
+      }
+      return assemblePair(base, pair, built);
+    },
+    [buildVersion],
+  );
 
   /** One worker for the view's life, started by the first compare. */
   const compare = useCallback(
@@ -150,7 +196,7 @@ export default function DiffView({ initial }: { initial: DiffPairRead }) {
     [],
   );
 
-  /** A job for `pair`: fetched unless `have` is its read already, then compared and drawn. */
+  /** A job for `pair`: put together here or fetched, unless `have` is its read already, then compared and drawn. */
   const startJob = useCallback(
     (pair: Pair, have: DiffPairRead | null) => {
       if (jobRef.current) return;
@@ -162,8 +208,8 @@ export default function DiffView({ initial }: { initial: DiffPairRead }) {
         let next: Shown | null = null;
         let failure: "load" | "worker" = "load";
         try {
-          let read = have;
-          if (!read) {
+          let read = have ?? (await assemble(pair));
+          if (!read && !job.cancelled) {
             const res = await fetch(`/api${key}`, { cache: "no-store", signal: job.abort.signal });
             if (res.status === 401 || res.status === 403 || res.status === 404) {
               // The pair's own address says which, as it does for a pasted
@@ -177,6 +223,7 @@ export default function DiffView({ initial }: { initial: DiffPairRead }) {
             if (!isDiffPairRead(body) || keyOf(pairOfRead(body)) !== key) throw new Error("Not the pair asked for.");
             read = body;
           }
+          if (!read) return;
           const { left, right } = read;
           next = { pair: read, answer: left.blocks && right.blocks ? await compare(left.blocks, right.blocks) : null };
         } catch (err) {
@@ -197,7 +244,7 @@ export default function DiffView({ initial }: { initial: DiffPairRead }) {
         setRunning(false);
       })();
     },
-    [compare],
+    [assemble, compare],
   );
 
   // The next job, whenever none is running and the page isn't the wanted
@@ -213,7 +260,7 @@ export default function DiffView({ initial }: { initial: DiffPairRead }) {
       startJob(wanted, shown.pair);
       return;
     }
-    // A fetch that failed is tried again by a move, or by the reader.
+    // A pair that couldn't be had is tried again by a move, or by the reader.
     if (failedFor === wantedKey) return;
     startJob(wanted, null);
   }, [running, workerFailed, shown, shownKey, wanted, wantedKey, failedFor, startJob]);
@@ -341,7 +388,7 @@ export default function DiffView({ initial }: { initial: DiffPairRead }) {
       </div>
       {shown && (
         <>
-          <div className={styles.sides}>
+          <div className={styles.sides} data-kind="sides">
             <SideHeader side={shown.pair.left} readAt={shown.pair.readAt} order={labels?.left ?? null} />
             <SideHeader side={shown.pair.right} readAt={shown.pair.readAt} order={labels?.right ?? null} />
           </div>

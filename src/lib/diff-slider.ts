@@ -1,12 +1,16 @@
-import type { DiffSide, SideOrder } from "./diff-side";
+import { pastForkPoint, sideOrder, type DiffPairSides, type DiffSide, type PairLineage, type SideOrder } from "./diff-side";
 import type { DiffBlock } from "./doc-diff";
 
 // docs/FORKS.md "Sliders on the diff page" — what the browser is sent for a
-// diff and its sliders, and where a slider sits on its doc's index. A slider
-// names a side; the server builds it, as it does for any `<id>@<update id>`
-// (src/lib/diff-pair.ts), and no update's bytes reach the browser.
+// diff and its sliders, where a slider sits on its doc's index, and how a
+// pair a slider names is put together without the server: a side the page
+// already shows is kept, and a side moved to a version is built in the
+// reader's browser (src/lib/doc-version.worker.ts). The server reads every
+// other pair, whole (src/lib/diff-pair.ts).
 //
 // Pure and browser-safe; diff-slider.test.ts is its table.
+
+export type Which = "left" | "right";
 
 /**
  * The least time between two writes of the diff page's address. **A write is
@@ -47,12 +51,25 @@ export type DiffSideRead = {
   blocks: DiffBlock[] | null;
 };
 
+/**
+ * A pair that is a fork and its parent: which doc is which, and the parent's
+ * update the fork was made at. What the browser places a parent's side
+ * against when it builds one.
+ */
+export type PairFork = { parentDocId: string; forkDocId: string; forkPoint: string };
+
 export type DiffPairRead = {
-  /** When the server read the pair. */
+  /** When the server last read the pair: the time a side with no version is as of. */
   readAt: string;
   order: SideOrder | null;
   /** A fork and its parent, with the parent's side past the fork point. */
   diverged: boolean;
+  /**
+   * Set for a fork and its parent, **only to a viewer who may see the
+   * parent's history**: no other viewer's browser moves the parent's side,
+   * and the fork point is one of the parent's update ids.
+   */
+  fork: PairFork | null;
   left: DiffSideRead;
   right: DiffSideRead;
 };
@@ -75,6 +92,12 @@ function isDiffSideRead(value: unknown): value is DiffSideRead {
   );
 }
 
+function isPairFork(value: unknown): value is PairFork {
+  if (typeof value !== "object" || value === null) return false;
+  const fork = value as Record<string, unknown>;
+  return isText(fork.parentDocId) && isText(fork.forkDocId) && isText(fork.forkPoint);
+}
+
 /** Whether a response body is a pair as the route sends one: what stands between a proxy's error page and the rows. */
 export function isDiffPairRead(value: unknown): value is DiffPairRead {
   if (typeof value !== "object" || value === null) return false;
@@ -83,6 +106,7 @@ export function isDiffPairRead(value: unknown): value is DiffPairRead {
     isText(pair.readAt) &&
     (pair.order === null || pair.order === "left-earlier" || pair.order === "right-earlier") &&
     typeof pair.diverged === "boolean" &&
+    (pair.fork === null || isPairFork(pair.fork)) &&
     isDiffSideRead(pair.left) &&
     isDiffSideRead(pair.right)
   );
@@ -131,4 +155,84 @@ export function sliderPosition(updates: VersionIndex, side: SliderSide): number 
  */
 export function sideAtPosition(docId: string, updates: VersionIndex, position: number): DiffSide {
   return { docId, updateId: position >= updates.length - 1 ? null : BigInt(updates[position].id) };
+}
+
+/** How a side of a wanted pair is had without the server: the read on the page, or a build in the browser. */
+export type SidePlan = "keep" | "build";
+
+/**
+ * How each side of `wanted` can be had without asking the server, given the
+ * pair on the page; null when the server must read the pair, which it then
+ * does whole.
+ *
+ * - **A side the page already shows is kept**, a side with no version too:
+ *   it stays the doc as it was when last read, which its header says.
+ * - **A side moved to a version is built in the browser**, where the viewer
+ *   may see that doc's history, which is what gave the side its slider.
+ * - **Everything else is the server's**: a side moved to the live end, which
+ *   is the doc as it is when next read; a side of another doc than the page
+ *   shows there, which no slider makes; a side the server couldn't read.
+ */
+export function planPair(shown: DiffPairRead, wanted: DiffPairSides): Record<Which, SidePlan> | null {
+  const plan = (which: Which): SidePlan | null => {
+    const read = shown[which];
+    const side = wanted[which];
+    if (read.docId !== side.docId) return null;
+    if (read.updateId === (side.updateId?.toString() ?? null)) return read.blocks ? "keep" : null;
+    return side.updateId !== null && read.history ? "build" : null;
+  };
+  const left = plan("left");
+  const right = plan("right");
+  return left && right ? { left, right } : null;
+}
+
+/** A side built in the browser: its title as of the version, when the version was written, and its blocks. */
+export type BuiltSide = { title: string; at: string; blocks: DiffBlock[] };
+
+/**
+ * The pair `wanted` names, from the pair on the page and the sides built for
+ * it, as `planPair` planned them: the shape the server sends for that pair.
+ *
+ * **Which side is later is worked out here as `readDiffPair` works it out**,
+ * through the same two functions:
+ *
+ * - one doc on both sides has the order its two versions give;
+ * - a fork and its parent, with the parent's side at a version, are placed
+ *   against the fork point the server sent;
+ * - any other pair keeps the order on the page. Its order depends on the
+ *   parent's side alone, and that side has not moved: a parent's side with no
+ *   version is only ever kept, and a parent's side at a version is built only
+ *   by a viewer who was sent the fork point.
+ */
+export function assemblePair(shown: DiffPairRead, wanted: DiffPairSides, built: Partial<Record<Which, BuiltSide>>): DiffPairRead {
+  const side = (which: Which): DiffSideRead => {
+    const made = built[which];
+    if (!made) return shown[which];
+    return {
+      docId: shown[which].docId,
+      updateId: wanted[which].updateId?.toString() ?? null,
+      slug: shown[which].slug,
+      title: made.title,
+      history: true,
+      at: made.at,
+      nowVersion: null,
+      blocks: made.blocks,
+    };
+  };
+  const { left, right } = wanted;
+  let order = shown.order;
+  let diverged = shown.diverged;
+  if (left.docId === right.docId) {
+    order = sideOrder(left, right);
+    diverged = false;
+  } else if (shown.fork) {
+    const { parentDocId, forkDocId, forkPoint } = shown.fork;
+    const parent = left.docId === parentDocId ? left : right.docId === parentDocId ? right : null;
+    if (parent && parent.updateId !== null) {
+      const lineage: PairLineage = { parentDocId, forkDocId, forkPoint: BigInt(forkPoint), parentNow: null };
+      order = sideOrder(left, right, lineage);
+      diverged = pastForkPoint(left, right, lineage);
+    }
+  }
+  return { readAt: shown.readAt, order, diverged, fork: shown.fork, left: side("left"), right: side("right") };
 }

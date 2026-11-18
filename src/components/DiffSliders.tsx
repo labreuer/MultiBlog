@@ -2,25 +2,28 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { DiffSide } from "@/lib/diff-side";
-import { sideAtPosition, sideUpdate, sliderPosition, type SliderSide, type VersionIndex } from "@/lib/diff-slider";
+import { sideAtPosition, sideUpdate, sliderPosition, type BuiltSide, type SliderSide, type VersionIndex, type Which } from "@/lib/diff-slider";
+import type { VersionAnswer, VersionRequest } from "@/lib/doc-version.worker";
 import LocalTime from "./LocalTime";
 import styles from "./DiffSliders.module.css";
 
 // docs/FORKS.md "Sliders on the diff page" — a slider for each side of a diff
 // whose history the viewer may see, in one bar fixed to the bottom of the
-// window, and the indexes they read. A slider names a side and nothing more:
-// `DiffView` asks the server for the pair, so no update's bytes reach the
-// browser, and nothing here turns a version into blocks.
+// window, and what they read. A slider names a side and nothing more:
+// `DiffView` decides how the pair it names is had.
 //
 // Two parts, mounted in two places:
 //
-// - **the indexes**, by doc id, in a provider `src/app/diff/layout.tsx`
-//   mounts above the page. A link from one diff to another ("Swap sides")
-//   mounts the page anew, and the index a touch fetched is still here for it;
+// - **what is kept for as long as the reader stays on diff pages**, by doc
+//   id, in a provider `src/app/diff/layout.tsx` mounts above the page: each
+//   doc's index, and the worker that holds each doc's log and builds a
+//   version from it (src/lib/doc-version.worker.ts). A link from one diff to
+//   another ("Swap sides") mounts the page anew, and what a touch fetched is
+//   still here for it;
 // - **the bar**, drawn by `DiffView` under the page, since nothing remounts
 //   the page while a slider moves.
 
-export type Which = "left" | "right";
+export type { Which };
 const BOTH: readonly Which[] = ["left", "right"];
 
 /**
@@ -41,13 +44,89 @@ type Indexes = {
 
 const DiffIndexesContext = createContext<Indexes | null>(null);
 
+/** A doc at one version, built in this browser; null when it can't be, and the server is to read the pair. */
+type BuildVersion = (docId: string, updateId: string) => Promise<BuiltSide | null>;
+
+const DiffVersionsContext = createContext<BuildVersion | null>(null);
+
+/** The builder of the diff pages' provider, for `DiffView`. */
+export function useBuildVersion(): BuildVersion {
+  const build = useContext(DiffVersionsContext);
+  if (!build) throw new Error("DiffView is drawn under src/app/diff/layout.tsx's provider.");
+  return build;
+}
+
+/** The worker, and each build it has yet to answer; `"failed"` once it couldn't start or threw, for good. */
+type Builder = { worker: Worker; waiting: Map<number, (built: BuiltSide | null) => void>; next: number } | "failed";
+
 export default function DiffIndexesProvider({ children }: { children: ReactNode }) {
   const [indexes, setIndexes] = useState<Record<string, IndexState>>({});
   const inFlightRef = useRef(new Set<string>());
   const soughtRef = useRef(new Map<string, Set<string>>());
+  const builderRef = useRef<Builder | null>(null);
+
+  /** The worker, started by the first slider touched. Null where it can't run: every pair is then the server's. */
+  const builder = useCallback((): Exclude<Builder, "failed"> | null => {
+    if (builderRef.current === "failed") return null;
+    if (builderRef.current) return builderRef.current;
+    const fail = () => {
+      const failed = builderRef.current;
+      builderRef.current = "failed";
+      if (!failed || failed === "failed") return;
+      failed.worker.terminate();
+      for (const answer of failed.waiting.values()) answer(null);
+    };
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("../lib/doc-version.worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      // A sandboxed frame, or a browser with workers turned off.
+      fail();
+      return null;
+    }
+    const started = { worker, waiting: new Map<number, (built: BuiltSide | null) => void>(), next: 0 };
+    worker.onmessage = (event: MessageEvent<VersionAnswer>) => {
+      const answer = started.waiting.get(event.data.id);
+      started.waiting.delete(event.data.id);
+      answer?.(event.data.built);
+    };
+    worker.onerror = fail;
+    builderRef.current = started;
+    return started;
+  }, []);
+
+  const build = useCallback<BuildVersion>(
+    (docId, updateId) =>
+      new Promise((resolve) => {
+        const running = builder();
+        if (!running) {
+          resolve(null);
+          return;
+        }
+        const id = running.next++;
+        running.waiting.set(id, resolve);
+        running.worker.postMessage({ type: "build", id, docId, updateId } satisfies VersionRequest);
+      }),
+    [builder],
+  );
+
+  // Leaving the diff pages ends the worker, and answers what it still owed.
+  useEffect(
+    () => () => {
+      const running = builderRef.current;
+      builderRef.current = null;
+      if (!running || running === "failed") return;
+      running.worker.terminate();
+      for (const answer of running.waiting.values()) answer(null);
+    },
+    [],
+  );
 
   const loadIndex = useCallback((docId: string, soughtFor: string | null) => {
     if (inFlightRef.current.has(docId)) return;
+    // The doc's log with its index: a touch is about to be a move, and the
+    // first build then finds the log fetched or on its way.
+    builder()?.worker.postMessage({ type: "open", docId } satisfies VersionRequest);
     inFlightRef.current.add(docId);
     const sought = soughtRef.current.get(docId) ?? new Set<string>();
     if (soughtFor !== null) sought.add(soughtFor);
@@ -69,10 +148,14 @@ export default function DiffIndexesProvider({ children }: { children: ReactNode 
       inFlightRef.current.delete(docId);
       setIndexes((prev) => ({ ...prev, [docId]: next }));
     })();
-  }, []);
+  }, [builder]);
 
   const value = useMemo(() => ({ indexes, loadIndex }), [indexes, loadIndex]);
-  return <DiffIndexesContext.Provider value={value}>{children}</DiffIndexesContext.Provider>;
+  return (
+    <DiffIndexesContext.Provider value={value}>
+      <DiffVersionsContext.Provider value={build}>{children}</DiffVersionsContext.Provider>
+    </DiffIndexesContext.Provider>
+  );
 }
 
 /** One side as the bar needs it. */

@@ -1,6 +1,7 @@
 import type { Session } from "next-auth";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canUserReadDoc, canUserSeeDocHistory, canUserSeeDocVersion } from "@/lib/doc-authz";
+import { diffBlocks } from "@/lib/doc-body";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { isDocVersion, loadDocStateAt, loadDocStateNow } from "@/lib/doc-state";
 import { parseDiffSide, pastForkPoint, sideOrder, type DiffSide, type PairLineage } from "@/lib/diff-side";
@@ -137,7 +138,7 @@ async function loadSide({ side, doc }: GatedSide): Promise<LoadedSide> {
     return {
       ok: true,
       title: docTitleOrFallback(state.title),
-      blocks: state.blocks.map((block) => ({ text: block.text, type: block.node.type.name, heading: block.heading !== null })),
+      blocks: diffBlocks(state.blocks),
       at: row?.createdAt ?? null,
       nowVersion: now?.version ?? null,
     };
@@ -154,7 +155,8 @@ async function loadSide({ side, doc }: GatedSide): Promise<LoadedSide> {
  * **`nowVersion` leaves here only for a side with `history`.** It is the id
  * of the log's newest update; sent for every side, it would tell a reader
  * without the history that id. The parent's own (`parentNow`) decides the
- * pair's order and stays on the server: only `order` and `diverged` leave.
+ * pair's order and stays on the server: `order` and `diverged` leave, and
+ * the fork point (`fork`) to a viewer with the parent's history alone.
  */
 export async function readDiffPair({ left, right, lineage }: GatedPair): Promise<DiffPairRead> {
   const readAt = new Date();
@@ -174,10 +176,15 @@ export async function readDiffPair({ left, right, lineage }: GatedPair): Promise
     nowVersion: history && loaded.ok ? (loaded.nowVersion?.toString() ?? null) : null,
     blocks: loaded.ok ? loaded.blocks : null,
   });
+  // The fork point leaves for a viewer who may see the parent's history, and
+  // for no other: their browser places a parent's side it builds itself
+  // against it (`assemblePair`), and it is one of the parent's update ids.
+  const parentHistory = lineage !== null && (lineage.parentDocId === left.doc.id ? left : right).history;
   return {
     readAt: readAt.toISOString(),
     order: sideOrder(left.side, right.side, withNow),
     diverged: pastForkPoint(left.side, right.side, withNow),
+    fork: lineage && parentHistory ? { parentDocId: lineage.parentDocId, forkDocId: lineage.forkDocId, forkPoint: lineage.forkPoint.toString() } : null,
     left: sideRead(left, leftLoaded),
     right: sideRead(right, rightLoaded),
   };

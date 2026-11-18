@@ -5,8 +5,9 @@ import { gateDiffPair, readDiffPair } from "@/lib/diff-pair";
 // docs/FORKS.md "Sliders on the diff page" — a diff's pair, for the page a
 // slider has moved on: the same sides, headers' facts and blocks the diff
 // page at `/diff/<left>/<right>` is rendered from, as JSON. The page there
-// asks this for each pair its sliders name, so it follows them without a
-// navigation.
+// asks this for a pair its sliders name and its browser can't put together
+// (a side moved to the live end, or one it can't build), so it follows them
+// without a navigation.
 //
 // **Nothing is read before the gate, and this holds no check of its own**:
 // `gateDiffPair` is the page's gate, and `readDiffPair` its read
