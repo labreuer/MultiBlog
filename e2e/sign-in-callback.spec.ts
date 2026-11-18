@@ -13,7 +13,15 @@
 // `safeCallbackUrl`'s. Its unit tests cover the input table; what this file
 // proves is that the validated value is what the browser actually follows.
 import { test, expect } from "@playwright/test";
-import { ADMIN_EMAIL, TEST_PASSWORD } from "./db";
+import {
+  ADMIN_EMAIL,
+  TEST_PASSWORD,
+  createTestAnnotation,
+  createTestDoc,
+  deleteTestDoc,
+  renameTestDocSlug,
+} from "./db";
+import { ADMIN_STORAGE_STATE } from "../playwright.config";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
@@ -85,4 +93,35 @@ test("/sign-in itself never becomes a destination", async ({ page }) => {
     "href",
     "/sign-in",
   );
+});
+
+test("a card's permalink survives signing in and a redirect on the way", async ({ page, browser }) => {
+  // A body long enough that a note below the article is out of view on
+  // arrival, so landing on it is something the fragment did.
+  const body = Array.from({ length: 60 }, (_, i) => `Paragraph ${i} of a long doc.`).join("\n\n");
+  const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: body });
+  try {
+    const note = await createTestAnnotation({ docId: doc.id, authorEmail: ADMIN_EMAIL, bodyText: "E2E note to land on" });
+
+    // The card's permalink, read off the card as the admin sees it.
+    const admin = await browser.newContext({ storageState: ADMIN_STORAGE_STATE });
+    const adminPage = await admin.newPage();
+    await adminPage.goto(`/doc/${doc.slug}`);
+    const fragment = await adminPage.locator(`[data-comment-id="${note.id}"] a[id]`).first().getAttribute("id");
+    await admin.close();
+    expect(fragment).toBeTruthy();
+
+    // An old slug answers with a redirect, which a client-side navigation
+    // would follow by committing a URL without the fragment.
+    const newSlug = await renameTestDocSlug(doc.id);
+    await page.goto(`/doc/${doc.slug}#${fragment}`);
+    await page.waitForURL("**/sign-in?callbackUrl=*");
+    await signIn(page);
+
+    await expect(page).toHaveURL(new RegExp(`/doc/${newSlug}#${fragment}$`));
+    await expect(page.locator(`[data-comment-id="${note.id}"]`)).toBeInViewport();
+  } finally {
+    await page.goto("about:blank").catch(() => {});
+    await deleteTestDoc(doc.id);
+  }
 });

@@ -1210,30 +1210,15 @@ each PR.
 
 ## What the wiki adds later
 
-The wiki's "Planned: wiki-style titles" asks for its history to be rebuilt onto `wiki-titles`,
-off main. Built on this, the rebuild takes forks and diffs from main and adds only what an
-address needs:
-
-| On `wiki` | Here | What the wiki adds |
-|---|---|---|
-| `forked_from_*` columns in `wiki_pages`, with `doc_fork_is_wiki_at_revision` | `doc_forks`, with `doc_fork_at_revision` | Nothing to forks: its migration adds the address columns alone. The titles plan had already relaxed the CHECK to this one |
-| `wiki-fork.ts`'s checks and read | `readForkSource`, `forkSeed` | The address: namespace, name and variant, claimed under its lock, through a `wiki` option of `createDocWithContent` |
-| `createDocWithContent`'s `visibility`, `forkedFrom` and `seed: "keep"` | `visibility`, `forkedFrom`, `chipStyles` | `wiki`. No `seed` option is needed: main already seeds through a schema with the author mark and keeps the marks a body has |
-| `diff-side.ts`, `doc-diff.ts`, the diff route at `/side-by-side/<a>/<b>/diff` | The same two files, the route at `/diff/<a>/<b>`, and the rows compared in a worker (`DocDiff`, `doc-diff.worker.ts`) | Sides linked at their wiki addresses (`wikiPathOfDoc`), an unreadable wiki doc answered as a missing one, and diffs for signed-out readers when those come |
-| `wiki-family.ts`, `WikiBanner` | `doc-family.ts`, `DocFamily` | "Same name", the public render's wording, and `readableWikiDocsWhere` for `PUBLIC` pages |
-| `DocActionsMenu` | Publish as blog post, Fork… | Move into the wiki…, Fork into the wiki… |
-| `b6126e5`, `1425a6a` | Ported | Nothing |
-
-**Both `b6126e5` and `1425a6a` are on main**, so the rebuild needs neither from the `wiki`
-branch it replaces.
-
-Its replay map shrinks to match: the size guards and the slug fix leave its prerequisites,
-forking a doc as a doc is no longer deferred, and its fork, banner and diff steps keep only
-their address halves. That edit belongs to the rebuild, not to this branch.
-
-**Slot A's database already holds the wiki's fork columns**, from the `wiki_pages` migration
-applied there, so `doc_forks` can't apply in slot A until that migration's objects are dropped,
-which is the rebuild's own first step. Slot B's database has neither.
+**The wiki is planned in [WIKI.md](WIKI.md)**, built fresh on main rather than from the `wiki`
+branch, so it takes forks and diffs from here and adds only what an address needs: a `wiki` option
+of `createDocWithContent`, claimed under its lock ("Forking into the wiki"); "Same name" and a
+null viewer in the family line ("The family line"); and sides linked at their addresses and headed
+by name in a diff, with an unreadable wiki doc answered as a missing one ("Diffs"). Three of its
+rules change code here: `forkDoc` titles a fork of a wiki page with the page's name, since a
+page's title fragment isn't its title; `editableDocsWhere` carries the person's-page rule, so the
+history filter keeps agreeing with `canUserSeeDocHistory`; and `canUserSeeDocVersion` and the
+family line see `PUBLIC` as `SHARED`, through `sharedOrPublic()`.
 
 ## Decisions
 

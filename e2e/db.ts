@@ -178,6 +178,10 @@ export const addTestDocAuthor = (...args: Parameters<DbHandlers["addTestDocAutho
 export const renameTestDocSlug = (...args: Parameters<DbHandlers["renameTestDocSlug"]>): Promise<string> =>
   call("renameTestDocSlug", ...args);
 
+export const takeBackOwnOldSlug = (
+  ...args: Parameters<DbHandlers["takeBackOwnOldSlug"]>
+): Promise<{ start: string; away: string; final: string; history: string[] }> => call("takeBackOwnOldSlug", ...args);
+
 export const addTestPostAuthor = (...args: Parameters<DbHandlers["addTestPostAuthor"]>): Promise<void> =>
   call("addTestPostAuthor", ...args);
 
@@ -343,6 +347,10 @@ export const setAnchorChipLabels = (...args: Parameters<DbHandlers["setAnchorChi
   call("setAnchorChipLabels", ...args);
 export const markPresentAtStamp = (...args: Parameters<DbHandlers["markPresentAtStamp"]>): Promise<boolean> =>
   call("markPresentAtStamp", ...args);
+
+export const applyTestAnnotationMark = (
+  ...args: Parameters<DbHandlers["applyTestAnnotationMark"]>
+): Promise<{ applied: boolean; markInDoc: boolean }> => call("applyTestAnnotationMark", ...args);
 
 // PLAN.md §22e — an annotation body's settled-state history, and the two
 // knobs the grace window and the abandoned-session UI are tested with.

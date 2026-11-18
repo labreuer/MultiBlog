@@ -225,7 +225,7 @@ are. Nothing on the page uses `dangerouslySetInnerHTML`.
   worth replaying, or anchors that must survive an edit. A blurb has none of those: one line,
   one owner, changed a few times a year. Putting it on a ydoc would add:
   - a `ydoc:contributor:` namespace;
-  - a third authorization branch in `/api/ydoc/[id]/token`;
+  - a third token route, with an authorization rule beside the doc's and the annotation's;
   - a third cache-flush path in the collab server, writing to `user`;
   - a provider and IndexedDB wiring on the dashboard.
 
@@ -436,6 +436,10 @@ The code, the columns and the routes say `slug`.
   current one *or* sits in any post's history, soft-deleted posts included. Otherwise a rename
   could take a slug that still redirects an old link to another post. A new post's slug gets
   `-2`, `-3` and so on by the same test (`uniquePostSlug`).
+- **A post's own past slug is its own to take back.** The test passes over the post's own
+  rows, so a change to a slug the post held before takes it out of the history, as Revert
+  does, rather than refusing it as in use. The same holds for a user's, a doc's and a file's
+  slug (`changeUserSlug`, `changeDocSlug`, `changeFileSlug`), and a tag's (`changeTagSlug`).
 - **One history table per kind**: `PostSlugHistory`, `UserSlugHistory` and `DocSlugHistory`.
   Prisma has no polymorphic relations, so one shared table would give up its foreign keys to
   save very little.

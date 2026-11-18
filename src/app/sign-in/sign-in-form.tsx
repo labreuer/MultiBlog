@@ -76,7 +76,19 @@ export default function SignInForm({
     // `redirect` callback never runs on this path. The fragment the reader
     // arrived with rides along (withArrivalFragment says why); the no-JS path
     // below can't see it, and can't run the PDF viewer that reads one either.
-    router.push(withArrivalFragment(callbackUrl ?? DEFAULT_SIGN_IN_DESTINATION, window.location.hash));
+    //
+    // **With a fragment, a full page load.** A client-side navigation to a
+    // destination that redirects (a doc's old slug) commits the URL the
+    // server answered with, which has no fragment, so the reader would land
+    // without the card their link named. The browser carries a fragment
+    // across a redirect it follows itself, and the page starts its session
+    // afresh from the cookie `signIn` has just set.
+    const destination = withArrivalFragment(callbackUrl ?? DEFAULT_SIGN_IN_DESTINATION, window.location.hash);
+    if (destination.includes("#")) {
+      window.location.assign(destination);
+    } else {
+      router.push(destination);
+    }
   }
 
   return (

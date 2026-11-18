@@ -9,10 +9,10 @@ import { pmAnnotationContentSchema } from "./tiptap-schema";
 // scripts/backfill-annotation-ydocs.ts (an existing annotation's `body.text`)
 // so the two never drift on what "seed a ydoc from text" means. A `Y.Doc`
 // works the same way in the Next web process as in the collab process — Yjs
-// itself has no server/collab-only requirement, and src/app/api/ydoc/route.ts
-// already establishes the pattern of the web process writing directly into
-// the ydoc store (§12b) rather than going through Hocuspocus for a brand-new,
-// not-yet-connected document.
+// itself has no server/collab-only requirement, and createDoc
+// (src/app/actions/docs.ts) already writes a new doc's ydoc straight into the
+// store from the web process (§12b) rather than going through Hocuspocus for
+// a brand-new, not-yet-connected document.
 export function seedAnnotationYdoc(text: string): {
   ydoc: Uint8Array;
   stateVector: Uint8Array;

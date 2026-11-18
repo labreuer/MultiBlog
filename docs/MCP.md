@@ -1651,10 +1651,10 @@ checks read access to the container. The UI checks that only when the draft is c
 
 - **Bodies in Markdown** need a `markdownToAnnotationContent`. It is a `MarkdownManager` over
   `annotationContentExtensions` (StarterKit and AuthorHighlight), with `decodeNodeEntities`,
-  the soft-break collapse that comments use, and a schema check. That schema has no tables, so
-  a Markdown table needs a fallback. A body has no length limit, as a doc has none; the
-  Markdown a call sends is capped at a doc's 768 KB (`MAX_MARKDOWN_BYTES`). Fragment links in
-  a body are checked as a doc's are (§8).
+  the soft-break collapse that comments use, which leaves a code block's lines alone, and a
+  schema check. That schema has no tables, so a Markdown table needs a fallback. A body has no
+  length limit, as a doc has none; the Markdown a call sends is capped at a doc's 768 KB
+  (`MAX_MARKDOWN_BYTES`). Fragment links in a body are checked as a doc's are (§8).
 - **Always the column mechanism.** The MCP server has no editor surface, so it never asks for a mark
   (see §17, item 1).
 - **A quote is optional.** With none, a root is a note on the whole doc or PDF, as the
@@ -2490,24 +2490,23 @@ model. OAuth is §21's.
 The MCP server avoids every one by construction, and building it fixed three in the UI's paths
 as well:
 
-- **Items 1–3 remain in the UI's paths.** The MCP server uses only the column mechanism,
-  validates stamps, and re-checks a reply's parent.
+- **Item 1 is fixed for both**: `applyAnnotationMark` (`src/lib/annotation-admin.ts`), where
+  the writable token is minted, refuses anyone who can't edit the doc, so a hand-made `"mark"`
+  from a reader posts document-level and writes nothing.
+- **Items 2 and 3 remain in the UI's paths.** The MCP server validates stamps and re-checks a
+  reply's parent.
 - **Item 4 is fixed for both**: the delete and restore are `setAnnotationDeleted`
   (`src/lib/annotation-manage.ts`), which the actions wrap.
 - **Item 5's byline half is fixed for both**: the byline actions wrap `setDocByline` (§12).
   `/dashboard`'s Recent docs still lists a doc to an ineligible name already on its byline.
 - **Item 6 is fixed**: `/admin/annotation-replace` refuses a read-only token.
 
-Items 1–3 should still be fixed on their own account (TODO.md).
+Items 2 and 3 should still be fixed on their own account (TODO.md).
 
-1. **A reader can have the server write into a doc they cannot edit.**
-   - `postAnnotation` takes `anchorMode` from the client for a root annotation. For
-     `"mark"`, it applies a mark through the collab server.
-   - Nothing in `src/app/actions/annotations.ts` calls `canUserEditDoc`.
-   - `/admin/annotation-mark` refuses a read-only token, but the token `annotation-admin.ts`
-     mints for the poster is writable whatever the poster may do to the doc.
-   - So [ANNOTATIONS.md](ANNOTATIONS.md)'s "why the reading views stopped writing marks" holds
-     only because the reading views send `"columns"`.
+1. **A reader could have the server write into a doc they cannot edit.** `postAnnotation`
+   takes `anchorMode` from the client for a root annotation, and for `"mark"` applies a mark
+   through the collab server with a token `annotation-admin.ts` mints writable. The check is
+   there, where the token is made (above).
 2. **The client's version stamp is parsed, not validated.** `postAnnotation` turns
    `ydocUpdateId` into a `BigInt` and uses it. Nothing checks that it is in this doc's log, or
    not past its tail. A stamp from the future breaks "replay to the stamp and `textBetween` is

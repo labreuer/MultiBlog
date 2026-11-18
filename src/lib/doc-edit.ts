@@ -471,8 +471,13 @@ export function mergeDoc(old: PMNode, next: PMNode, given: MergeOptions): PMNode
   return old.type.create(old.attrs, merged, old.marks);
 }
 
-/** Text in pasted Markdown keeps a soft line break as "\n"; in an edit it is the space CommonMark means by one. */
+/**
+ * Text in pasted Markdown keeps a soft line break as "\n"; in an edit it is
+ * the space CommonMark means by one. A code block's newlines are its lines,
+ * so it is left alone.
+ */
 function collapseSoftBreaks(json: JSONContent): JSONContent {
+  if (json.type === "codeBlock") return json;
   return {
     ...json,
     ...(typeof json.text === "string" ? { text: json.text.replace(/\r?\n/g, " ") } : {}),

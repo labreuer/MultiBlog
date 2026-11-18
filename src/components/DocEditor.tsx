@@ -85,10 +85,10 @@ type ConnectionStatus = "connecting" | "connected" | "disconnected";
 // schedule (a doc has no revisions — it auto-persists through the collab
 // server itself, PLAN.md §12d), no revision diff, no title autosave — the
 // title is a cache doc-cache.ts writes server-side from the "title"
-// fragment, not something this component pushes. What's left is close to
-// /ydoc-debug's editing mode (YdocDebug.tsx's EditView): provider wiring,
-// attachIndexeddb for offline durability, CollabTitleField/CollabEditorBody
-// reused unmodified, plus DocSettingsPanel for byline and visibility.
+// fragment, not something this component pushes. What's left: provider
+// wiring, attachIndexeddb for offline durability, CollabTitleField/
+// CollabEditorBody reused unmodified, plus DocSettingsPanel for byline and
+// visibility.
 export default function DocEditor({
   docId,
   slug,

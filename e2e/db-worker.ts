@@ -28,8 +28,9 @@ import { commentBodyTextFromJSON, commentDocFromText, isCommentBodyError } from 
 import { resolveCommentBody } from "@/lib/comment-chips";
 import { captureCommentQuotes } from "@/lib/comment-quote-capture";
 import { colorForSeed } from "@/lib/author-colors";
-import { uniqueUserSlug } from "@/lib/user-slug";
-import { uniquePostSlug } from "@/lib/post-slug";
+import { changeUserSlug, uniqueUserSlug } from "@/lib/user-slug";
+import { slugify } from "@/lib/slug";
+import { changePostSlug, uniquePostSlug } from "@/lib/post-slug";
 import { postPath } from "@/lib/post-path";
 import { derivePostStatus } from "@/lib/post-status";
 import { changeDocSlug, uniqueDocSlug } from "@/lib/doc-slug";
@@ -72,6 +73,7 @@ import { ensureYdocSnapshotAt, materializeYdocAt } from "@/lib/ydoc-snapshot";
 import { isTestYdocDocument, newTestYdocId, ydocIdForDoc, ydocIdForAnnotation } from "@/lib/ydoc-names";
 import { decodeAnnotationSnapshot } from "@/lib/annotation-body";
 import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
+import { applyAnnotationMark } from "@/lib/annotation-admin";
 import { issueApiToken } from "@/lib/api/tokens";
 import { softDeleteUser } from "@/lib/user-delete";
 import { setDocDeleted } from "@/lib/doc-manage";
@@ -627,6 +629,67 @@ export async function renameTestFileSlug(fileId: string): Promise<string> {
   });
   assertSafe(owner.user.email);
   return changeFileSlug(fileId, await uniqueFileSlug(uniqueTitle("renamed")), owner.userId);
+}
+
+/**
+ * Moves a test doc's, post's, user's or file's slug to a fresh one and then
+ * back, both through its kind's own `change*Slug`, as "Use this url" on the
+ * slug page (or the manage page's for a file) does when it offers the old slug
+ * back. Answers the slug it started on, the one it moved to, the one it ended
+ * on, and the slugs in its history afterwards. Whose the entity is is checked
+ * through its first byline author, owner or its own email.
+ */
+export async function takeBackOwnOldSlug(opts: {
+  kind: "doc" | "post" | "user" | "file";
+  id: string;
+}): Promise<{ start: string; away: string; final: string; history: string[] }> {
+  const { kind, id } = opts;
+  const away = slugify(uniqueTitle("away"), kind);
+  switch (kind) {
+    case "doc": {
+      const doc = await prisma.doc.findUniqueOrThrow({
+        where: { id },
+        select: { slug: true, authors: { orderBy: { bylineOrder: "asc" }, take: 1, select: { user: { select: { id: true, email: true } } } } },
+      });
+      const actor = doc.authors[0].user;
+      assertSafe(actor.email);
+      await changeDocSlug(id, away, actor.id);
+      const final = await changeDocSlug(id, doc.slug, actor.id);
+      const history = await prisma.docSlugHistory.findMany({ where: { docId: id }, select: { slug: true } });
+      return { start: doc.slug, away, final, history: history.map((row) => row.slug) };
+    }
+    case "post": {
+      const post = await prisma.post.findUniqueOrThrow({
+        where: { id },
+        select: { slug: true, authors: { orderBy: { bylineOrder: "asc" }, take: 1, select: { user: { select: { email: true } } } } },
+      });
+      assertSafe(post.authors[0].user.email);
+      await changePostSlug(id, away);
+      const final = await changePostSlug(id, post.slug);
+      const history = await prisma.postSlugHistory.findMany({ where: { postId: id }, select: { slug: true } });
+      return { start: post.slug, away, final, history: history.map((row) => row.slug) };
+    }
+    case "user": {
+      const user = await prisma.user.findUniqueOrThrow({ where: { id }, select: { slug: true, email: true } });
+      assertSafe(user.email);
+      await changeUserSlug(id, away);
+      const final = await changeUserSlug(id, user.slug);
+      const history = await prisma.userSlugHistory.findMany({ where: { userId: id }, select: { slug: true } });
+      return { start: user.slug, away, final, history: history.map((row) => row.slug) };
+    }
+    case "file": {
+      const file = await prisma.storedFile.findUniqueOrThrow({
+        where: { id },
+        select: { slug: true, owners: { orderBy: { ownerOrder: "asc" }, take: 1, select: { user: { select: { id: true, email: true } } } } },
+      });
+      const actor = file.owners[0].user;
+      assertSafe(actor.email);
+      await changeFileSlug(id, away, actor.id);
+      const final = await changeFileSlug(id, file.slug, actor.id);
+      const history = await prisma.fileSlugHistory.findMany({ where: { fileId: id }, select: { slug: true } });
+      return { start: file.slug, away, final, history: history.map((row) => row.slug) };
+    }
+  }
 }
 
 export async function addTestDocAuthor(docId: string, email: string): Promise<void> {
@@ -1792,7 +1855,7 @@ export async function setSiteDefaultColumnOrder(value: Prisma.JsonValue | null):
   });
 }
 
-/** Row count in ydoc_update for docId's own ydoc — invariant 1 (§11b), same check createTestYdoc's own spec makes for /ydoc-debug documents. */
+/** Row count in ydoc_update for docId's own ydoc — invariant 1 (§11b), the check ydoc-debug.spec.ts makes of a createTestYdoc document. */
 export async function countDocYdocUpdates(docId: string): Promise<number> {
   return prisma.ydocUpdate.count({ where: { ydocId: ydocIdForDoc(docId) } });
 }
@@ -2098,6 +2161,44 @@ export async function markPresentAtStamp(docId: string, annotationId: string): P
     return false;
   } finally {
     ydoc?.destroy();
+  }
+}
+
+/**
+ * applyAnnotationMark as postAnnotation calls it, for a throwaway user — the
+ * hand-made `"mark"` that no UI path sends for someone who can't edit the
+ * doc, which a spec can make only from here. Answers whether the mark
+ * landed, and whether the doc's log, replayed to its head, now carries a mark
+ * with the annotation's id.
+ */
+export async function applyTestAnnotationMark(opts: {
+  docId: string;
+  annotationId: string;
+  userEmail: string;
+  from: number;
+  to: number;
+  quotedText: string;
+}): Promise<{ applied: boolean; markInDoc: boolean }> {
+  assertSafe(opts.userEmail);
+  const user = await prisma.user.findUniqueOrThrow({ where: { email: opts.userEmail }, select: { id: true, role: true } });
+  const { applied } = await applyAnnotationMark({
+    docId: opts.docId,
+    userId: user.id,
+    role: user.role,
+    annotationId: opts.annotationId,
+    from: opts.from,
+    to: opts.to,
+    quotedText: opts.quotedText,
+  });
+  const ydocId = ydocIdForDoc(opts.docId);
+  const head = await ydocStore.maxUpdateId(ydocId);
+  if (head === null) return { applied, markInDoc: false };
+  const ydoc = await materializeYdocAt(ydocId, head);
+  try {
+    const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(ydoc, "default") as JSONContent;
+    return { applied, markInDoc: collectMarkAttrValues(json, "annotation", "id").includes(opts.annotationId) };
+  } finally {
+    ydoc.destroy();
   }
 }
 
@@ -2851,7 +2952,7 @@ export async function getCommentStatus(commentId: string): Promise<CommentStatus
 }
 
 // ---------------------------------------------------------------------------
-// The standalone ydoc stack (PLAN.md §11) — helpers for e2e/ydoc-debug.spec.ts.
+// The ydoc stack (PLAN.md §11) — helpers for e2e/ydoc-debug.spec.ts.
 // Every id this creates is under the ydoc:test- prefix (src/lib/ydoc-names.ts);
 // deleteTestYdoc refuses anything else, the same containment convention
 // createTestPost/createTestUser use for @example.com / "E2E " titles.
@@ -2860,10 +2961,10 @@ export async function getCommentStatus(commentId: string): Promise<CommentStatus
 export type TestYdoc = { id: string };
 
 /**
- * Creates a document the same way the "New document" button on /ydoc-debug
- * does — via ydocStore.createIfAbsent, so it's a real invariant-1 document
- * (a `ydoc` row plus exactly one full-state `ydoc_update` row), not a
- * hand-rolled shortcut around the code path under test.
+ * Creates a bare, empty document the way every ydoc is created — via
+ * ydocStore.createIfAbsent, so it's a real invariant-1 document (a `ydoc` row
+ * plus exactly one full-state `ydoc_update` row), not a hand-rolled shortcut
+ * around the code path under test.
  */
 export async function createTestYdoc(): Promise<TestYdoc> {
   const id = newTestYdocId();
@@ -3907,6 +4008,7 @@ const handlers = {
   addTestDocAuthor,
   renameTestDocSlug,
   renameTestFileSlug,
+  takeBackOwnOldSlug,
   getDocAuthorEmails,
   addTestPostAuthor,
   deleteTestDoc,
@@ -3964,6 +4066,7 @@ const handlers = {
   getTestReference,
   getDocChipIids,
   markPresentAtStamp,
+  applyTestAnnotationMark,
   createTestAnnotation,
   getReplyAnchorFacts,
   getAnnotationEditFacts,

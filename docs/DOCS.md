@@ -155,7 +155,7 @@ why there is no repair recipe that rebuilds a ydoc from its cache.
 runs at the end of `ydocOnStoreDocument` — Hocuspocus's default debounce, two seconds of
 quiet or ten seconds at most — and issues one `updateMany` writing `prose_json`, `title`,
 `prose_json_update_id` and `updated_by_user_id`. The `WHERE id = docIdFromYdocId(name)`
-matches zero rows for a `/ydoc-debug` document, so there is no lookup to decide whether to
+matches zero rows for a ydoc that isn't a doc's, so there is no lookup to decide whether to
 write and no doc-awareness in `server/ydoc-store.ts`. The derivation is
 `docCacheFromYdoc` (`src/lib/doc-content.ts`): `docContentFromYdoc`, which decodes the ydoc,
 and then the entity chips' labels (below). It is shared with the paths that create a doc
@@ -484,7 +484,7 @@ view does not have.
 
 `/doc/[slug]/edit` is **`DocEditor.tsx`**: provider wiring through the page's shared socket,
 `attachIndexeddb` for offline durability, `CollabTitleField` and `CollabEditorBody` (shared
-with `/side-by-side`'s write mode and `/ydoc-debug`), a status line (`🟢 Live` waits for
+with `/side-by-side`'s write mode), a status line (`🟢 Live` waits for
 the initial sync, not merely a socket), and `DocSettingsPanel` for byline, visibility, how
 mentions are shown (written into the doc's ydoc through this editor's connection, never by a
 server action), delete and undelete. There is no save, publish or schedule — a doc auto-persists through

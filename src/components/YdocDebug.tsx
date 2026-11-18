@@ -2,28 +2,24 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
-import { HocuspocusProvider } from "@hocuspocus/provider";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import type { JSONContent } from "@tiptap/core";
 import { renderYdocDoc, type YdocRenderResult } from "@/lib/ydoc-render";
 import { titleAuthorHighlightExtensions } from "@/lib/tiptap-schema";
 import { collect as collectMarkInventory } from "@/lib/mark-inventory";
 import { extractText } from "@/lib/diff";
-import { attachIndexeddb } from "@/lib/ydoc-persistence";
-import { getCollabUrl } from "@/lib/collab-url";
-import { isSchemaRefusal } from "@/lib/collab-socket";
 import { base64ToBytes, prepareReplay, ReplayCursor, type PreparedSnapshot, type PreparedUpdate, type ReplayPayload } from "@/lib/replay-log";
 import { useLocalTime } from "./LocalTime";
-import CollabEditorBody from "./CollabEditorBody";
-import CollabTitleField from "./CollabTitleField";
 import adminStyles from "./table/AdminTable.module.css";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./YdocDebug.module.css";
 
-// Client half of /ydoc-debug (PLAN.md §11f) — a proving ground for the
-// standalone ydoc persistence stack, entirely separate from post editing.
-// Reuses CollabEditorBody/CollabTitleField unmodified for the editing half;
-// everything else here is new.
+// Client half of /ydoc-debug (PLAN.md §11f) — an ADMIN's inspector for any
+// document in the ydoc stack: its row, its update log and snapshots, a replay
+// slider, its title history and its marks, all read over HTTP. It never
+// connects to the collab server, so nothing here changes a document's text;
+// Snapshot writes a checkpoint, which changes none either. The doc editor is
+// the stack's real consumer, and e2e/ydoc-debug.spec.ts types there.
 
 type DocSummary = { id: string; createdAt: string; updatedAt: string };
 type UpdateRow = { id: string; createdAt: string; byteLength: number };
@@ -37,14 +33,10 @@ type DocDetail = {
 
 type Props = {
   initialDocs: DocSummary[];
-  userId: string;
-  userName: string;
-  userColor: string;
-  userInitials: string;
+  /** The document `?id=` names, which `initialDocs` lists even when it isn't among the ten most recent. */
+  initialSelectedId: string | null;
 };
 
-type Mode = "read" | "edit";
-type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
 // One component per option rather than the timestamp inline, for two reasons:
 // useLocalTime is a hook and so can't be called inside the `.map()`, and an
@@ -63,91 +55,42 @@ function DocOption({ doc }: { doc: DocSummary }) {
   );
 }
 
-export default function YdocDebug({ initialDocs, userId, userName, userColor, userInitials }: Props) {
-  const [docs, setDocs] = useState<DocSummary[]>(initialDocs);
-  const [selectedId, setSelectedId] = useState<string | null>(initialDocs[0]?.id ?? null);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
+export default function YdocDebug({ initialDocs, initialSelectedId }: Props) {
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? initialDocs[0]?.id ?? null);
 
-  const fetchDocs = useCallback(async () => {
-    const res = await fetch("/api/ydoc");
-    if (!res.ok) return;
-    const { ydocs } = (await res.json()) as { ydocs: DocSummary[] };
-    setDocs(ydocs);
-  }, []);
-
-  const handleNewDocument = () => {
-    setCreating(true);
-    (async () => {
-      try {
-        const res = await fetch("/api/ydoc", { method: "POST" });
-        if (!res.ok) throw new Error(`Failed to create document (${res.status}).`);
-        const { id } = (await res.json()) as { id: string };
-        await fetchDocs();
-        setCreateError(null);
-        setSelectedId(id);
-      } catch (e) {
-        setCreateError(e instanceof Error ? e.message : "Failed to create document.");
-      } finally {
-        setCreating(false);
-      }
-    })();
+  const select = (id: string | null) => {
+    setSelectedId(id);
+    // Kept in the address bar, so a reload or a copied link opens the same document.
+    window.history.replaceState(null, "", id ? `?id=${encodeURIComponent(id)}` : window.location.pathname);
   };
 
   return (
     <main className={styles.container}>
       <h1>Ydoc debug</h1>
       <p className={styles.intro}>
-        Standalone proving ground for the ydoc persistence stack (PLAN.md §11) — separate
-        tables, separate Hocuspocus hooks. Nothing here is read or written by post editing.
+        Inspects any document in the ydoc stack (docs/YDOC.md): its stored state, its update log and its
+        snapshots, read with no connection to the collab server. Nothing here changes a document&apos;s text.
       </p>
 
       <div className={styles.controlsRow}>
         <label htmlFor="ydoc-select">Document</label>
-        <select id="ydoc-select" value={selectedId ?? ""} onChange={(e) => setSelectedId(e.target.value || null)}>
-          {docs.length === 0 && <option value="">No documents yet</option>}
-          {docs.map((doc) => (
+        <select id="ydoc-select" value={selectedId ?? ""} onChange={(e) => select(e.target.value || null)}>
+          {initialDocs.length === 0 && <option value="">No documents yet</option>}
+          {initialDocs.map((doc) => (
             <DocOption key={doc.id} doc={doc} />
           ))}
         </select>
-        <button type="button" onClick={handleNewDocument} disabled={creating}>
-          New document
-        </button>
       </div>
 
-      {createError && <p className={styles.error}>{createError}</p>}
-
       {/* Keyed by document id so switching the selection remounts this panel
-          entirely — its mode/detail/render state is naturally fresh for the
+          entirely — its detail and replay state is naturally fresh for the
           newly selected document instead of needing an effect to reset it. */}
-      {selectedId && (
-        <DocumentPanel
-          key={selectedId}
-          documentId={selectedId}
-          userId={userId}
-          userName={userName}
-          userColor={userColor}
-          userInitials={userInitials}
-        />
-      )}
+      {selectedId && <DocumentPanel key={selectedId} documentId={selectedId} />}
     </main>
   );
 }
 
-function DocumentPanel({
-  documentId,
-  userId,
-  userName,
-  userColor,
-  userInitials,
-}: {
-  documentId: string;
-  userId: string;
-  userName: string;
-  userColor: string;
-  userInitials: string;
-}) {
-  const [mode, setMode] = useState<Mode>("read");
+function DocumentPanel({ documentId }: { documentId: string }) {
   const [detail, setDetail] = useState<DocDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [replay, setReplay] = useState<ReplayPayload | null>(null);
@@ -220,34 +163,8 @@ function DocumentPanel({
   return (
     <>
       <section className={styles.section}>
-        <div className={styles.sectionHeadRow}>
-          <h2>{mode === "read" ? "Read-only view" : "Editing"}</h2>
-          {mode === "read" ? (
-            <button type="button" onClick={() => setMode("edit")}>
-              Switch to editing
-            </button>
-          ) : (
-            <button type="button" onClick={() => setMode("read")}>
-              Switch to read-only
-            </button>
-          )}
-        </div>
-
-        {mode === "read" ? (
-          replay ? (
-            <ReplayView key={replayVersion} replay={replay} />
-          ) : (
-            <p>Loading…</p>
-          )
-        ) : (
-          <EditView
-            documentName={documentId}
-            userId={userId}
-            userName={userName}
-            userColor={userColor}
-            userInitials={userInitials}
-          />
-        )}
+        <h2>Replay</h2>
+        {replay ? <ReplayView key={replayVersion} replay={replay} /> : <p>Loading…</p>}
       </section>
 
       <section className={styles.section}>
@@ -727,120 +644,6 @@ function MarkInventory({ bodyJSON, titleJSON }: { bodyJSON: JSONContent; titleJS
         ))
       )}
     </>
-  );
-}
-
-function EditView({
-  documentName,
-  userId,
-  userName,
-  userColor,
-  userInitials,
-}: {
-  documentName: string;
-  userId: string;
-  userName: string;
-  userColor: string;
-  userInitials: string;
-}) {
-  const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
-  // "connected" is websocket-open, before auth + initial sync; "🟢 Live"
-  // additionally requires this (see DocEditor.tsx's `synced`). The provider
-  // never emits the false transition — onStatus below owns that direction.
-  const [synced, setSynced] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // EditView is only ever mounted with a fixed documentName for its whole
-  // lifetime (its parent, DocumentPanel, is itself keyed by documentId), so
-  // this only ever runs once per instance.
-  const ydoc = useMemo(() => new Y.Doc(), []);
-
-  useEffect(() => {
-    let cancelled = false;
-    let instance: HocuspocusProvider | null = null;
-    let detachIndexeddb: (() => void) | null = null;
-
-    (async () => {
-      try {
-        const res = await fetch(`/api/ydoc/${documentName}/token`, { method: "POST" });
-        if (!res.ok) {
-          throw new Error("Failed to authenticate for live editing.");
-        }
-        const { token, lineage } = (await res.json()) as { token: string; lineage: number };
-        if (cancelled) return;
-
-        // The lineage has to be known before connecting — see PLAN.md §11e
-        // for why attaching first (or caching the lineage) would let a
-        // stale local copy merge into a re-seeded document.
-        detachIndexeddb = attachIndexeddb(ydoc, documentName, lineage);
-
-        instance = new HocuspocusProvider({
-          url: getCollabUrl(),
-          name: documentName,
-          document: ydoc,
-          token,
-          onStatus: ({ status }) => {
-            setConnectionStatus(status);
-            if (status !== "connected") setSynced(false);
-          },
-          onSynced: () => setSynced(true),
-          // The error replaces both editors, so nothing more is typed. A
-          // refused schema version also stops the socket and the local
-          // database, as DocEditor's out-of-date effect does and says why.
-          onAuthenticationFailed: ({ reason }) => {
-            if (isSchemaRefusal(reason)) {
-              instance?.disconnect();
-              detachIndexeddb?.();
-              detachIndexeddb = null;
-            }
-            setError(`Live editing unavailable: ${reason}`);
-          },
-        });
-        setProvider(instance);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to connect.");
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      instance?.destroy();
-      detachIndexeddb?.();
-      ydoc.destroy();
-    };
-  }, [documentName, ydoc]);
-
-  if (error) {
-    return <p className={styles.error}>{error}</p>;
-  }
-  if (!provider) {
-    return <p>Connecting…</p>;
-  }
-
-  return (
-    <div>
-      <p className={styles.muted}>
-        {connectionStatus === "connected" ? (synced ? "🟢 Live" : "🔵 Connected") : connectionStatus === "connecting" ? "🟡 Connecting…" : "🔴 Disconnected"}
-      </p>
-      <CollabTitleField
-        ydoc={ydoc}
-        userId={userId}
-        userName={userName}
-        userColor={userColor}
-        onTitleChange={() => {}}
-        onEditorReady={() => {}}
-      />
-      <CollabEditorBody
-        provider={provider}
-        ydoc={ydoc}
-        userId={userId}
-        userName={userName}
-        userColor={userColor}
-        userInitials={userInitials}
-        onEditorReady={() => {}}
-      />
-    </div>
   );
 }
 

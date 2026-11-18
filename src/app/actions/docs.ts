@@ -77,8 +77,8 @@ export async function createDoc(): Promise<void> {
   // arrive before either exists. Not wrapped in the transaction above — the
   // two tables share no foreign key by design (§12b) — but a failure here is
   // non-fatal: ydocOnLoadDocument's own createIfAbsent call
-  // (server/ydoc-hooks.ts) is the same forgiving fallback /ydoc-debug's "New
-  // document" button already relies on for a name nobody's created yet.
+  // (server/ydoc-hooks.ts) is a forgiving fallback for a name nobody's
+  // created yet.
   const emptyDoc = new Y.Doc();
   const { ydoc, stateVector } = encodeYdocState(emptyDoc);
   emptyDoc.destroy();

@@ -680,8 +680,10 @@ const commentMarkdownWriter = new MarkdownManager({
 // which the editor renders as a break (ProseMirror's `white-space: pre-wrap`)
 // and the static renderer collapses — two readings of one stored value. A
 // single space is what CommonMark means by it. Code-marked runs are exempt
-// only in form: the fence shim above never leaves a newline inside one.
+// only in form: the fence shim above never leaves a newline inside one. A
+// code block's newlines are its lines, not soft breaks, so it is left alone.
 function collapseSoftBreaks(node: JSONContent): JSONContent {
+  if (node.type === "codeBlock") return node;
   let out = node;
   if (typeof out.text === "string" && /\r?\n/.test(out.text)) {
     out = { ...out, text: out.text.replace(/\r?\n/g, " ") };

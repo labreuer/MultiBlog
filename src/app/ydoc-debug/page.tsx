@@ -5,18 +5,21 @@ import { isAdmin } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { signInPath } from "@/lib/sign-in-redirect";
 import YdocDebug from "@/components/YdocDebug";
-import { displayNameOf } from "@/lib/display-name";
 
 export const metadata: Metadata = { title: "Ydoc debug" };
 
-// Admin-only proving ground for the standalone ydoc persistence stack
-// (PLAN.md §11) — deliberately separate from every post-editing surface, so
-// nothing here can regress post editing and nothing in post editing can
-// regress this. Same ADMIN-gate shape as /site-settings.
-export default async function YdocDebugPage() {
+// Admin-only inspector for the ydoc stack (PLAN.md §11f): it reads any
+// document, a PRIVATE doc's included, and writes none, since inspecting the
+// stack is its whole job. Same ADMIN-gate shape as /site-settings.
+//
+// It lists the ten most recently updated ydocs, which a busy server can push
+// any one document out of, so `?id=` opens one directly.
+export default async function YdocDebugPage({ searchParams }: { searchParams: Promise<{ id?: string | string[] }> }) {
+  const { id } = await searchParams;
+  const requested = typeof id === "string" && id ? id : null;
   const session = await auth();
   if (!session?.user) {
-    redirect(signInPath("/ydoc-debug"));
+    redirect(signInPath(requested ? `/ydoc-debug?id=${encodeURIComponent(requested)}` : "/ydoc-debug"));
   }
   if (!isAdmin(session.user.role)) {
     return (
@@ -27,11 +30,13 @@ export default async function YdocDebugPage() {
     );
   }
 
-  const initialDocs = await prisma.ydoc.findMany({
-    orderBy: { updatedAt: "desc" },
-    take: 10,
-    select: { id: true, createdAt: true, updatedAt: true },
-  });
+  const select = { id: true, createdAt: true, updatedAt: true } as const;
+  const recent = await prisma.ydoc.findMany({ orderBy: { updatedAt: "desc" }, take: 10, select });
+  const named =
+    requested && !recent.some((doc) => doc.id === requested)
+      ? await prisma.ydoc.findUnique({ where: { id: requested }, select })
+      : null;
+  const initialDocs = named ? [named, ...recent] : recent;
 
   return (
     <YdocDebug
@@ -40,10 +45,7 @@ export default async function YdocDebugPage() {
         createdAt: doc.createdAt.toISOString(),
         updatedAt: doc.updatedAt.toISOString(),
       }))}
-      userId={session.user.id}
-      userName={displayNameOf(session.user)}
-      userColor={session.user.color}
-      userInitials={session.user.adminInitials}
+      initialSelectedId={requested && initialDocs.some((doc) => doc.id === requested) ? requested : null}
     />
   );
 }

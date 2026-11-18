@@ -46,17 +46,13 @@ an `onTokenSync` hook, and closes that document's connection if the hook throws.
 minute or so, `requestToken()` each connection, and in `onTokenSync` verify the token the way
 `ydocOnAuthenticate` does. That bounds every kind of revocation, sign-out included, to the
 interval plus a round trip. It needs no permission-changing action to remember to notify
-collab. Three details decide whether it is actually a fix:
+collab. Two details decide whether it is actually a fix:
 
 1. **A client that never answers must be closed too.** Each request needs a deadline, or the
    check is only advisory.
 2. **A token that comes back `readOnly` on a writable connection (a demotion) has to close
    it**, or narrow `connectionConfig.readOnly` if Hocuspocus honours a change after
    authentication (unverified).
-3. **`/ydoc-debug` passes a fixed token string, not a refresher.** It would answer with an
-   expired token and be closed within the interval, so it needs a refresher first, like the one
-   every other connection (PDF presence included) already has. It is ADMIN-only, so closing it
-   would cost nothing worse than a reload.
 
 **The alternative, and why it is worse.** Revocation could instead be pushed from each action
 that takes access away (removing an author, changing visibility, demoting, deleting a user) by
@@ -429,9 +425,9 @@ All five instances run main with all of it. Not yet done:
   in the app issues an `mb_` token. `/dashboard`'s Connections card lists and revokes one's own
   tokens and issues none (MCP.md §21), and anyone without a shell on the server connects
   through OAuth instead.
-- **MCP.md §17's items 1–3 are still in the UI's annotation paths.** The MCP server avoids all
-  three; the actions don't. They have their own entry below, "Posting an annotation trusts
-  three things the client sends".
+- **MCP.md §17's items 2 and 3 are still in the UI's annotation paths.** The MCP server avoids
+  both; the actions don't. They have their own entry below, "Posting an annotation trusts two
+  things the client sends".
 - **`/dashboard`'s Recent docs lists a doc to an ineligible name already on its byline**
   (MCP.md §17, item 5's remainder). The byline actions now refuse to add one.
 - **MCP.md §19's open decisions 5–7**: a PDF Claude can't see, uploaded again, makes a second
@@ -871,21 +867,15 @@ What can't be undone, in the functions both front doors call (the actions in
   "One anchor row shape"). A `deleted_at` on this one table is the consumer's own column, not
   part of the shared envelope; keep it out of `src/lib/anchors/`.
 
-## Posting an annotation trusts three things the client sends (MCP.md §17, items 1–3)
+## Posting an annotation trusts two things the client sends (MCP.md §17, items 2 and 3)
 
 **Status:** found 2026-10-07 while planning the MCP server, and present on `main`. The MCP
-server avoids all three (`src/lib/mcp/annotation-writes.ts`); the UI's server actions in
+server avoids both (`src/lib/mcp/annotation-writes.ts`); the UI's server actions in
 `src/app/actions/annotations.ts` don't. The UI never sends the bad value, so each needs a
-hand-made call to the action, which any signed-in reader of the container can make.
+hand-made call to the action, which any signed-in reader of the container can make. MCP.md
+§17's item 1, a mark written for a reader, is fixed: `applyAnnotationMark` refuses anyone who
+can't edit the doc.
 
-1. **A reader can have the server write a mark into a doc they can't edit.** `postAnnotation`
-   takes `anchorMode` from the client for a root annotation, and for `"mark"` calls
-   `applyAnnotationMark`, which writes into the doc's ydoc through `/admin/annotation-mark`.
-   The token `src/lib/annotation-admin.ts` mints for that is writable whoever the poster is,
-   and nothing in the action calls `canUserEditDoc`. ANNOTATIONS.md's "why the reading views
-   stopped writing marks" holds only because the reading views send `"columns"`.
-   **Fix:** refuse `"mark"` unless `canUserEditDoc` passes for the poster. Only the editor
-   sends it, and its users can edit.
 2. **The client's version stamp is parsed, not validated.** `stampRangeAnchor`, which
    `postAnnotation` and `updateDraftAnchor` both anchor through, turns the client's
    `ydocUpdateId` into a `BigInt` and anchors at it; an anchorless post stamps it as is.
@@ -902,7 +892,7 @@ hand-made call to the action, which any signed-in reader of the container can ma
    target check does. Check whether `postAnnotation` needs the same; `updateDraftAnchor` only
    ever captures into the parent its row was created with, so the check at creation covers it.
 
-**Shape of the fix:** the three checks can go into the actions as they stand. Or the UI's
+**Shape of the fix:** the two checks can go into the actions as they stand. Or the UI's
 posting can move onto `src/lib/annotation-post.ts`, which the MCP server already uses, so each
 rule exists once (CLAUDE.md, "A write the UI and the MCP server share is a function in
 `src/lib/`"). The second is more work and is what that invariant asks for.
@@ -910,7 +900,8 @@ rule exists once (CLAUDE.md, "A write the UI and the MCP server share is a funct
 **Tests:** each fix wants a refusal test, made as a reader on a shared doc, asserting that no
 row or mark was written. `e2e/annotation-readonly.spec.ts` has those fixtures. Whether a spec
 can call the server action directly, or the gate has to move into `src/lib/` to be testable,
-is part of the work.
+is part of the work. The mark's gate took the second way: it is in `src/lib/annotation-admin.ts`,
+and the spec calls it through `applyTestAnnotationMark` (`e2e/db-worker.ts`).
 
 ## A comment's card URL names the first of two comments that share it
 

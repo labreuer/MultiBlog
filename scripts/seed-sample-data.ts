@@ -49,7 +49,7 @@ import { colorForSeed } from "../src/lib/author-colors";
 import { uniqueUserSlug } from "../src/lib/user-slug";
 import { uniqueDocSlug } from "../src/lib/doc-slug";
 import { uniquePostSlug } from "../src/lib/post-slug";
-import { contentExtensions, titleExtensions, pmDocContentSchema, pmBlurbSchema } from "../src/lib/tiptap-schema";
+import { contentExtensions, docContentExtensions, titleExtensions, pmDocContentSchema, pmBlurbSchema } from "../src/lib/tiptap-schema";
 import { normalizeOrcid, normalizeWebsite } from "../src/lib/contributor-links";
 import { commentDocFromText } from "../src/lib/comment-body";
 import { storeAvatar } from "../src/lib/avatar";
@@ -59,6 +59,7 @@ import { docContentFromYdoc } from "../src/lib/doc-content";
 import { ensureYdocSnapshotAt } from "../src/lib/ydoc-snapshot";
 import { seedAnnotationYdoc } from "../src/lib/annotation-ydoc-seed";
 import { applyAnnotationMark } from "../src/lib/annotation-admin";
+import { captureAnchorInYdoc, chipRecordsColumn } from "../src/lib/anchors/capture";
 import { ydocIdForDoc, ydocIdForAnnotation } from "../src/lib/ydoc-names";
 import { ydocStore, encodeYdocState } from "../server/ydoc-store";
 import type { Role, DocVisibility, CommentStatus } from "../src/generated/prisma/enums";
@@ -332,6 +333,12 @@ async function addComment(opts: {
 // Row first, mark second (§12i): the annotation is valid whether or not the
 // mark lands, so a collab server that isn't running degrades this to a
 // document-level annotation rather than failing the seed.
+//
+// A quote anchors as the surface its author could have annotated from would
+// anchor it (docs/ANNOTATIONS.md, "Anchoring"): a mark for someone who may
+// edit the doc, as the doc editor writes one, and otherwise three columns
+// stamped with the version they were measured against, as a reading view
+// writes them. applyAnnotationMark refuses a mark for anyone else.
 async function addAnnotation(opts: {
   docId: string;
   docBodyText: string;
@@ -339,6 +346,8 @@ async function addAnnotation(opts: {
   role: Role;
   bodyText: string;
   quote?: string;
+  /** Anchor the quote by columns, as a reader of the doc does; by a mark otherwise. */
+  asReader?: boolean;
   parentAnnotationId?: string;
   raised?: boolean;
 }): Promise<string> {
@@ -362,6 +371,35 @@ async function addAnnotation(opts: {
     const [occurrence] = findQuoteOccurrences(node, opts.quote);
     if (!occurrence) {
       console.log(`    ! quote not found, left document-level: "${opts.quote.slice(0, 40)}"`);
+    } else if (opts.asReader) {
+      const ydocId = ydocIdForDoc(opts.docId);
+      const stamp = await ydocStore.maxUpdateId(ydocId);
+      const captured =
+        stamp === null
+          ? null
+          : await captureAnchorInYdoc({
+              ydocId,
+              throughUpdateId: stamp,
+              extensions: docContentExtensions,
+              schema: pmDocContentSchema,
+              from: occurrence.from,
+              to: occurrence.to,
+              quotedText: opts.quote,
+            });
+      if (!captured) {
+        console.log("    ! quote not captured in the doc's ydoc — annotation is document-level");
+      } else {
+        await prisma.annotation.update({
+          where: { id: annotation.id },
+          data: {
+            ydocUpdateId: stamp,
+            anchorFrom: captured.from,
+            anchorTo: captured.to,
+            quotedText: captured.quotedText,
+            anchorChips: chipRecordsColumn(captured.selector.chips),
+          },
+        });
+      }
     } else {
       const { applied } = await applyAnnotationMark({
         docId: opts.docId,
@@ -635,6 +673,8 @@ async function main() {
   console.log("  6 comments across APPROVED / PENDING / SPAM");
 
   console.log("\nAnnotations:");
+  // Grace reads Ada's doc but can't edit it, so her note anchors as a
+  // reading view's does; Ada, an EDITOR on Grace's SHARED doc, marks hers.
   const rootId = await addAnnotation({
     docId: adaDoc.id,
     docBodyText: ADA_DOC_BODY,
@@ -642,6 +682,7 @@ async function main() {
     role: "AUTHOR",
     bodyText: "This is the passage I'd put in front of anyone who thinks the machine is doing the thinking.",
     quote: "It can do whatever we know how to order it to perform.",
+    asReader: true,
   });
   await addAnnotation({
     docId: adaDoc.id,

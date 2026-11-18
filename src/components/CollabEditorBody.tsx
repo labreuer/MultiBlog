@@ -59,8 +59,8 @@ type Props = {
   suppressAnnotations?: boolean;
   // PLAN.md §18/COLLAB.md §5 — the doc editor's own selection-to-annotation
   // widget (useEditorAnnotationWidget), wired straight to useEditor's own
-  // selection hook. No default: every other embedder (post editors,
-  // /side-by-side, /ydoc-debug) simply never had one.
+  // selection hook. No default: the other embedder (/side-by-side) simply
+  // never had one.
   onSelectionUpdate?: (editor: Editor) => void;
   // Fired synchronously on every local or remote transaction that changes
   // the doc — separate from the debounced author-stats walk below, since a

@@ -75,8 +75,7 @@ export async function ydocOnAuthenticate({
   }
   // PLAN.md §12g — a doc reader's token carries readOnly: true; Hocuspocus
   // itself then refuses any write this connection attempts. Every other
-  // token (including every /ydoc-debug one) leaves connectionConfig.readOnly
-  // at its default (writable).
+  // token leaves connectionConfig.readOnly at its default (writable).
   if (payload.readOnly) {
     connectionConfig.readOnly = true;
   }
@@ -101,8 +100,8 @@ export async function ydocOnLoadDocument({ documentName, document }: onLoadDocum
     return;
   }
 
-  // No row yet — normally the document was already created (by the "New
-  // document" button or scripts/test-ydoc.ts) before anyone connected, so
+  // No row yet — normally the document was already created before anyone
+  // connected (with its doc or annotation, or by scripts/test-ydoc.ts), so
   // this is the forgiving path for a connection to a name nobody made yet.
   // An empty seed can't duplicate anything, and createIfAbsent's transaction
   // handles a concurrent race regardless of who wins.
@@ -151,7 +150,7 @@ export async function ydocOnStoreDocument({
   // PLAN.md §12d / §13a — each no-ops unless documentName is its own kind of
   // ydoc (a doc's vs. an annotation's own namespace, mutually exclusive by
   // construction), so both are safe to call unconditionally for every
-  // ydoc-stack document, including a bare /ydoc-debug one that matches neither.
+  // ydoc-stack document, including a bare test one that matches neither.
   //
   // lastContext is Hocuspocus's own "whichever connection most recently drove
   // this document" — the verified identity from onAuthenticate, not anything
@@ -628,11 +627,11 @@ export async function handleApplyDocUpdate(
 }
 
 // POST /admin/annotation-mark (PLAN.md §12i) — applies a mark carrying
-// annotationId over [from, to) in documentName's "default" fragment, via
-// the collab server so a read-only reader (§12g) can annotate without a
-// writable connection. The token is Next's, minted writable for the poster
-// (src/lib/annotation-admin.ts); a reader's own read-only token is refused
-// here as anywhere else (verifyAdminToken).
+// annotationId over [from, to) in documentName's "default" fragment, for the
+// doc editor's annotations, through the collab server so the write reaches
+// every connected client. The token is Next's, minted writable only for a
+// poster who may edit the doc (src/lib/annotation-admin.ts); a reader's own
+// read-only token is refused here as anywhere else (verifyAdminToken).
 //
 // Row-first-mark-second is the caller's job
 // (src/lib/annotation-admin.ts): if this returns applied:false — offsets no

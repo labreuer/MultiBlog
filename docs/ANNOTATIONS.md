@@ -181,8 +181,10 @@ composer sat open. Deleting the annotation, or moving it back to `DRAFT`, remove
 reader making one is a reader mutating a document they were denied write access to — through
 a privileged path, unattributed in the update log, unbounded in volume, and keeping the mark
 endpoint on the hot path for everyone. So a reading view writes three columns and touches the
-document never. `captureAnnotationAnchor` materializes the stamped state, uses the client's
-text only to verify and if need be re-find the offsets, and stores *its own* `textBetween` —
+document never. And the server writes a mark only for someone who may edit the doc:
+`applyAnnotationMark` asks `canUserEditDoc` where it mints the writable token, so a hand-made
+`"mark"` from a reader posts document-level and writes nothing. `captureAnnotationAnchor`
+materializes the stamped state, uses the client's text only to verify and if need be re-find the offsets, and stores *its own* `textBetween` —
 so replay to `ydocUpdateId` and `textBetween(anchorFrom, anchorTo)` is `quotedText` by
 construction, forever, and nothing a client says is stored verbatim. `resolveAnchorInDoc`
 (`src/lib/annotation-anchors.ts`) is that verify-then-re-find step, shared with the mark
