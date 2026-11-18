@@ -86,6 +86,16 @@ Its addresses are `@sample.invalid` (RFC 2606, guaranteed unroutable) rather tha
   fragment is canonical (§3d) and `server/doc-cache.ts` would otherwise write an empty title
   straight over the column on first flush.
 
+## Run once per instance at deploy
+
+Not test data, but under `scripts/` beside it, and real-address work like the imports below:
+a script a PR's deploy notes say to run once, after `prisma migrate deploy`, on every
+instance. Each says in its header what it writes and why a second run is safe.
+
+- **`scripts/comments/log-existing-collisions.ts`** — logs every anonymous commenter whose
+  email a live account has as an `EXISTING` row of the email-collision log (docs/COMMENTS.md,
+  "The log"). `--dry-run` lists without writing. A rerun adds only what is new.
+
 ## The e2e suite needs none of this
 
 Its fixtures create and clean up their own rows (`e2e/db-worker.ts`, same `@example.com`

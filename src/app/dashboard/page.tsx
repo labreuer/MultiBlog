@@ -6,6 +6,7 @@ import { auth, signOut } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canManageDocs } from "@/lib/doc-authz";
 import { canEditAuthorIdentity, canViewAuthorColorRoster, COLOR_ROSTER_ROLES } from "@/lib/authz";
+import { isAdmin } from "@/lib/role-checks";
 import { resolveAvatarSrc } from "@/lib/avatar-url";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import SessionRefresh from "@/components/SessionRefresh";
@@ -102,6 +103,13 @@ export default async function DashboardPage() {
   const showMentions = mentions.length > 0 || canInsertMentions(session.user.role);
   const showConnections = tokens.length > 0 || session.user.role !== "COMMENTER";
 
+  // How many email collisions wait for an ADMIN's review (docs/DASHBOARD.md,
+  // "Email collisions"). Shown at zero too: this line is how /email-collisions
+  // is reached, and its reviewed rows are worth reaching with none waiting.
+  const waitingCollisions = isAdmin(session.user.role)
+    ? await prisma.emailCollision.count({ where: { reviewedAt: null } })
+    : null;
+
   return (
     <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
       {/* Pulls role/name/color back from the DB into the JWT on every visit, so
@@ -113,6 +121,12 @@ export default async function DashboardPage() {
       <p>
         Signed in as {session.user.email} ({session.user.role})
       </p>
+      {waitingCollisions !== null && (
+        <p>
+          <Link href="/email-collisions">Email collisions</Link>:{" "}
+          {waitingCollisions === 0 ? "none waiting" : `${waitingCollisions} waiting for review`}
+        </p>
+      )}
       <details className={`${account.card} ${styles.card}`} open>
         {/* Links to this section's own where clause on /docs; plain text for
             anyone /docs would bounce. docs/DASHBOARD.md "Section cards". */}

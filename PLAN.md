@@ -5058,7 +5058,7 @@ AUTHOR account only after its holder confirms the email they gave. The account's
 `/welcome`, which shows the commons page `New Account Welcome`. A card never changes an
 existing account. It comes after three changes that deploy everywhere on their own: §39's
 session re-read with §38's wiki part; commenter identities kept apart, with a log of where they
-meet (docs/COMMENTS.md); and §38's posts. **The plan:
+meet (docs/COMMENTS.md, built 2026-11-18); and §38's posts. **The plan:
 [docs/EMAIL.md](docs/EMAIL.md) §10.**
 
 ## 38. Publishing becomes an EDITOR's

@@ -327,7 +327,12 @@ the admin account.
 - **Comments are rate-limited to 5 per IP per 10 minutes**
   (`src/lib/rate-limit.ts`), and every worker shares 127.0.0.1. Create comments
   with `createComment()` (straight to the DB) unless the test is *about* the
-  submission form; `moderation.spec.ts` has exactly one that is. Editing has its
+  submission form; `moderation.spec.ts` has exactly one that is. A spec can step
+  off the shared address instead: the suite has no nginx, so an `X-Real-IP` request
+  header reaches the app as sent (src/lib/client-ip.ts), and
+  `commenter-identities.spec.ts` gives each of its requests a fresh address from
+  the IPv6 documentation range, which also gives a second request "another IP
+  address". Editing has its
   own limiter (`isCommentEditRateLimited`, 5 revisions per user per 10 minutes),
   which is per *user* rather than per IP — so parallel workers don't share it,
   but a single test making six edits as the shared admin would.
@@ -344,7 +349,14 @@ the admin account.
   is what makes "edit your own comment" reachable at all — an anonymous commenter
   cannot edit (§22h), so a fixture with an unowned address is testing the
   moderator path instead. An email belonging to no user still produces an
-  anonymous commenter.
+  anonymous commenter, and so does `anonymous: true` with one that does: the
+  pair docs/COMMENTS.md's "Identities kept apart" keeps apart. Either way the row
+  is found the way the app finds it (`src/lib/commenter-identity.ts`), never by
+  an `upsert` on the email, which is unique only among anonymous rows. Deleting a
+  fixture account deletes every commenter row and email-collision row on its
+  email, and the teardown sweep takes `e2e-…@example.com` collision rows a
+  crashed run left; `getTestCommenters()` and `getTestEmailCollisions()` read them
+  back, by raw `lower()`, never Prisma's insensitive `ILIKE`.
 - **The three-minute edit window is not tested with `page.clock`.** §22b's silence
   rule compares two *stored* timestamps — when a version was superseded, against
   when the thing was posted — and never reads a clock, so moving the browser's

@@ -222,6 +222,8 @@ model User {
   oauthCodes             OauthCode[]              @relation("OauthCodeUser")
   oauthCodesIssued       OauthCode[]              @relation("OauthCodeIssuer")
   mentions               Mention[]
+  emailCollisions        EmailCollision[]         @relation("EmailCollisionAccount")
+  collisionsReviewed     EmailCollision[]         @relation("EmailCollisionReviewer")
 
   @@index([worksForUserId])
   @@map("user")
@@ -425,6 +427,7 @@ model Post {
   metrics             PostMetrics?
   mentions            Mention[]
   citations           Citation[]
+  emailCollisions     EmailCollision[]
 
   @@index([docId])
   // docs/BLOG.md — the listing's order, `/page/N`'s offset and a post's
@@ -581,18 +584,88 @@ model SiteSettings {
   @@map("site_settings")
 }
 
+// A comment's identity: a signed-in commenter's row is found by its user
+// alone, an anonymous one by its email among anonymous rows alone. So
+// `email` is unique only `WHERE user_id IS NULL`, by a hand-written partial
+// index (`commenter_anonymous_email_key`), which Prisma has no DSL for: a
+// signed-in row may share its email with an anonymous one, and the two stay
+// apart (docs/COMMENTS.md, "Identities kept apart"). No `upsert` can be keyed
+// on the email for that reason; src/lib/commenter-identity.ts finds, then
+// creates.
 model Commenter {
   id            String  @id @default(cuid())
   userId        String? @unique @map("user_id")
-  email         String  @unique
+  email         String
   displayName   String  @map("display_name")
   approvedCount Int     @default(0) @map("approved_count")
   forceModerate Boolean @default(false) @map("force_moderate")
 
-  user     User?     @relation(fields: [userId], references: [id])
-  comments Comment[]
+  user            User?            @relation(fields: [userId], references: [id])
+  comments        Comment[]
+  emailCollisions EmailCollision[]
 
   @@map("commenter")
+}
+
+// Where an account and an anonymous commenter meet on one email
+// (docs/COMMENTS.md, "The log"): a refused signed-out comment, a signed-in
+// commenter's row made beside an anonymous identity, or a pair found at
+// deploy. Repeats fold into one unreviewed row per source and lowercased
+// email, by a hand-written partial unique index on `(source, lower(email))
+// WHERE reviewed_at IS NULL` that src/lib/email-collision-log.ts's raw
+// `INSERT … ON CONFLICT` targets. ADMIN-only: it holds emails and IP
+// addresses.
+model EmailCollision {
+  id            String               @id @default(cuid())
+  source        EmailCollisionSource
+  email         String // as the request gave it
+  userId        String?              @map("user_id") // the account with the email, or given it
+  commenterId   String?              @map("commenter_id") // the anonymous identity with the email
+  postId        String?              @map("post_id") // the last post a comment was tried on
+  lastIpAddress String?              @map("last_ip_address")
+  ipAddresses   String[]             @default([]) @map("ip_addresses") // the requests', distinct, at most 20
+  count         Int                  @default(1)
+  firstSeenAt   DateTime             @default(now()) @map("first_seen_at")
+  lastSeenAt    DateTime             @default(now()) @map("last_seen_at")
+  reviewedAt    DateTime?            @map("reviewed_at")
+  reviewedById  String?              @map("reviewed_by_id")
+
+  user       User?                  @relation("EmailCollisionAccount", fields: [userId], references: [id], onDelete: SetNull)
+  commenter  Commenter?             @relation(fields: [commenterId], references: [id], onDelete: SetNull)
+  post       Post?                  @relation(fields: [postId], references: [id], onDelete: SetNull)
+  reviewedBy User?                  @relation("EmailCollisionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  listing    EmailCollisionListing?
+
+  @@index([userId])
+  @@index([commenterId])
+  @@index([postId])
+  @@map("email_collision")
+}
+
+enum EmailCollisionSource {
+  SIGNED_OUT_COMMENT
+  SIGNED_IN_COMMENT
+  EXISTING
+
+  @@map("email_collision_source")
+}
+
+// What /email-collisions sorts and shows that is not a column of the row: the
+// anonymous identity's comment count, and each side's distinct comment IP
+// addresses as text, read live from `comment.ip_address` so nothing is
+// copied; and the row's own IP addresses as text, since Prisma's `orderBy`
+// can't reach an array. A view keyed 1:1 on `email_collision.id` (CLAUDE.md,
+// "Admin tables are one kit").
+view EmailCollisionListing {
+  emailCollisionId  String  @unique @map("email_collision_id")
+  anonymousComments Int     @map("anonymous_comments")
+  anonymousIps      String? @map("anonymous_ips")
+  accountIps        String? @map("account_ips")
+  requestIps        String? @map("request_ips")
+
+  emailCollision EmailCollision @relation(fields: [emailCollisionId], references: [id])
+
+  @@map("email_collision_listing")
 }
 
 model CommentThread {

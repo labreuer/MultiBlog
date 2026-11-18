@@ -756,6 +756,21 @@ test's timing, not in moderation.
   `moderateComment` revalidates the post page is what the two tests are for, so `freshGoto`
   would pass a moderation that revalidates nothing.
 
+## Merging two commenter identities is done by hand (docs/COMMENTS.md, "The log")
+
+**Status:** no tool; an ADMIN who decides two rows at `/email-collisions` are one person does it
+in SQL. One email can be on two `commenter` rows, an anonymous one and an account's, and they
+are kept apart on purpose: nothing proves the anonymous comments are the account holder's.
+
+- **What a merge would move:** the anonymous row's `comment.commenter_id`s to the account's row,
+  in one transaction with adding its `approved_count` to the account's and deleting the
+  anonymous row (whose `email_collision.commenter_id`s go null by `SET NULL`). Revision 1 of
+  each moved comment keeps `author_user_id` null: it was written signed out, and that stays
+  true.
+- **What would make it a feature:** a second request for one. If it comes, it is an ADMIN
+  action on the collision row, refusing a pair whose account has since been deleted, and it
+  belongs in `src/lib/` taking an `Actor`, with the page's action a wrapper.
+
 ## The diff page's workers have not run on the oldest engines in the baseline
 
 **Status:** the worker that compares runs in Safari 27.2 and on an iPhone on iOS 18.6.2

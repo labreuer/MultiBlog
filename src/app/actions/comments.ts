@@ -9,10 +9,17 @@ import { derivePostStatus } from "@/lib/post-status";
 import { getSiteSettings } from "@/lib/site-settings";
 import { resolveCommentStatus } from "@/lib/moderation";
 import { getClientIp } from "@/lib/request-ip";
+import {
+  anonymousCommenterIdWithEmail,
+  findOrCreateAnonymousCommenter,
+  findOrCreateSignedInCommenter,
+  liveAccountIdWithEmail,
+} from "@/lib/commenter-identity";
+import { logEmailCollision } from "@/lib/email-collision-log";
 import { isCommentEditRateLimited, isCommentRateLimited } from "@/lib/rate-limit";
 import { checkSpam } from "@/lib/spam-check";
 import type { CommentStatus, Role } from "@/generated/prisma/enums";
-import type { Prisma } from "@/generated/prisma/client";
+import type { Commenter, Prisma } from "@/generated/prisma/client";
 import type { JSONContent } from "@tiptap/core";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import { isCommentBodyError } from "@/lib/comment-body";
@@ -34,6 +41,11 @@ import { commentBodyFor, commentHistoryFor, commentMarkdownFor, type CommentVers
 export type SubmitCommentState = { error?: string; status?: CommentStatus };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// docs/COMMENTS.md, "Identities kept apart". `/sign-up` already tells anyone
+// whether an email is taken, so saying so here reveals nothing new. Not
+// exported: a "use server" file may export async functions alone.
+const ACCOUNT_EMAIL_REFUSAL = "An account uses this email. Sign in to comment with it.";
 
 export async function submitComment(
   _prevState: SubmitCommentState,
@@ -58,6 +70,8 @@ export async function submitComment(
   const session = await auth();
   let userId: string | null = null;
   let email: string;
+  // The email as the form gave it, trimmed: what the collision log records.
+  let givenEmail: string;
   let displayName: string;
 
   if (session?.user) {
@@ -66,6 +80,7 @@ export async function submitComment(
     }
     userId = session.user.id;
     email = session.user.email;
+    givenEmail = email;
     displayName = displayNameOf(session.user);
   } else {
     const name = formData.get("name");
@@ -77,7 +92,8 @@ export async function submitComment(
       return { error: "A valid email is required." };
     }
     displayName = name.trim();
-    email = rawEmail.trim().toLowerCase();
+    givenEmail = rawEmail.trim();
+    email = givenEmail.toLowerCase();
   }
 
   const post = await prisma.post.findUnique({
@@ -88,6 +104,27 @@ export async function submitComment(
   });
   if (!post || !post.publishEventId || derivePostStatus(post) !== "published") {
     return { error: "This post isn't open for comments." };
+  }
+
+  const ipAddress = await getClientIp();
+
+  // **Nobody takes over anybody** (docs/COMMENTS.md, "Identities kept
+  // apart"): a signed-out comment giving a live account's email is refused,
+  // whether or not that account has ever commented, and the meeting is logged
+  // for an ADMIN. After the post check, so the log names a real post.
+  if (!userId) {
+    const accountId = await liveAccountIdWithEmail(email);
+    if (accountId) {
+      await logEmailCollision({
+        source: "SIGNED_OUT_COMMENT",
+        email: givenEmail,
+        userId: accountId,
+        commenterId: await anonymousCommenterIdWithEmail(email),
+        postId: post.id,
+        ipAddress,
+      });
+      return { error: ACCOUNT_EMAIL_REFUSAL };
+    }
   }
 
   // PLAN.md §23m — two front doors, one validated document. Anything but an
@@ -104,19 +141,31 @@ export async function submitComment(
     return { error: parsedBody.error };
   }
 
-  const commenter = userId
-    ? await prisma.commenter.upsert({
-        where: { userId },
-        update: {},
-        create: { userId, email, displayName },
-      })
-    : await prisma.commenter.upsert({
-        where: { email },
-        update: {},
-        create: { email, displayName },
-      });
+  // A signed-in commenter is found by their user alone, an anonymous one by
+  // the email among anonymous identities alone. A signed-in commenter whose
+  // email an anonymous identity holds gets a row of their own, the two stay
+  // apart, and the meeting is logged once, when that row is made.
+  let commenter: Commenter;
+  if (userId) {
+    const signedIn = await findOrCreateSignedInCommenter(userId, email, displayName);
+    commenter = signedIn.commenter;
+    if (signedIn.created) {
+      const anonymousId = await anonymousCommenterIdWithEmail(email);
+      if (anonymousId) {
+        await logEmailCollision({
+          source: "SIGNED_IN_COMMENT",
+          email: givenEmail,
+          userId,
+          commenterId: anonymousId,
+          postId: post.id,
+          ipAddress,
+        });
+      }
+    }
+  } else {
+    commenter = await findOrCreateAnonymousCommenter(email, displayName);
+  }
 
-  const ipAddress = await getClientIp();
   if (await isCommentRateLimited(ipAddress, commenter.id)) {
     return { error: "You're posting comments too quickly. Please wait a few minutes and try again." };
   }

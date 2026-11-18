@@ -49,6 +49,7 @@ import { colorForSeed } from "../src/lib/author-colors";
 import { uniqueUserSlug } from "../src/lib/user-slug";
 import { uniqueDocSlug } from "../src/lib/doc-slug";
 import { uniquePostSlug } from "../src/lib/post-slug";
+import { findOrCreateAnonymousCommenter } from "../src/lib/commenter-identity";
 import { contentExtensions, docContentExtensions, titleExtensions, pmDocContentSchema, pmBlurbSchema } from "../src/lib/tiptap-schema";
 import { normalizeOrcid, normalizeWebsite } from "../src/lib/contributor-links";
 import { commentDocFromText } from "../src/lib/comment-body";
@@ -293,11 +294,7 @@ async function addComment(opts: {
   status: CommentStatus;
   quote?: { from: number; to: number; text: string };
 }): Promise<void> {
-  const commenter = await prisma.commenter.upsert({
-    where: { email: opts.email },
-    update: {},
-    create: { email: opts.email, displayName: opts.displayName },
-  });
+  const commenter = await findOrCreateAnonymousCommenter(opts.email, opts.displayName);
 
   const quoted = opts.quote;
   const thread = quoted

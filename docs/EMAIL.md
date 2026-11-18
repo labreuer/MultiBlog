@@ -405,8 +405,8 @@ front page is (docs/WIKI.md, "Permissions" and "The front page").
   account again every five minutes"), with **making a wiki page `PUBLIC` an editor's**
   (docs/WIKI.md, "Permissions"). Both are built;
 - **commenter identities kept apart**, with every place an email meets an identity it doesn't
-  belong to logged for an ADMIN to review (docs/COMMENTS.md, "Planned: identities kept apart,
-  and a log of where they meet");
+  belong to logged for an ADMIN to review (docs/COMMENTS.md, "Identities kept apart, and a log
+  of where they meet"). Built;
 - **publishing a post made an EDITOR's**, with `RAISED` annotations sending no mail (PLAN.md
   §38).
 
@@ -849,9 +849,10 @@ minutes"), **and making a wiki page `PUBLIC` an editor's** (docs/WIKI.md, "Permi
 a session signed in before it is read again at its first request, and a page that is `PUBLIC`
 stays `PUBLIC`.
 
-**PR 2: commenter identities kept apart, and the collision log**, as docs/COMMENTS.md's plan
-describes, with `/email-collisions`. It fixes holes that are open everywhere today, and deploys
-to every instance on its own.
+**PR 2: commenter identities kept apart, and the collision log** (docs/COMMENTS.md,
+"Identities kept apart, and a log of where they meet"), with `/email-collisions`. Built
+2026-11-18. It deploys to every instance on its own, with a migration, a script to run once,
+and a change to the web unit's `ExecStart` (that section's "Deploying").
 
 **PR 3: publishing a post made an EDITOR's** (PLAN.md §38), with a Status filter on `/posts`.
 `RAISED` annotations stop sending mail in the same PR (docs/ANNOTATIONS.md's plan). It also
