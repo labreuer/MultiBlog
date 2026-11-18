@@ -81,7 +81,7 @@ import { wikiPathOfDoc } from "@/lib/wiki-address";
 import { foldWikiName, type FoldedWikiName } from "@/lib/wiki-claim";
 import { createWikiPage } from "@/lib/wiki-create";
 import { forkIntoWiki } from "@/lib/wiki-fork";
-import { moveDocIntoWiki } from "@/lib/wiki-move";
+import { moveDocIntoWiki, moveWikiPage } from "@/lib/wiki-move";
 import { deleteWikiAddressRow, renameWikiPage, revertWikiAddress } from "@/lib/wiki-rename";
 import { getFrontPagePreamble } from "@/lib/front-page";
 import { createBot, moveBot, requireBotRole, requireInvitable, restoreAccount, setBotAgent } from "@/lib/bots";
@@ -4034,6 +4034,40 @@ export async function moveDocAs(opts: {
 }
 
 /**
+ * docs/WIKI.md "Renaming", "Moving out of the wiki": moveWikiPage as
+ * `actorEmail`, with the session role given (or the account's): to another
+ * namespace, under a name, or out of the wiki.
+ */
+export async function moveWikiPageAs(opts: {
+  actorEmail: string;
+  sessionRole?: Role;
+  docId: string;
+  to: { namespace: "person" | "commons"; name: string; variant?: string | null } | "out";
+  visibility?: DocVisibility | null;
+}): Promise<{ ok: true; path: string; movedFrom: string } | { ok: false; code: string; message: string; path?: string }> {
+  assertSafe(opts.actorEmail);
+  const user = await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email: opts.actorEmail }, select: { id: true, role: true } });
+  try {
+    const moved = await moveWikiPage(
+      { userId: user.id, role: opts.sessionRole ?? user.role },
+      {
+        docId: opts.docId,
+        to:
+          opts.to === "out"
+            ? { kind: "out" }
+            : { kind: "namespace", namespace: opts.to.namespace, name: opts.to.name, variant: opts.to.variant ?? null },
+        visibility: opts.visibility ?? null,
+      },
+    );
+    return { ok: true, path: moved.path, movedFrom: moved.movedFrom };
+  } catch (err) {
+    const e = err as { code?: string; message?: string; details?: { path?: unknown } };
+    const path = typeof e.details?.path === "string" ? e.details.path : undefined;
+    return { ok: false, code: e.code ?? "error", message: e.message ?? String(err), ...(path ? { path } : {}) };
+  }
+}
+
+/**
  * Records `docId` as a fork of `parentId` at the parent's newest update, the
  * two columns forkDoc writes, without seeding the fork from the parent: for
  * a family line, where only the relation is read.
@@ -4357,6 +4391,7 @@ export async function addTestDocSlugHistory(docId: string, slug: string): Promis
 
 const handlers = {
   moveDocAs,
+  moveWikiPageAs,
   softDeleteTestPost,
   createWikiPageAs,
   findTestWikiPageId,

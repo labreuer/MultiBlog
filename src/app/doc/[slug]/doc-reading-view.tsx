@@ -3,7 +3,7 @@ import * as Y from "yjs";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import type { Session } from "next-auth";
 import type { Prisma } from "@/generated/prisma/client";
-import { canManageDocs, canUserEditDoc, canUserSeeDocHistory } from "@/lib/doc-authz";
+import { canEditAnySharedDoc, canManageDocs, canUserEditDoc, canUserSeeDocHistory } from "@/lib/doc-authz";
 import { wikiAddressOfDoc, wikiPagePath } from "@/lib/wiki-address";
 import WikiAddressLine from "@/components/wiki/WikiAddressLine";
 import { loadDocFamily } from "@/lib/doc-family";
@@ -21,6 +21,9 @@ import AuthorByline from "@/components/AuthorByline";
 import DocPostsLine from "@/components/DocPostsLine";
 import DocActionsMenu, { type DocActionsContext } from "@/components/DocActionsMenu";
 import { wikiNamespacesFor } from "@/lib/wiki-create";
+import { ownerWhoCanAct } from "@/lib/wiki-claim";
+import { isFrontPageAddress } from "@/lib/front-page";
+import type { WikiPageMoveTargets } from "@/components/wiki/MoveWikiPageDialog";
 import DocFamily from "@/components/DocFamily";
 import AnnotationSection from "@/components/annotation/AnnotationSection";
 import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
@@ -133,10 +136,29 @@ export default async function DocReadingView({
   // Where the dialogs may put a page, by a fresh read of the viewer's
   // account; the server reads it again when a dialog is sent.
   const namespaces = canFork ? await wikiNamespacesFor(user) : null;
+  // docs/WIKI.md "Renaming", "Moving out of the wiki" — "Move…", on a wiki
+  // page: a person's page by its owner, read afresh, to the commons when
+  // they are an ADMIN or EDITOR, or out; a commons page by an ADMIN or EDITOR
+  // on its byline, to their own namespace when they have one, or out.
+  let moveOut: WikiPageMoveTargets | null = null;
+  if (doc.wikiName !== null) {
+    if (doc.wikiOwnerUserId !== null) {
+      if (doc.wikiOwnerUserId === user.id && (await ownerWhoCanAct(user.id)) !== null) {
+        moveOut = { namespace: canEditAnySharedDoc(user.role) ? "commons" : null, namespaceRefusal: null };
+      }
+    } else if (canEditAnySharedDoc(user.role) && doc.authors.some((a) => a.userId === user.id)) {
+      moveOut = { namespace: namespaces?.person ? "person" : null, namespaceRefusal: namespaces?.personRefusal ?? null };
+    }
+  }
+  const frontPage =
+    moveOut !== null && doc.wikiOwnerUserId === null && doc.wikiVariant === "" && doc.visibility === "PUBLIC"
+      ? await isFrontPageAddress(doc.id)
+      : false;
   const actionsContext: DocActionsContext = {
     title: doc.title,
     visibility: doc.visibility,
     isWikiPage: doc.wikiName !== null,
+    frontPage,
     namespaces: {
       viewerId: user.id,
       person: namespaces?.person ? { slug: namespaces.person.slug } : null,
@@ -311,7 +333,7 @@ export default async function DocReadingView({
                           )}
                           {/* docs/FORKS.md — "Publish as blog post" (§15d's
                               entry point into post creation), "Fork…" and
-                              docs/WIKI.md's "Move into the wiki…", each for
+                              docs/WIKI.md's "Move into the wiki…" and "Move…", each for
                               whoever may. A client island, which renders
                               nothing with none; keyed for the same reason. */}
                           <DocActionsMenu
@@ -320,6 +342,7 @@ export default async function DocReadingView({
                             publish={canPublish}
                             fork={canFork}
                             moveIn={movable}
+                            moveOut={moveOut}
                             context={actionsContext}
                           />
                           {/* PLAN.md §20k — a second line of the byline rather

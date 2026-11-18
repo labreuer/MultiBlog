@@ -15,12 +15,15 @@ import LocalTime from "../LocalTime";
 // each row saying whether it holds its address or only redirects when
 // nothing else answers, with Revert on the most recent reserved row and a
 // delete on each, which ends its redirect and, for a reserved row, frees its
-// address. The server asks every rule again (wiki-rename.ts).
+// address. The server asks every rule again (wiki-rename.ts). For a doc
+// moved out of the wiki, which has no address and keeps its released rows
+// ("Moving out of the wiki"), only the history and its deletes.
 
 type Props = {
   docId: string;
-  path: string;
-  name: string;
+  /** The page's address and name, null for a doc moved out of the wiki. */
+  path: string | null;
+  name: string | null;
   variant: string;
   history: WikiAddressHistoryEntry[];
 };
@@ -30,7 +33,7 @@ const cell = { padding: "4px 8px 4px 0" } as const;
 export default function WikiAddressManager({ docId, path, name, variant, history }: Props) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
-  const [nameDraft, setNameDraft] = useState(name);
+  const [nameDraft, setNameDraft] = useState(name ?? "");
   const [variantDraft, setVariantDraft] = useState(variant);
   const [error, setError] = useState<{ message: string; takenPath?: string } | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
@@ -39,6 +42,7 @@ export default function WikiAddressManager({ docId, path, name, variant, history
   const checked = checkWikiName(nameDraft);
   const variantOk = isWikiVariant(variantDraft.trim());
   const changed = checked.ok && (checked.name !== name || variantDraft.trim() !== variant);
+  const what = path === null ? "doc" : "page";
   const newestReserved = history.find((row) => row.reserved)?.id ?? null;
 
   function settle(answer: WikiRenameState) {
@@ -76,27 +80,29 @@ export default function WikiAddressManager({ docId, path, name, variant, history
 
   return (
     <section data-wiki-address-manager="" style={{ marginBottom: "2.5em" }}>
-      <p>
-        Address: <Link href={path}>{path}</Link>
-        {!editing && (
-          <>
-            {" "}
-            <button
-              type="button"
-              onClick={() => {
-                setNameDraft(name);
-                setVariantDraft(variant);
-                setError(null);
-                setEditing(true);
-              }}
-              style={{ marginLeft: 4 }}
-            >
-              Rename…
-            </button>
-          </>
-        )}
-      </p>
-      {editing && (
+      {path !== null && (
+        <p>
+          Address: <Link href={path}>{path}</Link>
+          {!editing && (
+            <>
+              {" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setNameDraft(name ?? "");
+                  setVariantDraft(variant);
+                  setError(null);
+                  setEditing(true);
+                }}
+                style={{ marginLeft: 4 }}
+              >
+                Rename…
+              </button>
+            </>
+          )}
+        </p>
+      )}
+      {editing && path !== null && (
         <div style={{ margin: "8px 0", display: "grid", gap: 6, maxWidth: 420 }}>
           <label>
             Name{" "}
@@ -151,7 +157,7 @@ export default function WikiAddressManager({ docId, path, name, variant, history
         </p>
       )}
 
-      <h2 style={{ fontSize: "1rem", marginTop: 24 }}>Past addresses</h2>
+      <h2 style={{ fontSize: "1rem", marginTop: path === null ? 0 : 24 }}>{path === null ? "Past wiki addresses" : "Past addresses"}</h2>
       {history.length === 0 ? (
         <p style={{ color: "var(--text-secondary)" }}>No past addresses.</p>
       ) : (
@@ -224,9 +230,9 @@ export default function WikiAddressManager({ docId, path, name, variant, history
       )}
       {history.length > 0 && (
         <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: "0.5em" }}>
-          A past address sends whoever may read this page on to it. Deleting one ends that, and frees the address for
-          another page. Revert inside an hour of a rename undoes it outright, and keeps nothing for the address it
-          leaves.
+          A past address sends whoever may read this {what} on to it. Deleting one ends that, and frees the address for
+          another page.
+          {path !== null && <> Revert inside an hour of a rename undoes it outright, and keeps nothing for the address it leaves.</>}
         </p>
       )}
     </section>

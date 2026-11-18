@@ -6,6 +6,7 @@ import { createPostFromDoc } from "@/app/actions/posts";
 import { useDocScrubPosition, type ScrubPosition } from "@/components/DocScrubContext";
 import { useCloseOnOutsideClick } from "@/components/use-close-on-outside-click";
 import MoveIntoWikiDialog from "@/components/wiki/MoveIntoWikiDialog";
+import MoveWikiPageDialog, { type WikiPageMoveTargets } from "@/components/wiki/MoveWikiPageDialog";
 import type { WikiNamespaces } from "@/components/wiki/wiki-dialog-parts";
 import ForkDialog from "./ForkDialog";
 import styles from "./DocActionsMenu.module.css";
@@ -17,6 +18,8 @@ export type DocActionsContext = {
   visibility: DocVisibility;
   isWikiPage: boolean;
   namespaces: WikiNamespaces;
+  /** Whether this is the commons' `Front Page` while it is `PUBLIC`, which "Move…" says it takes off the landing page. */
+  frontPage: boolean;
 };
 
 /**
@@ -30,7 +33,9 @@ export type DocActionsContext = {
  * - **Fork…**, for any reader with canManageDocs, which includes readers who
  *   can't edit. One item with a Where: a doc, your namespace, or the commons;
  * - **Move into the wiki…**, for an editor on the byline of a doc that isn't
- *   a wiki page and has no post, a deleted one included.
+ *   a wiki page and has no post, a deleted one included;
+ * - **Move…**, on a wiki page, to another namespace or out of the wiki, for
+ *   its owner, or for a commons page an ADMIN or EDITOR on its byline.
  *
  * The server still decides each one; the menu only keeps from offering what
  * would be refused. A <details>, as the header's tool menus are. The dialogs
@@ -41,26 +46,30 @@ export default function DocActionsMenu({
   publish,
   fork,
   moveIn,
+  moveOut,
   context,
 }: {
   docId: string;
   publish: boolean;
   fork: boolean;
   moveIn: boolean;
+  /** Where "Move…" may take this wiki page, or null when it isn't offered. */
+  moveOut: WikiPageMoveTargets | null;
   context: DocActionsContext;
 }) {
   const menuRef = useRef<HTMLDetailsElement>(null);
   useCloseOnOutsideClick(menuRef);
   const forkRef = useRef<HTMLDialogElement>(null);
   const moveRef = useRef<HTMLDialogElement>(null);
+  const moveOutRef = useRef<HTMLDialogElement>(null);
   const getScrubPosition = useDocScrubPosition();
   // Where the scrub bar was when the dialog last opened: asked once, at the
   // click, so the dialog names one version however the slider moves behind it.
   const [position, setPosition] = useState<ScrubPosition | null>(null);
   // Which dialog is showing, so only that one asks the server for its default address.
-  const [showing, setShowing] = useState<"fork" | "move" | null>(null);
+  const [showing, setShowing] = useState<"fork" | "move" | "moveOut" | null>(null);
 
-  if (!publish && !fork && !moveIn) return null;
+  if (!publish && !fork && !moveIn && !moveOut) return null;
 
   function closeMenu() {
     if (menuRef.current) menuRef.current.open = false;
@@ -77,6 +86,12 @@ export default function DocActionsMenu({
     closeMenu();
     setShowing("move");
     moveRef.current?.showModal();
+  }
+
+  function openMoveOut() {
+    closeMenu();
+    setShowing("moveOut");
+    moveOutRef.current?.showModal();
   }
 
   return (
@@ -103,6 +118,11 @@ export default function DocActionsMenu({
               Move into the wiki…
             </button>
           )}
+          {moveOut && (
+            <button type="button" className={styles.item} onClick={openMoveOut}>
+              Move…
+            </button>
+          )}
         </div>
       </details>
       {fork && (
@@ -126,6 +146,19 @@ export default function DocActionsMenu({
           title={context.title}
           visibility={context.visibility}
           namespaces={context.namespaces}
+        />
+      )}
+      {moveOut && (
+        <MoveWikiPageDialog
+          dialogRef={moveOutRef}
+          open={showing === "moveOut"}
+          onClose={() => setShowing(null)}
+          docId={docId}
+          name={context.title}
+          visibility={context.visibility}
+          namespaces={context.namespaces}
+          targets={moveOut}
+          frontPage={context.frontPage}
         />
       )}
     </span>

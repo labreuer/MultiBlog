@@ -24,7 +24,7 @@ export function AddressHistoryList({ docs }: { docs: DocAddressHistory[] }) {
       <p>
         {several
           ? "These have past addresses, which are deleted with them:"
-          : "This page's past addresses are deleted with it:"}
+          : "Its past wiki addresses are deleted with it:"}
       </p>
       {docs.map((doc, i) => (
         <div key={i} style={{ marginTop: 4 }}>
