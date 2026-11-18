@@ -536,7 +536,7 @@ WorkingDirectory=/srv/multiblog
 EnvironmentFile=/srv/multiblog/.env
 Environment=NODE_ENV=production
 Environment=PORT=3000
-ExecStart=/usr/bin/npm run start
+ExecStart=/usr/bin/npm run start -- -H 127.0.0.1
 Restart=on-failure
 RestartSec=3
 
@@ -722,11 +722,20 @@ server {
 ```
 
 `X-Forwarded-Proto`/`Host` must be forwarded or NextAuth (with `trustHost`) can't build
-correct https callback URLs. The `X-Real-IP`/`X-Forwarded-For` headers matter too:
-`submitComment` records the commenter IP for rate-limiting, and `getClientIp()`
-(`src/lib/request-ip.ts`) already reads `X-Forwarded-For` then `X-Real-IP` — so with the two
-headers set above, the limiter sees the real client IP rather than `127.0.0.1`. Nothing to
-change in the app; just don't drop those headers.
+correct https callback URLs. The `X-Real-IP`/`X-Forwarded-For` headers matter too: a comment
+records its IP address, the comment rate limits count by it, and the email-collision log keeps
+it (docs/COMMENTS.md, "Identities kept apart"). `getClientIp()` (`src/lib/request-ip.ts`, its
+rule in `src/lib/client-ip.ts`) reads `X-Real-IP`, which nginx sets to the peer and which
+replaces anything a client sends, and failing that the *last* `X-Forwarded-For` entry, since
+`$proxy_add_x_forwarded_for` appends to whatever the client sent. Don't drop either header.
+Two assumptions hold this up:
+
+- **nginx is the only way in.** A request reaching `next start` directly could write
+  `X-Real-IP` itself, so the web unit binds to the address nginx proxies to,
+  `npm run start -- -H 127.0.0.1` (§6; `next start` takes its hostname only from `-H`). The
+  `proxy_pass` above must name `127.0.0.1`, not `localhost`, which can resolve to `::1`.
+- **nothing sits in front of nginx.** Behind a CDN, `$remote_addr` is the CDN's, and every
+  commenter would share one IP address, and one rate limit.
 
 No path rewrite is needed for collab: `HocuspocusProvider` opens the socket at exactly
 `NEXT_PUBLIC_COLLAB_URL` (`wss://<app-host>/collab`) and sends the document id (the post id)

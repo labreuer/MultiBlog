@@ -13,7 +13,10 @@ WorkingDirectory=/srv/multiblog
 EnvironmentFile=/srv/multiblog/.env
 Environment=NODE_ENV=production
 Environment=PORT=3000
-ExecStart=/usr/bin/npm run start
+# Bound to the address nginx proxies to, so nginx is the only way in and the
+# X-Real-IP it sets can be trusted (DEPLOY.md §7). `next start` takes its
+# hostname only from -H.
+ExecStart=/usr/bin/npm run start -- -H 127.0.0.1
 Restart=on-failure
 RestartSec=3
 
