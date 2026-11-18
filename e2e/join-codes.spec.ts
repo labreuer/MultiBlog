@@ -206,6 +206,7 @@ test.describe("join cards", () => {
       const email = uniqueEmail("card-twice");
       emails.push(email);
       await claim(page, twice.code, { name: uniqueName(), email });
+      await expect(page.getByRole("heading", { name: CHECK_EMAIL })).toBeVisible();
       const link = await setTestJoinClaimToken(batchId, twice.serial);
       await confirm(page, link);
       await expect(page.getByRole("heading", { name: "Your account is ready" })).toBeVisible();
@@ -265,6 +266,7 @@ test.describe("join cards", () => {
       const email = uniqueEmail("card-wrong");
       emails.push(email);
       await claim(page, wrongPw.code, { name: uniqueName(), email });
+      await expect(page.getByRole("heading", { name: CHECK_EMAIL })).toBeVisible();
       const link = await setTestJoinClaimToken(batchId, wrongPw.serial);
       for (let left = 4; left >= 1; left--) {
         await confirm(page, link, "not-the-password");
@@ -308,7 +310,7 @@ test.describe("join cards", () => {
     try {
       await page.goto(`/join/${cards[0].code}`);
       await expect(page.getByRole("heading", { name: "You're signed in" })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+      await expect(page.getByRole("main").getByRole("button", { name: "Sign out" })).toBeVisible();
       await expect(page.getByLabel("Choose a password")).toHaveCount(0);
     } finally {
       await deleteTestJoinBatch(batchId);
@@ -323,6 +325,7 @@ test.describe("join cards", () => {
     const second = uniqueEmail("card-second");
     try {
       await claim(page, card.code, { name: uniqueName(), email: first });
+      await expect(page.getByRole("heading", { name: CHECK_EMAIL })).toBeVisible();
       const firstLink = await setTestJoinClaimToken(batchId, card.serial);
       await ageTestJoinSend(batchId, card.serial, 61_000);
       await claim(page, card.code, { name: uniqueName(), email: second });
