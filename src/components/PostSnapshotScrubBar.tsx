@@ -139,10 +139,6 @@ function LoadedScrubBar({
   return (
     <div className={styles.bar}>
       <div className={styles.inner}>
-        <p className={styles.positionLine}>
-          update {index + 1} of {total}
-          {current && ` — ${new Date(current.createdAt).toLocaleString()}`}
-        </p>
         <div className={styles.sliderWrapper}>
           <input
             type="range"
@@ -165,6 +161,12 @@ function LoadedScrubBar({
             />
           ))}
         </div>
+        {/* Under the slider, not over it: at the window's bottom edge iPadOS
+            takes a drag as its own gesture, so the slider is kept off it. */}
+        <p className={styles.positionLine}>
+          update {index + 1} of {total}
+          {current && ` — ${new Date(current.createdAt).toLocaleString()}`}
+        </p>
         <p className={styles.snapshotLine}>
           {atSnapshot
             ? "Publishing will reuse the snapshot at this position."
