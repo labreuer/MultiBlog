@@ -31,6 +31,35 @@ What it does not repeat:
 | [PERMISSIONS.md](PERMISSIONS.md) | Who may do what, as tables; the wiki adds its own (below, "Permissions"). |
 | [MCP.md](MCP.md) | The tools. They take a page's address wherever they take a doc's URL ("URLs"); the rest is deferred. |
 
+## Mistakes that fail no check
+
+Read these before changing code that tests or offers a doc's visibility, decides who may edit
+a doc, changes a doc's settings, or writes a doc's `title` or its `wiki_*` columns. Each
+compiles, lints and gives the right answer for every doc that isn't a wiki page, which is
+most of what the specs make. CLAUDE.md points here and holds none of it.
+
+- **A visibility compared to a literal.** `=== "SHARED"` or `{ visibility: "SHARED" }` treats
+  `PUBLIC` as `PRIVATE`: `readableDocsWhere` written that way lists a public page to nobody,
+  its author included. Ask `isSharedOrPublic` or `sharedOrPublic()`
+  (`src/lib/doc-visibility.ts`), offer `allowedVisibilities` in a doc's select and
+  `FILE_VISIBILITIES` in a file's, and check a value against `allowedVisibilities` where it is
+  accepted. A literal `"PRIVATE" | "SHARED"` type is the harmless kind: `tsc` refuses it.
+  ("`PUBLIC` outside the wiki's routes".)
+- **The edit rule restated.** `SHARED && canEditAnySharedDoc(role)` inline gives an ADMIN or
+  EDITOR a person's page, which has no bypass. Ask `canEditDocRow` of a row in hand, and
+  `editableDocsWhere` as a filter; `wikiName: null` belongs in `editableDocsFor` alone, since
+  on the shared filter it strips every page's history from the family line ("Permissions").
+- **A settings rule checked before the lock.** Each function in `doc-manage.ts` takes
+  `lockDoc` first and asks its rules of the row it returns; a check before the lock can be
+  overtaken by a move into the wiki ("Moving a doc into the wiki").
+- **A write of `wiki_name` that doesn't name `title`.** The mirror trigger puts the name in
+  `title` either way, but the search vector's trigger fires by the columns a statement names,
+  so a rename naming `wiki_name` alone leaves search on the old name ("The name is the title").
+- **A name folded anywhere but `wiki_name_key()`.** No JavaScript function agrees with
+  `casefold` (`toLowerCase` keeps `ß`), and `casefold` without `COLLATE pg_unicode_fast`
+  folds by the database's default collation, with no error. `wiki_name_key` the column is
+  written only by its trigger ("Case").
+
 ## What it is for
 
 Wiki pages are meant to:

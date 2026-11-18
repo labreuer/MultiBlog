@@ -292,12 +292,9 @@ before changing the behavior it describes.
   docs/MCP.md §1, §2, §6.
 - **A `PRIVATE` doc is its listed `DocAuthor`s' alone** — no ADMIN/EDITOR bypass. docs/DOCS.md "Roles and
   visibility", docs/PERMISSIONS.md.
-- **A doc's visibility is tested through `src/lib/doc-visibility.ts`, never against a literal.**
-  `PUBLIC`, a wiki page's, is `SHARED` everywhere outside the wiki's routes, so a doc rule asks
-  `isSharedOrPublic`/`sharedOrPublic()`, and a select offers `allowedVisibilities`: a bare
-  `=== "SHARED"` compiles and hides a public page from its own author. Who may edit a doc is
-  `canEditDocRow`'s, which gives a person's wiki page no ADMIN/EDITOR bypass. docs/WIKI.md
-  "Permissions".
+- **Before changing code that tests or offers a doc's visibility, decides who may edit a doc,
+  changes a doc's settings, or writes a doc's `title` or `wiki_*` columns, read docs/WIKI.md,
+  "Mistakes that fail no check".**
 - **Before changing code that shows a doc as it was at an earlier version (it calls
   `loadDocStateAt`, `isDocVersion` or `docBodyOf`, serves a doc's `ydoc_update` rows, or takes
   an update id from a request), or that seeds a doc from another doc's text, read
