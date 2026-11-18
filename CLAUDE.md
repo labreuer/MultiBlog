@@ -373,8 +373,9 @@ running `prisma migrate dev` on anything unusual.
   wrote. Restarting web is the whole fix. Distinct from the EPERM case: that one is generate
   refusing to *write*, this one is a successful write the running process never picks up.
 - **Seven `search_vector` columns (the reference library's is the seventh), the `search_lexeme`
-  table, the `mention` and `citation` tables, and `doc.wiki_name_key` are written only by
-  triggers** (docs/FULLTEXT.md §3; docs/ENTITY_CHIPS.md, step 1, item 12; docs/WIKI.md "Case")
+  table, the `mention` and `citation` tables, `doc.wiki_name_key` and
+  `wiki_address_history.name_key` are written only by triggers** (docs/FULLTEXT.md §3;
+  docs/ENTITY_CHIPS.md, step 1, item 12; docs/WIKI.md "Case")
   — never assign to them, give a new trigger function
   its own `SET search_path`, and leave `search_lexeme`'s, `mention`'s and `citation`'s data out
   of a data-only load, or their `COPY` collides with what the triggers already refilled.

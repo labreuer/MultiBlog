@@ -2233,7 +2233,7 @@ comment's writer and the post's moderators. So a hit never leads to `not_found`.
 | `tag` · `untag` | write | Apply a term, minting it when it is new, to anything but a published or scheduled post; remove one's own assignment, or anyone's as ADMIN/EDITOR (§11) |
 | `create_ref` | write | A work added to the reference library from its CSL-JSON record, with its PDF as `file` if given; `duplicate`, with the key to cite, for one the library holds by DOI or ISBN ([CITATIONS.md](CITATIONS.md)) |
 | `update_ref` | write | A work's record replaced whole, by its key: its key, abbreviation, PDF and citations kept and the citations relabelled; `duplicate` for a DOI or ISBN another work holds, and `conflict` for a deleted work, never restored ([CITATIONS.md](CITATIONS.md), "Replacing a record") |
-| `manage` | manage | A doc's or file's visibility, slug, byline or owners, and whether a doc is a record; tagging a published or scheduled post; deleting or restoring a doc, file, annotation or link. A deleted file's slug is refused until it is restored (§12) |
+| `manage` | manage | A doc's or file's visibility, slug, byline or owners, and whether a doc is a record; tagging a published or scheduled post; deleting or restoring a doc, file, annotation or link. A deleted file's slug is refused until it is restored (§12). Deleting a doc with past wiki addresses deletes them with it, and the answer lists them (`removedAddresses`, docs/WIKI.md "Deleting a page") |
 
 Uploading, downloading and exporting go through §5's byte routes, not through a tool's
 arguments: `upload` and `download` answer only with a route's URL.
@@ -2360,8 +2360,10 @@ restore-to-a-point exists ([DOCS.md](DOCS.md), "Deferred").
   never changes.
 - **A wiki page's address is a doc's URL** to every tool that takes one: `parseDocRef`
   (`src/lib/mcp/resolve.ts`) finds the doc it names as the wiki's routes do, a name in other
-  capitals included, and every switch that answers a parsed doc then answers it, with the
-  rules it has for a doc. The doc is gated by `canUserReadDoc`, so an unreadable page is
+  capitals and an old address included (an old address answers with the first page holding or
+  naming it that the actor may read, so `parseDocRef` takes the actor), and every switch that
+  answers a parsed doc then answers it, with the rules it has for a doc. The doc is gated by
+  `canUserReadDoc`, so an unreadable page is
   `not_found`, as a missing one is, and `PUBLIC` adds nothing. `/wiki`, a namespace list and
   `/wiki/special/pages` are not read. What the tools give back for a wiki page stays
   `/doc/<slug>`, and search's hits are the one exception: each names its page's address.
