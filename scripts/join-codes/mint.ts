@@ -1,6 +1,6 @@
 // Mints, prints again and revokes batches of join cards (docs/EMAIL.md §10,
 // "Minting and printing"), on behalf of a named ADMIN, through the same
-// functions the admin table will use (src/lib/join-codes/cards.ts).
+// functions /join-codes uses (src/lib/join-codes/cards.ts).
 //
 // **The sheet holds live codes.** It is written to a directory outside the
 // working tree, and should be deleted once the cards are printed: it can be
@@ -31,6 +31,7 @@ import { prisma } from "../../src/lib/prisma";
 import { SITE_TITLE } from "../../src/lib/site-config";
 import { liveCardsForPrinting, mintJoinBatch, revokeJoinCards } from "../../src/lib/join-codes/cards";
 import { renderCardSheet } from "../../src/lib/join-codes/sheet";
+import { parseJoinExpiry } from "../../src/lib/join-codes/expiry";
 import { welcomePageReachesAuthors, WELCOME_PAGE_NAME } from "../../src/lib/front-page";
 import { isAdmin } from "../../src/lib/role-checks";
 import type { Actor } from "../../src/lib/actor";
@@ -69,9 +70,7 @@ async function adminActor(email: string | undefined): Promise<Actor> {
 
 function parseExpiry(text: string | undefined): Date {
   if (!text) fail("--expires <date> is required.");
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(text) ? new Date(`${text}T23:59:59.999Z`) : new Date(text);
-  if (Number.isNaN(date.getTime())) fail(`Not a date: ${text}`);
-  return date;
+  return parseJoinExpiry(text) ?? fail(`Not a date: ${text}`);
 }
 
 function cardHost(): string {

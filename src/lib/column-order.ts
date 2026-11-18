@@ -21,7 +21,8 @@ export type AdminTableName =
   | "links"
   | "references"
   | "wiki"
-  | "email-collisions";
+  | "email-collisions"
+  | "join-codes";
 
 // Where each table is served, for the revalidation a saved column order needs.
 // Every table but the wiki's is at `/<name>`; the wiki's is under /wiki/special/,

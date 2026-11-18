@@ -36,7 +36,7 @@ to re-derive the decision from.
 | [docs/BLOG.md](docs/BLOG.md) | The public blog as built: the landing page (the banner, the preamble from the commons' `Front Page`, the latest posts, the contributor list and the dashboard panel a contributor edits it from), a post's page at its `/yyyy/mm/dd/slug` URL, why its date is UTC, and how a slug changes and redirects, the date archives, the author pages, the RSS feed, the links between a post's three pages, which posts are public (published and due, with no status column and no sweep) and the one order every listing uses, `/page/N` continuing `/` (a path, not `?page=`, so `/` keeps its cache), a post's older and newer neighbours, which public pages are cached at all, and what each change revalidates. |
 | [docs/DASHBOARD.md](docs/DASHBOARD.md) | /dashboard: the section cards, Recent docs, the Settings tiers, the Connections card, and where an author color is cached. |
 | [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Who may do what, as tables over roles × visibility × byline. Tags have their own section: minting vs. applying vs. curating. So do API tokens: who connects, as whom, the rules for bots, and the tools each token lists. |
-| [docs/EMAIL.md](docs/EMAIL.md) | Resend, the `sendMail()` seam, invites, what's deferred; §10, one-off join codes: printed QR cards that make an account once its email is confirmed, trusted commenters, `/welcome`, emails compared without case, and the `/join-codes` table still planned. |
+| [docs/EMAIL.md](docs/EMAIL.md) | Resend, the `sendMail()` seam, invites, what's deferred; §10, one-off join codes: printed QR cards that make an account once its email is confirmed, trusted commenters, `/welcome`, emails compared without case, and the `/join-codes` table that mints, prints and revokes them. |
 | [docs/DOC_IMPORT.md](docs/DOC_IMPORT.md) | Markdown → TipTap: creating a doc (file import, paste box); §11, the comment box's parse with its conform shims; and §12, which line opens an ordered list in every Markdown parse and plain-text paste (an initial is not a marker), and what the export writes for a lettered one. |
 | [docs/CLAUDE_IMPORT.md](docs/CLAUDE_IMPORT.md) | A claude.ai data export → one doc per session, Markdown files → one doc each (`--markdown`), and updating imported docs in place without breaking the anchors other docs hold into them. |
 | [docs/FULLTEXT.md](docs/FULLTEXT.md) | Full-text search as built: a trigger-maintained vector per row over docs, posts, annotations, comments and PDF pages, per-kind queries that rank only inside the viewer's readable ids, accent folding and a typo correction that leaks nothing, filters by kind, author and date, the page and the quote picker; the decisions, and the other options in an appendix. |
@@ -59,13 +59,14 @@ Each of these has been decided once and is easy to undo by accident. Read the li
 before changing the behavior it describes.
 
 - **Admin tables are one kit.** `/posts`, `/docs`, `/files`, `/users`, `/comments`,
-  `/annotations`, `/tags`, `/links`, `/references` and `/email-collisions` all
+  `/annotations`, `/tags`, `/links`, `/references`, `/email-collisions` and `/join-codes` all
   render through `src/components/table/` plus a per-table `*-query.ts` over
   `src/lib/table-query.ts`. Filters, sort, pagination and the show-deleted toggle live in the
   querystring and are applied in Postgres, never client-side; a new admin table means a
   `*-query.ts` and the kit's hooks, not a fresh `<table>`. Every column sorts — the ones
   Prisma's `orderBy` can't reach go through a **database view keyed 1:1 on the primary key**
-  (`post_activity`, `post_metrics`, `doc_metrics`, `reference_listing`, `email_collision_listing`), which Prisma then treats as an ordinary
+  (`post_activity`, `post_metrics`, `doc_metrics`, `reference_listing`, `email_collision_listing`,
+  `join_code_listing`), which Prisma then treats as an ordinary
   to-one relation. Reach for that before denormalizing or re-sorting in JS. The exception is a
   value expensive to *compute* rather than awkward to reach: a view has no `WHERE` to push
   down when sorted through, so it evaluates for every row on every page load — hence `/docs`'

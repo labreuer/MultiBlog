@@ -432,9 +432,26 @@ model JoinCode {
   batch           JoinBatch        @relation(fields: [batchId], references: [id], onDelete: Cascade)
   claimedUser     User?            @relation("JoinCodeClaimant", fields: [claimedUserId], references: [id], onDelete: SetNull)
   emailCollisions EmailCollision[]
+  listing         JoinCodeListing?
 
   @@unique([batchId, serial])
   @@map("join_code")
+}
+
+// What /join-codes sorts and filters by that is not a column of the row: the
+// card's status, read from the card and its batch against the clock, as
+// `stateOf` in src/lib/join-codes/cards.ts reads it for `/join/<code>`, with
+// `pending` split out of a live card. `status_order` is its place in the
+// table's sort. A view keyed 1:1 on `join_code.id` (CLAUDE.md, "Admin tables
+// are one kit"; docs/EMAIL.md §10, "Minting and printing").
+view JoinCodeListing {
+  joinCodeId  String @unique @map("join_code_id")
+  status      String
+  statusOrder Int    @map("status_order")
+
+  joinCode JoinCode @relation(fields: [joinCodeId], references: [id])
+
+  @@map("join_code_listing")
 }
 
 // PLAN.md §15 — a post is an immutable snapshot of a Doc at one point in that

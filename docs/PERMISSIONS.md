@@ -234,12 +234,16 @@ read as `SHARED`, but where these say otherwise. Two namespaces: a person's,
 | `/ydoc-debug`, `/api/ydoc/*` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `/dashboard`, `/welcome` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Read a published post, submit a comment | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `/join-codes` (read, mint, revoke a card or a batch), `/join-codes/print` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Mint, print or revoke join cards (`scripts/join-codes/mint.ts`) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Use a join card (`/join/<code>`, `/join/confirm`) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 **A join card is used signed out, or not at all** (docs/EMAIL.md §10): it makes a new AUTHOR
 account and never changes an existing one, so a viewer with a session gets no form and its
-POST refuses them. **`/welcome` shows the commons page `New Account Welcome` under the wiki
+POST refuses them. **Minting, printing and revoking ask the account row as well as the
+session** (`src/lib/join-codes/cards.ts`), for the table, its print route and the script alike,
+so an ADMIN demoted in the last five minutes mints nothing; the print route asks for itself,
+since no page's gate covers a Route Handler. **`/welcome` shows the commons page `New Account Welcome` under the wiki
 read rule for its viewer**, so a `SHARED` page reaches AUTHOR and AUTHORIZED accounts and a
 `PUBLIC` one every account.
 

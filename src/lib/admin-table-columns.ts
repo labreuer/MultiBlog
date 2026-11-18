@@ -219,6 +219,22 @@ export const ADMIN_TABLE_COLUMNS = {
     { key: "reviewedAt", label: "Reviewed at", defaultHidden: true },
     { key: "reviewedBy", label: "Reviewed by", defaultHidden: true },
   ],
+  // docs/EMAIL.md §10, "Minting and printing" — /join-codes, ADMIN-only, one
+  // row per card. Status is read through the `join_code_listing` view, which
+  // is what lets it sort; Minted is the batch's, and with Serial is the
+  // default order.
+  "join-codes": [
+    { key: "batch", label: "Batch" },
+    { key: "serial", label: "No." },
+    { key: "status", label: "Status" },
+    { key: "pendingEmail", label: "Pending email" },
+    { key: "claimedBy", label: "Claimed by" },
+    { key: "claimedAt", label: "Claimed at" },
+    { key: "sends", label: "Sends", defaultHidden: true },
+    { key: "lastSent", label: "Last sent", defaultHidden: true },
+    { key: "expires", label: "Batch expires", defaultHidden: true },
+    { key: "minted", label: "Minted", defaultHidden: true },
+  ],
 } as const satisfies Record<AdminTableName, readonly ColumnMeta[]>;
 
 /** The movable column keys of one admin table — what its `registryColumns` call must supply a body for. */

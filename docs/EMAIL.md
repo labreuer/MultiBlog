@@ -390,7 +390,7 @@ whatever invites are pending at backup time — see §5's residual for the full 
 
 ## 10. Accounts from one-off join codes
 
-**Built through PR 4 of the build order below; the admin table, PR 5, is planned.** An ADMIN
+**Built, in the five PRs of the build order below.** An ADMIN
 prints a batch of cards, each with a QR code and a code that works
 once. Whoever scans one gives a name, an email and a password, confirms the email from a link,
 and only then has an account: an AUTHOR, whose comments publish without waiting for
@@ -785,8 +785,12 @@ deferred.
 
 **`mintJoinBatch(actor, { label, count, expiresAt })`** in `src/lib/join-codes/cards.ts` takes
 an ADMIN only, a label of 1 to 200 characters, at most 500 cards, and a required `expiresAt` in
-the future. It writes the batch and its rows in one transaction. `liveCardsForPrinting` and
-`revokeJoinCards` beside it take an ADMIN too.
+the future. It writes the batch and its rows in one transaction. `liveCardsForPrinting`,
+`revokeJoinCards` and `revokeJoinCard` (one card by its row's id) beside it take an ADMIN too.
+**Each asks the actor's role and then its account row's**, since a session can be five minutes
+behind its account (`src/app/sign-in/NOTES.md`): a demoted ADMIN's open tab mints, prints and
+revokes nothing, as `requireCanMakePublic` refuses it a raise to `PUBLIC`. The rule is in the
+library, so it binds the table, the print route and the script alike.
 
 **The card sheet is one function returning a whole HTML document.** It lays out business cards
 of 3.5 × 2 inches, ten to a US Letter page in the common two-by-five label layout. Each card has:
@@ -808,7 +812,7 @@ and the quiet zone sits inside the SVG's box, so no card padding can eat it. The
 on one line, in 9.5-point bold monospace, which leaves a little room in its column; anything
 larger splits it over two lines.
 
-**Minting starts as a script, and an admin table follows:**
+**Minting is a script, or the admin table:**
 
 - `scripts/join-codes/mint.ts` mints a batch on behalf of a named ADMIN (`--admin <email>`),
   and writes the sheet to a directory outside the tree, `~/join-cards` unless `--out` says
@@ -819,18 +823,42 @@ larger splits it over two lines.
   day, UTC, or a date-time; `--host` defaults to `APP_URL`'s. It warns before printing when
   no `New Account Welcome` page is `SHARED` or `PUBLIC`. Its header has the usage.
   `scripts/join-codes/demo-sheet.ts` draws a sheet of fake cards under a fake secret, with no
-  database, for looking at the layout.
-- `/join-codes` is an admin table through the kit (`join-codes-query.ts`), one row per card,
-  gated with `signInPath`. Its columns are batch, serial, status, the pending email, and who
-  claimed the card and when. From it an ADMIN revokes a card, or a batch in bulk, and mints from
-  a form. The sheet is at `/join-codes/print?batch=…`, a Route Handler returning the document.
-  A page's gate doesn't cover a Route Handler, so it checks for an ADMIN itself, and it sends
-  `Cache-Control: no-store`. Status sorts through a view keyed 1:1 on `join_code.id`, as the
-  kit asks (CLAUDE.md, "Admin tables are one kit").
+  database, for looking at the layout. `--expires` and the table's mint form read a date
+  through one parser, `parseJoinExpiry` (`src/lib/join-codes/expiry.ts`).
+- **`/join-codes`** is an admin table through the kit (`src/lib/join-codes-query.ts`), one
+  row per card, ADMIN-only and gated with `signInPath`; `/dashboard` links to it
+  (docs/DASHBOARD.md, "Join cards"). Its columns are the batch's label, the card's number,
+  its status, a pending claim's email, and who claimed it and when; the sends, the last
+  delivered send, the batch's expiry and when it was minted are hidden by default. The newest
+  batch comes first, its cards in number order.
+  - **Status** is the `join_code_listing` view, keyed 1:1 on `join_code.id` (CLAUDE.md,
+    "Admin tables are one kit"): `unclaimed`, `pending`, `sends-used`, `claimed`, `expired`
+    or `revoked`, in the order `stateOf` decides what `/join/<code>` shows, with a live card
+    split by whether a claim waits on it. It sorts in that order, and filters by `?status=`.
+    The view writes the five-sends limit as a number, beside `MAX_CONFIRM_SENDS`, and
+    compares expiry with `now() AT TIME ZONE 'UTC'`, since the column holds UTC without a
+    zone.
+  - **`?batch=<id>`** narrows the table to one batch, picked from a list of every batch
+    with its claimed count and "expired, not revoked" or "revoked" beside it. A batch picked
+    shows its facts, its sheet and Revoke batch, which asks first. Minting from the form
+    (label, number of cards, and a date, read as the end of that day, UTC) picks the new
+    batch. The action answers with the batch's id and nothing else: no code reaches the
+    browser but in the sheet.
+  - **Revoke** is a row's button, or a selection's in bulk, on any card neither claimed nor
+    revoked, an expired one included, since revoking it drops its claim.
+  - **The sheet is at `/join-codes/print?batch=…`**, with `&line=…` for the line under the
+    title (at most 120 characters), opened in a tab of its own. It is a Route Handler returning
+    the document, its host `APP_URL`'s. A page's gate doesn't cover a Route Handler, so it
+    asks for an ADMIN itself, through `liveCardsForPrinting`; signed out, it sends the viewer
+    to sign in and back. It writes nothing, and sends `Cache-Control: no-store`,
+    `Referrer-Policy: no-referrer` and a CSP that allows its own inline style and nothing
+    else, since the document holds live codes.
+  - There is no MCP tool for any of it.
 
 **Revoking nulls any pending claim; expiry doesn't.** An expired batch's pending password hashes
 stay until the batch is revoked, so revoking a batch once its event is over is the clean-up.
-`--list` says "expired, not revoked" beside such a batch, and the table will too. A claimed
+`--list` says "expired, not revoked" beside such a batch, as do the table's batch list, its
+batch's facts and the dashboard's line. A claimed
 card is left as it is by a revoke: its account is managed on `/users`.
 
 ### Mail volume
@@ -854,8 +882,8 @@ shortly" is the answer, and a failed send costs the card nothing (step 3).
   printed, and a lost card is revoked alone.
 - **A random code kept only as a hash**, as `password_reset_token` keeps one, reprinted from a
   file written at minting. That file is then a store of live codes that has to be kept, where a
-  derived code's sheet can be deleted once printed and written again from the database. PR 5's
-  print route also needs the derivation.
+  derived code's sheet can be deleted once printed and written again from the database. The
+  print route needs the derivation too.
 - **Recording when a card is first opened.** It would be a write on every GET, a reader app's
   prefetch included, for one column in the admin table.
 - **A raw code at rest**, as `user_invite.token` keeps one (§5). A backup would then hold codes
@@ -945,10 +973,15 @@ case (below). It was:
    - docs/TEST_DATA.md and e2e/README.md, for the mint script and the spec's fixture;
    - CLAUDE.md's row for this file, and PLAN.md §37.
 
-**PR 5: `/join-codes`**, meaning the table, revoking, the mint form and the print route. It
-also brings their PERMISSIONS.md rows, a link in the header's admin menu and on
-docs/DASHBOARD.md's list, and the table and its view in CLAUDE.md's admin-table invariant. It
-is a PR of its own so that PR 4 can be used at an event without it.
+**PR 5: `/join-codes`**, meaning the table, revoking, the mint form and the print route, with
+their PERMISSIONS.md rows, the dashboard's line (docs/DASHBOARD.md), and the table and its view
+in CLAUDE.md's admin-table invariant. Built 2026-11-18. A PR of its own so that PR 4 can be used
+at an event without it. Checking its plan against the code found what "Minting and printing"
+now says: the ADMIN gate asked of the account row as well as the session, in the library; the
+view's clock in UTC; a revoke by the card's id, which the script never needed; one expiry
+parser for the script and the form; and the way in, which is the dashboard's line beside Email
+collisions, since the header has no admin menu. It deploys with one migration, the view, and
+nothing to run.
 
 ### Testing
 
@@ -992,6 +1025,12 @@ is a PR of its own so that PR 4 can be used at an event without it.
      AUTHOR and withholds it from a COMMENTER, shows it to both once `PUBLIC`, and an AUTHOR on
      a commons page's byline can't rename it to the held name. The test is skipped on an
      instance with its own page, which it won't change.
+  6. **`/join-codes`**, as an ADMIN: mint a batch from the form and see its cards listed;
+     print its sheet and read each card's code from it; revoke one card from its row, see its
+     `/join/<code>` refuse it and the sheet leave it out; revoke another by selection; revoke
+     the batch, and see a pending claim's columns nulled and the sheet refused. The status
+     column agrees with what `/join/<code>` shows for each state, and filters by it. An EDITOR
+     is refused the page and the sheet, and a signed-out viewer is sent to sign in from both.
 - **Emails ignore case**, in the same file: `/sign-up` stores an email trimmed and refuses it
   in another case, a reset requested in another case makes the account's token, and the
   account signs in with its email in another case. No spec covered `/sign-up` before.

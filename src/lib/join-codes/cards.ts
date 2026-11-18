@@ -34,7 +34,10 @@ import { joinKey } from "./key";
 /** What every card makes: a constant, so no field in any form names a role. */
 export const CARD_ROLE: Role = "AUTHOR";
 
-/** Delivered sends a card has before it says to ask for another. */
+/**
+ * Delivered sends a card has before it says to ask for another. The
+ * `join_code_listing` view, /join-codes' status, writes the same number.
+ */
 export const MAX_CONFIRM_SENDS = 5;
 /** The least time between two delivered sends for one card (docs/EMAIL.md §3's shape). */
 export const RESEND_COOLDOWN_MS = 60 * 1000;
@@ -389,8 +392,21 @@ class NoClaim extends Error {}
 
 // ─── Minting, printing and revoking ────────────────────────────────────────
 
-function requireAdmin(actor: Actor): void {
-  if (!isAdmin(actor.role)) throw forbidden("Only an ADMIN mints, prints or revokes join cards.");
+const ADMINS_ONLY = "Only an ADMIN mints, prints or revokes join cards.";
+
+/**
+ * The actor's role, and then its row's: a session can be five minutes behind
+ * its account (src/app/sign-in/NOTES.md), and a demoted ADMIN's open tab
+ * should mint nothing, as requireCanMakePublic refuses a raise to PUBLIC
+ * (src/lib/wiki-claim.ts). The filtered client: a deleted account does
+ * nothing.
+ */
+async function requireAdmin(actor: Actor): Promise<void> {
+  if (isAdmin(actor.role)) {
+    const row = await prisma.user.findFirst({ where: { id: actor.userId }, select: { role: true } });
+    if (row && isAdmin(row.role)) return;
+  }
+  throw forbidden(ADMINS_ONLY);
 }
 
 export type MintInput = { label: string; count: number; expiresAt: Date };
@@ -404,7 +420,7 @@ export async function mintJoinBatch(
   actor: Actor,
   input: MintInput,
 ): Promise<{ batchId: string; cards: { serial: number; code: string }[] }> {
-  requireAdmin(actor);
+  await requireAdmin(actor);
   const label = input.label.trim();
   if (!label || label.length > 200) throw invalid("A batch needs a label of 1 to 200 characters.");
   if (!Number.isInteger(input.count) || input.count < 1 || input.count > MAX_BATCH_CARDS) {
@@ -439,7 +455,7 @@ export async function liveCardsForPrinting(
   actor: Actor,
   batchId: string,
 ): Promise<{ label: string; cards: { serial: number; code: string }[] }> {
-  requireAdmin(actor);
+  await requireAdmin(actor);
   const batch = await prisma.joinBatch.findUnique({
     where: { id: batchId },
     select: { label: true, revokedAt: true, expiresAt: true, codes: { select: { serial: true, codeHash: true, revokedAt: true, claimedAt: true }, orderBy: { serial: "asc" } } },
@@ -474,7 +490,7 @@ const NO_CLAIM = {
  * cards it ended.
  */
 export async function revokeJoinCards(actor: Actor, batchId: string, serial?: number): Promise<number> {
-  requireAdmin(actor);
+  await requireAdmin(actor);
   const now = new Date();
   return prisma.$transaction(async (tx) => {
     const batch = await tx.joinBatch.findUnique({ where: { id: batchId }, select: { id: true } });
@@ -486,10 +502,29 @@ export async function revokeJoinCards(actor: Actor, batchId: string, serial?: nu
     }
     const card = await tx.joinCode.findUnique({ where: { batchId_serial: { batchId, serial } }, select: { id: true } });
     if (!card) throw invalid(`The batch has no card ${serial}.`);
-    const ended = await tx.joinCode.updateMany({
-      where: { id: card.id, claimedAt: null, revokedAt: null },
-      data: { revokedAt: now, ...NO_CLAIM },
-    });
-    return ended.count;
+    return revokeCard(tx, card.id, now);
   });
+}
+
+/**
+ * One card by its row's id, as /join-codes names it. Returns 1 when it ended
+ * the card, and 0 when the card was already claimed or revoked.
+ */
+export async function revokeJoinCard(actor: Actor, cardId: string): Promise<number> {
+  await requireAdmin(actor);
+  return prisma.$transaction(async (tx) => {
+    const card = await tx.joinCode.findUnique({ where: { id: cardId }, select: { id: true } });
+    if (!card) throw invalid("No such card.");
+    return revokeCard(tx, card.id, new Date());
+  });
+}
+
+type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+async function revokeCard(tx: Tx, cardId: string, now: Date): Promise<number> {
+  const ended = await tx.joinCode.updateMany({
+    where: { id: cardId, claimedAt: null, revokedAt: null },
+    data: { revokedAt: now, ...NO_CLAIM },
+  });
+  return ended.count;
 }

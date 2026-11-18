@@ -23,6 +23,7 @@ const TABLE_LABELS: Record<AdminTableName, string> = {
   references: "/references",
   wiki: "/wiki/special/pages",
   "email-collisions": "/email-collisions",
+  "join-codes": "/join-codes",
 };
 
 // One entry per exported constant in site-config.ts (see PLAN.md §6 for how
