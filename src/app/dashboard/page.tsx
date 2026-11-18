@@ -119,7 +119,7 @@ export default async function DashboardPage() {
       <SessionRefresh />
       <h1>Dashboard</h1>
       <p>
-        Signed in as {session.user.email} ({session.user.role})
+        Signed in as {session.user.email} ({session.user.role}) · <Link href="/welcome">Welcome</Link>
       </p>
       {waitingCollisions !== null && (
         <p>

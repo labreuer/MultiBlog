@@ -191,7 +191,7 @@ read as `SHARED`, but where these say otherwise. Two namespaces: a person's,
 | Rename within the namespace, revert, or delete a past address | its byline | its byline, plus ADMIN and EDITOR |
 | Move to another namespace, or out of the wiki | `x` alone: into the commons as an ADMIN or EDITOR, or out | an ADMIN or EDITOR on its byline: into their own namespace, or out |
 | Delete or restore | `x` alone | its byline, plus ADMIN and EDITOR |
-| Claim a held commons name (`Front Page`, `About`), creating, renaming or restoring | — (a person's namespace holds none) | ADMIN or EDITOR |
+| Claim a held commons name (`Front Page`, `About`, `New Account Welcome`), creating, renaming or restoring | — (a person's namespace holds none) | ADMIN or EDITOR |
 | Listed in `/docs` | never: the wiki table, `/wiki/special/pages`, lists wiki pages | never |
 
 - **`x`'s powers are judged by their account as it is now**: raising, deleting, restoring,
@@ -232,8 +232,16 @@ read as `SHARED`, but where these say otherwise. Two namespaces: a person's,
 | `/users`, `/users/[id]/slug` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `/email-collisions` (read, mark reviewed) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `/ydoc-debug`, `/api/ydoc/*` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| `/dashboard` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `/dashboard`, `/welcome` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Read a published post, submit a comment | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Mint, print or revoke join cards (`scripts/join-codes/mint.ts`) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Use a join card (`/join/<code>`, `/join/confirm`) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+**A join card is used signed out, or not at all** (docs/EMAIL.md §10): it makes a new AUTHOR
+account and never changes an existing one, so a viewer with a session gets no form and its
+POST refuses them. **`/welcome` shows the commons page `New Account Welcome` under the wiki
+read rule for its viewer**, so a `SHARED` page reaches AUTHOR and AUTHORIZED accounts and a
+`PUBLIC` one every account.
 
 Two of these are worth not mistaking for doc rules. **Creating a doc** is `canManageDocs`
 with no doc to scope against yet, so it sits outside all four tables. **Forking a doc** is

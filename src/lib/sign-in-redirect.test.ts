@@ -54,6 +54,9 @@ test("safeCallbackUrl rejects pages that can't be a post-sign-in destination", (
   assert.equal(safeCallbackUrl("/sign-up"), null);
   assert.equal(safeCallbackUrl("/forgot-password"), null);
   assert.equal(safeCallbackUrl("/reset-password?token=abc"), null);
+  assert.equal(safeCallbackUrl("/join"), null);
+  assert.equal(safeCallbackUrl("/join/K7Q4M2XD9PFA3HTN"), null);
+  assert.equal(safeCallbackUrl("/join/confirm?token=abc"), null);
   assert.equal(safeCallbackUrl("/api/auth/signout"), null);
   // A longer sibling is a different page and stays allowed.
   assert.equal(safeCallbackUrl("/sign-in-help"), "/sign-in-help");

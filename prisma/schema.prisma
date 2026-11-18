@@ -120,6 +120,13 @@ enum Agent {
   @@map("agent")
 }
 
+// `email` is stored trimmed, as typed, and its `@unique` compares case; a
+// hand-written unique index on `lower(email)` (`user_email_lower_key`), which
+// Prisma has no DSL for, keeps two accounts from holding one email in two
+// cases, deleted accounts included. Every lookup of an account by an email a
+// person typed is raw `lower(email) = lower($1)` (src/lib/accounts.ts), never
+// Prisma's `mode: "insensitive"`, whose `ILIKE` reads `_` and `%` as
+// wildcards. docs/EMAIL.md §10.
 model User {
   id               String           @id @default(cuid())
   email            String           @unique
@@ -224,6 +231,8 @@ model User {
   mentions               Mention[]
   emailCollisions        EmailCollision[]         @relation("EmailCollisionAccount")
   collisionsReviewed     EmailCollision[]         @relation("EmailCollisionReviewer")
+  joinBatchesCreated     JoinBatch[]              @relation("JoinBatchCreator")
+  joinCodeClaimed        JoinCode?                @relation("JoinCodeClaimant")
 
   @@index([worksForUserId])
   @@map("user")
@@ -376,6 +385,56 @@ model UserInvite {
 
   @@index([userId, sentAt])
   @@map("user_invite")
+}
+
+// docs/EMAIL.md §10 — a batch of one-off join cards, minted by an ADMIN. A
+// batch has no role and no trust switch: every card makes a trusted AUTHOR.
+model JoinBatch {
+  id          String    @id @default(cuid())
+  label       String // the ADMIN's; no card holder sees it
+  expiresAt   DateTime  @map("expires_at")
+  createdById String    @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  revokedAt   DateTime? @map("revoked_at")
+
+  createdBy User       @relation("JoinBatchCreator", fields: [createdById], references: [id])
+  codes     JoinCode[]
+
+  @@map("join_batch")
+}
+
+// docs/EMAIL.md §10, "The data" — one row per card, made at minting. The
+// card's code is derived from the batch id and serial under a key from
+// AUTH_SECRET, never stored; `code_hash` finds the row, and a lookup then
+// re-derives the code and compares (src/lib/join-codes/). Hand-written CHECKs
+// keep the four pending columns all set or all null, and null on a claimed
+// card.
+model JoinCode {
+  id        String    @id @default(cuid())
+  batchId   String    @map("batch_id")
+  serial    Int // printed small on the card
+  codeHash  String    @unique @map("code_hash")
+  revokedAt DateTime? @map("revoked_at")
+
+  // The pending claim: one at a time, replaced by the next.
+  pendingEmail        String?   @map("pending_email")
+  pendingName         String?   @map("pending_name")
+  pendingPasswordHash String?   @map("pending_password_hash")
+  pendingIpAddress    String?   @map("pending_ip_address") // the claim's, for the collision log
+  confirmTokenHash    String?   @unique @map("confirm_token_hash")
+  confirmSentAt       DateTime? @map("confirm_sent_at") // the last *delivered* send
+  confirmSends        Int       @default(0) @map("confirm_sends")
+  confirmFailures     Int       @default(0) @map("confirm_failures") // wrong passwords at Confirm
+
+  claimedAt     DateTime? @map("claimed_at")
+  claimedUserId String?   @unique @map("claimed_user_id")
+
+  batch           JoinBatch        @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  claimedUser     User?            @relation("JoinCodeClaimant", fields: [claimedUserId], references: [id], onDelete: SetNull)
+  emailCollisions EmailCollision[]
+
+  @@unique([batchId, serial])
+  @@map("join_code")
 }
 
 // PLAN.md §15 — a post is an immutable snapshot of a Doc at one point in that
@@ -599,6 +658,11 @@ model Commenter {
   displayName   String  @map("display_name")
   approvedCount Int     @default(0) @map("approved_count")
   forceModerate Boolean @default(false) @map("force_moderate")
+  // Publishes a comment as reaching `trust_threshold` does, below
+  // `force_moderate` (src/lib/moderation.ts). Set on the row a join card's
+  // account is given at confirmation (docs/EMAIL.md §10, "Trusted
+  // commenters"); no UI sets it.
+  trusted       Boolean @default(false)
 
   user            User?            @relation(fields: [userId], references: [id])
   comments        Comment[]
@@ -616,29 +680,33 @@ model Commenter {
 // `INSERT … ON CONFLICT` targets. ADMIN-only: it holds emails and IP
 // addresses.
 model EmailCollision {
-  id            String               @id @default(cuid())
-  source        EmailCollisionSource
-  email         String // as the request gave it
-  userId        String?              @map("user_id") // the account with the email, or given it
-  commenterId   String?              @map("commenter_id") // the anonymous identity with the email
-  postId        String?              @map("post_id") // the last post a comment was tried on
-  lastIpAddress String?              @map("last_ip_address")
-  ipAddresses   String[]             @default([]) @map("ip_addresses") // the requests', distinct, at most 20
-  count         Int                  @default(1)
-  firstSeenAt   DateTime             @default(now()) @map("first_seen_at")
-  lastSeenAt    DateTime             @default(now()) @map("last_seen_at")
-  reviewedAt    DateTime?            @map("reviewed_at")
-  reviewedById  String?              @map("reviewed_by_id")
+  id             String               @id @default(cuid())
+  source         EmailCollisionSource
+  email          String // as the request gave it
+  userId         String?              @map("user_id") // the account with the email, or given it
+  commenterId    String?              @map("commenter_id") // the anonymous identity with the email
+  postId         String?              @map("post_id") // the last post a comment was tried on
+  joinCodeId     String?              @map("join_code_id") // the card a claim or confirmation used
+  claimIpAddress String?              @map("claim_ip_address") // a confirmation's claim's
+  lastIpAddress  String?              @map("last_ip_address")
+  ipAddresses    String[]             @default([]) @map("ip_addresses") // the requests', distinct, at most 20
+  count          Int                  @default(1)
+  firstSeenAt    DateTime             @default(now()) @map("first_seen_at")
+  lastSeenAt     DateTime             @default(now()) @map("last_seen_at")
+  reviewedAt     DateTime?            @map("reviewed_at")
+  reviewedById   String?              @map("reviewed_by_id")
 
   user       User?                  @relation("EmailCollisionAccount", fields: [userId], references: [id], onDelete: SetNull)
   commenter  Commenter?             @relation(fields: [commenterId], references: [id], onDelete: SetNull)
   post       Post?                  @relation(fields: [postId], references: [id], onDelete: SetNull)
+  joinCode   JoinCode?              @relation(fields: [joinCodeId], references: [id], onDelete: SetNull)
   reviewedBy User?                  @relation("EmailCollisionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
   listing    EmailCollisionListing?
 
   @@index([userId])
   @@index([commenterId])
   @@index([postId])
+  @@index([joinCodeId])
   @@map("email_collision")
 }
 
@@ -646,6 +714,8 @@ enum EmailCollisionSource {
   SIGNED_OUT_COMMENT
   SIGNED_IN_COMMENT
   EXISTING
+  CARD_CLAIM
+  CARD_CONFIRM
 
   @@map("email_collision_source")
 }

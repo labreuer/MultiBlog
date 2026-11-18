@@ -96,6 +96,15 @@ instance. Each says in its header what it writes and why a second run is safe.
   email a live account has as an `EXISTING` row of the email-collision log (docs/COMMENTS.md,
   "The log"). `--dry-run` lists without writing. A rerun adds only what is new.
 
+## Join cards
+
+- **`scripts/join-codes/mint.ts`** — mints, prints again, revokes and lists batches of join
+  cards as a named ADMIN (docs/EMAIL.md §10, "Minting and printing"). Real cards for a real
+  instance, not test data: the sheet it writes holds live codes, outside the tree, and is
+  deleted once printed.
+- **`scripts/join-codes/demo-sheet.ts`** — a sheet of fake cards under a fake secret, with no
+  database, for looking at the layout.
+
 ## The e2e suite needs none of this
 
 Its fixtures create and clean up their own rows (`e2e/db-worker.ts`, same `@example.com`

@@ -820,7 +820,8 @@ on any doc's.
 
 **Some commons names are held for ADMIN and EDITOR.** `src/lib/wiki-address.ts` keeps the list,
 `HELD_COMMONS_NAMES`: `Front Page`, whose page is the landing page's preamble ("The front
-page"), and `About`, which nothing reads yet. A claim of a commons address with one of those
+page"), `About`, which nothing reads yet, and `New Account Welcome`, whose page `/welcome` shows
+every account (docs/EMAIL.md §10, "The welcome page"). A claim of a commons address with one of those
 names, whatever its variant, needs an ADMIN or EDITOR.
 
 - **The check is in the claim** (`src/lib/wiki-claim.ts`), so creating, forking, moving in,
@@ -831,12 +832,14 @@ names, whatever its variant, needs an ADMIN or EDITOR.
   moving into it are an ADMIN's or EDITOR's already, but a commons page's byline may rename and
   restore it, and an AUTHOR can be on one. Without the list, an AUTHOR on any commons page's
   byline could rename it `Front Page` while that name was free, raise it to `PUBLIC`, and put
-  its text on `/`.
+  its text on `/`; or rename it `New Account Welcome` and greet every new account with it,
+  which needs no raise at all, since `/welcome` shows a `SHARED` page to every AUTHOR.
 - **A page that holds such a name is its byline's as any commons page is**, to edit, lower,
   rename away and delete: an ADMIN or EDITOR gave it the name, and chose its byline.
 - **A person's namespace holds none**: `/wiki/@x/About` is x's.
 - **The refusal says the name is kept for editors.** The list is a constant, not a setting, and
-  `getFrontPagePreamble` takes its name from it.
+  `getFrontPagePreamble` and `/welcome` take their names from it (`FRONT_PAGE_NAME`,
+  `WELCOME_PAGE_NAME`, typed as members of it), through one lookup, `heldCommonsPageBody`.
 
 **A person's page has no ADMIN/EDITOR bypass.** `canEditAnySharedDoc` lets ADMIN and EDITOR edit
 any `SHARED` doc whatever its byline. Under `/wiki/@x/` that would put other people's words under
@@ -2127,7 +2130,7 @@ Made on 2026-11-18, after the plan's review:
 
 - **A wiki page forks as a doc too** ("Forking into the wiki"): no refusal keeps a page's text
   out of a doc or a post.
-- **Some commons names are an ADMIN's or EDITOR's to claim**: `Front Page` and `About`
+- **Some commons names are an ADMIN's or EDITOR's to claim**: `Front Page`, `About` and `New Account Welcome`
   ("Permissions").
 - **The MCP tools take a page's address** from PR 2, and nothing more of the wiki yet ("URLs").
 - **The public render is uncached**, with a TODO.md entry ("Public pages").

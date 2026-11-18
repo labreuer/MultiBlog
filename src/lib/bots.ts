@@ -7,6 +7,7 @@ import { colorForSeed } from "@/lib/author-colors";
 import { displayNameOf } from "@/lib/display-name";
 import { isUserSlugFree, uniqueUserSlug } from "@/lib/user-slug";
 import { deriveInitials } from "@/lib/user-initials";
+import { anyAccountIdWithEmail } from "@/lib/accounts";
 import { Prisma } from "@/generated/prisma/client";
 import { Role, type Agent } from "@/generated/prisma/enums";
 import type { Actor } from "@/lib/actor";
@@ -140,8 +141,9 @@ export async function createBot(
   const slug = await uniqueUserSlug(name, `bot@${BOT_EMAIL_DOMAIN}`);
   const email = input.email ?? `${slug}@${BOT_EMAIL_DOMAIN}`;
   // The slug is free, so this is taken only by an account whose address
-  // doesn't follow its slug; the unique index would refuse it anyway.
-  if (await prismaIncludingDeleted.user.findUnique({ where: { email }, select: { id: true } })) {
+  // doesn't follow its slug. Compared without case, as the `lower(email)`
+  // index compares (src/lib/accounts.ts), which would refuse it anyway.
+  if (await anyAccountIdWithEmail(email)) {
     throw new ApiError("conflict", `An account already has the address ${email}.`);
   }
   const user = await withAgentIndex(held, () =>
@@ -178,7 +180,7 @@ async function agentBotIdentity(personSlug: string, agent: Agent): Promise<{ slu
     const slug = suffix === 1 ? base : `${base}-${suffix}`;
     const email = `${slug}@${BOT_EMAIL_DOMAIN}`;
     if (!(await isUserSlugFree(slug))) continue;
-    if (await prismaIncludingDeleted.user.findUnique({ where: { email }, select: { id: true } })) continue;
+    if (await anyAccountIdWithEmail(email)) continue;
     return { slug, email };
   }
 }

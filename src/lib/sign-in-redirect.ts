@@ -33,15 +33,18 @@ export const CALLBACK_URL_PARAM = "callbackUrl";
 /**
  * Paths that must never become a callbackUrl, because arriving at them
  * *after* signing in is either a loop or nonsense. `/sign-in` is the loop;
- * `/sign-up`, `/forgot-password` and `/reset-password` are the pages someone
- * may have been on immediately before, which matters for `SiteHeader`'s link
- * (it builds its callbackUrl from wherever the reader currently is).
+ * `/sign-up`, `/forgot-password`, `/reset-password` and `/join` are the pages
+ * someone may have been on immediately before, which matters for
+ * `SiteHeader`'s link (it builds its callbackUrl from wherever the reader
+ * currently is). A card's page offers a signed-in viewer nothing, and its
+ * path holds the card's code, which a callbackUrl would carry on.
  */
 const NON_DESTINATIONS = [
   "/sign-in",
   "/sign-up",
   "/forgot-password",
   "/reset-password",
+  "/join",
   "/api/",
 ];
 

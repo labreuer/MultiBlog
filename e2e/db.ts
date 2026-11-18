@@ -527,3 +527,17 @@ export const getUploadFacts = (...args: Parameters<DbHandlers["getUploadFacts"]>
 export const setTestFileOwners = (...args: Parameters<DbHandlers["setTestFileOwners"]>) => call("setTestFileOwners", ...args);
 export const getFileSlugFacts = (...args: Parameters<DbHandlers["getFileSlugFacts"]>) => call("getFileSlugFacts", ...args);
 export const setTestDocForkedFrom = (...args: Parameters<DbHandlers["setTestDocForkedFrom"]>) => call("setTestDocForkedFrom", ...args);
+
+// Join cards (docs/EMAIL.md §10).
+export const mintTestJoinBatch = (...args: Parameters<DbHandlers["mintTestJoinBatch"]>) => call("mintTestJoinBatch", ...args);
+export const deleteTestJoinBatch = (...args: Parameters<DbHandlers["deleteTestJoinBatch"]>) => call("deleteTestJoinBatch", ...args);
+export const getTestJoinCode = (...args: Parameters<DbHandlers["getTestJoinCode"]>) => call("getTestJoinCode", ...args);
+export const setTestJoinClaimToken = (...args: Parameters<DbHandlers["setTestJoinClaimToken"]>) =>
+  call("setTestJoinClaimToken", ...args);
+export const ageTestJoinSend = (...args: Parameters<DbHandlers["ageTestJoinSend"]>) => call("ageTestJoinSend", ...args);
+export const setTestJoinState = (...args: Parameters<DbHandlers["setTestJoinState"]>) => call("setTestJoinState", ...args);
+export const getTestJoinAccount = (...args: Parameters<DbHandlers["getTestJoinAccount"]>) => call("getTestJoinAccount", ...args);
+export const ensureTestWelcomePage = (...args: Parameters<DbHandlers["ensureTestWelcomePage"]>) =>
+  call("ensureTestWelcomePage", ...args);
+export const welcomeTextFor = (...args: Parameters<DbHandlers["welcomeTextFor"]>) => call("welcomeTextFor", ...args);
+export const hasTestResetToken = (...args: Parameters<DbHandlers["hasTestResetToken"]>) => call("hasTestResetToken", ...args);

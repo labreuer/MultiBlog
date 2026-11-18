@@ -34,6 +34,7 @@ function buildFilterWhere(filters: EmailCollisionsFilters): Prisma.EmailCollisio
     where.OR = [
       { email: contains },
       { lastIpAddress: contains },
+      { claimIpAddress: contains },
       { ipAddresses: { has: filters.q } },
       { user: { email: contains } },
       { user: { name: contains } },
@@ -46,7 +47,7 @@ function buildFilterWhere(filters: EmailCollisionsFilters): Prisma.EmailCollisio
 
 function buildOrderBy(sort: SortColumn<EmailCollisionsSortKey>[]): Prisma.EmailCollisionOrderByWithRelationInput[] {
   const nulls = (dir: "asc" | "desc") => (dir === "asc" ? "first" : "last");
-  return sort.map(({ key, dir }): Prisma.EmailCollisionOrderByWithRelationInput => {
+  return sort.flatMap(({ key, dir }): Prisma.EmailCollisionOrderByWithRelationInput | Prisma.EmailCollisionOrderByWithRelationInput[] => {
     switch (key) {
       case "lastSeen":
         return { lastSeenAt: dir };
@@ -72,6 +73,10 @@ function buildOrderBy(sort: SortColumn<EmailCollisionsSortKey>[]): Prisma.EmailC
         return { listing: { anonymousIps: { sort: dir, nulls: "last" } } };
       case "accountIps":
         return { listing: { accountIps: { sort: dir, nulls: "last" } } };
+      case "card":
+        return [{ joinCode: { batch: { label: dir } } }, { joinCode: { serial: dir } }];
+      case "claimIp":
+        return { claimIpAddress: { sort: dir, nulls: "last" } };
       case "reviewedAt":
         return { reviewedAt: { sort: dir, nulls: nulls(dir) } };
       case "reviewedBy":
@@ -117,6 +122,7 @@ export default async function EmailCollisionsPage({
         user: { select: { id: true, name: true, email: true, deletedByUserId: true } },
         commenter: { select: { id: true, displayName: true, email: true } },
         post: { select: { id: true, title: true } },
+        joinCode: { select: { serial: true, batch: { select: { label: true } } } },
         reviewedBy: { select: { name: true, email: true } },
         listing: true,
       },
@@ -144,6 +150,8 @@ export default async function EmailCollisionsPage({
     anonymousIps: row.listing?.anonymousIps ?? "",
     accountIps: row.listing?.accountIps ?? "",
     post: row.post ? { id: row.post.id, title: row.post.title } : null,
+    card: row.joinCode ? { batchLabel: row.joinCode.batch.label, serial: row.joinCode.serial } : null,
+    claimIp: row.claimIpAddress ?? "",
     reviewedAt: row.reviewedAt,
     reviewedByName: row.reviewedBy ? staffDisplayNameOf(row.reviewedBy, session.user.role) : "",
   }));

@@ -14,22 +14,9 @@ import { prisma } from "@/lib/prisma";
 
 const isUniqueViolation = (err: unknown) => (err as { code?: unknown } | null)?.code === "P2002";
 
-/**
- * The live account whose email this is, in any case. Raw SQL on purpose:
- * Prisma's `mode: "insensitive"` compiles to an unescaped `ILIKE`, where `_`
- * and `%` are wildcards, so `a_b@example.com` would match `axb@example.com`;
- * and a raw query skips prisma.ts's soft-delete extension, so the
- * `deleted_by_user_id IS NULL` is written here rather than assumed.
- */
-export async function liveAccountIdWithEmail(email: string): Promise<string | null> {
-  const rows = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
-    SELECT id FROM "user"
-    WHERE lower(email) = lower(${email}) AND deleted_by_user_id IS NULL
-    ORDER BY created_at, id
-    LIMIT 1
-  `);
-  return rows[0]?.id ?? null;
-}
+// The live account whose email this is, in any case, is
+// `liveAccountIdWithEmail` in src/lib/accounts.ts, which sign-in and password
+// reset find their account with too.
 
 /**
  * The anonymous identity holding this email, in any case. The signed-out path
