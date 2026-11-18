@@ -21,7 +21,11 @@ export const FRONT_PAGE_DOC_TITLE = "FRONT PAGE";
 // the title is never read.
 export async function getFrontPagePreamble(): Promise<JSONContent | null> {
   const doc = await prisma.doc.findFirst({
-    where: { title: { equals: FRONT_PAGE_DOC_TITLE, mode: "insensitive" } },
+    // No wiki page: Doc.title mirrors a page's name, so every page named
+    // `Front Page`, a PRIVATE one in a person's namespace included, is a doc
+    // titled so. docs/WIKI.md "The front page" replaces this rule with the
+    // commons' PUBLIC `Front Page`; until then a wiki page is passed over.
+    where: { title: { equals: FRONT_PAGE_DOC_TITLE, mode: "insensitive" }, wikiName: null },
     orderBy: { createdAt: "asc" },
     select: { proseJson: true, chipStyles: true },
   });
