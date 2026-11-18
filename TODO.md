@@ -734,6 +734,28 @@ the spec. The race itself is still there, on every surface that mounts `DocReadi
 - Worth an upstream report: `runRemainingActions` should advance the queue only when the
   action that finished is the one at its head.
 
+## `e2e/moderation.spec.ts` can load the post page before the action has revalidated it
+
+**Status:** seen once, 2026-11-18, in a full production run: "a pending comment is hidden until
+an admin approves it" failed on its last assertion, the approved comment missing from the post
+page. Alone it passed 5 times in 5, and it passed in the next full run. The fault is in the
+test's timing, not in moderation.
+
+- **Mechanism:** the test clicks Approve, polls the database until the comment is `APPROVED`,
+  then opens the post page with a plain `goto`. `moderateComment`
+  (`src/app/actions/comments.ts`) writes the status in `moderateOne` and only then calls
+  `revalidateTouchedPosts`. A `goto` that lands between the two is answered from the ISR cache,
+  with the page from before the approval; the failed run's trace shows that response as a cache
+  `HIT`. The navigation also cancels the browser's wait on the action's POST, so nothing in the
+  page shows the action had not finished.
+- **Who else has the shape:** "marking a comment as spam hides it again", in the same file,
+  polls and navigates the same way. Its stale page would show a comment that should be gone.
+- **The fix is in the spec:** wait for the action itself before navigating, not for its
+  database write. Either await the action's POST (`page.waitForResponse`) around the click, or
+  assert on what `/comments` shows once the action has answered. Keep the `goto`s plain: that
+  `moderateComment` revalidates the post page is what the two tests are for, so `freshGoto`
+  would pass a moderation that revalidates nothing.
+
 ## The diff page's workers have not run on the oldest engines in the baseline
 
 **Status:** the worker that compares runs in Safari 27.2 and on an iPhone on iOS 18.6.2
