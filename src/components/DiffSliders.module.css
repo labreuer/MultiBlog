@@ -1,0 +1,58 @@
+/* The diff page's sliders (docs/FORKS.md, "Sliders on the diff page"): one
+   bar fixed to the bottom of the window, as the doc page's scrub bar is, so a
+   slider is in reach while its reader looks at any row.
+
+   The inner box is the diff page's own container (DiffView.module.css): the same
+   width, gutters, two columns and gap, so each half sits under its side's
+   column. */
+.bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--background);
+  border-top: 1px solid var(--border);
+  padding: 0.5rem 0;
+  z-index: 10;
+  font-family: sans-serif;
+}
+
+.inner {
+  width: calc(1600px + 1rem + 3rem);
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 1rem;
+  /* A half's line comes and goes below its slider, which stays where it is. */
+  align-items: start;
+}
+
+.half {
+  min-width: 0;
+}
+
+.line {
+  min-height: 1.2em;
+  margin-top: 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.slider {
+  width: 100%;
+  display: block;
+  margin: 0;
+}
+
+/* Nothing fetched yet, so nothing about this slider's position means anything. */
+.grayed {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+
+.error {
+  color: var(--error);
+  font-size: 0.85rem;
+}

@@ -5,7 +5,7 @@
    line breaks in it, which pre-wrap keeps.
 
    The page's headers sit in a grid of the same two columns and the same gap
-   (page.module.css), which is what lines them up with these. */
+   (DiffView.module.css), which is what lines them up with these. */
 .grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
