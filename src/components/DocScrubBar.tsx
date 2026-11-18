@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import type { JSONContent } from "@tiptap/react";
 import { titleTextFromJSON } from "@/lib/ydoc-render";
 import { docTitleOrFallback } from "@/lib/doc-title";
-import { useReplayScrub, type ReplayPayload } from "./YdocDebug";
+import { useReplayScrub } from "./YdocDebug";
+import type { ReplayPayload } from "@/lib/replay-log";
 import { useRegisterDocScrubPosition, useRegisterDocScrubSeek, type ScrubPosition } from "./DocScrubContext";
 import { SCRUB_URL_DEBOUNCE_MS, replaceScrubParam } from "@/lib/scrub-url";
 import { diffPath, type DiffSide } from "@/lib/diff-side";
