@@ -100,7 +100,10 @@ test("avatar cropper: previews the picked file, positions it, and uploads the cr
     expect(Math.round(shown.h)).toBe(Math.round((220 * SOURCE_H) / SOURCE_W));
 
     // Drag upward: the offset should move and then clamp at the bound rather
-    // than letting an edge inside the circle.
+    // than letting an edge inside the circle. Scrolled into view first: the
+    // mouse acts at viewport coordinates, and a frame whose middle is below
+    // the fold (anything added above the card pushes it there) takes no drag.
+    await frame.scrollIntoViewIfNeeded();
     const box = (await frame.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
