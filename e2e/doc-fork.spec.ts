@@ -495,6 +495,8 @@ test.describe("the fork-point exception (docs/FORKS.md \"Who may see a doc's his
       const island = await done(page);
       await expect(island.locator('[data-kind="added"] [data-side="new"]')).toHaveText(SECOND);
       await expect(island.locator('[data-kind="deleted"], [data-kind="changed"]')).toHaveCount(0);
+      // No slider on either side: the exception is this one version, not the parent's history.
+      await expect(page.locator('[data-kind="diff-sliders"]')).toHaveCount(0);
       // The header links to the parent as it is now: its reading view honours ?at= for its editors alone.
       await expect(page.locator("main").getByRole("link", { name: parent.title }).first()).toHaveAttribute("href", `/doc/${parent.slug}`);
 
@@ -506,6 +508,21 @@ test.describe("the fork-point exception (docs/FORKS.md \"Who may see a doc's his
       }
       // The exception is for diffs alone: not the parent's replay, nor forking it at a version.
       expect((await page.request.get(`/api/doc/${parent.id}/replay`)).status()).toBe(403);
+      // Nor its index, nor a slider on its side of a diff: the exception is one version.
+      expect((await page.request.get(`/api/doc/${parent.id}/versions`)).status()).toBe(403);
+      // Against the fork, whose history is the forker's, the fork's side has a slider and the parent's none.
+      await gotoOk(page, `/diff/${parent.id}@${point}/${fork.id}`);
+      await done(page);
+      const sliders = page.locator('[data-kind="diff-sliders"]');
+      await expect(sliders.locator('[data-side="right"] input')).toHaveCount(1);
+      await expect(sliders.locator('[data-side="left"] input')).toHaveCount(0);
+      // The route a slider asks says the same of the two sides, and not which update the parent is at now.
+      const pair = (await (await page.request.get(`/api/diff/${parent.id}/${fork.id}`)).json()) as {
+        left: { history: boolean; nowVersion: string | null };
+        right: { history: boolean; nowVersion: string | null };
+      };
+      expect(pair.left).toMatchObject({ history: false, nowVersion: null });
+      expect(pair.right.history).toBe(true);
       expect(await forkDocAs({ actorEmail: forker.email, parentId: parent.id, revision: point })).toMatchObject({ ok: false, code: "forbidden" });
 
       // A deleted fork gives nothing.
