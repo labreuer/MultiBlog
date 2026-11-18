@@ -1,17 +1,14 @@
 import * as Y from "yjs";
-import { TiptapTransformer } from "@hocuspocus/transformer";
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { prisma } from "@/lib/prisma";
-import { docContentExtensions, pmDocContentSchema, titleAuthorHighlightExtensions } from "@/lib/tiptap-schema";
-import { titleTextFromJSON } from "@/lib/ydoc-render";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { resolveUpdateIdForSnapshot } from "@/lib/ydoc-version";
 import { ydocStore } from "../../server/ydoc-store";
 import { materializeYdocAt } from "@/lib/ydoc-snapshot";
+import { docBodyOf } from "@/lib/doc-body";
 import { docBlocks, type DocBlock } from "@/lib/doc-text";
 import { chipInputsForBody } from "@/lib/entity-chips/context";
-import { chipStylesOf } from "@/lib/entity-chips/settings";
 import { chipMarkdowns, chipsIn } from "@/lib/entity-chips/renderings";
 import { chipLabelsIn, type ChipLabels } from "@/lib/entity-chips/text";
 import type { ChipInputs } from "@/lib/entity-chips/types";
@@ -52,21 +49,16 @@ export type DocState = {
 };
 
 async function stateOf(doc: Y.Doc): Promise<Omit<DocState, "version">> {
-  const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(doc, "default") as JSONContent;
-  const content = Array.isArray(json.content) && json.content.length > 0 ? json : { type: "doc", content: [{ type: "paragraph" }] };
-  const node = pmDocContentSchema.nodeFromJSON(content);
-  const titleFragment = doc.getXmlFragment("title");
-  const title =
-    titleFragment.length > 0
-      ? titleTextFromJSON(TiptapTransformer.extensions(titleAuthorHighlightExtensions).fromYdoc(doc, "title") as JSONContent)
-      : "";
+  // The body, the title and the styles as src/lib/doc-body.ts reads them,
+  // which is how the diff page's sliders read a version in the browser too.
+  const { json, node, title, styles } = docBodyOf(doc);
   // The labels are the targets' current ones, whichever version of the doc
   // this is: a label is not part of a version.
   // The style is the doc's at this version: it lives in the ydoc.
-  const inputs = await chipInputsForBody(content, chipStylesOf(doc));
+  const inputs = await chipInputsForBody(json, styles);
   const labels = chipLabelsIn(node, inputs);
   const markdown = chipMarkdowns(chipsIn(node), inputs.styles, inputs.context);
-  return { json: content, title, node, blocks: docBlocks(node, labels), chips: { labels, markdown, inputs } };
+  return { json, title, node, blocks: docBlocks(node, labels), chips: { labels, markdown, inputs } };
 }
 
 /**
