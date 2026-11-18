@@ -102,8 +102,9 @@ Three properties are load-bearing:
 - **The log path always reports `delivered: true`**, so local dev and the e2e suite
   exercise every caller's success branch without a provider ever being configured.
 
-**One sender identity.** `MAIL_FROM` serves both the auth flows and the RAISED-annotation
-notifier (`src/app/actions/annotations.ts`) — their subject lines already carry the
+**One sender identity.** `MAIL_FROM` serves the auth flows, and would serve the
+RAISED-annotation notifier (`src/app/actions/annotations.ts`), which is switched off
+(docs/ANNOTATIONS.md, "Raising sends no mail") — their subject lines already carry the
 distinction a second identity would otherwise buy. `from?` exists on the input purely as a
 future seam; nothing sets it today.
 
@@ -408,7 +409,7 @@ front page is (docs/WIKI.md, "Permissions" and "The front page").
   belong to logged for an ADMIN to review (docs/COMMENTS.md, "Identities kept apart, and a log
   of where they meet"). Built;
 - **publishing a post made an EDITOR's**, with `RAISED` annotations sending no mail (PLAN.md
-  §38).
+  §38). Built.
 
 **A card never changes an existing account**: it neither raises one's role, nor adopts an
 anonymous commenter identity with the same email.
@@ -433,8 +434,8 @@ Read this before printing a batch for an instance. AUTHOR is a role, and these a
 - **Every `SHARED` doc and file, to read** (`canViewDocs`, `canViewFiles`), with the docs'
   annotations. Whatever an instance keeps `SHARED` is theirs to read the moment they confirm.
   They can annotate and tag all of it too.
-- **Not mail.** Raising an annotation sends none (docs/ANNOTATIONS.md, "Planned: `RAISED`
-  sends no mail"), so nothing a card's account does sends mail, except its own confirmation.
+- **Not mail.** Raising an annotation sends none (docs/ANNOTATIONS.md, "Raising sends no
+  mail"), so nothing a card's account does sends mail, except its own confirmation.
 - **Their own docs and uploaded files**, each file up to `FILE_MAX_UPLOAD_BYTES` (50 MB unless
   set), with no per-account quota.
 - **An AI client's connection.** Connecting one makes them a bot at Approve (docs/MCP.md §21),
@@ -855,8 +856,9 @@ stays `PUBLIC`.
 and a change to the web unit's `ExecStart` (that section's "Deploying").
 
 **PR 3: publishing a post made an EDITOR's** (PLAN.md §38), with a Status filter on `/posts`.
-`RAISED` annotations stop sending mail in the same PR (docs/ANNOTATIONS.md's plan). It also
-deploys everywhere on its own.
+`RAISED` annotations stop sending mail in the same PR (docs/ANNOTATIONS.md, "Raising sends no
+mail"). Built 2026-11-18. It deploys everywhere on its own, with no migration, after listing
+who has been publishing as an AUTHOR (PLAN.md §38, "Deploying").
 
 **PR 4: everything a card holder meets, with minting by script.**
 

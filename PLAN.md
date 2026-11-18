@@ -5058,7 +5058,7 @@ AUTHOR account only after its holder confirms the email they gave. The account's
 `/welcome`, which shows the commons page `New Account Welcome`. A card never changes an
 existing account. It comes after three changes that deploy everywhere on their own: §39's
 session re-read with §38's wiki part; commenter identities kept apart, with a log of where they
-meet (docs/COMMENTS.md, built 2026-11-18); and §38's posts. **The plan:
+meet (docs/COMMENTS.md, built 2026-11-18); and §38's posts (built 2026-11-18). **The plan:
 [docs/EMAIL.md](docs/EMAIL.md) §10.**
 
 ## 38. Publishing becomes an EDITOR's
@@ -5066,56 +5066,71 @@ meet (docs/COMMENTS.md, built 2026-11-18); and §38's posts. **The plan:
 Planned 2026-11-18. Publishing means putting something in front of readers who aren't signed
 in, which a post and a `PUBLIC` wiki page both do, and both become an EDITOR's. Each part stands
 alone, and deploys to every instance whether or not cards do. Built 2026-11-18: wiki pages.
+Built 2026-11-18: posts, with `RAISED` annotations sending no mail.
 
 - **Wiki pages, in the first PR of [docs/EMAIL.md](docs/EMAIL.md) §10's build order**, with §39's
   session re-read. Making a page `PUBLIC` is an ADMIN's or EDITOR's, and on a person's page
   stays its owner's alone. **What is built: [docs/WIKI.md](docs/WIKI.md), "Permissions".**
 - **Posts, in the third PR**, which also stops `RAISED` annotations from sending mail
-  ([docs/ANNOTATIONS.md](docs/ANNOTATIONS.md), "Planned: `RAISED` sends no mail").
+  (**what is built: [docs/ANNOTATIONS.md](docs/ANNOTATIONS.md), "Raising sends no mail"**).
 
-No topic doc owns the publishing of posts (§15), so the rest of this section is the plan's
-home for that part.
+No topic doc owns the publishing of posts (§15), so the rest of this section is that part's
+home, as built.
 
 - **`canPublishPosts(role)`, in `src/lib/role-checks.ts`, is ADMIN and EDITOR.** It holds the
-  same roles as `canEditAnyPost` today, and is stated on its own rather than in terms of it.
-  That file keeps such pairs apart, because they answer different questions and should be free
-  to move apart (docs/PERMISSIONS.md, "Roles and the predicates built on them").
+  same roles as `canEditAnyPost`, and is stated on its own rather than in terms of it. That
+  file keeps such pairs apart, because they answer different questions and should be free to
+  move apart (docs/PERMISSIONS.md, "Roles and the predicates built on them").
 - **`publishPostFromDoc` and `schedulePostFromDoc` ask it first**, before their post and doc
-  checks. Those two are everything that puts a version on the blog: publishing, republishing,
+  checks (`requireEditableSession(postId, { publishing: true })`, `src/app/actions/posts.ts`).
+  Those two are everything that puts a version on the blog: publishing, republishing,
   scheduling and rescheduling. Their `canUserEditDoc` check stays.
+- **They ask it of the session and then of the actor's row** (`requireCanPublishPosts`), as
+  a raise to `PUBLIC` does (`requireCanMakePublic`, docs/WIKI.md "Permissions"). A session can
+  be five minutes behind its account (§39), and a demoted editor's open tab would otherwise
+  publish for that long. A promotion still waits for the session, as every gate does.
 - **Everything else stays with whoever may edit the post**: creating a post from a doc they can
   edit, its title, byline, tags, slug and moderation policy, unpublishing and cancelling a
   schedule, and deleting and restoring it. Taking one's own work down should never wait for
   someone else. Restoring a deleted published post puts back what an editor published, so it
   needs no editor.
-- **`PostPublisher` disables Publish, Schedule and Republish for a viewer without it**, with
-  "An editor publishes posts." on the wrapper, as it now shows the doc-access reason
-  ("Publishing needs edit access to this post's source doc."). The role reason is shown first.
+- **`PostPublisher` disables Publish, Republish, Schedule and Reschedule, and the schedule's
+  date, for a viewer without it.** Publish's wrapper and Schedule's (which gained one for this)
+  carry "An editor publishes posts." as their title, ahead of the doc-access reason
+  ("Publishing needs edit access to this post's source doc."), and Publish's no-op reason
+  after both.
 - **An editor can publish a draft only from a doc they can edit**, which `canUserEditDoc`
-  already requires. That means a `SHARED` doc, or one with the editor on its byline; a `PRIVATE`
-  doc the editor isn't on can't be published by anyone who may publish. An AUTHOR's
-  `PostPublisher` says so: "An editor publishes posts, and needs to be able to edit the doc:
-  share it, or add them to its byline."
-- **`/posts` gains a Status filter** (draft, scheduled, published), so an editor can find the
-  drafts waiting. It lists every post for an EDITOR already, but filters only by author today
-  (`src/lib/posts-query.ts`). The filter is applied in Postgres, as the kit requires. A draft
-  has no `publishEventId`. A scheduled post has one, with `publishedAt` in the future, and a
-  published post has one with `publishedAt` now or past. Nothing tells an editor that a draft
-  is waiting; a "ready for an editor" signal is deferred.
+  already requires. That means a `SHARED` doc that is no one's wiki page, or one with the
+  editor on its byline; a `PRIVATE` doc the editor isn't on can't be published by anyone who
+  may publish. So a viewer without `canPublishPosts` reads a note under the controls: "An
+  editor publishes posts." when an editor could edit the post's doc, and "An editor publishes
+  posts, and needs to be able to edit the doc: share it, or add them to its byline." when the
+  doc is `PRIVATE` with no live ADMIN or EDITOR on its byline (`editorCanEditSource`, worked out
+  by `/post/[id]/edit`). The note is about the post's own doc, which is what an editor opening
+  the page sees first.
+- **`/posts` has a Status filter** (`?status=draft,scheduled,published`, the words
+  `derivePostStatus` uses), so an editor can find the drafts waiting. It lists every post for
+  an EDITOR, and filters in Postgres, as the kit requires (`postStatusWhere`,
+  `src/app/posts/page.tsx`): a draft has no `publishEventId`, a scheduled post has one with
+  `publishedAt` in the future, and a published post one with `publishedAt` now or past.
+  Nothing tells an editor that a draft is waiting; a "ready for an editor" signal is deferred.
 - **The doc's Actions menu says "Draft a blog post"**, not "Publish as blog post"
   (`src/components/DocActionsMenu.tsx`), to a viewer without `canPublishPosts`. What the item
   does, `createPostFromDoc`, makes a draft for everyone.
 - **No MCP tool publishes**: `manage` only tags a post already published or scheduled.
 
-**Tests.** `e2e/publish.spec.ts`'s AUTHOR case (§15i's split) now meets the role reason, so it
-checks the doc-access reason with an EDITOR who is not on the `PRIVATE` doc's byline instead. A
-new case has an AUTHOR create a draft from a `SHARED` doc and find Publish disabled, then an
-EDITOR publish it.
+**Tests.** `e2e/publish.spec.ts`'s case for a post author who can't edit the source doc
+(§15i's split) uses an EDITOR who is not on the `PRIVATE` doc's byline, since an AUTHOR now
+meets the role reason first. A case has an AUTHOR draft a post from a `SHARED` doc they are on
+the byline of, find Publish and Schedule disabled with the role reason, and an EDITOR off both
+bylines publish it; another has an AUTHOR draft from their own `PRIVATE` doc and read the
+longer note. `e2e/admin-table.spec.ts` drives the Status filter over a draft, a scheduled and a
+published post.
 
-**Docs.** docs/PERMISSIONS.md's role table gains the predicate, and its axis-independent table
-and "A post's byline is not its doc's" table gain the publish rows. CLAUDE.md is unchanged.
+**Docs.** docs/PERMISSIONS.md's role table has the predicate, and its axis-independent table
+and "A post's byline is not its doc's" table the publish rows. CLAUDE.md is unchanged.
 
-**Deploying.** Every AUTHOR on an instance loses publishing at once.
+**Deploying.** Every AUTHOR on an instance loses publishing at once. There is no migration.
 - **Before deploying, list who has been publishing as an AUTHOR:**
 
   ```sql
@@ -5127,8 +5142,8 @@ and "A post's byline is not its doc's" table gain the publish rows. CLAUDE.md is
 
 - **Decide whether to promote them.** There is no role between AUTHOR and EDITOR, and EDITOR
   grants more: editing every `SHARED` doc and every post. A promoted account can publish within
-  five minutes, or at once after a visit to `/dashboard`, since the publish actions read the
-  role from the session (§39).
+  five minutes, or at once after a visit to `/dashboard`, since the publish actions ask the
+  session's role as well as the row's (§39).
 - **Posts an AUTHOR has already scheduled still go live when due**, since a post's visibility
   is its `publishedAt`, with no status column and no sweep (docs/BLOG.md). An editor cancels any
   that shouldn't.

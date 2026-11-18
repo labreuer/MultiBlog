@@ -1670,12 +1670,11 @@ checks read access to the container. The UI checks that only when the draft is c
   - The same on a PDF, where `postFileAnnotation` already runs the capture with the doc path's
     arguments. A reply's quote is in a body, never on a page, so it needs no quads.
   - The parent must be readable, posted, and not deleted (§17, item 3).
-- **The MCP server never raises an annotation, and never resolves one.** Raising emails the
-  body to every other byline author, or every other owner of the file, whose account isn't
-  deleted (`raiseRecipientWhere`), and an email leaves the instance and can't be unsent.
-  Claude's own account is never a recipient, being the poster or at `.invalid`, which
-  `sendMail` refuses; the person who issued its token is. What the MCP server writes is LIVE, never RAISED. Resolving a thread, once it
-  exists, is a person's act (TODO.md).
+- **The MCP server never raises an annotation, and never resolves one.** What a raise should
+  do, and whether it should mail anyone, is undecided, and today a raise sends no mail
+  (docs/ANNOTATIONS.md, "Raising sends no mail"), so a machine client isn't given it. What
+  the MCP server writes is LIVE, never RAISED. Resolving a thread, once it exists, is a
+  person's act (TODO.md).
 - **Editing a posted body** is one call, `edit_note`. It begins an edit session, writes
   the new body through `/admin/annotation-replace`, and finishes the session. Finishing writes
   a new snapshot as the next version, or none if nothing changed. If a step fails, the call

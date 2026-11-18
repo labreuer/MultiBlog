@@ -1049,5 +1049,55 @@ test.describe("admin table kit", () => {
         await deleteTestUser(betaEmail);
       }
     });
+
+    // PLAN.md §38 — the Status filter, applied in Postgres from the same three
+    // states derivePostStatus tells apart: a draft has no publish event, a
+    // scheduled post one whose publishedAt is ahead, a published post one
+    // whose publishedAt has passed.
+    test("/posts' Status filter", async ({ page }) => {
+      const token = `statuspost${Date.now()}`;
+      const draft = await createTestPost({ authorEmail: ADMIN_EMAIL, title: uniqueTitle(`${token} draft`) });
+      const scheduled = await createTestPost({
+        authorEmail: ADMIN_EMAIL,
+        title: uniqueTitle(`${token} scheduled`),
+        scheduledFor: new Date(Date.now() + 86_400_000).toISOString(),
+      });
+      const published = await createTestPost({
+        authorEmail: ADMIN_EMAIL,
+        title: uniqueTitle(`${token} published`),
+        publish: true,
+      });
+
+      try {
+        const table = page.getByRole("table").first();
+        const titles = () => table.locator("tbody tr td:nth-child(2) a").allTextContents();
+        const base = `/posts?q=${token}&sort=title:asc`;
+
+        await page.goto(base);
+        expect(await titles()).toEqual([draft.title, published.title, scheduled.title]);
+        await page.goto(`${base}&status=draft`);
+        expect(await titles()).toEqual([draft.title]);
+        await page.goto(`${base}&status=scheduled`);
+        expect(await titles()).toEqual([scheduled.title]);
+        await page.goto(`${base}&status=published`);
+        expect(await titles()).toEqual([published.title]);
+        await page.goto(`${base}&status=draft,scheduled`);
+        expect(await titles()).toEqual([draft.title, scheduled.title]);
+
+        // The control, ticked from the URL, and driving it.
+        await page.goto(`${base}&status=draft`);
+        await expect(page.getByText("Status: draft", { exact: true })).toBeVisible();
+        await page.getByText("Status: draft", { exact: true }).click();
+        // A click, not check(): the box is controlled by the URL, so it turns
+        // only once the navigation it starts has landed.
+        await page.getByRole("checkbox", { name: "published" }).click();
+        await expect(page).toHaveURL(/status=draft%2Cpublished|status=draft,published/);
+        await expect.poll(titles).toEqual([draft.title, published.title]);
+      } finally {
+        await deleteTestPost(draft.id);
+        await deleteTestPost(scheduled.id);
+        await deleteTestPost(published.id);
+      }
+    });
   });
 });

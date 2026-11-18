@@ -1,8 +1,18 @@
 // PLAN.md §15 — /post/[id]/edit no longer edits a post's own content; it
 // publishes a point in its backing doc's history. Editing happens at
 // /doc/[id]/edit, same as any doc.
-import { test, expect, bodyEditor, docActionItems, gotoOk, freshGoto, visibleText, waitForDocCollabReady } from "./fixtures";
-import { addTestDocAuthor, addTestPostAuthor, getPostPath, type TestPost } from "./db";
+import {
+  test,
+  expect,
+  bodyEditor,
+  docActionItems,
+  openDocActions,
+  gotoOk,
+  freshGoto,
+  visibleText,
+  waitForDocCollabReady,
+} from "./fixtures";
+import { addTestDocAuthor, addTestPostAuthor, createTestDoc, deleteTestDoc, deleteTestPost, getPostPath, type TestPost } from "./db";
 
 // "Publish" without `exact` also matches "Publish as blog post" elsewhere.
 // The button reads "Publish" on a draft and "Republish" once the post is
@@ -285,7 +295,9 @@ test.describe("publish / unpublish", () => {
     await gotoOk(page, `/post/${publishedPost.id}/edit`);
     await waitForPublishReady(page);
 
-    const { user, page: authorPage } = await secondUser({ role: "AUTHOR" });
+    // An EDITOR, who may publish (PLAN.md §38), so the doc-access reason is
+    // the one that bites: an AUTHOR would meet the role's first.
+    const { user, page: authorPage } = await secondUser({ role: "EDITOR" });
     await addTestPostAuthor(publishedPost.id, user.email);
     await authorPage.goto(`/post/${publishedPost.id}/edit`);
 
@@ -321,6 +333,73 @@ test.describe("publish / unpublish", () => {
     await expect(authorPage.getByLabel("Post title")).toBeEnabled();
     await expect(authorPage.getByRole("button", { name: "Unpublish", exact: true })).toBeEnabled();
     await expect(authorPage.getByLabel("Add or remove tags")).toBeVisible();
+  });
+
+  // PLAN.md §38 — publishing is an editor's. An AUTHOR drafts a post from a
+  // doc they can edit and finds every publishing control disabled, saying
+  // why; an EDITOR who can edit that doc publishes the draft.
+  test("an AUTHOR drafts a post, and an EDITOR publishes it", async ({ sharedDoc, secondUser }) => {
+    const { user: author, page: authorPage } = await secondUser({ role: "AUTHOR" });
+    // A SHARED doc an AUTHOR edits only from its byline (canEditDocRow).
+    await addTestDocAuthor(sharedDoc.id, author.email);
+
+    await gotoOk(authorPage, `/doc/${sharedDoc.slug}`);
+    expect(await docActionItems(authorPage)).toEqual(["Draft a blog post", "Fork…", "Move into the wiki…"]);
+    await authorPage.getByRole("button", { name: "Draft a blog post" }).click();
+    await authorPage.waitForURL(/\/post\/[^/]+\/edit$/);
+    const postId = authorPage.url().match(/\/post\/([^/]+)\/edit$/)?.[1];
+    if (!postId) throw new Error(`Couldn't read the post id from ${authorPage.url()}`);
+
+    try {
+      // Their own doc's history, so the bar loads: the role alone is in the way.
+      await waitForPublishReady(authorPage);
+      const publish = authorPage.getByRole("button", PUBLISH);
+      await expect(publish).toBeDisabled();
+      await expect(authorPage.locator("span", { has: publish })).toHaveAttribute("title", "An editor publishes posts.");
+      const schedule = authorPage.getByRole("button", { name: "Schedule", exact: true });
+      await expect(schedule).toBeDisabled();
+      await expect(authorPage.locator("span", { has: schedule })).toHaveAttribute("title", "An editor publishes posts.");
+      // A SHARED doc, which any editor may edit, so the note asks nothing more.
+      await expect(authorPage.getByText("An editor publishes posts.", { exact: true })).toBeVisible();
+      // Everything else about the post is still theirs.
+      await expect(authorPage.getByLabel("Post title")).toBeEnabled();
+
+      // An EDITOR off the doc's byline and off the post's publishes it.
+      const { page: editorPage } = await secondUser({ role: "EDITOR" });
+      await gotoOk(editorPage, `/post/${postId}/edit`);
+      await waitForPublishReady(editorPage);
+      await expect(editorPage.getByText("An editor publishes posts.", { exact: true })).toHaveCount(0);
+      await editorPage.getByRole("button", PUBLISH).click();
+      await expect(editorPage.getByText("Published.")).toBeVisible();
+      expect(await getPostPath(postId)).not.toBeNull();
+    } finally {
+      await authorPage.goto("about:blank").catch(() => {});
+      await deleteTestPost(postId);
+    }
+  });
+
+  // PLAN.md §38 — a PRIVATE doc with no ADMIN or EDITOR on its byline is one
+  // no editor can publish from, and the AUTHOR's page says what would change that.
+  test("an AUTHOR's draft from a PRIVATE doc no editor can edit says how to let one", async ({ secondUser }) => {
+    const { user: author, page: authorPage } = await secondUser({ role: "AUTHOR" });
+    const doc = await createTestDoc({ authorEmail: author.email, bodyText: "E2E only an author's words" });
+    let postId: string | undefined;
+    try {
+      await gotoOk(authorPage, `/doc/${doc.slug}`);
+      await openDocActions(authorPage);
+      await authorPage.getByRole("button", { name: "Draft a blog post" }).click();
+      await authorPage.waitForURL(/\/post\/[^/]+\/edit$/);
+      postId = authorPage.url().match(/\/post\/([^/]+)\/edit$/)?.[1];
+      await expect(
+        authorPage.getByText(
+          "An editor publishes posts, and needs to be able to edit the doc: share it, or add them to its byline.",
+        ),
+      ).toBeVisible();
+    } finally {
+      await authorPage.goto("about:blank").catch(() => {});
+      if (postId) await deleteTestPost(postId);
+      await deleteTestDoc(doc.id);
+    }
   });
 
   test("unpublishing takes the post back to a 404", async ({ page, publishedPost }) => {

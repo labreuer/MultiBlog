@@ -29,6 +29,7 @@ Every gate in the app is one of these predicates, sometimes combined with a
 |---|---|---|---|---|---|---|
 | `isAdmin` | ✅ | ❌ | ❌ | ❌ | ❌ | `role-checks.ts` |
 | `canEditAnyPost` | ✅ | ✅ | ❌ | ❌ | ❌ | `role-checks.ts` |
+| `canPublishPosts` | ✅ | ✅ | ❌ | ❌ | ❌ | `role-checks.ts` |
 | `canEditAnySharedDoc` | ✅ | ✅ | ❌ | ❌ | ❌ | `doc-authz.ts` |
 | `canManagePosts` | ✅ | ✅ | ✅ | ❌ | ❌ | `role-checks.ts` |
 | `canManageDocs` | ✅ | ✅ | ✅ | ❌ | ❌ | `role-checks.ts` |
@@ -53,9 +54,11 @@ the other:
   delegation between them would have preserved exactly the coupling the split exists to
   break.
 
-`canMakePagesPublic` holds those same two roles and is kept apart from both for the same
-reason: who may put a wiki page in front of signed-out readers ("Wiki pages", below) need not
-stay who may edit any post or any `SHARED` doc.
+`canMakePagesPublic` and `canPublishPosts` hold those same two roles and are kept apart from
+them and from each other for the same reason: who may put a wiki page, or a post, in front of
+signed-out readers ("Wiki pages", below; PLAN.md §38) need not stay who may edit any post or
+any `SHARED` doc. Both are asked of the actor's row as well as the session's role by the
+writes they gate (`requireCanMakePublic`, `requireCanPublishPosts`).
 
 **A role is the account's as its session last read it.** A session reads its account again
 every five minutes, and at once on `/dashboard` (src/app/sign-in/NOTES.md), so a promotion, a
@@ -223,6 +226,9 @@ read as `SHARED`, but where these say otherwise. Two namespaces: a person's,
 | `/posts`, `/comments` (page) | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | `/posts` + `/comments` rows | all | all | own | — | — | — |
 | Edit post / post history | ✅ | ✅ | own | ❌ | ❌ | ❌ |
+| Draft a post from a doc they can edit | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Publish, republish, schedule a post (and from a doc they can edit) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Unpublish, cancel a schedule, delete, restore a post | ✅ | ✅ | own | ❌ | ❌ | ❌ |
 | `/users`, `/users/[id]/slug` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `/email-collisions` (read, mark reviewed) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `/ydoc-debug`, `/api/ydoc/*` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -295,7 +301,12 @@ person coming off a doc's byline must not thereby lose credit for what is alread
 | Unpublish / cancel schedule | ✅ (`unpublishPost` takes `canUserEditPost` only) |
 | See the post's published content | ✅ (its stored `proseJson`, server-rendered) |
 | Scrub the doc's history | ❌ `/api/doc/[id]/replay` is `canUserSeeDocHistory`-gated, which is `canUserEditDoc`'s answer (FORKS.md, "Who may see a doc's history") |
-| Publish / republish / schedule | ❌ `publishPostFromDoc` requires `canUserEditDoc` too |
+| Publish / republish / schedule | ❌ `publishPostFromDoc` requires `canUserEditDoc` too, after `canPublishPosts` |
+
+A post author who **can** edit the source doc still publishes only as an ADMIN or EDITOR
+(`canPublishPosts`, PLAN.md §38). An AUTHOR on both bylines scrubs the doc's history and
+finds every publishing control disabled, with "An editor publishes posts." on it; an editor
+publishes the draft, and needs to be able to edit the doc to do so.
 | See the doc's tags offered for carrying across | only if `canUserReadDoc` (see Tags, below) |
 | Reach the doc itself | as far as `canUserReadDoc` allows, and no further |
 
@@ -870,6 +881,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 |---|---|
 | The role predicates (all but `canEditAnySharedDoc`) | `src/lib/role-checks.ts` |
 | Read / edit a doc; the two `where`-clause equivalents | `src/lib/doc-authz.ts` |
+| Publishing and scheduling a post (role from the session and the row, then post and doc) | `requireEditableSession(postId, { publishing: true })` in `src/app/actions/posts.ts` |
 | Read / manage a file; its `where`-clause equivalent | `src/lib/file-authz.ts` |
 | `/files` row scoping + the "Show all files" override | `src/app/files/page.tsx` |
 | File mutations (visibility, title, slug, owners, delete; a version's promotion and abandoning) | `src/app/actions/files.ts` |

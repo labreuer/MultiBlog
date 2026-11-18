@@ -4,10 +4,11 @@ import { onceWithin } from "@/lib/api/idempotency";
 import { chipSyntax, defineTool, listedName, objectRef, quoteFields, versionString } from "../tool";
 import { annotateFor, editAnnotationFor } from "../annotation-writes";
 
-// docs/MCP.md §9 — add_note and edit_note. A note Claude writes is
-// LIVE, never RAISED (raising emails its body off the instance) and never
-// resolved (a person's act). Acting on a note means replying to it: what was
-// done, and a link to the passage or the doc it went into.
+// docs/MCP.md §9 — add_note and edit_note. A note Claude writes is LIVE,
+// never RAISED (what a raise should do is undecided: docs/ANNOTATIONS.md,
+// "Raising sends no mail") and never resolved (a person's act). Acting on a
+// note means replying to it: what was done, and a link to the passage or the
+// doc it went into.
 
 const body = z
   .string()

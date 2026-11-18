@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import { canManagePosts, canEditAnyPost } from "@/lib/authz";
-import { derivePostStatus } from "@/lib/post-status";
+import { derivePostStatus, type PostStatus } from "@/lib/post-status";
 import type { Prisma } from "@/generated/prisma/client";
 import { toURLSearchParams } from "@/lib/table-query";
 import { getTablePrefs } from "@/lib/user-preferences";
@@ -16,10 +16,27 @@ import PostsTable from "@/components/PostsTable";
 
 export const metadata: Metadata = { title: "Posts" };
 
-function buildFilterWhere(filters: PostsFilters): Prisma.PostWhereInput {
+// PLAN.md §38 — derivePostStatus as a `where`, one branch per status: a
+// draft has no publishEventId, a scheduled post has one with publishedAt
+// still ahead, a published one has one with publishedAt now or past (which
+// is publishedPostWhere). `now` is the request's, as derivePostStatus's is
+// the render's, so a row and its Published cell agree.
+function postStatusWhere(status: PostStatus, now: Date): Prisma.PostWhereInput {
+  switch (status) {
+    case "draft":
+      return { publishEventId: null };
+    case "scheduled":
+      return { publishEventId: { not: null }, publishedAt: { gt: now } };
+    case "published":
+      return { publishEventId: { not: null }, publishedAt: { lte: now } };
+  }
+}
+
+function buildFilterWhere(filters: PostsFilters, now: Date): Prisma.PostWhereInput {
   const where: Prisma.PostWhereInput = {};
   if (!filters.deleted) where.deletedByUserId = null;
   if (filters.q) where.title = { contains: filters.q, mode: "insensitive" };
+  if (filters.status !== "ALL") where.OR = [...filters.status].map((status) => postStatusWhere(status, now));
   // Composes with, and only ever narrows, the permission scoping below — see
   // authorFilterWhere's header comment for the four modes' semantics.
   Object.assign(where, authorFilterWhere(filters.authors, filters.authorMode) as Prisma.PostWhereInput);
@@ -115,7 +132,7 @@ export default async function PostsPage({
   const where: Prisma.PostWhereInput = {
     AND: [
       canEditAnyPost(session.user.role) ? {} : { authors: { some: { userId: session.user.id } } },
-      buildFilterWhere(filters),
+      buildFilterWhere(filters, new Date()),
     ],
   };
 

@@ -5,6 +5,8 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canEditAnyPost } from "@/lib/authz";
+import { canPublishPosts, POST_PUBLISHER_ROLES } from "@/lib/role-checks";
+import { isSharedOrPublic } from "@/lib/doc-visibility";
 import { gated, titleWhenOk } from "@/lib/route-access";
 import { derivePostStatus } from "@/lib/post-status";
 import type { JSONContent } from "@tiptap/react";
@@ -30,7 +32,7 @@ const loadPostForEdit = gated(async (user, id: string) => {
       // gate: §20m's tag offer owes the doc's *read* rule and §15i's publish
       // controls owe its *edit* rule, both on top of the post gate this
       // function already applies.
-      doc: { select: { id: true, slug: true, title: true, visibility: true } },
+      doc: { select: { id: true, slug: true, title: true, visibility: true, wikiOwnerUserId: true } },
       publishEvent: { select: { createdAt: true, ydocSnapshot: { select: { lastYdocUpdateId: true } } } },
     },
   });
@@ -100,6 +102,21 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
     canUserReadDoc(user.id, user.role, post.doc),
     canUserEditDoc(user.id, user.role, post.doc.id),
   ]);
+
+  // PLAN.md §38 — publishing is an editor's. For a viewer who can't, whether
+  // any editor could publish from the source doc, so the note can say what
+  // stands in the way: an editor edits a SHARED doc that is no one's wiki page,
+  // and a PRIVATE one only from its byline (canEditDocRow), so a PRIVATE doc
+  // with no ADMIN or EDITOR on its byline is one nobody who may publish can
+  // publish from. The byline's users are reached through a relation, so the
+  // deleted check is spelled out.
+  const canPublish = canPublishPosts(user.role);
+  const editorCanEditSource =
+    canPublish ||
+    (post.doc.wikiOwnerUserId === null && isSharedOrPublic(post.doc.visibility)) ||
+    (await prisma.docAuthor.count({
+      where: { docId: post.doc.id, user: { role: { in: POST_PUBLISHER_ROLES }, deletedByUserId: null } },
+    })) > 0;
 
   // PLAN.md §20m — the source doc's terms that haven't come across yet, for
   // the tag offer under the post's own strip.
@@ -189,6 +206,8 @@ export default async function EditPostPage({ params }: { params: Promise<{ id: s
       sourceDocSlug={post.doc.slug}
       canReadSourceDoc={canReadSourceDoc}
       canEditSourceDoc={canEditSourceDoc}
+      canPublish={canPublish}
+      editorCanEditSource={editorCanEditSource}
       storedBody={storedBody}
     />
   );

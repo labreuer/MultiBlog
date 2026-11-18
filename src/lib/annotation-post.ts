@@ -27,10 +27,10 @@ import { ydocStore } from "../../server/ydoc-store";
 // A refusal before step 1 writes nothing; a failure after it removes the
 // draft and its ydoc, so a half-made annotation is never left behind.
 //
-// **Never raised, never resolved.** Raising emails the body off the instance,
-// to every other byline author or owner, and an email can't be unsent;
-// resolving a thread, once it exists, is a person's act. So this writes LIVE
-// and nothing else. Callers have already checked the container and the
+// **Never raised, never resolved.** What a raise should do, and whether it
+// should mail anyone, is undecided (docs/ANNOTATIONS.md, "Raising sends no
+// mail"), so a machine client isn't given it; resolving a thread, once it
+// exists, is a person's act. So this writes LIVE and nothing else. Callers have already checked the container and the
 // parent (posted, not deleted, in the same container) and resolved the anchor.
 
 /** Where a new annotation points. */

@@ -7,7 +7,7 @@ import { deletePost, restorePost, bulkDeletePosts, bulkRestorePosts } from "@/ap
 import type { ModerationPolicy } from "@/generated/prisma/enums";
 import { type DateFormat, formatDate } from "@/lib/format-date";
 import { postPath } from "@/lib/post-path";
-import { type PostsFilters, buildPostsQueryString } from "@/lib/posts-query";
+import { type PostsFilters, POST_STATUS_OPTIONS, buildPostsQueryString } from "@/lib/posts-query";
 import { sameCols, type TablePrefs } from "@/lib/table-query";
 import { useTableFilters } from "@/components/table/use-table-filters";
 import { useRevealedRows } from "@/components/table/use-revealed-rows";
@@ -36,6 +36,7 @@ import {
   DateFormatSelect,
   DeletedSortHeader,
   EmptyRow,
+  MultiSelectDropdown,
   PaginationBar,
   RowActionButton,
   SearchBox,
@@ -310,6 +311,12 @@ export default function PostsTable({
           mode={filters.authorMode}
           onChange={(next) => updateFilters(next)}
         />
+        <MultiSelectDropdown
+          label="Status"
+          options={POST_STATUS_OPTIONS}
+          selected={filters.status}
+          onChange={(next) => updateFilters({ status: next })}
+        />
         <ColumnPicker
           columns={columns}
           resolved={visibleColumns}
@@ -397,6 +404,16 @@ export default function PostsTable({
               </>
             ),
             control: "Match dropdown, at the foot of the Authors panel",
+          },
+          {
+            param: "status",
+            meaning: (
+              <>
+                Comma-separated {POST_STATUS_OPTIONS.join(", ")}; omitted means all. A draft has never been published or
+                was taken down; a scheduled post goes live at its Published date.
+              </>
+            ),
+            control: "Status dropdown",
           },
         ]}
         notes={

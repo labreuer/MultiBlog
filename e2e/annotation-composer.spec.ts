@@ -239,3 +239,37 @@ test.describe("a draft keeps its passage through a reload", () => {
       .toEqual({ quotedText: "narwhal", textAtStamp: "narwhal" });
   });
 });
+
+// docs/ANNOTATIONS.md, "Raising sends no mail" — the composer's raise says what
+// it does, and still raises: the status and its place on /annotations stay.
+test.describe("raising a note", () => {
+  test("\"Post & raise\" posts the note RAISED, and promises no email", async ({ page, sharedDoc }) => {
+    const body = "E2E note raised for the authors";
+    await page.goto(`/doc/${sharedDoc.slug}`);
+    await expect(page.getByTestId("live-doc-synced")).toBeAttached({ timeout: 15_000 });
+
+    await selectTextInBody(page, QUOTED_TEXT);
+    await page.getByTestId("annotation-popup").getByRole("button", { name: "Annotate" }).click();
+    const composer = annotationEditor(page);
+    await expect(composer).toBeVisible({ timeout: 15_000 });
+    await composer.click();
+    await page.keyboard.type(body);
+    await expect
+      .poll(async () => (await getAnnotationStates(sharedDoc.id)).find((a) => a.status === "DRAFT")?.bodyText, {
+        timeout: 15_000,
+      })
+      .toBe(body);
+
+    await page.getByLabel("Annotation visibility").selectOption({ label: "Post & raise" });
+    const raise = page.getByRole("button", { name: "Post & raise", exact: true });
+    await expect(raise).toHaveAttribute("title", /sends no email/i);
+    await raise.click();
+
+    await expect
+      .poll(async () => (await getAnnotationStates(sharedDoc.id)).map((a) => a.status), { timeout: 15_000 })
+      .toEqual(["RAISED"]);
+
+    await page.goto(`/annotations?doc=${sharedDoc.id}`);
+    await expect(page.getByRole("row").filter({ hasText: body })).toContainText("RAISED");
+  });
+});

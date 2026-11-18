@@ -4,6 +4,7 @@ import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import type { Session } from "next-auth";
 import type { Prisma } from "@/generated/prisma/client";
 import { canEditAnySharedDoc, canManageDocs, canUserEditDoc, canUserSeeDocHistory } from "@/lib/doc-authz";
+import { canPublishPosts } from "@/lib/role-checks";
 import { wikiAddressOfDoc, wikiPagePath } from "@/lib/wiki-address";
 import WikiAddressLine from "@/components/wiki/WikiAddressLine";
 import { loadDocFamily } from "@/lib/doc-family";
@@ -120,7 +121,16 @@ export default async function DocReadingView({
   // A wiki page publishes nothing (docs/WIKI.md "Doc rules a wiki page
   // doesn't inherit"): the menu leaves the item out, and the publish actions
   // refuse one whatever the menu offers.
-  const canPublish = canEdit && doc.wikiName === null && doc.posts.length === 0;
+  //
+  // The item makes a draft for everyone (createPostFromDoc). Putting it on
+  // the blog is an ADMIN's or EDITOR's (PLAN.md §38), so anyone else is
+  // offered "Draft a blog post" instead.
+  const postItem: "publish" | "draft" | null =
+    canEdit && doc.wikiName === null && doc.posts.length === 0
+      ? canPublishPosts(user.role)
+        ? "publish"
+        : "draft"
+      : null;
   const canFork = canManageDocs(user.role);
   // docs/WIKI.md "The Actions menu" — moving a doc into the wiki is an
   // editor's on its byline, of a doc that isn't a wiki page and has no post.
@@ -331,7 +341,7 @@ export default async function DocReadingView({
                           {canEdit && doc.posts.length > 0 && (
                             <DocPostsLine key="posts" docTitle={doc.title} posts={doc.posts} />
                           )}
-                          {/* docs/FORKS.md — "Publish as blog post" (§15d's
+                          {/* docs/FORKS.md — "Publish as blog post" or "Draft a blog post" (§15d's
                               entry point into post creation), "Fork…" and
                               docs/WIKI.md's "Move into the wiki…" and "Move…", each for
                               whoever may. A client island, which renders
@@ -339,7 +349,7 @@ export default async function DocReadingView({
                           <DocActionsMenu
                             key="actions"
                             docId={doc.id}
-                            publish={canPublish}
+                            postItem={postItem}
                             fork={canFork}
                             moveIn={movable}
                             moveOut={moveOut}

@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { prisma, prismaIncludingDeleted, type TransactionClient } from "@/lib/prisma";
 import { uniquePostSlug, changePostSlug, revertPostSlug as revertPostSlugInDb } from "@/lib/post-slug";
 import { canUserEditPost } from "@/lib/authz";
+import { canPublishPosts } from "@/lib/role-checks";
 import { canUserEditDoc } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
 import { remapThreadsToEvent } from "@/lib/anchor-remap";
@@ -17,7 +18,7 @@ import { ensureYdocSnapshotAt } from "@/lib/ydoc-snapshot";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { derivePostStatus } from "@/lib/post-status";
 import { Prisma } from "@/generated/prisma/client";
-import { ModerationPolicy } from "@/generated/prisma/enums";
+import { ModerationPolicy, type Role } from "@/generated/prisma/enums";
 import { settleBulk, type BulkResult } from "@/lib/bulk-result";
 import { signInPath } from "@/lib/sign-in-redirect";
 import {
@@ -93,12 +94,35 @@ async function refuseWikiDocLocked(tx: TransactionClient, docId: string): Promis
   if (rows.length > 0 && rows[0].wiki_name !== null) throw new Error(WIKI_DOC_REFUSED);
 }
 
-async function requireEditableSession(postId: string) {
+// PLAN.md §38 — publishing is an editor's. The role is asked of the session
+// and then of the actor's row, since a session can be five minutes behind its
+// account (src/app/sign-in/NOTES.md): a demoted editor's open tab publishes
+// nothing, as requireCanMakePublic (src/lib/wiki-claim.ts) refuses the same
+// tab a raise to PUBLIC. A promotion still waits for the session, as every
+// gate does.
+const PUBLISH_EDITORS_ONLY = "Only an ADMIN or EDITOR can publish a post.";
+
+async function requireCanPublishPosts(userId: string, sessionRole: Role): Promise<void> {
+  if (canPublishPosts(sessionRole)) {
+    // The filtered client: a deleted account publishes nothing.
+    const row = await prisma.user.findFirst({ where: { id: userId }, select: { role: true } });
+    if (row && canPublishPosts(row.role)) return;
+  }
+  throw new Error(PUBLISH_EDITORS_ONLY);
+}
+
+// `publishing` is for the two actions that put a version on the blog, which
+// ask the role first, before the post and doc checks every other action here
+// shares (PLAN.md §38).
+async function requireEditableSession(postId: string, opts: { publishing?: true } = {}) {
   const session = await auth();
   if (!session?.user) {
     // No callbackUrl: this guards a mutation, and a POST can't be replayed by
     // arriving at a URL, so there is no destination worth naming.
     redirect(signInPath());
+  }
+  if (opts.publishing) {
+    await requireCanPublishPosts(session.user.id, session.user.role);
   }
 
   const post = await prisma.post.findUnique({ where: { id: postId } });
@@ -114,7 +138,8 @@ async function requireEditableSession(postId: string) {
 }
 
 // PLAN.md §15d — a post can be created from any doc its creator can edit,
-// either from the /posts/new picker or a "Publish as blog post" button on
+// either from the /posts/new picker or the "Publish as blog post" item ("Draft
+// a blog post" to a viewer without canPublishPosts, PLAN.md §38) on
 // /doc/[slug]. Seeds the post's authors as a copy of the doc's byline at
 // creation time (post_author.createdUserId records who added each row) —
 // from then on the two author lists are edited independently.
@@ -218,7 +243,7 @@ async function resolvePublishContent(opts: PublishFromDocOpts, userId: string, p
 }
 
 export async function publishPostFromDoc(postId: string, opts: PublishFromDocOpts): Promise<{ eventId: string }> {
-  const { session, post } = await requireEditableSession(postId);
+  const { session, post } = await requireEditableSession(postId, { publishing: true });
   if (!(await canUserEditDoc(session.user.id, session.user.role, opts.docId))) {
     throw new Error("You don't have permission to publish from this doc.");
   }
@@ -307,7 +332,7 @@ export async function schedulePostFromDoc(
   postId: string,
   opts: PublishFromDocOpts & { scheduledFor: Date },
 ): Promise<{ eventId: string }> {
-  const { session, post } = await requireEditableSession(postId);
+  const { session, post } = await requireEditableSession(postId, { publishing: true });
   if (!(await canUserEditDoc(session.user.id, session.user.role, opts.docId))) {
     throw new Error("You don't have permission to publish from this doc.");
   }

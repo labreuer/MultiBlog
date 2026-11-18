@@ -430,7 +430,18 @@ export async function updateDraftAnchor(annotationId: string, anchor: DraftRange
   return {};
 }
 
-// Who a RAISED annotation emails, as a filter on a doc's `DocAuthor` rows or
+// docs/ANNOTATIONS.md, "Raising sends no mail". Raising an annotation once
+// mailed each author on the doc's byline, or each owner of the file, once per
+// raise and with no limit, which any account that can annotate a SHARED doc
+// could set off. Whether, and how, a raise should mail anyone is undecided,
+// so until it is decided it mails no one. Both mail paths below are kept, for
+// when it is, and this one constant turns them off; a raise still sets the
+// status and stamps `raisedAt`. Not exported: a "use server" file exports
+// only async functions.
+// Typed boolean, so the guarded blocks still typecheck as code that can run.
+const RAISE_SENDS_MAIL: boolean = false;
+
+// Who a RAISED annotation would email, as a filter on a doc's `DocAuthor` rows or
 // a file's `FileOwner` rows — the two share the `userId`/`user` shape. Never
 // the poster, who already knows what they raised, and never a soft-deleted
 // account: its row stays on the byline, its inbox is no longer ours to write
@@ -480,9 +491,10 @@ export async function postAnnotation(opts: {
   // captureAnchorInYdoc does. Never stored as sent either way — §12i's
   // "a request field only, never a column" survives the column's arrival.
   quotedText?: string;
-  // "Notify authors" (PLAN.md §13d) — RAISED is LIVE plus the doc's byline
-  // authors emailed and raisedAt stamped; nothing else about visibility or
-  // the mark differs from a plain LIVE post.
+  // "Post & raise" (PLAN.md §13d) — RAISED is LIVE plus raisedAt stamped,
+  // marking the note for the container's authors on /annotations; nothing
+  // else about visibility or the mark differs from a plain LIVE post. It
+  // sends no mail (RAISE_SENDS_MAIL, above).
   raise?: boolean;
   // PLAN.md §12p/§13 — the ydoc_update the author's own view showed, string
   // because BigInt doesn't survive a server-action boundary. Supplied by the
@@ -557,7 +569,8 @@ export async function postAnnotation(opts: {
   // PLAN.md §19 — **a file annotation takes a completely different path from
   // here**, and short-circuits rather than threading a condition through the
   // doc logic below. What follows this branch stamps the doc's update log,
-  // may write a mark into the doc's ydoc, and emails the doc's byline; a file
+  // may write a mark into the doc's ydoc, and would email the doc's byline on a
+  // raise (RAISE_SENDS_MAIL); a file
   // has no update log, no ydoc and a different byline table, so almost none of
   // it would survive being made conditional.
   if (annotation.fileId !== null) {
@@ -724,7 +737,7 @@ export async function postAnnotation(opts: {
     }
   }
 
-  if (opts.raise) {
+  if (opts.raise && RAISE_SENDS_MAIL) {
     const doc = await prisma.doc.findUnique({
       where: { id: docId },
       select: {
@@ -1130,7 +1143,7 @@ async function postFileAnnotation(opts: {
   /** Where the post was made (docs/PDF.md §13); null from a client that sent none. */
   origin: CaptureOrigin | null;
   raise: boolean;
-  /** Display name for the notification email — resolved by the caller, which already has the session. */
+  /** Display name for the notification email, were a raise to send one (RAISE_SENDS_MAIL) — resolved by the caller, which already has the session. */
   raisedBy: string;
   /** Who is posting — PLAN.md §22e's version 1 is attributed to them. */
   authorUserId: string;
@@ -1268,7 +1281,7 @@ async function postFileAnnotation(opts: {
     return { error: refused, captureRefused: true };
   }
 
-  if (raise) {
+  if (raise && RAISE_SENDS_MAIL) {
     const file = await prisma.storedFile.findUnique({
       where: { id: fileId },
       select: {
