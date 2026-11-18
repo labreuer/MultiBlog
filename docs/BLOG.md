@@ -225,7 +225,7 @@ are. Nothing on the page uses `dangerouslySetInnerHTML`.
   worth replaying, or anchors that must survive an edit. A blurb has none of those: one line,
   one owner, changed a few times a year. Putting it on a ydoc would add:
   - a `ydoc:contributor:` namespace;
-  - a third authorization branch in `/api/ydoc/[id]/token`;
+  - a third token route, with an authorization rule beside the doc's and the annotation's;
   - a third cache-flush path in the collab server, writing to `user`;
   - a provider and IndexedDB wiring on the dashboard.
 

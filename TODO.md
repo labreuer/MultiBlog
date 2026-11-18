@@ -46,17 +46,13 @@ an `onTokenSync` hook, and closes that document's connection if the hook throws.
 minute or so, `requestToken()` each connection, and in `onTokenSync` verify the token the way
 `ydocOnAuthenticate` does. That bounds every kind of revocation, sign-out included, to the
 interval plus a round trip. It needs no permission-changing action to remember to notify
-collab. Three details decide whether it is actually a fix:
+collab. Two details decide whether it is actually a fix:
 
 1. **A client that never answers must be closed too.** Each request needs a deadline, or the
    check is only advisory.
 2. **A token that comes back `readOnly` on a writable connection (a demotion) has to close
    it**, or narrow `connectionConfig.readOnly` if Hocuspocus honours a change after
    authentication (unverified).
-3. **`/ydoc-debug` passes a fixed token string, not a refresher.** It would answer with an
-   expired token and be closed within the interval, so it needs a refresher first, like the one
-   every other connection (PDF presence included) already has. It is ADMIN-only, so closing it
-   would cost nothing worse than a reload.
 
 **The alternative, and why it is worse.** Revocation could instead be pushed from each action
 that takes access away (removing an author, changing visibility, demoting, deleting a user) by

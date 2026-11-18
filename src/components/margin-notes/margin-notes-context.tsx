@@ -110,8 +110,8 @@ export function MarginNotesRail({ className }: { className?: string }) {
 // Called by whichever component owns the article's editor. Split out so the
 // three call sites share the ready-gating and the unmount cleanup rather than
 // each writing their own effect. A no-op outside a provider, so
-// CollabEditorBody's other embedders (/side-by-side, /ydoc-debug) are
-// unaffected by the doc editor adopting it.
+// CollabEditorBody's other embedder (/side-by-side) is unaffected by the doc
+// editor adopting it.
 export function useRegisterMarginNotesEditor(editor: Editor | null, ready: boolean) {
   const setEditor = useContext(MarginNotesContext)?.setEditor;
 

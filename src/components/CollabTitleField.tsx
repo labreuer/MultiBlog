@@ -33,7 +33,7 @@ type Props = {
 // the existing Hocuspocus connection, `ydoc` persistence and the `ydoc_update`
 // replay log — which is what lets /doc/[slug]'s scrub bar and /ydoc-debug
 // scrub through title changes, colored per author, for free. Used by
-// DocEditor, a /side-by-side column's write mode and YdocDebug.
+// DocEditor and a /side-by-side column's write mode.
 //
 // Deliberately no CollaborationCaret: the extension has no per-field awareness
 // key, so a second instance sharing this provider would write the same

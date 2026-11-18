@@ -5,8 +5,7 @@ import { canUserEditDoc, canUserReadDoc } from "@/lib/doc-authz";
 import { signYdocToken } from "@/lib/ydoc-token";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 
-// Doc-scoped sibling of /api/ydoc/[id]/token (that route stays ADMIN-gated
-// and /ydoc-debug-only, PLAN.md §12g). An editor gets a writable token;
+// A doc's collab token (PLAN.md §12g). An editor gets a writable token;
 // someone who merely satisfies canUserReadDoc gets readOnly: true — the
 // two checks are deliberately asked in that order so an editor never even
 // evaluates the read-only path.

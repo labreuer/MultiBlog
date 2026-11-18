@@ -1,5 +1,5 @@
 /* Shared editor chrome for every CollabEditorBody consumer (DocEditor,
-   sidebyside/DocColumn, YdocDebug's EditView) — the toolbar, the scrollable
+   sidebyside/DocColumn) — the toolbar, the scrollable
    body frame, and remote-collaborator caret styling. Split out of what used
    to be PostEditor.module.css (deleted with PostEditor.tsx, PLAN.md §15):
    that file's name suggested it was post-specific, but CollabEditorBody/
@@ -421,8 +421,8 @@
    `:has()` predates nothing this codebase already requires: it is more widely
    supported than the `light-dark()` STYLE.md's dark theme is built on. The
    scope attribute is what keeps this off the site header's own <details>
-   dropdowns, and off the other EditorChrome consumers (DocColumn, YdocDebug's
-   EditView), which have no settings panel. Attribute selectors survive CSS
+   dropdowns, and off the other EditorChrome consumer (DocColumn), which has
+   no settings panel. Attribute selectors survive CSS
    Modules unhashed, which is why the hook is an attribute and not a class. */
 [data-doc-editor-column]:has(> [data-doc-settings][open]) .editorContent {
   min-height: 0;
@@ -435,9 +435,9 @@
    mode whose entire premise is that the viewport is the document, a page
    scroll under the editor is the one thing that must not happen.
 
-   Scoped to the doc editor's column, so the other consumers of this chrome
-   (DocColumn, YdocDebug's EditView) keep their floor — neither hides any
-   chrome in landscape, so neither has the height to spare. */
+   Scoped to the doc editor's column, so the other consumer of this chrome
+   (DocColumn) keeps its floor — it hides no chrome in landscape, so it has
+   no height to spare. */
 @media (orientation: landscape) and (max-height: 500px) {
   [data-doc-editor-column] .editorContent {
     min-height: 0;

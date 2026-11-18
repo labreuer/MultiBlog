@@ -1793,7 +1793,7 @@ export async function setSiteDefaultColumnOrder(value: Prisma.JsonValue | null):
   });
 }
 
-/** Row count in ydoc_update for docId's own ydoc — invariant 1 (§11b), same check createTestYdoc's own spec makes for /ydoc-debug documents. */
+/** Row count in ydoc_update for docId's own ydoc — invariant 1 (§11b), the check ydoc-debug.spec.ts makes of a createTestYdoc document. */
 export async function countDocYdocUpdates(docId: string): Promise<number> {
   return prisma.ydocUpdate.count({ where: { ydocId: ydocIdForDoc(docId) } });
 }
@@ -2890,7 +2890,7 @@ export async function getCommentStatus(commentId: string): Promise<CommentStatus
 }
 
 // ---------------------------------------------------------------------------
-// The standalone ydoc stack (PLAN.md §11) — helpers for e2e/ydoc-debug.spec.ts.
+// The ydoc stack (PLAN.md §11) — helpers for e2e/ydoc-debug.spec.ts.
 // Every id this creates is under the ydoc:test- prefix (src/lib/ydoc-names.ts);
 // deleteTestYdoc refuses anything else, the same containment convention
 // createTestPost/createTestUser use for @example.com / "E2E " titles.
@@ -2899,10 +2899,10 @@ export async function getCommentStatus(commentId: string): Promise<CommentStatus
 export type TestYdoc = { id: string };
 
 /**
- * Creates a document the same way the "New document" button on /ydoc-debug
- * does — via ydocStore.createIfAbsent, so it's a real invariant-1 document
- * (a `ydoc` row plus exactly one full-state `ydoc_update` row), not a
- * hand-rolled shortcut around the code path under test.
+ * Creates a bare, empty document the way every ydoc is created — via
+ * ydocStore.createIfAbsent, so it's a real invariant-1 document (a `ydoc` row
+ * plus exactly one full-state `ydoc_update` row), not a hand-rolled shortcut
+ * around the code path under test.
  */
 export async function createTestYdoc(): Promise<TestYdoc> {
   const id = newTestYdocId();

@@ -5,9 +5,11 @@ import { IndexeddbPersistence } from "y-indexeddb";
 import { SCHEMA_VERSION } from "./schema-version";
 import { parseYdocDbName, ydocDbName } from "./ydoc-db-name";
 
-// Client-side durability for the /ydoc-debug editor only — PostEditor.tsx
-// does not use this (PLAN.md §11e). Two distinct duplication bugs, two
+// Client-side durability for the doc editor and a /side-by-side column's
+// write mode (PLAN.md §11e, §14l). Two distinct duplication bugs, two
 // distinct fixes; see the module-level comments below for which is which.
+// The databases' `ydoc-debug:` prefix names a page that no longer edits
+// anything, and stays as it is: renaming it would orphan every local copy.
 
 // y-indexeddb's object store of updates, one per key, in the order written.
 const UPDATES_STORE = "updates";

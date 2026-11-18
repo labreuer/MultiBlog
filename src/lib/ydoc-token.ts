@@ -26,8 +26,8 @@ export type YdocTokenPayload = {
   documentName: string;
   role: Role;
   // PLAN.md §12g — set for a doc reader who satisfies canViewDocs on a
-  // SHARED doc but isn't an editor. Absent (not merely false) for every
-  // /ydoc-debug token, so ydocOnAuthenticate's default stays writable there.
+  // SHARED doc but isn't an editor. Absent (not merely false) for an
+  // editor's token, so ydocOnAuthenticate's default stays writable there.
   readOnly?: boolean;
 };
 

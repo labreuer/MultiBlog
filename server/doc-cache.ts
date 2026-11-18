@@ -9,7 +9,7 @@ import { Prisma } from "../src/generated/prisma/client";
 
 // PLAN.md §12d — writes doc.title/prose_json from the live ydoc, called from
 // ydocOnStoreDocument's debounce for every ydoc-stack document, doc or not.
-// docIdFromYdocId(ydocId) is non-null for a /ydoc-debug document too (it's
+// docIdFromYdocId(ydocId) is non-null for a bare test document too (it's
 // just string surgery on the ydoc:-prefix), so the updateMany below is what
 // actually decides "is this a doc's ydoc" — it matches zero rows for
 // anything else. No lookup, no doc-awareness in server/ydoc-store.ts, and

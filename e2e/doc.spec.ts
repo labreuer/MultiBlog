@@ -1,11 +1,10 @@
-// Docs and annotations (PLAN.md §12) — the ydoc-stack's second real
-// consumer after /ydoc-debug. Three things worth covering that nothing else
-// in the suite touches: the doc-cache debounce actually reaches
-// Doc.title/proseJson, a reader's already-open tab updates with no reload
-// (the reading view's whole reason for existing, §12g), and an annotation's
-// full anchoring lifecycle — anchored at the selected range, degrading the
-// instant its text is gone, and never reachable from the blog's own
-// /comments.
+// Docs and annotations (PLAN.md §12) — the ydoc stack's real consumer.
+// Three things worth covering that nothing else in the suite touches: the
+// doc-cache debounce actually reaches Doc.title/proseJson, a reader's
+// already-open tab updates with no reload (the reading view's whole reason
+// for existing, §12g), and an annotation's full anchoring lifecycle —
+// anchored at the selected range, degrading the instant its text is gone,
+// and never reachable from the blog's own /comments.
 //
 // The anchoring tests below cover *both* mechanisms (PLAN.md §13o), because
 // which one is used is a property of the surface: annotating from a reading

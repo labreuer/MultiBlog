@@ -1,6 +1,6 @@
-// Create, list, or delete throwaway documents in the standalone ydoc stack
-// (PLAN.md §11) — for exercising /ydoc-debug without needing a real editing
-// session first. Only ever touches ids under the ydoc:test- prefix (see
+// Create, list, or delete throwaway documents in the ydoc stack (PLAN.md
+// §11) — for exercising /ydoc-debug without needing a real editing session
+// first. Only ever touches ids under the ydoc:test- prefix (see
 // src/lib/ydoc-names.ts); delete refuses anything else, the same containment
 // convention as scripts/test-user.ts's @example.com guard.
 //

@@ -34,7 +34,7 @@ export type DecodedAnnotationBody = { proseJson: JSONContent; bodyText: string }
 /**
  * The body as the cache columns hold it. Throws when the "default" fragment
  * is not decodable by the annotation schema — a body written with the doc
- * schema, or a bare /ydoc-debug document — which every caller treats as
+ * schema, or a bare test document — which every caller treats as
  * "leave things as they are" rather than as empty.
  */
 export async function decodeAnnotationBody(doc: Y.Doc): Promise<DecodedAnnotationBody> {

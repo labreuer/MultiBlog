@@ -30,8 +30,8 @@ changed. Not routing away from a legacy path any more, just carving out two thin
   nobody made.
 - **`ydoc:test-*`** — the containment guard for `scripts/test-ydoc.ts`.
 
-A `ydoc:` name nobody has explicitly created — via `scripts/test-ydoc.ts`,
-`scripts/test-doc.ts`, or `/ydoc-debug`'s "New document" button — just starts empty.
+A `ydoc:` name nobody has explicitly created — with its doc or annotation, or via
+`scripts/test-ydoc.ts` or `scripts/test-doc.ts` — just starts empty.
 
 That there is exactly one `new Server(...)` in the codebase is also why a slot needs one
 collab port and not a block: see [DEV_SLOTS.md](DEV_SLOTS.md).
@@ -69,8 +69,7 @@ which creates the socket on first call and destroys it when the provider unmount
   (`src/lib/collab-token-request.ts`) turns those two statuses into `CollabTokenDenied`, and
   every refresher uses it. Every provider on the shared socket gets a refresher rather than a
   token string, the PDF presence channel included: a string is re-sent unchanged on each
-  reconnect and refused once its two minutes are up. `/ydoc-debug`, on a socket of its own, is
-  the one that still passes a string. A 401 goes to `DocPresenceProvider`'s
+  reconnect and refused once its two minutes are up. A 401 goes to `DocPresenceProvider`'s
   `reportSignedOut()`, which `disconnect()`s the socket — so nothing on it, and nothing
   attached to it later, reconnects
   until the page loads again — and raises `signedOut`: `SignedOutNotice` shows it under the
@@ -88,7 +87,7 @@ which creates the socket on first call and destroys it when the provider unmount
   authenticated. Separate sockets used to make that harmless. No surface mounts one annotation
   twice today (the margin rail *portals* a card rather than duplicating it); side-by-side with
   the same doc in both columns would, which is one reason `DocColumn` still owns its own
-  provider and socket, and `/ydoc-debug` the other.
+  provider and socket.
 - **Server-side caches must key on socket *and* document.** Hocuspocus's `socketId` is per
   websocket, not per document connection. The clientID → user attribution cache in
   `server/ydoc-hooks.ts` was keyed on `socketId` alone and would have held whichever
@@ -123,7 +122,20 @@ under that id, discarding every paragraph and every annotation the doc ever had.
 
 If a doc's `ydoc` row is ever genuinely corrupted, the only way back is the update log itself
 — `ydoc_update`, never truncated — replayed via `/ydoc-debug`. A doc's `ydoc:<docId>` row is
-just another entry in the same table an ADMIN can select there. Not a delete-and-restart.
+just another entry in the same table, which an ADMIN opens there with `?id=ydoc:<docId>`. Not a
+delete-and-restart.
+
+## `/ydoc-debug` reads any ydoc, and writes none
+
+It is an ADMIN's inspector: the row, the update log and snapshots, the replay slider, the title
+history and the marks, all read over HTTP, with no connection to the collab server. Reading is
+open to any ydoc, a `PRIVATE` doc's included, since inspecting the stack is the page's job.
+
+**It has no editing mode, and must not regain one.** An editing mode needs a writable token for
+any ydoc, which would let an ADMIN change the text of a doc they can't edit: a `PRIVATE` doc is
+its byline's alone (docs/PERMISSIONS.md). The doc editor is the stack's real consumer, and
+`e2e/ydoc-debug.spec.ts` types there and inspects the result here. The Snapshot button stays,
+since a checkpoint changes no text.
 
 ## `y-indexeddb`: never construct a second instance for one `Y.Doc`
 
@@ -146,7 +158,7 @@ itself as an origin, not sibling instances.
 ### The database is keyed by lineage, not by name
 
 The local IndexedDB database is keyed by the document's *lineage* — `ydoc.created_at`,
-fetched from `/api/ydoc/[id]/token` alongside the collab token — rather than by
+fetched from `/api/doc/[id]/token` alongside the collab token — rather than by
 `documentName` alone. `created_at` only changes if the row is ever recreated, i.e. exactly
 when the server has built a structurally new document, so a stale local copy can never merge
 into a re-seeded one.
@@ -323,8 +335,7 @@ before the content check sees it, so `contentError` never fires."
 2. **The version goes on the socket URL.** `getCollabUrl()` (`src/lib/collab-url.ts`) appends
    `schema=<SCHEMA_VERSION>` through `withSchemaVersion`. Every browser socket is built from it:
    - `createCollabSocket`, the page's one socket;
-   - the side-by-side columns (`sidebyside/DocColumn.tsx`);
-   - `/ydoc-debug` (`YdocDebug.tsx`).
+   - the side-by-side columns (`sidebyside/DocColumn.tsx`).
 
    It isn't in the token. `/api/doc/<id>/token` is fetched again on every reconnect, so a new
    server would hand an old tab a token carrying the new version.
@@ -358,8 +369,8 @@ before the content check sees it, so `contentError` never fires."
    - An annotation's editor has no IndexedDB, so it goes read-only at once, its submit is
      disabled, and it says to copy out anything unsaved before reloading.
    - The reading views and the PDF viewer show `OutOfDateNotice`.
-   - A side-by-side column and `/ydoc-debug` own their sockets, so each handles the refusal
-     itself: the socket stops, the editors stop, IndexedDB is detached.
+   - A side-by-side column owns its socket, so it handles the refusal itself: the socket
+     stops, the editors stop, IndexedDB is detached.
 7. **A unit test makes a bump impossible to forget.** `src/lib/schema-version.test.ts`:
    - Each live editor's whole extension list lives in `src/lib/live-editor-extensions.ts`
      (`docEditorExtensions`, `annotationEditorExtensions`, `titleEditorExtensions`), and

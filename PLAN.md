@@ -1278,10 +1278,10 @@ explicit `yDocOptions: { gc: true, gcFilter: () => true }`.
 **Loading** reads the row and applies it; on `Unavailable` it marks the document degraded and
 returns an empty doc; on a miss it calls `createIfAbsent` with an empty state and applies
 whichever blob won. There is deliberately **no revision fallback** — that coupling is exactly
-what these tables exist to shed. In practice the row always already exists, because the script
-and the `/ydoc-debug` "New document" button both create it (row #1 included) before anyone
-connects; the auto-create is just the forgiving path for a connection to a name nobody made,
-and an empty seed has no content to duplicate.
+what these tables exist to shed. In practice the row always already exists, because whatever
+makes a document creates it (row #1 included) before anyone connects; the auto-create is just
+the forgiving path for a connection to a name nobody made, and an empty seed has no content to
+duplicate.
 
 **`onChange`** is one call to `appendUpdate` — no `count()`, because invariant 1 was settled at
 creation. **`onStoreDocument`** writes the blob and state vector.
@@ -1336,8 +1336,9 @@ so a re-seed lands in a *different* local store and there is nothing to merge. S
 the same name are swept on attach via `indexedDB.databases()`, guarded because Firefox doesn't
 implement it (in which case they are merely orphaned, which is harmless).
 
-The lineage has to be known *before* connecting, which is why `POST /api/ydoc/[id]/token`
-returns `{ token, lineage }` — it is already doing a Postgres round-trip to authorize, and the
+The lineage has to be known *before* connecting, which is why the token route (as built, a
+doc's `POST /api/doc/[id]/token`) returns `{ token, lineage }` — it is already doing a Postgres
+round-trip to authorize, and the
 `ydoc` row is guaranteed to exist by then (§11d), so the lineage is never null. Caching it in
 `localStorage` to skip that round-trip was considered and rejected: it would let a
 stale-lineage store merge into the live document *before* the mismatch could be detected, which
@@ -1370,6 +1371,13 @@ Fixtures come from both directions: `scripts/test-ydoc.ts` (create/list/delete, 
 `--from-post` to build a document from a real revision so there is genuine TipTap content, and
 `--garbage` to exercise the error path) and an on-page "New document" button for a quick empty
 one.
+
+**As built, 2026-11-18: the page reads, and writes no text.** The editing mode, its token route
+(`/api/ydoc/[id]/token`) and "New document" are gone. The mode minted a writable token for any
+ydoc, which let an ADMIN change a doc they couldn't edit, a `PRIVATE` doc's included; the doc
+editor is the stack's real consumer, and `e2e/ydoc-debug.spec.ts` types there. Reading stays
+open to any ydoc, Snapshot stays, and `?id=` opens one document directly. docs/YDOC.md,
+"`/ydoc-debug` reads any ydoc, and writes none".
 
 ### 11h. The replay slider — measuring what a snapshot buys
 
@@ -1413,7 +1421,8 @@ Two caveats worth keeping:
 ### 11g. Verification
 
 The suite (`e2e/ydoc-debug.spec.ts`, with `db-worker.ts` helpers and a `ydoc:test-*` teardown
-sweep) asserts the invariants rather than the UI: creating a document writes the `ydoc` row and
+sweep; as built since §11f's note, it types in the doc editor) asserts the invariants rather
+than the UI: creating a document writes the `ydoc` row and
 **exactly one** `ydoc_update` row before anyone connects; opening the page read-only adds no
 rows and leaves `clients` empty, while typing one character adds rows and exactly one `clients`
 entry; replaying row #1 plus deltas into a scratch `Y.Doc` reproduces the editor's text with

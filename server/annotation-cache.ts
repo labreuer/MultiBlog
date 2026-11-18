@@ -9,7 +9,7 @@ import type { Prisma } from "../src/generated/prisma/client";
 // ydocOnStoreDocument's debounce for every ydoc-stack document, annotation
 // or not. annotationIdFromYdocId(ydocId) is what actually decides "is this
 // an annotation's ydoc" — it matches zero rows for anything else (a doc, or
-// a bare /ydoc-debug document), so this is safe to call unconditionally
+// a bare test document), so this is safe to call unconditionally
 // alongside updateDocCache; the two never both match the same documentName
 // (§13a's namespace guard). No title fragment — an annotation has none.
 export async function updateAnnotationCache(
