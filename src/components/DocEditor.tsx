@@ -16,6 +16,8 @@ import { useEditorAnnotationWidget } from "@/lib/use-editor-annotation-widget";
 import { markMouseDownInside } from "@/lib/outside-mousedown";
 import CollabEditorBody, { type AuthorStat } from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
+import WikiAddressLine from "./wiki/WikiAddressLine";
+import { wikiPagePath, type WikiAddress } from "@/lib/wiki-address";
 import DocSettingsPanel, { type EligibleUser } from "./DocSettingsPanel";
 import EditorAnnotationRail from "./annotation/EditorAnnotationRail";
 import AnnotationPopover from "./annotation/AnnotationPopover";
@@ -63,8 +65,13 @@ type Props = {
   slug: string;
   initialTitle: string;
   visibility: DocVisibility;
-  /** The doc's wiki address columns, null for a doc that isn't a wiki page. */
-  wiki: { name: string; ownerUserId: string | null } | null;
+  /**
+   * A wiki page's address and owner, null for a doc that isn't one
+   * (docs/WIKI.md "The name is the title", "Telling a wiki page from a doc"):
+   * its name stands where a doc's title field does, the address line and the
+   * PUBLIC notice above it, and its own links go to its address.
+   */
+  wiki: { address: WikiAddress; ownerUserId: string | null } | null;
   createdAt: Date;
   userId: string;
   userName: string;
@@ -110,6 +117,10 @@ export default function DocEditor({
   // Fed per keystroke by CollabTitleField's onTitleChange below.
   const [title, setTitle] = useState(initialTitle);
   const [deleted, setDeleted] = useState(initialDeleted);
+  // The visibility the server last accepted, reported by the Settings panel,
+  // which a wiki page's address line and PUBLIC notice follow.
+  const [currentVisibility, setCurrentVisibility] = useState(visibility);
+  const wikiPath = wiki && wikiPagePath(wiki.address);
   const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   // Distinct from `connectionStatus === "connected"`: the provider reports
@@ -315,7 +326,28 @@ export default function DocEditor({
         ref={containerRef}
         onMouseDownCapture={markMouseDownInside}
       >
-        {provider ? (
+        {wiki && currentVisibility === "PUBLIC" && (
+          // Stays in the phone-landscape focus mode, where the address line
+          // and the name are hidden: it is the one thing a typist there must
+          // still know.
+          <p className={styles.publicNotice} data-wiki-public-notice="">
+            This page is PUBLIC: anyone can read it, signed out, and what you type here reaches them within seconds.
+          </p>
+        )}
+        {wiki && (
+          <div className={styles.wikiAddress}>
+            <WikiAddressLine address={wiki.address} visibility={currentVisibility} />
+          </div>
+        )}
+        {wiki ? (
+          // A wiki page's title is its name, shown where a doc's title field
+          // is, and not its title fragment, which nothing on a wiki page
+          // shows. Read-only: a page is renamed from here once renaming
+          // exists (docs/WIKI.md, "Renaming").
+          <div className={`${styles.titleInput} ${styles.titleInputDisabled}`} data-wiki-name="">
+            {wiki.address.name}
+          </div>
+        ) : provider ? (
           <CollabTitleField
             ydoc={ydoc}
             userId={userId}
@@ -435,12 +467,13 @@ export default function DocEditor({
         )}
         {error && <p className={styles.errorMessage}>{error}</p>}
         <p className={styles.docNote}>
-          <Link href={`/doc/${slug}`}>View and Annotate</Link>
+          <Link href={wikiPath ?? `/doc/${slug}`}>View and Annotate</Link>
         </p>
         <DocSettingsPanel
           docId={docId}
           visibility={visibility}
-          wiki={wiki}
+          wiki={wiki && { name: wiki.address.name, ownerUserId: wiki.ownerUserId, path: wikiPath! }}
+          onVisibilityChange={setCurrentVisibility}
           viewerId={userId}
           createdAt={createdAt}
           authorIds={authorIds}

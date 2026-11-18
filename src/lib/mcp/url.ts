@@ -14,6 +14,13 @@ export type ParsedRef =
   /** /doc/<slug or id>, with or without /edit. */
   | { kind: "doc"; param: string; fragment: string }
   /**
+   * A wiki page's address, /wiki/<owner>/<name>[~<variant>], with or without
+   * /edit (docs/WIKI.md "URLs"): its two segments decoded once, as the wiki's
+   * routes take them. resolve.ts finds the doc it names, which every tool
+   * then answers as it answers a /doc/ URL.
+   */
+  | { kind: "wiki"; owner: string; page: string; fragment: string }
+  /**
    * /pdf/<slug>, with its fragment: #sheet=… (or #page=…), a fragment link's text=…, or an
    * annotation card's name. `version` is set for a version's own address,
    * /pdf/<slug>/v/<n> (docs/PDF.md §13, "Addresses"); without it, the latest.
@@ -87,6 +94,16 @@ export function parseRef(ref: string, appOrigin: string | null): ParsedRef {
     if (sel) return { kind: "link", id: sel };
     const param = decode(second);
     return param ? { kind: "doc", param, fragment } : { kind: "unknown", path };
+  }
+  if (first === "wiki" && second && third && (segments.length === 3 || (segments.length === 4 && segments[3] === "edit"))) {
+    if (sel) return { kind: "link", id: sel };
+    const owner = decode(second);
+    const page = decode(third);
+    // A namespace's own segment (`@<slug>` or `commons`, any capitals): the
+    // reserved ones, /wiki/special/pages among them, name no page.
+    const lowered = owner?.toLowerCase();
+    const isNamespace = lowered !== undefined && (lowered.startsWith("@") || lowered === "commons" || lowered === "common");
+    return owner && page && isNamespace ? { kind: "wiki", owner, page, fragment } : { kind: "unknown", path };
   }
   if (first === "pdf" && second && (segments.length === 2 || versionOf(segments.slice(2)) !== null)) {
     if (sel) return { kind: "link", id: sel };

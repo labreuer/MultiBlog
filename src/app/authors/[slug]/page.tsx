@@ -1,6 +1,7 @@
 import { notFound, permanentRedirect } from "next/navigation";
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
+import { userByOldSlug } from "@/lib/user-slug";
 import { publishedPostWhere } from "@/lib/post-status";
 import { postListOrderBy } from "@/lib/post-pages";
 import { resolveAvatarSrc } from "@/lib/avatar-url";
@@ -39,19 +40,6 @@ async function getAuthorWithPosts(slug: string) {
   return { user, posts };
 }
 
-// Falls back to UserSlugHistory when `slug` isn't any user's current slug —
-// old author links 301 to wherever that user lives now instead of 404ing.
-// Mirrors [slug]/page.tsx's resolveRedirectSlug for posts; the nested `user`
-// filter needs its own deletedByUserId check since src/lib/prisma.ts's
-// soft-delete extension only wraps top-level user/post operations.
-async function resolveRedirectSlug(slug: string): Promise<string | null> {
-  const entry = await prisma.userSlugHistory.findFirst({
-    where: { slug, user: { deletedByUserId: null } },
-    select: { user: { select: { slug: true } } },
-  });
-  return entry?.user.slug ?? null;
-}
-
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
   const author = await getAuthorWithPosts(slug);
@@ -65,9 +53,12 @@ export default async function AuthorPage({ params }: { params: Promise<{ slug: s
   const { slug } = await params;
   const author = await getAuthorWithPosts(slug);
   if (!author) {
-    const redirectSlug = await resolveRedirectSlug(slug);
-    if (redirectSlug) {
-      permanentRedirect(`/authors/${redirectSlug}`);
+    // An old slug goes on to the account's current one (userByOldSlug, which
+    // the wiki's /wiki/@<old-slug>/ and MCP's readAuthor share), a live
+    // account's only.
+    const moved = await userByOldSlug(slug);
+    if (moved) {
+      permanentRedirect(`/authors/${moved.slug}`);
     }
     notFound();
   }

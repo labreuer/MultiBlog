@@ -311,6 +311,8 @@ export async function updateUserSlug(userId: string, newSlug: string): Promise<{
   revalidatePath(`/users/${userId}/slug`);
   revalidatePath(`/authors/${user.slug}`);
   revalidatePath(`/authors/${slug}`);
+  // A person's wiki namespace is addressed by their slug (docs/WIKI.md "URLs").
+  revalidatePath("/wiki", "layout");
   return { slug };
 }
 
@@ -336,6 +338,8 @@ export async function revertUserSlug(userId: string): Promise<{ slug: string }> 
   revalidatePath(`/users/${userId}/slug`);
   revalidatePath(`/authors/${oldSlug}`);
   revalidatePath(`/authors/${slug}`);
+  // A person's wiki namespace is addressed by their slug (docs/WIKI.md "URLs").
+  revalidatePath("/wiki", "layout");
   return { slug };
 }
 

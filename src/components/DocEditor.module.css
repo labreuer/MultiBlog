@@ -115,6 +115,7 @@
   }
 
   .titleInput,
+  .wikiAddress,
   .statusLine,
   .docNote {
     display: none;
@@ -206,6 +207,22 @@
 .titleInputDisabled {
   color: var(--text-secondary);
   cursor: default;
+}
+
+/* docs/WIKI.md "Telling a wiki page from a doc" — above a PUBLIC page's
+   name in its editor, in the warning colors the address line gives PUBLIC. */
+.publicNotice {
+  flex: 0 0 auto;
+  margin-bottom: 0.5rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--fill-warning);
+  color: var(--warning-text);
+  font-size: 0.85rem;
+}
+
+.wikiAddress {
+  flex: 0 0 auto;
 }
 
 .statusLine {

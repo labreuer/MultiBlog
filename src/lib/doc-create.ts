@@ -4,11 +4,12 @@ import type { JSONContent } from "@tiptap/core";
 import type { Schema } from "@tiptap/pm/model";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
-import type { DocVisibility } from "@/generated/prisma/enums";
+import type { DocVisibility, Role } from "@/generated/prisma/enums";
 import { uniqueDocSlug } from "@/lib/doc-slug";
 import { slugify } from "@/lib/slug";
 import { isUniqueViolationOn } from "@/lib/unique-violation";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
+import { claimWikiAddress, type WikiClaim } from "@/lib/wiki-claim";
 import {
   docContentExtensions,
   pmDocContentSchema,
@@ -133,6 +134,22 @@ export type CreateDocOptions = {
    * `chip_styles` beside the body labelled under it.
    */
   chipStyles?: ChipStyles;
+  /**
+   * A wiki address to claim for the new doc (docs/WIKI.md "The `wiki`
+   * option"): the namespace, the name, and a typed variant or the sequence to
+   * pick one from, with the role of whoever claims it, which the held commons
+   * names ask. The claim runs first in the create's transaction, under the
+   * address lock; the row is written with the address, and its slug and
+   * `title` column are made from the name. A refusal is thrown as a typed
+   * error (WikiAddressTaken, ApiError), which passes through the slug retry
+   * untouched. `visibility` must be passed for the commons, whose pages are
+   * never PRIVATE; the caller checks it against allowedVisibilities.
+   *
+   * `verify` is the caller's own check, run in the transaction before the
+   * claim: the namespace's rules, read afresh there (wiki-create.ts), so a
+   * demotion committed before the create is seen by it.
+   */
+  wiki?: WikiClaim & { actorRole: Role; verify?: (tx: Prisma.TransactionClient) => Promise<void> };
 };
 
 // The doc a Markdown import creates: `body` is the parse's (markdownToDocContent),
@@ -190,17 +207,35 @@ export async function createDocWithContent(userId: string, title: string, body: 
   seed.destroy();
 
   const byline = [...new Set(opts.byline ?? [userId])];
+  const { wiki } = opts;
+  // A wiki page's title is its name, whatever the seed's title fragment says
+  // (a fork's is its parent's title at the forked version).
+  const rowTitle = wiki ? wiki.name : cached.title;
   // A slug from the title when it has one (see insertDocRow), claimed in the
-  // transaction; a lost race on it retries the whole create, and the third
-  // try falls back to the cuid, so this always ends.
+  // transaction; a lost race on it retries the whole create, claim included,
+  // and the third try falls back to the cuid, so this always ends.
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const slug = attempt < 2 && cached.title && slugify(cached.title, "") ? await uniqueDocSlug(cached.title) : null;
+    const slug = attempt < 2 && rowTitle && slugify(rowTitle, "") ? await uniqueDocSlug(rowTitle) : null;
     try {
       return await prisma.$transaction(async (tx) => {
+        let wikiVariant = "";
+        if (wiki) {
+          // A fork into the wiki takes its parent's row FOR KEY SHARE first,
+          // as the insert's foreign key would, so that it and a rename or
+          // move of the parent (which holds that row FOR UPDATE, then the
+          // address lock) take the two in one order ("Claiming an address").
+          if (opts.forkedFrom) {
+            await tx.$queryRaw`SELECT 1 FROM doc WHERE id = ${opts.forkedFrom.docId} FOR KEY SHARE`;
+          }
+          const client = tx as unknown as Prisma.TransactionClient;
+          await wiki.verify?.(client);
+          wikiVariant = (await claimWikiAddress(client, wiki.actorRole, wiki)).variant;
+        }
         const created = await tx.doc.create({
           data: {
             slug: slug ?? crypto.randomUUID(),
-            title: cached.title,
+            title: rowTitle,
+            ...(wiki ? { wikiOwnerUserId: wiki.ownerUserId, wikiName: wiki.name, wikiVariant } : {}),
             createdByUserId: userId,
             updatedByUserId: userId,
             visibility: opts.visibility ?? "PRIVATE",
@@ -212,11 +247,11 @@ export async function createDocWithContent(userId: string, title: string, body: 
             forkedFromUpdateId: opts.forkedFrom?.updateId ?? null,
             authors: { create: byline.map((authorId, bylineOrder) => ({ userId: authorId, bylineOrder })) },
           },
-          select: { id: true, slug: true },
+          select: { id: true, slug: true, wikiVariant: true },
         });
         const doc = slug
           ? created
-          : await tx.doc.update({ where: { id: created.id }, data: { slug: created.id }, select: { id: true, slug: true } });
+          : await tx.doc.update({ where: { id: created.id }, data: { slug: created.id }, select: { id: true, slug: true, wikiVariant: true } });
         await ydocStore.createInTransaction(tx as unknown as Prisma.TransactionClient, ydocIdForDoc(doc.id), ydoc, stateVector);
         return doc;
       });

@@ -10,7 +10,24 @@
 // The admin tables that carry these preferences. A string union rather than a
 // free-form key, so a typo in a page is a type error instead of a silently
 // ignored preference.
-export type AdminTableName = "posts" | "docs" | "files" | "users" | "comments" | "annotations" | "tags" | "links" | "references";
+export type AdminTableName =
+  | "posts"
+  | "docs"
+  | "files"
+  | "users"
+  | "comments"
+  | "annotations"
+  | "tags"
+  | "links"
+  | "references"
+  | "wiki";
+
+// Where each table is served, for the revalidation a saved column order needs.
+// Every table but the wiki's is at `/<name>`; the wiki's is under /wiki/special/,
+// since /wiki/<segment> is a namespace (docs/WIKI.md "Listing wiki pages").
+export function adminTablePath(table: AdminTableName): string {
+  return table === "wiki" ? "/wiki/special/pages" : `/${table}`;
+}
 
 export function columnOrderFor(stored: unknown, table: AdminTableName): string[] | null {
   if (stored === null || typeof stored !== "object" || Array.isArray(stored)) return null;

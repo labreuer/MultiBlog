@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { isAdmin } from "@/lib/authz";
 import { getSiteSettings } from "@/lib/site-settings";
-import type { AdminTableName } from "@/lib/column-order";
+import { adminTablePath, type AdminTableName } from "@/lib/column-order";
 
 async function requireAdmin(): Promise<void> {
   const session = await auth();
@@ -69,5 +69,5 @@ export async function updateSiteDefaultColumnOrder(table: AdminTableName, cols: 
   // page — the whole point is that it changes what an admin who has never
   // saved their own preference for that table sees.
   revalidatePath("/site-settings");
-  revalidatePath(`/${table}`);
+  revalidatePath(adminTablePath(table));
 }

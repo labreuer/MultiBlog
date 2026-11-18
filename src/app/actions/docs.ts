@@ -6,7 +6,7 @@ import * as Y from "yjs";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { revertDocSlug as revertDocSlugInDb } from "@/lib/doc-slug";
-import { docBylineIds, setDocByline, setDocDeleted, setDocSlug, setDocVisibility } from "@/lib/doc-manage";
+import { docBylineIds, setDocByline, setDocDeleted, setDocSlug, setDocVisibility, type DocDeletedResult } from "@/lib/doc-manage";
 import { actorFromSessionUser } from "@/lib/actor";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
 import {
@@ -245,11 +245,28 @@ export async function importMarkdownDocAction(
 // The bodies of these live in src/lib/doc-manage.ts, shared with the MCP
 // server's `manage` tool; each action here is the session, the call, and the
 // UI's own revalidation.
+//
+// Visibility gates on the session alone, as setDocDeletedAction does, and
+// leaves every rule to setDocVisibility: an ADMIN may lower a person's wiki
+// page they can't edit (docs/WIKI.md "Permissions"), which an edit check here
+// would refuse first.
 export async function updateDocVisibility(docId: string, visibility: DocVisibility): Promise<void> {
-  const { session } = await requireEditableDocSession(docId);
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("Unauthorized.");
+  }
   await setDocVisibility(actorFromSessionUser(session.user), docId, visibility);
   revalidatePath(`/doc/${docId}/edit`);
   revalidatePath(`/doc/${docId}`);
+  revalidatePath("/docs");
+  revalidateWiki();
+}
+
+// Every route under /wiki/ lists or shows pages by their visibility, byline
+// and deletion, and none is cached beyond the client's router cache, so a
+// change to any of those clears the lot.
+function revalidateWiki(): void {
+  revalidatePath("/wiki", "layout");
 }
 
 export async function updateDocSlug(docId: string, newSlug: string): Promise<{ slug: string }> {
@@ -303,6 +320,7 @@ export async function updateDocAuthor(docId: string, userId: string, included: b
 
   revalidatePath(`/doc/${docId}/edit`);
   revalidatePath("/docs");
+  revalidateWiki();
 }
 
 export async function updateDocAuthorOrder(docId: string, orderedUserIds: string[]): Promise<void> {
@@ -323,21 +341,27 @@ export async function updateDocAuthorOrder(docId: string, orderedUserIds: string
 // (src/app/actions/posts.ts) for the identical rationale; the body is
 // src/lib/doc-manage.ts's, which reads through prismaIncludingDeleted so a
 // restore can find the row it restores.
-async function setDocDeletedAction(docId: string, deleted: boolean): Promise<void> {
+//
+// The result says where a wiki page lives after a restore, which may be the
+// next free variant of its address (docs/WIKI.md "Data model"), so the
+// editor's Undelete can go on to it.
+async function setDocDeletedAction(docId: string, deleted: boolean): Promise<DocDeletedResult> {
   const session = await auth();
   if (!session?.user) {
     throw new Error("Unauthorized.");
   }
-  await setDocDeleted(actorFromSessionUser(session.user), docId, deleted);
+  const result = await setDocDeleted(actorFromSessionUser(session.user), docId, deleted);
   revalidatePath("/docs");
+  revalidateWiki();
+  return result;
 }
 
 export async function deleteDoc(docId: string): Promise<void> {
   await setDocDeletedAction(docId, true);
 }
 
-export async function restoreDoc(docId: string): Promise<void> {
-  await setDocDeletedAction(docId, false);
+export async function restoreDoc(docId: string): Promise<DocDeletedResult> {
+  return setDocDeletedAction(docId, false);
 }
 
 // Bulk delete/restore (PLAN.md §16g) — see bulkDeletePosts for why these are
@@ -384,6 +408,7 @@ export async function searchLinkableDocs(query: string): Promise<LinkableDocJson
 const PREVIEW_SELECT = {
   id: true,
   title: true,
+  wikiName: true,
   visibility: true,
   updatedAt: true,
   deletedByUserId: true,
@@ -400,7 +425,11 @@ export async function previewLinkedDoc(param: string): Promise<LinkedDocPreview 
   if (!trimmed || trimmed.length > 200) return null;
   const doc = await resolveDocParam(trimmed, PREVIEW_SELECT);
   if (!doc || doc.deletedByUserId !== null) return null;
-  if (!(await canUserReadDoc(session.user.id, session.user.role, doc))) return { status: "forbidden" };
+  if (!(await canUserReadDoc(session.user.id, session.user.role, doc))) {
+    // An unreadable wiki doc is answered as a missing one (docs/WIKI.md
+    // "URLs"): "forbidden" would confirm that a page of that name exists.
+    return doc.wikiName !== null ? null : { status: "forbidden" };
+  }
   return {
     status: "ok",
     title: doc.title,

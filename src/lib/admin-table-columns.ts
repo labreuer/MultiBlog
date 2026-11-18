@@ -182,6 +182,21 @@ export const ADMIN_TABLE_COLUMNS = {
     { key: "createdBy", label: "Added by", defaultHidden: true },
     { key: "deletedAt", label: "Deleted at", defaultHidden: true },
   ],
+  // docs/WIKI.md "Listing wiki pages" — /wiki/special/pages. Namespace, Name
+  // and Variant are the page's address; Tags defaults hidden as on /docs.
+  wiki: [
+    { key: "namespace", label: "Namespace" },
+    { key: "name", label: "Name" },
+    { key: "variant", label: "Variant" },
+    { key: "edit", label: "Edit" },
+    { key: "authors", label: "Author(s)" },
+    { key: "visibility", label: "Visibility" },
+    { key: "updatedAt", label: "Updated" },
+    { key: "length", label: "Length" },
+    { key: "tags", label: "Tags", defaultHidden: true },
+    { key: "forkedFrom", label: "Forked from" },
+    { key: "deletedAt", label: "Deleted at", defaultHidden: true },
+  ],
 } as const satisfies Record<AdminTableName, readonly ColumnMeta[]>;
 
 /** The movable column keys of one admin table — what its `registryColumns` call must supply a body for. */

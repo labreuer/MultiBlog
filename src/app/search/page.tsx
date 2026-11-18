@@ -9,7 +9,7 @@ import { kindList } from "./labels";
 import styles from "./page.module.css";
 
 // docs/FULLTEXT.md — one search over everything this viewer may read: docs,
-// posts, PDFs, annotations and comments, a section per kind.
+// wiki pages, posts, PDFs, annotations and comments, a section per kind.
 //
 // **Dynamic, never cached, and different for every viewer.** An ADMIN and a
 // signed-out reader see different results for the same URL, so a shared

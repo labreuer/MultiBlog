@@ -7,7 +7,7 @@ import { tagSlugFromHistory } from "@/lib/tag-slug";
 import { applyTags, mintTag, normalizeTagName, removeTagAssignment } from "@/lib/tag-write";
 import { ApiError, forbidden, invalid, notFound } from "@/lib/api/errors";
 import { listedName, type McpContext, type ToolResult } from "./tool";
-import { parse, readableDocByParam, readableFileBySlug } from "./resolve";
+import { parseDocRef, readableDocByParam, readableFileBySlug } from "./resolve";
 import { isViewerFragment } from "./url";
 import { annotationByFragment } from "./read/threads";
 import { commentIdByFragment, readablePost } from "./read/posts";
@@ -61,7 +61,7 @@ async function postTarget(ctx: McpContext, by: { slug: string } | { id: string }
  * through its own read rule; `applyTags` runs the tag gate on top.
  */
 export async function resolveTagTarget(ctx: McpContext, ref: string): Promise<TagTarget> {
-  const parsed = parse(ref);
+  const parsed = await parseDocRef(ref);
   switch (parsed.kind) {
     case "doc": {
       const doc = await readableDocByParam(ctx.actor, parsed.param);

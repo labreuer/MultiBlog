@@ -34,8 +34,11 @@ export type Access<T> =
   | { status: "forbidden" }
   | { status: "ok"; value: T; user: Session["user"] };
 
-/** What a route's own `load` returns when it has no value to hand back. */
-export type AccessRejection = "not-found" | "forbidden" | { redirect: string };
+/**
+ * What a route's own `load` returns when it has no value to hand back. A
+ * redirect is a 307 unless it says it is permanent (a 308).
+ */
+export type AccessRejection = "not-found" | "forbidden" | { redirect: string } | { redirect: string; permanent: true };
 
 /**
  * Wraps a route's own resolve-and-gate in the session preamble and a
@@ -81,14 +84,57 @@ export function gated<A extends unknown[], T extends object>(
 }
 
 /**
- * The only supported way to get a title out of an `Access`. Anything short of
- * "ok" yields `{}`, which falls back to the root layout's SITE_TITLE — what
- * someone who may not read this thing should see in their tab.
+ * `gated`'s answer for a route that can serve someone signed out: its `ok`
+ * arm's user may be null, and a redirect says whether it is permanent.
+ */
+export type AnyViewerAccess<T> =
+  | { status: "signed-out" }
+  | { status: "not-found" }
+  | { status: "redirect"; to: string; permanent: boolean }
+  | { status: "forbidden" }
+  | { status: "ok"; value: T; user: Session["user"] | null };
+
+/**
+ * `gated` for a route that answers some requests signed out: a wiki page
+ * that is PUBLIC, or `/doc/<slug>`'s redirect to one (docs/WIKI.md "Public
+ * pages"). `gated` answers a signed-out request before the route's loader
+ * runs; this hands the loader a viewer that may be null, and the loader
+ * returns "signed-out" itself for whatever still needs a sign-in. The same
+ * per-request memo, and the same rule: the envelope is shared, never the gate.
+ */
+export function gatedAnyViewer<A extends unknown[], T extends object>(
+  load: (user: Session["user"] | null, ...args: A) => Promise<T | AccessRejection | "signed-out">,
+): (...args: A) => Promise<AnyViewerAccess<T>> {
+  return cache(async (...args: A): Promise<AnyViewerAccess<T>> => {
+    const session = await auth();
+    const user = session?.user ?? null;
+    const result = await load(user, ...args);
+    if (result === "signed-out") {
+      return { status: "signed-out" };
+    }
+    if (result === "not-found") {
+      return { status: "not-found" };
+    }
+    if (result === "forbidden") {
+      return { status: "forbidden" };
+    }
+    if ("redirect" in result && typeof result.redirect === "string") {
+      return { status: "redirect", to: result.redirect, permanent: "permanent" in result && result.permanent === true };
+    }
+    return { status: "ok", value: result as T, user };
+  });
+}
+
+/**
+ * The only supported way to get a title out of an `Access`, of either kind.
+ * Anything short of "ok" yields `{}`, which falls back to the root layout's
+ * SITE_TITLE — what someone who may not read this thing should see in their
+ * tab.
  *
  * Deliberately not a general-purpose `isOk()`: taking the title *function*
  * rather than returning the value is what stops a call site from unwrapping
  * the access and building a title beside the check rather than behind it.
  */
-export function titleWhenOk<T>(access: Access<T>, title: (value: T) => string): { title?: string } {
+export function titleWhenOk<T>(access: Access<T> | AnyViewerAccess<T>, title: (value: T) => string): { title?: string } {
   return access.status === "ok" ? { title: title(access.value) } : {};
 }

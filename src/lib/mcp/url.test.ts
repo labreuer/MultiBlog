@@ -21,6 +21,37 @@ test("doc URLs, by slug or id, with /edit, and a link's ?sel=", () => {
   assert.deepEqual(parseRef("/doc/caf%C3%A9", ORIGIN), { kind: "doc", param: "café", fragment: "" });
 });
 
+test("a wiki page's address, with a variant, /edit, a fragment, an encoded name, and absolute", () => {
+  assert.deepEqual(parseRef("/wiki/commons/Mercury_(planet)", ORIGIN), {
+    kind: "wiki",
+    owner: "commons",
+    page: "Mercury_(planet)",
+    fragment: "",
+  });
+  assert.deepEqual(parseRef("/wiki/@jane/Mercury_(planet)~2/edit", ORIGIN), {
+    kind: "wiki",
+    owner: "@jane",
+    page: "Mercury_(planet)~2",
+    fragment: "",
+  });
+  assert.deepEqual(parseRef("/wiki/%40jane/Stra%C3%9Fe#claude-2026-10-07-14-23-01", ORIGIN), {
+    kind: "wiki",
+    owner: "@jane",
+    page: "Straße",
+    fragment: "claude-2026-10-07-14-23-01",
+  });
+  assert.deepEqual(parseRef(`${ORIGIN}/wiki/commons/R%26D`, ORIGIN), { kind: "wiki", owner: "commons", page: "R&D", fragment: "" });
+  assert.deepEqual(parseRef("/wiki/commons/x?sel=clinkabc", ORIGIN), { kind: "link", id: "clinkabc" });
+});
+
+test("the wiki's front, a namespace list and its admin table are not read", () => {
+  assert.equal(parseRef("/wiki", ORIGIN).kind, "unknown");
+  assert.equal(parseRef("/wiki/commons", ORIGIN).kind, "unknown");
+  assert.equal(parseRef("/wiki/@jane", ORIGIN).kind, "unknown");
+  assert.equal(parseRef("/wiki/special/pages", ORIGIN).kind, "unknown");
+  assert.equal(parseRef("/wiki/commons/x/history", ORIGIN).kind, "unknown");
+});
+
 test("PDF URLs keep their fragment, and a fragment link is told from a card's name", () => {
   const page = parseRef("/pdf/saving-appearances#page=12", ORIGIN);
   assert.deepEqual(page, { kind: "pdf", slug: "saving-appearances", fragment: "page=12" });

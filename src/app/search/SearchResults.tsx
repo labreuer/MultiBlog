@@ -74,6 +74,7 @@ function Section({ section, result }: { section: SearchSection; result: SearchRe
 function Hits({ section }: { section: SearchSection }) {
   switch (section.kind) {
     case "docs":
+    case "wiki":
       return section.hits.map((hit) => <DocItem key={hit.id} hit={hit} />);
     case "posts":
       return section.hits.map((hit) => <PostItem key={hit.id} hit={hit} />);

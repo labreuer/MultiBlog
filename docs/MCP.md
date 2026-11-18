@@ -2336,6 +2336,7 @@ restore-to-a-point exists ([DOCS.md](DOCS.md), "Deferred").
 | URL | Reads |
 |---|---|
 | `/doc/<slug>`, also by id and with `/edit` | The doc whole, its outline, or a range of it (§6); `include` its annotations, or the links into it |
+| `/wiki/<owner>/<name>[~<variant>]`, with `/edit` or a card's fragment | A wiki page, read as its doc is (docs/WIKI.md "URLs") |
 | `/pdf/<slug>` | The file's title, page count, labels as ranges, outline and tags (§8); `include` as for a doc; an outline entry's pages |
 | `/pdf/<slug>#sheet=<n>`, or `#p=<label>` | That sheet's text, the first carrying the label; `sheet`, `sheets` or `page` for others (§8) |
 | `/pdf/<slug>#sheet=<n>&text=…` or `#p=<label>&text=…`, a fragment link | Its passage, with its context, sheet and page (§8) |
@@ -2357,6 +2358,13 @@ restore-to-a-point exists ([DOCS.md](DOCS.md), "Deferred").
   name, and the link breaks when its writer renames themselves; the id, which every read hands
   out (§9), doesn't. A comment's fragment is the name its commenter row was made with, which
   never changes.
+- **A wiki page's address is a doc's URL** to every tool that takes one: `parseDocRef`
+  (`src/lib/mcp/resolve.ts`) finds the doc it names as the wiki's routes do, a name in other
+  capitals included, and every switch that answers a parsed doc then answers it, with the
+  rules it has for a doc. The doc is gated by `canUserReadDoc`, so an unreadable page is
+  `not_found`, as a missing one is, and `PUBLIC` adds nothing. `/wiki`, a namespace list and
+  `/wiki/special/pages` are not read. What the tools give back for a wiki page stays
+  `/doc/<slug>`, and search's hits are the one exception: each names its page's address.
 - **Every other tool names objects the same way**, by URL or by id.
 - **Any other URL is `invalid`**, naming the tool that answers it where one does: `search`
   for `/search` and the date archives.

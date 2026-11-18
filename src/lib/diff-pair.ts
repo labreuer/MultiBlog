@@ -21,6 +21,7 @@ const DOC_SELECT = {
   slug: true,
   title: true,
   visibility: true,
+  wikiName: true,
   deletedByUserId: true,
   // Whether one side was forked from the other, for "Which side is later".
   forkedFromDocId: true,
@@ -57,7 +58,8 @@ export type GatedPair = { left: GatedSide; right: GatedSide; lineage: Omit<PairL
  * 2. each doc is read by id alone, so a slug is not-found, and a deleted one
  *    is refused by hand, since canUserReadDoc doesn't consider deletion;
  * 3. if either side is unreadable, so is the whole pair, and a title
- *    answers the same way rather than naming half a pair;
+ *    answers the same way rather than naming half a pair; an unreadable
+ *    wiki doc is not-found rather than forbidden (docs/WIKI.md "Diffs");
  * 4. **a version needs canUserSeeDocVersion, asked before the version itself
  *    is looked for**, so a reader without the history gets forbidden whatever
  *    the id;
@@ -81,6 +83,11 @@ export async function gateDiffPair(user: Session["user"], left: string, right: s
   if (!leftDoc || leftDoc.deletedByUserId !== null || !rightDoc || rightDoc.deletedByUserId !== null) return "not-found";
 
   const readable = await Promise.all([leftDoc, rightDoc].map((doc) => canUserReadDoc(user.id, user.role, doc)));
+  // An unreadable wiki doc is answered as a missing one (docs/WIKI.md
+  // "Diffs"): a Forbidden would confirm to someone holding its id that a
+  // page exists. Before anything is asked about versions, so no log's
+  // membership leaks either.
+  if ([leftDoc, rightDoc].some((doc, i) => !readable[i] && doc.wikiName !== null)) return "not-found";
   if (!readable.every(Boolean)) return "forbidden";
 
   const versioned = sides.filter((side): side is DiffSide & { updateId: bigint } => side.updateId !== null);

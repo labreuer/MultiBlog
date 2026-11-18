@@ -48,6 +48,7 @@ export type {
   TestYdoc,
   TestYdocSnapshot,
   TestDoc,
+  TestWikiPage,
   TestFile,
   TestFileVersion,
   TestTag,
@@ -489,6 +490,11 @@ export const getDocMarkFacts = (...args: Parameters<DbHandlers["getDocMarkFacts"
 export const setTestDocRecord = (...args: Parameters<DbHandlers["setTestDocRecord"]>) => call("setTestDocRecord", ...args);
 export const softDeleteTestDoc = (...args: Parameters<DbHandlers["softDeleteTestDoc"]>) => call("softDeleteTestDoc", ...args);
 export const forkDocAs = (...args: Parameters<DbHandlers["forkDocAs"]>) => call("forkDocAs", ...args);
+export const createWikiPageAs = (...args: Parameters<DbHandlers["createWikiPageAs"]>) => call("createWikiPageAs", ...args);
+export const findTestWikiPageId = (...args: Parameters<DbHandlers["findTestWikiPageId"]>) => call("findTestWikiPageId", ...args);
+export const renameTestUserSlug = (...args: Parameters<DbHandlers["renameTestUserSlug"]>) => call("renameTestUserSlug", ...args);
+export const getTestUserSlug = (...args: Parameters<DbHandlers["getTestUserSlug"]>) => call("getTestUserSlug", ...args);
+export const addTestDocSlugHistory = (...args: Parameters<DbHandlers["addTestDocSlugHistory"]>) => call("addTestDocSlugHistory", ...args);
 export const createTestWikiPage = (...args: Parameters<DbHandlers["createTestWikiPage"]>) => call("createTestWikiPage", ...args);
 export const writeTestWikiColumns = (...args: Parameters<DbHandlers["writeTestWikiColumns"]>) => call("writeTestWikiColumns", ...args);
 export const writeTestFileVisibility = (...args: Parameters<DbHandlers["writeTestFileVisibility"]>) =>

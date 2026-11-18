@@ -1,5 +1,5 @@
-// docs/FULLTEXT.md — one search over docs, posts, PDFs, annotations and
-// comments, in Postgres's own full-text search.
+// docs/FULLTEXT.md — one search over docs, wiki pages, posts, PDFs,
+// annotations and comments, in Postgres's own full-text search.
 //
 // **A plain module that takes an explicit actor**, never exported from a
 // `"use server"` file: the page calls it with the session's user, the quote
@@ -9,7 +9,7 @@
 // **The index holds no permission data** (§2). Each kind asks Prisma for the
 // ids this viewer may read, under the filters, through the `where` helper
 // that states its read rule; the SQL that matches and ranks then runs only
-// inside those ids. Five queries wearing five existing predicates, never one
+// inside those ids. A query per kind wearing an existing predicate, never one
 // UNION — the reason /tag is three: a merged query re-implements every read
 // rule at once, the easiest leak to write and the hardest to see.
 
@@ -23,6 +23,7 @@ import { asYouTypeQuery } from "./as-you-type";
 import { correctQuery } from "./correct";
 import { AUTHORED_KINDS, searchAuthorOptions } from "./authors";
 import { docsSearch } from "./docs";
+import { docsAndWikiSearch, wikiSearch } from "./wiki";
 import { postsSearch } from "./posts";
 import { pdfsSearch } from "./pdfs";
 import { annotationsSearch } from "./annotations";
@@ -49,6 +50,7 @@ export function readableKinds(actor: SearchActor, scope: SearchScope = "viewer")
   return SEARCH_KINDS.filter((kind) => {
     switch (kind) {
       case "docs":
+      case "wiki":
         return docs;
       case "pdfs":
         return files;
@@ -63,28 +65,35 @@ export function readableKinds(actor: SearchActor, scope: SearchScope = "viewer")
 
 const SEARCHES: { [K in SearchKind]: KindSearch<unknown> } = {
   docs: docsSearch,
+  wiki: wikiSearch,
   posts: postsSearch,
   pdfs: pdfsSearch,
   annotations: annotationsSearch,
   comments: commentsSearch,
 };
 
+/** The searcher for a kind: with `wikiInDocs`, the docs kind holds wiki pages too. */
+function searcherFor(kind: SearchKind, wikiInDocs: boolean): KindSearch<unknown> {
+  return wikiInDocs && kind === "docs" ? docsAndWikiSearch : SEARCHES[kind];
+}
+
 /** One kind's section: its count, and the hits in the window. */
 async function sectionFor(
   kind: SearchKind,
+  searcher: KindSearch<unknown>,
   ctx: KindContext,
   query: TsQuery | null,
   window: { offset: number; limit: number },
 ): Promise<SearchSection> {
-  const ordered = await SEARCHES[kind].match(ctx, query);
-  const hits = await SEARCHES[kind].hits(ctx, windowOf(ordered, window), query);
-  // The cast is the price of one table of searchers: SEARCHES[kind] is the
-  // searcher for exactly this kind, so its hits are this kind's.
+  const ordered = await searcher.match(ctx, query);
+  const hits = await searcher.hits(ctx, windowOf(ordered, window), query);
+  // The cast is the price of one table of searchers: the searcher is the one
+  // for exactly this kind, so its hits are this kind's.
   return { kind, total: ordered.length, hits } as SearchSection;
 }
 
 /** The kinds that can hold a citation; the rest drop out while a citation filter is set. */
-export const CITATION_KINDS: readonly SearchKind[] = ["docs", "posts", "annotations", "comments"];
+export const CITATION_KINDS: readonly SearchKind[] = ["docs", "wiki", "posts", "annotations", "comments"];
 
 /**
  * The reference ids each citation filter names, one list per filter that is
@@ -103,7 +112,7 @@ export async function citedIdsFor(params: Pick<SearchParams, "cites" | "citedTit
 }
 
 /** The kinds that can hold a mention; the rest drop out while a mention filter is set. */
-export const MENTION_KINDS: readonly SearchKind[] = ["docs", "posts", "annotations", "comments"];
+export const MENTION_KINDS: readonly SearchKind[] = ["docs", "wiki", "posts", "annotations", "comments"];
 
 /**
  * The user ids a mention filter's handles name. `me` is the searcher, and
@@ -139,6 +148,13 @@ export type SearchOptions = {
   authorOptions?: boolean;
   /** Tag ids every hit must carry one of (docs/MCP.md §11): the MCP server's filter, which the page doesn't offer. */
   tagIds?: string[];
+  /**
+   * Search wiki pages as docs: no `wiki` kind, and the docs section holds
+   * docs and wiki pages ranked together, as it did before the two split
+   * (docs/WIKI.md, "Listing wiki pages"). For the MCP server, whose kinds
+   * have no `wiki` yet, so that its results don't change.
+   */
+  wikiInDocs?: boolean;
 };
 
 export async function search(
@@ -147,7 +163,8 @@ export async function search(
   opts: SearchOptions = {},
 ): Promise<SearchResult> {
   const scope = opts.scope ?? "viewer";
-  const readable = readableKinds(actor, scope);
+  const wikiInDocs = opts.wikiInDocs === true;
+  const readable = readableKinds(actor, scope).filter((kind) => !(wikiInDocs && kind === "wiki"));
   const options = opts.authorOptions === false ? [] : await searchAuthorOptions(actor, scope);
 
   // Slugs not on this viewer's picker are dropped, as /docs drops its own.
@@ -214,7 +231,7 @@ export async function search(
   const window = { offset: paginated ? (params.page - 1) * pageSize : 0, limit: pageSize };
   // Concurrently: each is a handful of queries over its own tables, and the
   // page waits for the slowest anyway.
-  const run = (q: TsQuery | null) => Promise.all(kinds.map((kind) => sectionFor(kind, ctx, q, window)));
+  const run = (q: TsQuery | null) => Promise.all(kinds.map((kind) => sectionFor(kind, searcherFor(kind, wikiInDocs), ctx, q, window)));
 
   const sections = await run(query);
 
@@ -224,7 +241,7 @@ export async function search(
   // matched, which is what happened.
   if (query && !opts.asYouType && !params.exact && sections.every((section) => section.total === 0)) {
     const countHits = async (q: TsQuery) =>
-      (await Promise.all(kinds.map((kind) => SEARCHES[kind].match(ctx, q)))).reduce((n, ids) => n + ids.length, 0);
+      (await Promise.all(kinds.map((kind) => searcherFor(kind, wikiInDocs).match(ctx, q)))).reduce((n, ids) => n + ids.length, 0);
     const corrected = await correctQuery(text, query, countHits);
     if (corrected) {
       const retried = await run(corrected);

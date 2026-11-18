@@ -44,6 +44,29 @@ export async function isUserSlugFree(slug: string): Promise<boolean> {
   return !(await userSlugInUse(slug));
 }
 
+/**
+ * The account an old slug was left by, through user_slug_history: what
+ * /authors/, MCP's readAuthor and the wiki's `/wiki/@<old-slug>/` each send an
+ * old link on to, so the three share one lookup. A deleted account's only
+ * with `includeDeleted`, which the wiki asks so that a deleted person's pages
+ * stay where they were (docs/WIKI.md "URLs"); /authors/ 404s for one. Each
+ * wiki redirect it feeds is a 307, since an old slug can be freed
+ * (deleteUserSlugHistory) or taken back (revertUserSlug); /authors/' own
+ * stays a 308 (docs/BLOG.md §3).
+ */
+export async function userByOldSlug(
+  slug: string,
+  opts: { includeDeleted?: boolean } = {},
+): Promise<{ id: string; slug: string; name: string | null; deleted: boolean } | null> {
+  const entry = await prismaIncludingDeleted.userSlugHistory.findFirst({
+    where: { slug, ...(opts.includeDeleted ? {} : { user: { deletedByUserId: null } }) },
+    select: { user: { select: { id: true, slug: true, name: true, deletedByUserId: true } } },
+  });
+  if (!entry) return null;
+  const { deletedByUserId, ...user } = entry.user;
+  return { ...user, deleted: deletedByUserId !== null };
+}
+
 // excludeUserId: see uniquePostSlug's excludePostId — omitted for the normal
 // sign-up path, passed by the slug-management page to preview what
 // name/email-derived slug this user would get today.

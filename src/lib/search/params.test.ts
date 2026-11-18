@@ -42,6 +42,7 @@ test("the text is trimmed and capped", () => {
 test("kinds read comma-joined or repeated, in page order, unknown ones dropped", () => {
   assert.deepEqual(parse("kinds=comments,docs").kinds, ["docs", "comments"]);
   assert.deepEqual(parse("kinds=pdfs&kinds=posts").kinds, ["posts", "pdfs"]);
+  assert.deepEqual(parse("kinds=posts,wiki,docs").kinds, ["docs", "wiki", "posts"]);
   assert.deepEqual(parse("kinds=docs,users,../etc").kinds, ["docs"]);
   // Nothing recognisable is the same as nothing named: every readable kind.
   assert.equal(parse("kinds=users").kinds, null);

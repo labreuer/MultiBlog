@@ -1,0 +1,19 @@
+/* The Name cell reads as one link, as /docs' Title does: the whole cell is
+   clickable (handled in JS), and hovering anywhere in it underlines the name. */
+.nameCell {
+  cursor: pointer;
+}
+
+.nameCell:hover a {
+  text-decoration: underline;
+}
+
+/* "a doc you can't read", standing in for a parent that isn't named. */
+.hiddenParent {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.showAllRow {
+  margin-top: 8px;
+}

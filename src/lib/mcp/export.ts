@@ -1,7 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { citedIdsFor, mentionIdsFor } from "@/lib/search";
-import { docsSearch } from "@/lib/search/docs";
+import { docsAndWikiSearch } from "@/lib/search/wiki";
 import { searchAuthorOptions } from "@/lib/search/authors";
 import { dayRangeToInstants } from "@/lib/search/dates";
 import { DEFAULT_TIME_ZONE, isTimeZone, MAX_CITED_LENGTH, parseDay } from "@/lib/search/params";
@@ -18,7 +18,7 @@ import { tarEnd, tarEntry } from "@/lib/tar";
 import { referencesInLibraryOrder } from "@/lib/reference-export";
 import { writeReferences } from "@/lib/references/export";
 import { bylineOf } from "./shape";
-import { parse, readableDocByParam } from "./resolve";
+import { parseDocRef, readableDocByParam } from "./resolve";
 
 // docs/MCP.md §6, "Exporting" — docs as local files, for a sweep that reads
 // every doc for a concept rather than searching for its words: Grep can
@@ -93,7 +93,9 @@ export async function selectByFilters(actor: Actor, params: URLSearchParams): Pr
     tagIds = live.map((tag) => tag.id);
   }
 
-  const docIds = await docsSearch.match(
+  // Wiki pages are docs to an export: the search kinds split them apart, the
+  // export takes both.
+  const docIds = await docsAndWikiSearch.match(
     {
       actor: searchActorOf(actor),
       scope: "viewer",
@@ -120,7 +122,7 @@ export async function selectByList(actor: Actor, refs: unknown): Promise<ExportS
   const docIds: string[] = [];
   const missing: string[] = [];
   for (const ref of refs as string[]) {
-    const parsed = parse(ref);
+    const parsed = await parseDocRef(ref);
     const param = parsed.kind === "doc" ? parsed.param : parsed.kind === "id" ? parsed.id : null;
     try {
       if (param === null) throw invalid(ref);

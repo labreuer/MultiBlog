@@ -55,6 +55,21 @@ most of what the specs make. CLAUDE.md points here and holds none of it.
 - **A write of `wiki_name` that doesn't name `title`.** The mirror trigger puts the name in
   `title` either way, but the search vector's trigger fires by the columns a statement names,
   so a rename naming `wiki_name` alone leaves search on the old name ("The name is the title").
+- **The wiki read rule moved into `canUserReadDoc`.** `canReadWikiDoc` and
+  `readableWikiDocsWhere` admit a signed-out reader and a COMMENTER to a `PUBLIC` page; every
+  other gate on a doc (the collab token, replay, annotations, tags, diffs, search, MCP) is
+  built on `canUserReadDoc`, which refuses them. Folding the one into the other compiles and
+  hands the world a page's annotations and history ("Public pages").
+- **Forbidden for a wiki doc the viewer can't read.** A route or action that answers a doc it
+  looked up with Forbidden confirms, for a wiki doc, that a page of that name exists; answer it
+  as a missing doc, as `/doc/[slug]`, its `/edit` and `/slug`, side-by-side,
+  `previewLinkedDoc`, `gateDiffPair` and `readForkSource` do ("URLs").
+- **A link to `/doc/<slug>#<fragment>`.** A wiki doc's `/doc/` URL redirects to its address,
+  and a `<Link>` followed through a redirect lands without the fragment. Build the doc's own
+  path with `docPagePath` over `DOC_PATH_SELECT` (`src/lib/wiki-address.ts`).
+- **A route param decoded by the loader.** A wiki route's page is handed its params encoded
+  and its `generateMetadata` decoded; each decodes what it was given (`routeSegments`) and
+  hands the loader decoded segments ("The owner segment").
 - **A name folded anywhere but `wiki_name_key()`.** No JavaScript function agrees with
   `casefold` (`toLowerCase` keeps `ß`), and `casefold` without `COLLATE pg_unicode_fast`
   folds by the database's default collation, with no error. `wiki_name_key` the column is
@@ -1100,14 +1115,22 @@ wiki page**, by decision (2026-11-17): the two are kept apart.
   Its route is `src/app/wiki/special/pages/`, a static segment, which Next matches ahead of
   `[owner]/[page]`; any other `/wiki/special/<x>` is a reserved segment naming no namespace, and
   404s.
-- **Who sees it, and which rows**: a signed-in viewer with `canViewDocs`, as `/docs`; its rows
-  are the wiki pages `/docs`' own scope would list, with the same ADMIN "Show all" override, and
-  the same withheld tags on a row only the override lists. Signed out, it is the sign-in redirect.
-- **Its columns**, each sortable: namespace (the owner's slug, the commons first), name (by
-  `wiki_name_key`, so case doesn't order it), variant, visibility, authors, updated, length (the
-  stored `prose_json_length`), tags (`doc_tag_summary`, as `/docs` draws them), and forked from.
-  It filters by namespace and visibility. The name links to the page, and the namespace to its
-  list.
+- **Who sees it, and which rows**: a signed-in viewer with `canManageDocs`, as `/docs`; its rows
+  are the wiki pages `/docs`' own scope would list, with the same ADMIN "Show all" override
+  (`?showAll=1`), and the same withheld tags on a row only the override lists, which then sort
+  by no tags. Signed out, it is the sign-in redirect.
+- **Its columns**, each sortable: namespace (the owner's slug), name (by `wiki_name_key`, so
+  case doesn't order it), variant, visibility, authors, updated, length (the stored
+  `prose_json_length`), tags (`doc_tag_summary`, as `/docs` draws them), and forked from. It
+  filters by `q` over the name, by namespace (`commons` or `@<slug>`, among the owners its rows
+  name) and by visibility. The name links to the page, and the namespace to its list; a deleted
+  row's name links nowhere, and its Edit goes to `/doc/<id>/edit`.
+  - **The commons sorts where Postgres puts a null**: last ascending, first descending. Prisma
+    takes no `nulls` on a required column reached through a relation (`User.slug`), and putting
+    it first needs a view keyed on the doc, a migration this table doesn't yet earn.
+  - **Forked from sorts by the parent's id**, which keeps a doc's forks together, and not by its
+    title: the cell names only a parent the viewer may read, and an order by title would say
+    where a hidden parent's title falls.
 - **Each row says what may be done to it**, by the rules in "Permissions": Edit by
   `canEditDocRow`; the Visibility cell by `canSetVisibility` and `allowedVisibilities`; Delete
   and Restore by `canDelete`, with the confirmation that lists a page's old addresses ("Deleting
@@ -1824,7 +1847,7 @@ not the wiki's; the other five are its, in an order in which each deployed state
    alone, an ADMIN's lowering, the visibility actions gating on the session alone, and the
    wiki table's `canSetVisibility` and `canDelete` with `softDeleteBulkActions`' `canToggle`),
    and a restore's next free variant.
-2. **Pages.** `gatedAnyViewer`; the wiki read rule; `/wiki`, the namespace lists, a page and its
+2. **Pages. Built 2026-11-18.** `gatedAnyViewer`; the wiki read rule; `/wiki`, the namespace lists, a page and its
    editor, the catch-all, the fixed redirects and the case 307; `/doc/<slug>`'s redirect and the
    lookups that answer an unreadable wiki doc as a missing one; the public render; a person's
    page's rules and `ownerWhoCanAct`; `/wiki/new` and the 404's offer; the doc view and editor
@@ -1834,7 +1857,15 @@ not the wiki's; the other five are its, in an order in which each deployed state
    taking a page's address; TODO.md's entry for the uncached public render; the wiki table at
    `/wiki/special/pages`, with `/docs` listing no wiki page; search's "Wiki pages" section; the
    `[[` menu's label. Both listings land with the pages, since from then on `/docs` and the docs
-   search leave wiki pages out.
+   search leave wiki pages out. **As built**: the doc view and the editor are
+   `src/app/doc/[slug]/doc-reading-view.tsx` and `edit/doc-edit-view.tsx`, which both routes
+   render; the loader of every wiki route takes decoded segments (`routeSegments`); a wiki doc's
+   `Doc.slug` is frozen already (`WIKI_SLUG_FROZEN` in `doc-slug.ts`), and `/doc/<slug>/slug`
+   shows the address beside it, its address history waiting for PR 3; the family line on a
+   wiki page still links its entries at `/doc/`, which redirects, until PR 4; the wiki table's
+   row and bulk Delete ask nothing first, since a page has no address history until PR 3. MCP
+   resolves an address through `parseDocRef` before any tool's switch, and its search asks the
+   docs and wiki kinds ranked together (`wikiInDocs`), so its results are unchanged.
 3. **Renaming within a namespace.** `wiki_address_history`; `wiki-rename.ts`; reserved rows
    counted by every claim; the old-address 307s; Revert; the editor's name as the rename
    control; the history on `/doc/<slug>/slug`; a deleted page's rows deleted with it, after the

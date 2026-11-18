@@ -24,6 +24,15 @@ type Props = {
   family?: ReactNode;
   // Gates the title's link to the editor.
   canEdit: boolean;
+  // Where the title links an editor to: a wiki page's own editor, at its
+  // address (docs/WIKI.md "URLs"), or /doc/<id>/edit.
+  editHref: string;
+  // A wiki page's name, which is its title whatever its title fragment says,
+  // live or at a version (docs/WIKI.md "The name is the title"); absent for a
+  // doc, whose title follows the fragment.
+  fixedTitle?: string;
+  // The line above a wiki page's title (WikiAddressLine), absent for a doc.
+  addressLine?: ReactNode;
   // Gates the scrub bar, by the answer GET /api/doc/[id]/replay itself gives
   // (canUserSeeDocHistory), so a reader it would refuse never sees a bar that
   // would 403 the moment it fetched.
@@ -59,6 +68,9 @@ export default function DocView({
   family,
   canEdit,
   canSeeHistory,
+  editHref,
+  fixedTitle,
+  addressLine,
   userColor,
   annotationAnchors,
   initialScrubUpdateId,
@@ -100,7 +112,7 @@ export default function DocView({
   // bar's live-end replay; then the server's cache. PLAN.md §12n, "The title
   // follows the fragment live".
   const title = docTitleOrFallback(
-    scrubFrozen && scrubbed ? scrubbed.title : (liveTitle ?? scrubbed?.title ?? initialTitle),
+    fixedTitle ?? (scrubFrozen && scrubbed ? scrubbed.title : (liveTitle ?? scrubbed?.title ?? initialTitle)),
   );
 
   // The tab, which generateMetadata composed from that same cache.
@@ -119,7 +131,8 @@ export default function DocView({
 
   return (
     <>
-      <h1>{canEdit ? <Link href={`/doc/${docId}/edit`}>{title}</Link> : title}</h1>
+      {addressLine}
+      <h1>{canEdit ? <Link href={editHref}>{title}</Link> : title}</h1>
       {byline}
       {family}
       <SignedOutNotice />

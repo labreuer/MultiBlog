@@ -13,6 +13,8 @@ import styles from "./SideBySideView.module.css";
 export type SideBySideDoc = {
   docId: string;
   initialTitle: string;
+  /** A wiki page's name, its title in either mode whatever its title fragment says (docs/WIKI.md "The name is the title"). */
+  fixedTitle?: string;
   initialBodyJSON: JSONContent;
   staticBody: ReactNode;
 };

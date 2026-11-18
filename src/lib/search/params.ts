@@ -9,8 +9,8 @@
 
 import { isKeyShaped, lookupKey } from "@/lib/references/keys";
 
-/** The five kinds, in the order the page shows their sections (§7). */
-export const SEARCH_KINDS = ["docs", "posts", "pdfs", "annotations", "comments"] as const;
+/** The kinds, in the order the page shows their sections (§7). */
+export const SEARCH_KINDS = ["docs", "wiki", "posts", "pdfs", "annotations", "comments"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
 /** `searchQuotableTargets` capped its input at the same length. */

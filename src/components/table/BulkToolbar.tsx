@@ -231,11 +231,16 @@ export function BulkToolbar<T extends { id: string }>({
 }
 
 // The delete/restore pair every table's toolbar ends with, since all five
-// share soft-deletion. `noun` only shapes the accessible label.
+// share soft-deletion. `noun` only shapes the accessible label. `canToggle`
+// is for a table whose rows differ in who may delete them (the wiki table,
+// where a person's page is its owner's alone to delete or restore): a row it
+// refuses is dropped from both actions, as any row an action doesn't apply to
+// is, rather than sent to be refused.
 export function softDeleteBulkActions<T extends { deleted: boolean }>(
   noun: string,
   bulkDelete: (ids: string[]) => Promise<BulkResult>,
   bulkRestore: (ids: string[]) => Promise<BulkResult>,
+  canToggle: (row: T) => boolean = () => true,
 ): BulkAction<T & { id: string }>[] {
   return [
     {
@@ -244,7 +249,7 @@ export function softDeleteBulkActions<T extends { deleted: boolean }>(
       label: `Delete selected ${noun}`,
       icon: "delete",
       separated: true,
-      applicableTo: (row) => !row.deleted,
+      applicableTo: (row) => !row.deleted && canToggle(row),
       run: bulkDelete,
     },
     {
@@ -252,7 +257,7 @@ export function softDeleteBulkActions<T extends { deleted: boolean }>(
       key: "restore",
       label: `Restore selected ${noun}`,
       icon: "restore",
-      applicableTo: (row) => row.deleted,
+      applicableTo: (row) => row.deleted && canToggle(row),
       run: bulkRestore,
     },
   ];

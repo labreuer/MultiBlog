@@ -12,6 +12,17 @@ import type { Prisma } from "@/generated/prisma/client";
 // editor route needs a soft-deleted doc to still resolve, so its Settings
 // panel can offer Undelete. Callers that must not see a deleted doc (the
 // reading route, PLAN.md §12g) check deletedAt themselves.
+/**
+ * Whether a route param could name a doc at all: an id or a slug, both made
+ * of `slugify`'s letters, digits and dashes (or a cuid's). Asked before any
+ * lookup, since a param can carry a NUL (`/doc/a%00b`), which reaches
+ * Postgres as one and comes back a 500 — and `/doc/[slug]` looks a doc up
+ * for a signed-out request too (docs/WIKI.md "URLs").
+ */
+export function isDocParamShape(param: string): boolean {
+  return param.length > 0 && param.length <= 255 && /^[A-Za-z0-9_-]+$/.test(param);
+}
+
 export async function resolveDocParam<T extends Prisma.DocSelect>(
   param: string,
   select: T,
@@ -30,10 +41,31 @@ export async function resolveDocParam<T extends Prisma.DocSelect>(
 // Returns what the caller needs to gate on before disclosing the current slug.
 export async function resolveDocSlugHistory(
   slug: string,
-): Promise<{ id: string; slug: string; visibility: DocVisibility; deletedByUserId: string | null } | null> {
+): Promise<{
+  id: string;
+  slug: string;
+  visibility: DocVisibility;
+  deletedByUserId: string | null;
+  wikiName: string | null;
+  wikiVariant: string;
+  wikiOwner: { slug: string } | null;
+} | null> {
   const entry = await prismaIncludingDeleted.docSlugHistory.findUnique({
     where: { slug },
-    select: { doc: { select: { id: true, slug: true, visibility: true, deletedByUserId: true } } },
+    select: {
+      doc: {
+        select: {
+          id: true,
+          slug: true,
+          visibility: true,
+          deletedByUserId: true,
+          // A wiki doc's old slug goes on to its address (docs/WIKI.md "URLs").
+          wikiName: true,
+          wikiVariant: true,
+          wikiOwner: { select: { slug: true } },
+        },
+      },
+    },
   });
   return entry?.doc ?? null;
 }

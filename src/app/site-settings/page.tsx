@@ -21,6 +21,7 @@ const TABLE_LABELS: Record<AdminTableName, string> = {
   tags: "/tags",
   links: "/links",
   references: "/references",
+  wiki: "/wiki/special/pages",
 };
 
 // One entry per exported constant in site-config.ts (see PLAN.md §6 for how

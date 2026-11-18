@@ -27,7 +27,8 @@ to re-derive the decision from.
 | [docs/PDF_FRAGMENT_LINKS.md](docs/PDF_FRAGMENT_LINKS.md) | PDF fragment links as built: a link to a PDF passage that is only a URL (`/pdf/<slug>#sheet=<n>&text=<words>`, or `#p=<label>` by printed page, with `&v=<n>` for the file's version; no row) — the grammar, which sheet a printed page names (the file's own labels, never a filled-in number), the letters-and-digits skeleton match, quads measured from text items, cross-page passages, a miss looked for beyond its page, the check and the page links it reads, its integrity script and one-quote CLI, which page form a writer, search and a citation take, writing them from a corrected extraction, and the words a quotation leaves out (`...`, with brackets and page breaks settled by `passagePieces`); §13 plans how the viewer shows those gaps. |
 | [docs/PDF_QUADS.md](docs/PDF_QUADS.md) | Quads from text items without a selection: where an edge inside an item falls, the browser's canvas measurer, the Liberation width tables a server measures with and their generator, `extractPageItems`, and how close each lands to a real selection. |
 | [docs/DOCS.md](docs/DOCS.md) | Docs as built: the entity beside its ydoc, the `title`/`prose_json` caches and the live title, roles and visibility, routes, the reading view and its freeze, the editor, what is deferred. |
-| [docs/FORKS.md](docs/FORKS.md) | Forks and diffs as built: who may see a doc's history (an interim rule, one predicate, and its exception for a fork point); the diff route over two docs or one doc at two versions, its gate, the worker that compares them, the engine's size guards, the scrub bar's pin, and the diff page's sliders, with the pair route and the index route they read and the version they build in the browser; a fork as a new doc seeded from another at one version, who may fork, what it takes and what stays, the Actions menu and the Fork dialog, and a doc's family lines. Not chosen: how a diff shows a fork against its parent. Also the build order, and what the wiki adds later. |
+| [docs/FORKS.md](docs/FORKS.md) | Forks and diffs as built: who may see a doc's history (an interim rule, one predicate, and its exception for a fork point); the diff route over two docs or one doc at two versions, its gate, the worker that compares them, the engine's size guards, the scrub bar's pin, and the diff page's sliders, with the pair route and the index route they read and the version they build in the browser; a fork as a new doc seeded from another at one version, who may fork, what it takes and what stays, the Actions menu and the Fork dialog, and a doc's family lines. Not chosen: how a diff shows a fork against its parent. Also the build order. |
+| [docs/WIKI.md](docs/WIKI.md) | Wiki pages: docs with an owner, a name that is their title and an address under `/wiki`; the name rules and case folding, `PUBLIC` and its read rule, a person's page and the commons, the routes and their redirects, and the build order, with what each PR built. |
 | [docs/YDOC.md](docs/YDOC.md) | The document stack: one Hocuspocus process, the `ydoc*` tables, the `/admin` endpoints and the token they take, restarts, IndexedDB, and the schema-version gate that refuses a tab whose bundle predates a schema change. |
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
 | [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures; §13 is versions of a file: a file takes a new version (upload, promotion, abandoning), every address and anchor goes by version, a link names its version with `v=` and is carried through the page maps between versions, a bulk carry moves forward the notes that place themselves and a note's author moves one at a time, with the SQL that undoes a carry; §14 is a file's manage page: `/files/<id>/manage`, where its managers change its title, slug, visibility and owners, delete or restore it, and upload, promote, abandon and carry its versions (a candidate's page map under its card, the map build and the carry preview as Route Handlers), and what the viewer keeps: the reading half of the Metadata pane, and a waiting version pinned there, a dot on its tab and a line under the selection popover. |
@@ -293,7 +294,8 @@ before changing the behavior it describes.
 - **A `PRIVATE` doc is its listed `DocAuthor`s' alone** — no ADMIN/EDITOR bypass. docs/DOCS.md "Roles and
   visibility", docs/PERMISSIONS.md.
 - **Before changing code that tests or offers a doc's visibility, decides who may edit a doc,
-  changes a doc's settings, or writes a doc's `title` or `wiki_*` columns, read docs/WIKI.md,
+  changes a doc's settings, writes a doc's `title` or `wiki_*` columns, answers a doc lookup
+  for a viewer who can't read it, or links to a doc with a `#fragment`, read docs/WIKI.md,
   "Mistakes that fail no check".**
 - **Before changing code that shows a doc as it was at an earlier version (it calls
   `loadDocStateAt`, `isDocVersion` or `docBodyOf`, serves a doc's `ydoc_update` rows, or takes
@@ -561,7 +563,8 @@ working on.
   against `next@16.2.11`), so a route packing two ids into one segment as `a+b` would see
   `"a%2Bb"` and `.split("+")` would 404 every URL — a `+`-means-space assumption that's true
   for query strings and false here. `/side-by-side/[left]/[right]` (PLAN.md §14c) uses two path
-  segments specifically to never need to decode anything.
+  segments specifically to never need to decode anything. `generateMetadata` gets the same
+  params already decoded, so decode in the page alone (docs/WIKI.md "The owner segment").
 - **A Server Component handed to a client component as a prop needs a `key` if it has
   siblings** — even though nothing there is a list. A JSX tree passed across that boundary is
   *serialized into the RSC payload* rather than rendered in place, and the Flight server's

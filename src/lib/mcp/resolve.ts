@@ -12,6 +12,8 @@ import type { Actor } from "@/lib/actor";
 import { ApiError, invalid, notFound } from "@/lib/api/errors";
 import { listedName } from "./tool";
 import { parseRef, type ParsedRef } from "./url";
+import { parseOwnerSegment, parsePageSegment } from "@/lib/wiki-address";
+import { findWikiOwner, findWikiPage, ownerIdOf } from "@/lib/wiki-pages";
 
 // docs/MCP.md §15 — what a URL or id names, followed through slug history as
 // its own reading route follows it, and gated by that kind's read rule.
@@ -31,6 +33,40 @@ export function appOrigin(): string | null {
 
 export function parse(ref: string): ParsedRef {
   return parseRef(ref, appOrigin());
+}
+
+/** A parsed reference with a wiki page's address turned into the doc it names. */
+export type DocParsedRef = Exclude<ParsedRef, { kind: "wiki" }>;
+
+/**
+ * `parse`, for a tool that takes a doc: a wiki page's address
+ * (docs/WIKI.md "URLs") becomes `{ kind: "doc" }` naming the page's id, so
+ * every switch that answers a parsed doc answers a page alike, and each keeps
+ * the rules it has for a doc. The page is found as the wiki's routes find
+ * it, through wiki-pages.ts, so a name in other capitals reaches it. Nothing
+ * is gated here: the doc is then gated as any is, by canUserReadDoc
+ * (readableDocByParam), and an unreadable page is `not_found`, as a missing
+ * one is, which an id no doc has also answers. PUBLIC adds nothing: the wiki
+ * read rule stays on the wiki's routes ("Public pages").
+ */
+export async function parseDocRef(ref: string): Promise<DocParsedRef> {
+  const parsed = parse(ref);
+  if (parsed.kind !== "wiki") return parsed;
+  const id = await wikiDocIdOf(parsed.owner, parsed.page);
+  return { kind: "doc", param: id ?? "", fragment: parsed.fragment };
+}
+
+async function wikiDocIdOf(ownerText: string, pageText: string): Promise<string | null> {
+  let lowered = ownerText.toLowerCase();
+  if (lowered === "common") lowered = "commons";
+  const owner = parseOwnerSegment(lowered);
+  const [rawName, ...variantParts] = pageText.split("~");
+  const page = parsePageSegment(variantParts.length === 1 ? `${rawName}~${variantParts[0].toLowerCase()}` : pageText);
+  if (!owner || (owner.kind !== "person" && owner.kind !== "commons") || !page) return null;
+  const found = await findWikiOwner(owner);
+  if (!found) return null;
+  const doc = await findWikiPage(ownerIdOf(found), page.name, page.variant, { id: true });
+  return doc?.id ?? null;
 }
 
 export type ResolvedDoc = {
@@ -167,7 +203,7 @@ export type ResolvedContainer = { kind: "doc"; doc: ResolvedDoc } | { kind: "fil
  * `search`'s `within` take. A bare id is tried as a doc, then as a file.
  */
 export async function readableContainer(actor: Actor, ref: string): Promise<ResolvedContainer> {
-  const parsed = parse(ref);
+  const parsed = await parseDocRef(ref);
   switch (parsed.kind) {
     case "doc":
       return { kind: "doc", doc: await readableDocByParam(actor, parsed.param) };
@@ -180,7 +216,7 @@ export async function readableContainer(actor: Actor, ref: string): Promise<Reso
       return { kind: "file", file: await readableFileBySlug(actor, parsed.id) };
     }
     default:
-      throw invalid(`${ref} isn't a doc or a file; pass /doc/<slug>, /pdf/<slug> or an id.`);
+      throw invalid(`${ref} isn't a doc or a file; pass /doc/<slug>, a wiki page's /wiki/<owner>/<name>, /pdf/<slug> or an id.`);
   }
 }
 
@@ -204,6 +240,6 @@ export function refuseRef(parsed: ParsedRef, ref: string): never {
     throw invalid(`${parsed.path} is answered by the \`${listedName(parsed.tool)}\` tool, not by \`${listedName("read")}\`.`);
   }
   throw new ApiError("invalid", `${ref} isn't a MultiBlog URL this server reads.`, {
-    reads: "/doc/<slug>, /pdf/<slug>, /files/<slug>, /annotations, /link/<id>, a post's path, /post/<id>/edit, /tag/<slug>, /authors/<slug>, or an id",
+    reads: "/doc/<slug>, a wiki page's /wiki/<owner>/<name>, /pdf/<slug>, /files/<slug>, /annotations, /link/<id>, a post's path, /post/<id>/edit, /tag/<slug>, /authors/<slug>, or an id",
   });
 }

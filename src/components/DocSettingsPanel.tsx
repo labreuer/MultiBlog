@@ -9,7 +9,7 @@ import { loadTaggerState, type TaggerState } from "@/app/actions/tags";
 import TagStrip from "@/components/tags/TagStrip";
 import { CitationStyleSelect, MentionStyleSelect } from "@/components/ChipStyleSettings";
 import type { DocVisibility, Role } from "@/generated/prisma/enums";
-import { allowedVisibilities } from "@/lib/doc-visibility";
+import { allowedVisibilities, PUBLIC_VISIBILITY_NOTE } from "@/lib/doc-visibility";
 import styles from "./DocSettingsPanel.module.css";
 
 export type EligibleUser = {
@@ -22,8 +22,14 @@ export type EligibleUser = {
 type Props = {
   docId: string;
   visibility: DocVisibility;
-  /** The doc's wiki address columns, null for a doc that isn't a wiki page: which visibilities it may take (allowedVisibilities). */
-  wiki: { name: string; ownerUserId: string | null } | null;
+  /**
+   * A wiki page's name, owner and address, null for a doc that isn't one:
+   * which visibilities it may take (allowedVisibilities), the Url row, and
+   * where Delete and Undelete go on to (docs/WIKI.md "Deleting a page").
+   */
+  wiki: { name: string; ownerUserId: string | null; path: string } | null;
+  /** Told each visibility the server accepts, for the editor's address line and PUBLIC notice. */
+  onVisibilityChange?: (visibility: DocVisibility) => void;
   /** The viewer, whom allowedVisibilities asks about on a person's page. */
   viewerId: string;
   createdAt: Date;
@@ -47,6 +53,7 @@ export default function DocSettingsPanel({
   docId,
   visibility,
   wiki,
+  onVisibilityChange,
   viewerId,
   createdAt,
   authorIds,
@@ -75,6 +82,11 @@ export default function DocSettingsPanel({
   // makes for its own popover.
   const [tags, setTags] = useState<TaggerState | null>(null);
 
+  const visibilityOptions = allowedVisibilities(
+    { visibility: visibilityValue, wikiName: wiki?.name ?? null, wikiOwnerUserId: wiki?.ownerUserId ?? null },
+    viewerId,
+  );
+
   function handleVisibilityChange(next: DocVisibility) {
     const prev = visibilityValue;
     setVisibilityValue(next);
@@ -82,6 +94,7 @@ export default function DocSettingsPanel({
     startTransition(async () => {
       try {
         await updateDocVisibility(docId, next);
+        onVisibilityChange?.(next);
         router.refresh();
       } catch (e) {
         setVisibilityValue(prev);
@@ -146,16 +159,29 @@ export default function DocSettingsPanel({
     });
   }
 
+  // A wiki page's editor is at its address, which deleting gives back: a
+  // refresh there would resolve the address again, find nothing and 404,
+  // with Undelete gone. So Delete goes on to /doc/<id>/edit, which loads a
+  // deleted doc on purpose, and Undelete to wherever the page now lives,
+  // which may be the next free variant (docs/WIKI.md "Deleting a page").
   function handleDeleteToggle() {
     setError(null);
     startTransition(async () => {
       try {
         if (deleted) {
-          await restoreDoc(docId);
+          const restored = await restoreDoc(docId);
           onDeletedChange(false);
+          if (restored.wikiPath) {
+            router.replace(`${restored.wikiPath}/edit`);
+            return;
+          }
         } else {
           await deleteDoc(docId);
           onDeletedChange(true);
+          if (wiki) {
+            router.replace(`/doc/${docId}/edit`);
+            return;
+          }
         }
         router.refresh();
       } catch (e) {
@@ -216,7 +242,9 @@ export default function DocSettingsPanel({
                   <input
                     type="checkbox"
                     checked={checked}
-                    disabled={pending || deleted}
+                    // A person's wiki page keeps its owner on its byline
+                    // (setDocByline refuses otherwise; docs/WIKI.md "Permissions").
+                    disabled={pending || deleted || (checked && wiki?.ownerUserId === userId)}
                     onChange={(e) => handleAuthorToggle(userId, e.target.checked)}
                   />
                   {user.label} <span className={styles.roleTag}>({user.role})</span>
@@ -255,20 +283,22 @@ export default function DocSettingsPanel({
               <td className={styles.label}>Visibility</td>
               <td>
                 <select
+                  aria-label="Visibility"
                   value={visibilityValue}
                   disabled={pending || deleted}
                   onChange={(e) => handleVisibilityChange(e.target.value as DocVisibility)}
                   className={styles.visibilitySelect}
                 >
-                  {allowedVisibilities(
-                    { visibility: visibilityValue, wikiName: wiki?.name ?? null, wikiOwnerUserId: wiki?.ownerUserId ?? null },
-                    viewerId,
-                  ).map((option) => (
+                  {visibilityOptions.map((option) => (
                     <option key={option} value={option}>
                       {option}
                     </option>
                   ))}
                 </select>
+                {visibilityOptions.includes("PUBLIC") && (
+                  // Beside every choice that offers PUBLIC (docs/WIKI.md "Public pages").
+                  <p className={styles.hint}>{PUBLIC_VISIBILITY_NOTE}</p>
+                )}
               </td>
             </tr>
             {ydoc && (
@@ -292,7 +322,16 @@ export default function DocSettingsPanel({
             <tr>
               <td className={styles.label}>Url</td>
               <td>
-                <Link href={`/doc/${docId}/slug`}>Change…</Link>
+                {wiki ? (
+                  // A wiki page's url is its address; its slug is frozen
+                  // while it is in the wiki, and its history is on the slug
+                  // page (docs/WIKI.md "URLs").
+                  <>
+                    <code>{wiki.path}</code> <Link href={`/doc/${docId}/slug`}>History…</Link>
+                  </>
+                ) : (
+                  <Link href={`/doc/${docId}/slug`}>Change…</Link>
+                )}
               </td>
             </tr>
             <tr>
