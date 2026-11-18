@@ -3777,32 +3777,23 @@ export async function restoreTestUser(email: string): Promise<void> {
 }
 
 /**
- * Appends a paragraph to a doc's body, written straight to its log and its
- * row — safe only while no page has the doc open, as for createTestDoc's
- * seed. With `authorEmail` the text carries that author's mark, as typing in
- * the editor leaves it. Returns the update's id.
+ * One update to a test doc's body, written straight to its log and its row —
+ * safe only while no page has the doc open, as for createTestDoc's seed.
+ * `next` is given the body's blocks and returns the blocks it is to have.
+ * Returns the update's id.
  */
-export async function appendTestDocParagraph(opts: { docId: string; text: string; authorEmail?: string }): Promise<string> {
-  const ydocId = ydocIdForDoc(opts.docId);
+async function writeTestDocBody(docId: string, helper: string, next: (blocks: JSONContent[]) => JSONContent[]): Promise<string> {
+  const ydocId = ydocIdForDoc(docId);
   const row = await prisma.ydoc.findUniqueOrThrow({ where: { id: ydocId }, select: { ydoc: true } });
-  const doc = await prisma.doc.findUniqueOrThrow({ where: { id: opts.docId }, select: { authors: { select: { user: { select: { email: true } } } } } });
-  if (!doc.authors.some((a) => SAFE_EMAIL.test(a.user.email))) throw new Error("appendTestDocParagraph: not a test doc.");
-  const authorId = opts.authorEmail
-    ? (await prisma.user.findUniqueOrThrow({ where: { email: opts.authorEmail }, select: { id: true } })).id
-    : null;
+  const doc = await prisma.doc.findUniqueOrThrow({ where: { id: docId }, select: { authors: { select: { user: { select: { email: true } } } } } });
+  if (!doc.authors.some((a) => SAFE_EMAIL.test(a.user.email))) throw new Error(`${helper}: not a test doc.`);
 
   const scratch = new Y.Doc();
   Y.applyUpdate(scratch, new Uint8Array(row.ydoc));
   const before = Y.encodeStateVector(scratch);
   const json = TiptapTransformer.extensions(docContentExtensions).fromYdoc(scratch, "default") as JSONContent;
-  const paragraph = {
-    type: "paragraph",
-    content: [
-      { type: "text", text: opts.text, ...(authorId ? { marks: [{ type: "authorHighlight", attrs: { authorId } }] } : {}) },
-    ],
-  };
-  const next = pmDocContentSchema.nodeFromJSON({ ...json, content: [...(json.content ?? []), paragraph] });
-  prosemirrorToYXmlFragment(next, scratch.getXmlFragment("default"));
+  const node = pmDocContentSchema.nodeFromJSON({ ...json, content: next(json.content ?? []) });
+  prosemirrorToYXmlFragment(node, scratch.getXmlFragment("default"));
   const update = Y.encodeStateAsUpdate(scratch, before);
   const created = await prisma.ydocUpdate.create({ data: { ydocId, update: Buffer.from(update) }, select: { id: true } });
   const { ydoc, stateVector } = encodeYdocState(scratch);
@@ -3813,10 +3804,37 @@ export async function appendTestDocParagraph(opts: { docId: string; text: string
     data: { ydoc: Buffer.from(ydoc), stateVector: Buffer.from(stateVector), lastUpdateId: created.id },
   });
   await prisma.doc.update({
-    where: { id: opts.docId },
+    where: { id: docId },
     data: { proseJson: cached.proseJson as Prisma.InputJsonValue, proseJsonUpdateId: created.id },
   });
   return created.id.toString();
+}
+
+/**
+ * Appends a paragraph to a doc's body, as one update (`writeTestDocBody`).
+ * With `authorEmail` the text carries that author's mark, as typing in the
+ * editor leaves it. Returns the update's id.
+ */
+export async function appendTestDocParagraph(opts: { docId: string; text: string; authorEmail?: string }): Promise<string> {
+  const authorId = opts.authorEmail
+    ? (await prisma.user.findUniqueOrThrow({ where: { email: opts.authorEmail }, select: { id: true } })).id
+    : null;
+  const paragraph = {
+    type: "paragraph",
+    content: [
+      { type: "text", text: opts.text, ...(authorId ? { marks: [{ type: "authorHighlight", attrs: { authorId } }] } : {}) },
+    ],
+  };
+  return writeTestDocBody(opts.docId, "appendTestDocParagraph", (blocks) => [...blocks, paragraph]);
+}
+
+/**
+ * Replaces a doc's body with `content`'s blocks, as one update
+ * (`writeTestDocBody`): a version that takes something out, or holds a chip.
+ * Returns the update's id.
+ */
+export async function setTestDocBody(opts: { docId: string; content: JSONContent[] }): Promise<string> {
+  return writeTestDocBody(opts.docId, "setTestDocBody", () => opts.content);
 }
 
 // ---------------------------------------------------------------------------
@@ -4007,6 +4025,7 @@ const handlers = {
   softDeleteTestUser,
   restoreTestUser,
   appendTestDocParagraph,
+  setTestDocBody,
   renameTestTagSlug,
   getDocMarkFacts,
   setTestDocRecord,

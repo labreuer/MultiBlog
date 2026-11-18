@@ -495,8 +495,15 @@ the admin account.
   press. A press turns the island's `data-state` to `comparing` at once, with the rows of
   the pair before still in it, and it is `done` again only when the rows are for the pair
   the sliders name: wait on `done`, never on the address, which is written 400 ms after the
-  sliders rest whether or not the rows have come. `next dev` mounts the page twice (Strict
-  Mode), so a count of `/api/diff/` requests on a fresh mount differs between the targets.
+  sliders rest whether or not the rows have come.
+- **A diff's slider asks the server for a pair only when the browser can't put it together.**
+  A side moved to a version is built in a worker from the doc's log
+  (`/api/doc/<id>/replay`), so no `/api/diff/` request is made for it, and there is none to
+  hold, fail or count. A spec that needs one aborts the log's route first
+  (`serverReadsEveryPair` in `doc-diff.spec.ts`), which is the path a pair takes whenever
+  the browser can't build a side. `page.route` and `page.on("request")` both see a worker's
+  requests. A doc's versions are written with `appendTestDocParagraph` and `setTestDocBody`,
+  one update each, while no page has the doc open.
 - **The scrub bar's slider exists before its history does.** The inert `<input>` it starts
   as has the same label and a `max` of 100, so a wait on `max` alone can pass before
   anything has loaded. Wait for the value the history gives it, or for a control only the
