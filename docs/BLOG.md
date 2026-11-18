@@ -27,7 +27,7 @@ PLAN.md §3d, §4, §4a, §17, §21 and §25 point here.
 `/` (`src/app/page.tsx`) holds four blocks:
 
 - a **banner**;
-- a **preamble** taken from a doc;
+- a **preamble** taken from a wiki page;
 - the **latest posts**;
 - a **contributor list**, in a right-hand column that moves below the posts on a narrow
   screen.
@@ -121,40 +121,45 @@ go depends on the image, so like it the overlay is deployment content: a markup 
 
 ### The preamble
 
-The preamble is the body of the doc titled **`FRONT PAGE`** (`FRONT_PAGE_DOC_TITLE`), matched
-case-insensitively by `getFrontPagePreamble` (`src/lib/front-page.ts`).
+The preamble is the body of the commons' wiki page named **`Front Page`**
+(`FRONT_PAGE_NAME`), at `/wiki/commons/Front_Page`, while it is `PUBLIC`, and nothing
+otherwise. `getFrontPagePreamble` (`src/lib/front-page.ts`) asks for it; docs/WIKI.md "The
+front page" owns the rule.
 
-- **Only `proseJson` is selected**, so the title can't be shown: it is the selector, and it is
-  never read.
-- **First-created wins.** `Doc.title` has no unique constraint, since it is a cache of the
-  ydoc's title fragment (docs/DOCS.md, "The caches"), so two docs can share it. Ordering by
-  `createdAt` makes a second `FRONT PAGE` doc inert, rather than letting the page flip between
-  two preambles. §10 has what this costs the tests.
-- **Visibility is not consulted.** Requiring `SHARED` would be wrong on two counts. `SHARED`
-  means "anyone with `canViewDocs`", a role gate, not the public (docs/DOCS.md, "Roles and
-  visibility"). And it would make a `SHARED` doc look world-readable in the admin UI when it
-  isn't. The title is the one switch. A doc's visibility still governs `/doc/<slug>`; a doc
-  titled `FRONT PAGE` also has its body published anonymously here.
-- **Its marks are stripped.** A doc's prose can carry `authorHighlight` and `annotation`
-  marks, which `contentExtensions` doesn't know, and every public surface renders with
-  `contentExtensions`. So the body goes through `stripMarksFromDoc(json, ["authorHighlight",
-  "annotation"])`, as a post's snapshot does in `postContentFromYdoc`, before
-  `renderToReactElement` renders it inside `.prose`. Unstripped, it would 500 the page.
-- **A doc with no `proseJson` has no preamble.** The page leaves it out rather than decode the
-  ydoc, as `/doc/[slug]` would, which would cost a row read and a Yjs decode on a statically
-  generated page. The case barely arises: every path that gives a doc the title `FRONT PAGE`
-  writes its `proseJson` in the same step.
+- **The name matches by its key**, which `wiki_name_key` folds in the database, so
+  `front page` is the same page. Only the page itself counts: not a variant, and not a
+  person's page of that name. A doc titled `FRONT PAGE` is just a doc.
+- **One page can be there.** A live address holds one page, by a unique index, so there is no
+  tie to break.
+- **Only ADMIN and EDITOR can give a page the address.** `Front Page` is one of the commons
+  names held for them (`HELD_COMMONS_NAMES`, docs/WIKI.md "Permissions"), and only `PUBLIC`
+  puts it here, which is what `PUBLIC` means for a wiki page. The lookup goes through the
+  wiki read rule's `where` for a null viewer (`readableWikiDocsWhere`), so it reads no session.
+- **Only `proseJson` and the chip styles are selected**, so the name can't be shown: it is
+  the selector, and it is never read.
+- **Its marks and chips are converted.** A doc's prose can carry `authorHighlight` and
+  `annotation` marks and entity chips, which `contentExtensions` doesn't know, and every public
+  surface renders with `contentExtensions`. So the body goes through `docJsonForPostSide`
+  (`src/lib/post-content.ts`), as a post's snapshot does, before `renderToReactElement`
+  renders it inside `.prose`. Unconverted, it would 500 the page.
+- **A page with no `proseJson` has no preamble.** The page leaves it out rather than decode
+  the ydoc, which would cost a row read and a Yjs decode on a statically generated page. The
+  case barely arises: a page created, forked or seeded has its `proseJson` written in the same
+  step, and only a doc moved into the wiki before anything stored it has none.
+- **The editor says so.** On that page, the Settings panel and the name field say that
+  lowering it, deleting it or renaming it takes the preamble off the landing page.
 - **"Preamble", not "blurb".** A contributor's blurb ("The blurb", below) is a plain `User`
   column, written by a server action and live at once. The preamble is a doc, collaboratively
   edited, that reaches the page through a debounced cache (§8). Two mechanisms get two words,
   and "preamble" implies no brevity: it can be several paragraphs. The identifiers follow the
-  word (`getFrontPagePreamble`, `.preamble`). The title stays `FRONT PAGE`, since that is a
-  string an editor types.
-- **Seeding.** `scripts/seed-front-page.ts` creates the doc if none exists, and never clears
-  anything, so it is safe on a database with real content. `scripts/seed-sample-data.ts`,
-  which empties the content tables, doesn't create one (§9). The script creates the ydoc row
-  eagerly, and seeds the title into the title fragment as well as the column; otherwise
-  `server/doc-cache.ts` would write an empty title over the column on its first flush.
+  word (`getFrontPagePreamble`, `.preamble`). The page's name stays `Front Page`, since that
+  is a name an editor types.
+- **Seeding.** `scripts/seed-front-page.ts` creates the commons page, `PUBLIC`, as the
+  earliest ADMIN, with a sample body, if no page is at the address, and never clears anything,
+  so it is safe on a database with real content. It makes the page as `createWikiPage`
+  (`src/lib/wiki-create.ts`) does, the address claimed under its lock, with its body in place
+  of the empty one. `scripts/seed-sample-data.ts`, which empties the content tables, doesn't
+  create one (§9).
 
 ### The latest posts
 
@@ -823,6 +828,12 @@ finds the two whose links went stale. A slug change also refreshes the page at t
 - **The contributor actions** (being listed or leaving, the order, the blurb, ORCID, the
   website and the photo), both self-service (`src/app/actions/contributor.ts`) and admin
   (`src/app/actions/users.ts`), refresh `/` inline (§1, "Contributors").
+- **A write that can put a commons page on `/` or take it off** refreshes `/`
+  (`src/lib/front-page-revalidate.ts`): a visibility change, a delete or restore, and their
+  bulk forms (`src/app/actions/docs.ts`), a rename (`src/app/actions/wiki.ts`), a create, a
+  fork or a move into the commons, and MCP's `manage` when it lowers, deletes or restores a
+  doc. `revalidateFrontPageFor` refreshes it when the doc is a commons page;
+  `revalidateFrontPage` where the caller already knows it is.
 
 **What no action refreshes.** These wait out the 60 seconds:
 
@@ -835,8 +846,8 @@ finds the two whose links went stale. A slug change also refreshes the page at t
 
 **Preamble edits can't be pushed.** `Doc.proseJson` is written by the collab server's store
 debounce (`server/doc-cache.ts`), a different process with no access to Next's
-`revalidatePath`. So an edit to the `FRONT PAGE` doc reaches `/` after the debounce plus up
-to 60s. A webhook from collab into the web app would close that gap, but isn't worth a
+`revalidatePath`. So an edit to the commons' `Front Page` reaches `/` after the debounce plus
+up to 60s. A webhook from collab into the web app would close that gap, but isn't worth a
 cross-process dependency for a preamble that changes a few times a year.
 
 A contributor's blurb is the contrast. It is the same TipTap JSON, but written by a server
@@ -893,7 +904,7 @@ it can be pushed, not what the content is.
 - **Being listed doesn't follow publishing.** An author's first published post doesn't put
   them on the front page (§1, "Who is listed"). Whether `/users` should hint at a published
   author who isn't listed is unresolved.
-- **`scripts/seed-sample-data.ts` creates no `FRONT PAGE` doc.** `scripts/seed-front-page.ts`
+- **`scripts/seed-sample-data.ts` creates no `Front Page`.** `scripts/seed-front-page.ts`
   is how to get one. Adding one to `SAMPLE_DOCS` has a catch: the script's safety check
   compares the number of docs with `SAMPLE_DOCS.length`, and that count would move by one.
 
@@ -916,12 +927,13 @@ it can be pushed, not what the content is.
 
 **E2e specs:**
 
-- **`e2e/landing.spec.ts`**'s one preamble test asserts only that the literal `FRONT PAGE`
-  never reaches the page.
-  - It asserts no preamble text: first-created-wins means a doc the spec makes loses to any
-    `FRONT PAGE` doc already there.
-  - Production determinism was judged worth more than test convenience; newest-wins would
-    swap which of the two is easy.
+- **`e2e/landing.spec.ts`**'s one preamble test makes a doc titled `FRONT PAGE` and asserts
+  that neither its title nor its text reaches the page.
+  - Which page is the preamble is `e2e/wiki.spec.ts`'s "front page" block: the commons'
+    `PUBLIC` `Front Page` in other capitals, shown on `/` without its name, and gone once
+    lowered; and a `SHARED` one, a variant and a person's page of that name, none of them it.
+    That file alone takes the address, so no two workers race for it, and its tests skip
+    when a real page already holds it.
   - The spec's other tests cover the contributor list, which shows a listed contributor with
     their ORCID iD and website and leaves out one who isn't; its move below the posts under
     900px; the dashboard panel's edits reaching `/`, and leaving the list hiding the panel;

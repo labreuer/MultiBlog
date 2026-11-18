@@ -1,6 +1,6 @@
 import type { JSONContent } from "@tiptap/react";
 import * as Y from "yjs";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import type { Session } from "next-auth";
 import type { Prisma } from "@/generated/prisma/client";
 import { canManageDocs, canUserEditDoc, canUserSeeDocHistory } from "@/lib/doc-authz";
@@ -19,7 +19,8 @@ import { ydocIdForDoc } from "@/lib/ydoc-names";
 import DocView from "@/components/DocView";
 import AuthorByline from "@/components/AuthorByline";
 import DocPostsLine from "@/components/DocPostsLine";
-import DocActionsMenu from "@/components/DocActionsMenu";
+import DocActionsMenu, { type DocActionsContext } from "@/components/DocActionsMenu";
+import { wikiNamespacesFor } from "@/lib/wiki-create";
 import DocFamily from "@/components/DocFamily";
 import AnnotationSection from "@/components/annotation/AnnotationSection";
 import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
@@ -118,6 +119,31 @@ export default async function DocReadingView({
   // refuse one whatever the menu offers.
   const canPublish = canEdit && doc.wikiName === null && doc.posts.length === 0;
   const canFork = canManageDocs(user.role);
+  // docs/WIKI.md "The Actions menu" — moving a doc into the wiki is an
+  // editor's on its byline, of a doc that isn't a wiki page and has no post.
+  // The page's own list of posts leaves deleted ones out, and a deleted one
+  // refuses a move too, so the count is its own.
+  const movable =
+    canFork &&
+    canEdit &&
+    doc.wikiName === null &&
+    doc.posts.length === 0 &&
+    doc.authors.some((a) => a.userId === user.id) &&
+    (await prismaIncludingDeleted.post.count({ where: { docId: doc.id } })) === 0;
+  // Where the dialogs may put a page, by a fresh read of the viewer's
+  // account; the server reads it again when a dialog is sent.
+  const namespaces = canFork ? await wikiNamespacesFor(user) : null;
+  const actionsContext: DocActionsContext = {
+    title: doc.title,
+    visibility: doc.visibility,
+    isWikiPage: doc.wikiName !== null,
+    namespaces: {
+      viewerId: user.id,
+      person: namespaces?.person ? { slug: namespaces.person.slug } : null,
+      personRefusal: namespaces?.personRefusal ?? null,
+      commons: namespaces?.commons ?? false,
+    },
+  };
   const family = await loadDocFamily(user, doc);
 
   // PLAN.md §13o — fetched here rather than inside AnnotationSection because
@@ -250,7 +276,7 @@ export default async function DocReadingView({
                       // docs/FORKS.md "A doc's family" — under the byline.
                       // Keyed for the byline's own reason: a prop DocView
                       // renders among siblings.
-                      family={family && <DocFamily key="family" family={family} />}
+                      family={family && <DocFamily key="family" family={family} surface={wikiAddress ? "wiki" : "doc"} />}
                       byline={
                         // A <div>, not <p> — <form> isn't valid inside <p> (HTML
                         // rejects it; React hydrates it anyway and then warns), same
@@ -284,10 +310,18 @@ export default async function DocReadingView({
                             <DocPostsLine key="posts" docTitle={doc.title} posts={doc.posts} />
                           )}
                           {/* docs/FORKS.md — "Publish as blog post" (§15d's
-                              entry point into post creation) and "Fork…", each
-                              for whoever may. A client island, which renders
-                              nothing with neither; keyed for the same reason. */}
-                          <DocActionsMenu key="actions" docId={doc.id} publish={canPublish} fork={canFork} />
+                              entry point into post creation), "Fork…" and
+                              docs/WIKI.md's "Move into the wiki…", each for
+                              whoever may. A client island, which renders
+                              nothing with none; keyed for the same reason. */}
+                          <DocActionsMenu
+                            key="actions"
+                            docId={doc.id}
+                            publish={canPublish}
+                            fork={canFork}
+                            moveIn={movable}
+                            context={actionsContext}
+                          />
                           {/* PLAN.md §20k — a second line of the byline rather
                               than a block below the text, and "bare" is what
                               drops the "Tags" label. Gated by this page's own

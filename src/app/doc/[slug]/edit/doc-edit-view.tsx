@@ -13,6 +13,7 @@ import { ChipSurfaceProvider } from "@/lib/entity-chips/chip-surface";
 import { displayNameOf, staffDisplayNameOf } from "@/lib/display-name";
 import { wikiAddressOfDoc } from "@/lib/wiki-address";
 import { wikiAddressHistoriesOf } from "@/lib/wiki-rename";
+import { isFrontPageAddress } from "@/lib/front-page";
 
 // The editor over a doc already resolved and gated: what /doc/[slug]/edit
 // renders, and what a wiki page's `/edit` renders (docs/WIKI.md "The doc view
@@ -48,7 +49,7 @@ export function canEditLoadedDoc(doc: DocForEditing, user: Session["user"]): boo
 }
 
 export default async function DocEditView({ doc, user }: { doc: DocForEditing; user: Session["user"] }) {
-  const [eligibleUsers, threads, addressHistories] = await Promise.all([
+  const [eligibleUsers, threads, addressHistories, frontPage] = await Promise.all([
     prisma.user
       .findMany({
         where: { role: { in: ["ADMIN", "EDITOR", "AUTHOR"] } },
@@ -61,6 +62,10 @@ export default async function DocEditView({ doc, user }: { doc: DocForEditing; u
     // with it (docs/WIKI.md "Deleting a page"); a doc moved out of the wiki
     // can have some too.
     wikiAddressHistoriesOf([doc.id], (u) => staffDisplayNameOf(u, user.role)),
+    // Whether this is the commons' Front Page, the landing page's preamble
+    // when PUBLIC, which the name field and Settings say (docs/WIKI.md "The
+    // front page"); the name is matched by its key, which only the database folds.
+    doc.wikiName !== null && doc.wikiOwnerUserId === null && doc.wikiVariant === "" ? isFrontPageAddress(doc.id) : false,
   ]);
 
   // "focus mode" pulls all annotations rather than just anchored ones and we
@@ -90,7 +95,7 @@ export default async function DocEditView({ doc, user }: { doc: DocForEditing; u
               slug={doc.slug}
               initialTitle={doc.title}
               visibility={doc.visibility}
-              wiki={address && { address, ownerUserId: doc.wikiOwnerUserId }}
+              wiki={address && { address, ownerUserId: doc.wikiOwnerUserId, frontPage }}
               addressHistory={addressHistories.get(doc.id) ?? []}
               createdAt={doc.createdAt}
               userId={user.id}

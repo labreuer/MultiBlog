@@ -248,7 +248,7 @@ test.describe("publish / unpublish", () => {
     draftDoc,
   }) => {
     await page.goto(`/doc/${draftDoc.id}`);
-    expect(await docActionItems(page)).toEqual(["Publish as blog post", "Fork…"]);
+    expect(await docActionItems(page)).toEqual(["Publish as blog post", "Fork…", "Move into the wiki…"]);
     await expect(page.getByRole("link", { name: "configure" })).toHaveCount(0);
   });
 

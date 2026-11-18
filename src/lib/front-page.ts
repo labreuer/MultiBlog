@@ -1,39 +1,50 @@
 import type { JSONContent } from "@tiptap/core";
-import { prisma } from "./prisma";
+import type { Prisma } from "@/generated/prisma/client";
+import { prisma, prismaIncludingDeleted } from "./prisma";
 import { docJsonForPostSide } from "./post-content";
 import { parseChipStyles } from "./entity-chips/settings";
+import { readableWikiDocsWhere } from "./doc-authz";
+import { foldWikiName } from "./wiki-claim";
+import type { HELD_COMMONS_NAMES } from "./wiki-address";
 
-export const FRONT_PAGE_DOC_TITLE = "FRONT PAGE";
+// docs/WIKI.md "The front page", docs/BLOG.md §1 "The preamble" — the
+// landing page's preamble is the body of the commons page named
+// FRONT_PAGE_NAME, when it is PUBLIC, and nothing otherwise. The name is one
+// of the commons names held for ADMIN and EDITOR (HELD_COMMONS_NAMES), so
+// only they can give a page this address, and PUBLIC is what puts it here.
 
-// The landing page's preamble (PLAN.md §17c) — the body of the doc titled
-// FRONT PAGE, with no visibility check. §12e defines DocVisibility.SHARED as
-// "anyone with canViewDocs", a role gate, not "the public" — requiring it
-// here would attach a meaning to that enum value it doesn't have. The title
-// is the only switch, stated once, here.
+/** The commons page whose body is the landing page's preamble; typed as one of the held names, so the two can't part. */
+export const FRONT_PAGE_NAME: (typeof HELD_COMMONS_NAMES)[number] = "Front Page";
+
+/**
+ * The front page's address as a `where`: the commons (no owner), the page
+ * itself (variant ""), and the name matched by its key, which is folded by
+ * `wiki_name_key` in the database and nowhere else (docs/WIKI.md "Case"),
+ * so `front page` and `FRONT PAGE` are the same page. A unique index keeps
+ * one live page at it. Visibility and deletion are each caller's.
+ */
+async function frontPageAddressWhere(): Promise<Prisma.DocWhereInput> {
+  const { key } = await foldWikiName(prisma, FRONT_PAGE_NAME);
+  return { wikiOwnerUserId: null, wikiName: { not: null }, wikiNameKey: key, wikiVariant: "" };
+}
+
+// Reads no session, so `/` keeps its ISR cache (docs/BLOG.md §8): the viewer
+// is null, and the wiki read rule's `where` for a null viewer is the live
+// PUBLIC pages. The writes that put a page on or take it off revalidate `/`
+// (src/lib/front-page-revalidate.ts).
 //
-// First-created wins (orderBy createdAt asc): Doc.title has no unique
-// constraint, so a second doc titled FRONT PAGE is made inert rather than
-// letting the front page flip between two preambles depending on which row
-// Postgres happens to return.
-//
-// Only proseJson and the doc's chip styles are selected — that's what makes
-// "never show the title" structural rather than a rule to remember, since
-// the title is never read.
+// Only proseJson and the doc's chip styles are selected, so the page's name
+// is never shown: nothing reads it.
 export async function getFrontPagePreamble(): Promise<JSONContent | null> {
   const doc = await prisma.doc.findFirst({
-    // No wiki page: Doc.title mirrors a page's name, so every page named
-    // `Front Page`, a PRIVATE one in a person's namespace included, is a doc
-    // titled so. docs/WIKI.md "The front page" replaces this rule with the
-    // commons' PUBLIC `Front Page`; until then a wiki page is passed over.
-    where: { title: { equals: FRONT_PAGE_DOC_TITLE, mode: "insensitive" }, wikiName: null },
-    orderBy: { createdAt: "asc" },
+    where: { AND: [await frontPageAddressWhere(), readableWikiDocsWhere(null), { visibility: "PUBLIC" }] },
     select: { proseJson: true, chipStyles: true },
   });
 
-  // proseJson is null for a doc created but never edited (the store
-  // debounce hasn't fired yet) — omit the preamble rather than pay a ydoc
-  // decode on a statically-generated page for a state that resolves itself
-  // the moment anyone types a character.
+  // proseJson is null for a doc moved into the wiki before anything stored
+  // it — omit the preamble rather than pay a ydoc decode on a statically
+  // generated page for a state that resolves itself the moment anyone types
+  // a character.
   if (!doc?.proseJson) {
     return null;
   }
@@ -43,4 +54,14 @@ export async function getFrontPagePreamble(): Promise<JSONContent | null> {
   // entity chips the public renderer's contentExtensions doesn't know, and
   // rendering them unconverted would 500 this page.
   return docJsonForPostSide(doc.proseJson as JSONContent, parseChipStyles(doc.chipStyles));
+}
+
+/**
+ * Whether a doc is at the front page's address, whatever its visibility and
+ * whether or not it is deleted: what the editor asks, to say that lowering,
+ * renaming or deleting the page takes the preamble off the landing page.
+ */
+export async function isFrontPageAddress(docId: string): Promise<boolean> {
+  const found = await prismaIncludingDeleted.doc.count({ where: { AND: [{ id: docId }, await frontPageAddressWhere()] } });
+  return found > 0;
 }

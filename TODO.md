@@ -1087,8 +1087,9 @@ show up and then make the styling say so on purpose, not to fix a reported break
   to `Annotation.userId` when the second distinct user connects, keyed `=== 2` so it fires
   exactly once per annotation.
 - **Persistence.** The doc side treats the mark as working-session-only and strips it before it
-  reaches public content (`stripMarksFromDoc` in `src/lib/post-content.ts` and
-  `src/lib/front-page.ts`) — which is what keeps `contentExtensions` (without the mark) honest
+  reaches public content (`stripMarksFromDoc` in `src/lib/post-content.ts`'s
+  `docJsonForPostSide`, which a post, the landing page's preamble and a public wiki page go
+  through) — which is what keeps `contentExtensions` (without the mark) honest
   as the schema for saved content. The annotation side strips nothing: the mark lands in
   `Annotation.proseJson` and in the `ydoc_snapshot` versions, and renders back out through
   `annotationContentExtensions` in `annotation-entries.ts`, `AnnotationVersionBody` and

@@ -174,8 +174,9 @@ An empty or heading-only source yields one empty paragraph.
 
 The same creation path as `createDoc` — one row, slugged by its own id, with an eagerly
 created ydoc (DOCS.md, "The ydoc behind a doc") — differing only in that the ydoc is seeded with content instead
-of left empty. The seeding is [`scripts/seed-front-page.ts`](../scripts/seed-front-page.ts)'s,
-and both of that script's non-obvious steps are load-bearing here for the same reasons:
+of left empty. The seeding is `createDocWithContent`'s (below), which a new wiki page and
+[`scripts/seed-front-page.ts`](../scripts/seed-front-page.ts) go through too, and two of its
+steps are load-bearing:
 
 - **The title goes into the doc's own `title` fragment, not just the `Doc.title` column.**
   The fragment is canonical (§3d), and `server/doc-cache.ts` writes an empty title straight

@@ -5,6 +5,7 @@ import { canUserManageFile, canUserReadFile } from "@/lib/file-authz";
 import { resolveDocParam, resolveDocSlugHistory } from "@/lib/resolve-doc-param";
 import { resolveFileParam } from "@/lib/file-slug";
 import { setDocByline, setDocDeleted, setDocRecord, setDocSlug, setDocVisibility } from "@/lib/doc-manage";
+import { revalidateFrontPageFor } from "@/lib/front-page-revalidate";
 import { setFileDeleted, setFileOwners, setFileSlug, setFileVisibility } from "@/lib/file-manage";
 import { setAnnotationDeleted } from "@/lib/annotation-manage";
 import { setLinkDeleted } from "@/lib/anchored-link-write";
@@ -118,6 +119,11 @@ async function manageDoc(ctx: McpContext, docId: string, args: Args): Promise<To
   if (args.delete) {
     ({ removedAddresses } = await setDocDeleted(ctx.actor, docId, true));
     changed.push("deleted");
+  }
+  // docs/WIKI.md "The front page": a commons page lowered, deleted or
+  // restored can come off `/` or go back on it, and `/` is ISR-cached.
+  if (args.restore || args.visibility !== undefined || args.delete) {
+    await revalidateFrontPageFor(docId);
   }
   const doc = await prisma.doc.findFirst({
     where: { id: docId },

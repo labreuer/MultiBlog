@@ -3331,8 +3331,8 @@ FK needs no view.
 its `clients` map, and — only when that map names more than one user — walk `ydoc_update`
 newest-first for the latest update whose origin clientID is in it. A single-editor doc needs no
 walk, which is most of them. It refuses to guess where the map is empty (a doc seeded straight
-into the ydoc tables by `seed-sample-data.ts`/`seed-front-page.ts` has no `clients` entries at
-all) rather than falling back to the byline: a byline says who *may* edit, not who did. The write
+into the ydoc tables by `seed-sample-data.ts`, or a `FRONT PAGE` doc by an older
+`seed-front-page.ts`, has no `clients` entries at all) rather than falling back to the byline: a byline says who *may* edit, not who did. The write
 is raw SQL naming only that one column, so `@updatedAt` doesn't move and the
 `doc_sync_prose_json_length` trigger doesn't fire, and it carries `AND updated_by_user_id IS NULL`
 so a concurrent collab flush's fresher value wins — which is why, unlike
@@ -3342,7 +3342,7 @@ so a concurrent collab flush's fresher value wins — which is why, unlike
 
 `/` has been a bare list of published posts since the first week — `src/app/page.tsx`, a
 680px column, inline styles, every published post unbounded. This section turns it into an
-actual landing page with four blocks: a **banner** image, a **preamble** taken from a doc, the
+actual landing page with four blocks: a **banner** image, a **preamble** taken from the commons' wiki page `Front Page`, the
 **latest posts**, and a **contributor list** in a right-hand column that moves below the
 posts when the viewport is too narrow to hold both.
 
@@ -3356,9 +3356,9 @@ in §9. Each subsection below that moved says where its content lives now. The a
 (§17n–§17o) stay here. The moved text is in the parent of the commit that introduced each
 stub.
 
-### 17a. Three constraints that exist before anything is designed — docs/BLOG.md §1, "It reads no session" and "The preamble"; the third, the soft-delete extension's reach, is §4's soft-delete note
+### 17a. Three constraints that exist before anything is designed — docs/BLOG.md §1, "It reads no session" and "The preamble" (the `Front Page`'s prose carries marks and chips the public renderer doesn't know); the third, the soft-delete extension's reach, is §4's soft-delete note
 ### 17b. The banner: env-configured, gitignored, and deliberately not `NEXT_PUBLIC_` — docs/BLOG.md §1, "The banner"
-### 17c. The preamble: a doc found by title — docs/BLOG.md §1, "The preamble"
+### 17c. The preamble: the commons' `PUBLIC` `Front Page` — docs/WIKI.md "The front page", docs/BLOG.md §1, "The preamble"
 ### 17d. The latest posts — docs/BLOG.md §1, "The latest posts", and §5–§6
 ### 17e. Contributors: three new `User` columns, and what they replace — docs/BLOG.md §1, "Who is listed" and "The card"
 ### 17f. `contributor_blurb` is TipTap JSON, and the schema *is* the validation — docs/BLOG.md §1, "The blurb"

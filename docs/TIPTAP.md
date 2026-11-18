@@ -755,9 +755,10 @@ bugs hide until the first heading or ordered list shows up.
 > with `saveDraft` / `publishPost` / `clearAuthorHighlights` around it. None of that exists
 > any more — posts are immutable snapshots of a doc (PLAN.md §15), and there is no `Revision`
 > model. The function survives, reached through `stripMarksFromDoc` from
-> `src/lib/post-content.ts` and `src/lib/front-page.ts`, so **both structural lessons still
+> `docJsonForPostSide` (`src/lib/post-content.ts`), which a post's snapshot, the landing
+> page's preamble and a public wiki page all go through, so **both structural lessons still
 > apply to it**; only the blast radius changed, from "a spurious revision" to "an unstripped
-> mark in `Post.proseJson` or on the front page". The source comments in
+> mark in `Post.proseJson`, on the landing page or on a public wiki page". The source comments in
 > `src/lib/tiptap-schema.ts` still describe the old machinery.
 
 **The bug:** `stripMarkFromDoc` (`src/lib/tiptap-schema.ts`), which recursively removes one

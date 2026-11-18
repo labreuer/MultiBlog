@@ -547,7 +547,8 @@ post's labels, and a republish refreshes both.
   - In the doc editor the list sits inside the scrolling box, after the text, so it scrolls
     with the doc rather than taking room under it. It isn't editable.
 - **On a post** `docJsonForPostSide` (`post-content.ts`) appends a "References" heading and a
-  paragraph per work, so the landing page's preamble gets one too. The lead is bold and a
+  paragraph per work, so the landing page's preamble, the commons' `Front Page`, gets one
+  too. The lead is bold and a
   deleted work is struck, in the marks a post's schema has. Being the post's text, it is
   searched, quoted and commented on like the rest.
 - **Not in a doc's own text.** A doc's search text and its Markdown, an MCP read's included,
@@ -1094,8 +1095,9 @@ reads a public page doesn't fetch four files for each work on it.
   - **Where it sits.** The heading is the post's text, so the icon can't share its row: it is
     drawn before the heading, floated right at the heading's own size, top margin and line
     height, so the two make one line. A doc's sits at the right of its heading's row to match.
-- **The landing page's preamble** gets no icon. Its References are a doc's, drawn as a post's,
-  and the doc may be one its readers can't open.
+- **The landing page's preamble** gets no icon. Its References are the commons' `Front Page`'s,
+  drawn as a post's, and the download is a signed-in route, which the landing page's reader
+  needn't be, as a public wiki page's bibliography has none (docs/WIKI.md "Public pages").
 - **`/references`:** a Download menu beside the column picker for the rows its search matches,
   on every page, and a bulk action, "Download as…", for the rows selected, offered to every
   member, where the table's other bulk actions are an author's. The route reads the querystring

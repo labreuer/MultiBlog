@@ -14,6 +14,10 @@ import type { WikiAddressHistoryEntry } from "@/lib/wiki-rename";
 import DeleteAddressesConfirm from "@/components/wiki/DeleteAddressesConfirm";
 import styles from "./DocSettingsPanel.module.css";
 
+/** What the panel says on the commons' PUBLIC Front Page (docs/WIKI.md "The front page"). */
+const FRONT_PAGE_SETTINGS_NOTE =
+  "This page's text is the landing page's preamble. Lowering it from PUBLIC, or deleting it, takes the preamble off the landing page.";
+
 export type EligibleUser = {
   id: string;
   /** What the byline picker shows: staffDisplayNameOf, decided on the server. */
@@ -28,8 +32,10 @@ type Props = {
    * A wiki page's name, owner and address, null for a doc that isn't one:
    * which visibilities it may take (allowedVisibilities), the Url row, and
    * where Delete and Undelete go on to (docs/WIKI.md "Deleting a page").
+   * `frontPage`: it is the commons' Front Page, whose text is the landing
+   * page's preamble while it is PUBLIC (docs/WIKI.md "The front page").
    */
-  wiki: { name: string; ownerUserId: string | null; path: string } | null;
+  wiki: { name: string; ownerUserId: string | null; path: string; frontPage: boolean } | null;
   /**
    * The doc's past wiki addresses, newest first, which Delete lists before it
    * deletes them with the doc (docs/WIKI.md "Deleting a page").
@@ -315,6 +321,11 @@ export default function DocSettingsPanel({
                 {visibilityOptions.includes("PUBLIC") && (
                   // Beside every choice that offers PUBLIC (docs/WIKI.md "Public pages").
                   <p className={styles.hint}>{PUBLIC_VISIBILITY_NOTE}</p>
+                )}
+                {wiki?.frontPage && visibilityValue === "PUBLIC" && !deleted && (
+                  <p className={styles.hint} data-front-page-note="">
+                    {FRONT_PAGE_SETTINGS_NOTE}
+                  </p>
                 )}
               </td>
             </tr>

@@ -93,9 +93,10 @@ test.describe("the Actions menu and the Fork dialog (docs/FORKS.md \"The doc vie
     const { page: author } = await secondUser({ role: "AUTHOR" });
     const { page: reader } = await secondUser({ role: "AUTHORIZED" });
 
-    // An editor of a doc with no post.
+    // An editor on the byline of a doc with no post: docs/WIKI.md's "Move
+    // into the wiki…" too.
     await page.goto(`/doc/${sharedDoc.slug}`);
-    expect(await docActionItems(page)).toEqual(["Publish as blog post", "Fork…"]);
+    expect(await docActionItems(page)).toEqual(["Publish as blog post", "Fork…", "Move into the wiki…"]);
     // A reader who can't edit it may still fork it, having canManageDocs.
     await author.goto(`/doc/${sharedDoc.slug}`);
     expect(await docActionItems(author)).toEqual(["Fork…"]);

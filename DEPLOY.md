@@ -414,8 +414,9 @@ sizes it. Same rule: a restart picks either up. Leave both `SITE_BANNER` and
 `SITE_BANNER_TEXT` unset to show no banner at all.
 
 The landing page's preamble paragraph(s) are separate from all of this — not an env var, but
-the body of whichever `Doc` is titled exactly `FRONT PAGE` (docs/BLOG.md §1). Seed one after the
-first deploy with `npx tsx scripts/seed-front-page.ts` (create-if-absent, safe to re-run).
+the body of the commons' wiki page `Front Page`, while it is `PUBLIC` (docs/BLOG.md §1,
+docs/WIKI.md "The front page"). Seed one after the first deploy with
+`npx tsx scripts/seed-front-page.ts` (create-if-absent, safe to re-run).
 
 `RESEND_API_KEY`/`MAIL_FROM` (`src/lib/mail.ts`) wire real delivery through Resend — reset
 links, admin-issued invite links, and RAISED-annotation notifications all actually send once
@@ -905,6 +906,31 @@ Until then claude.ai keeps the old list, and a renamed tool is called by its old
 refused (docs/MCP.md §21, "What else changes for claude.ai"). Claude Code reads the list
 afresh at its next connection, but a project's allow rules name tools, so a rename changes
 them too (docs/MCP.md §15).
+
+**The deploy that brings the wiki's front page** (docs/WIKI.md "The front page", "Before the
+wiki reaches an instance") takes the preamble off an instance whose landing page shows a doc
+titled `FRONT PAGE`, until that doc is in the commons as `Front Page`, `PUBLIC`. Before the
+deploy, find it: the first row is the one the landing page shows, and `posts` says which way
+it goes in.
+
+```sql
+SELECT d.id, d.slug, d.visibility, d.created_at,
+       (SELECT count(*) FROM post p WHERE p.doc_id = d.id) AS posts
+FROM doc d
+WHERE lower(d.title) = 'front page' AND d.wiki_name IS NULL AND d.deleted_by_user_id IS NULL
+ORDER BY d.created_at;
+```
+
+After the deploy, an ADMIN or EDITOR on its byline opens it and, from the Actions menu:
+
+- **with no post** (`posts` = 0, deleted ones included), chooses **Move into the wiki…**, the
+  commons, the name `Front Page` and `PUBLIC`. The doc keeps its body, history, annotations
+  and links, and its title becomes the name.
+- **with a post**, which can't be moved, chooses **Fork…** into the commons as `Front Page`,
+  `PUBLIC`. The fork starts with the doc's text and its own history; the doc stays as it is.
+
+Then load `/` and check the preamble is back. An instance whose query finds nothing has no
+preamble to keep, and `npx tsx scripts/seed-front-page.ts` makes one if it wants one.
 
 **Changing the site icon** (docs/FAVICON.md) isn't part of this flow — it's not triggered by a
 code change, so `git pull` won't touch it. Replace `site-icons/master.png` and run

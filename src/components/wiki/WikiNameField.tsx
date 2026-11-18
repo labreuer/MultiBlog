@@ -20,9 +20,14 @@ type Props = {
   editable: boolean;
   /** The editor's title-field class, so the name sits where a doc's title does. */
   className: string;
+  /**
+   * The page is the commons' PUBLIC Front Page, the landing page's preamble,
+   * which a new name takes off it (docs/WIKI.md "The front page").
+   */
+  onLandingPage?: boolean;
 };
 
-export default function WikiNameField({ docId, name, editable, className }: Props) {
+export default function WikiNameField({ docId, name, editable, className, onLandingPage = false }: Props) {
   const router = useRouter();
   const [draft, setDraft] = useState(name);
   const [error, setError] = useState<{ message: string; takenPath?: string } | null>(null);
@@ -96,6 +101,13 @@ export default function WikiNameField({ docId, name, editable, className }: Prop
           {checked.ok && !error && (
             <span style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>
               Links to the old name will still reach this page.
+            </span>
+          )}
+          {onLandingPage && (
+            // Said whatever is typed: only the database's fold tells a new
+            // name from new capitals, which keep the page where it is.
+            <span style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }} data-front-page-note="">
+              This page&apos;s text is the landing page&apos;s preamble while it is named Front Page; a new name takes it off.
             </span>
           )}
         </div>

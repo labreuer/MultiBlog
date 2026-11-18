@@ -65,8 +65,9 @@ const BLOCKS = [{ text: "As read.", type: "paragraph", heading: false }];
 const read = (docId: string, updateId: string | null, over: Partial<DiffSideRead> = {}): DiffSideRead => ({
   docId,
   updateId,
-  slug: `${docId}-slug`,
+  path: `/doc/${docId}-slug`,
   title: `${docId} as read`,
+  headedByName: false,
   history: true,
   at: updateId === null ? null : "2026-11-17T00:00:00.000Z",
   nowVersion: updateId === null ? "20" : null,
@@ -116,8 +117,9 @@ test("a built side takes the page's facts about its doc and the build's about it
   assert.deepEqual(pair.left, {
     docId: "a",
     updateId: "11",
-    slug: "a-slug",
+    path: "/doc/a-slug",
     title: "As built",
+    headedByName: false,
     history: true,
     at: BUILT.at,
     nowVersion: null,
@@ -126,6 +128,17 @@ test("a built side takes the page's facts about its doc and the build's about it
   // The kept side is the read on the page, and the pair's time is still that read's.
   assert.equal(pair.right, shown.right);
   assert.equal(pair.readAt, shown.readAt);
+  assert.equal(isDiffPairRead(pair), true);
+});
+
+test("a wiki page's side built in the browser keeps its name and its address", () => {
+  const named = read("a", "10", { path: "/wiki/commons/Mercury_(planet)", title: "Mercury (planet)", headedByName: true });
+  const shown = pairRead(named, read("a", null), { order: "left-earlier" });
+  const pair = assemblePair(shown, { left: side("a", 11), right: side("a", null) }, { left: BUILT });
+  assert.equal(pair.left.title, "Mercury (planet)");
+  assert.equal(pair.left.path, "/wiki/commons/Mercury_(planet)");
+  assert.equal(pair.left.headedByName, true);
+  assert.equal(pair.left.blocks, BUILT.blocks);
   assert.equal(isDiffPairRead(pair), true);
 });
 
@@ -177,4 +190,6 @@ test("a pair's body is told from anything else by its shape, its fork point incl
   assert.equal(isDiffPairRead({ ...pair, fork: { parentDocId: "a" } }), false);
   assert.equal(isDiffPairRead({ ...pair, fork: undefined }), false);
   assert.equal(isDiffPairRead({ ...pair, left: { ...pair.left, blocks: "none" } }), false);
+  assert.equal(isDiffPairRead({ ...pair, left: { ...pair.left, path: undefined, slug: "a-slug" } }), false);
+  assert.equal(isDiffPairRead({ ...pair, left: { ...pair.left, headedByName: undefined } }), false);
 });

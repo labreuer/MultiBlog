@@ -81,8 +81,9 @@ function SideHeader({
   order: "Earlier" | "Later" | null;
 }) {
   // The doc at this version where its reading view honours `?at=` for this
-  // viewer, and the doc as it is now otherwise.
-  const href = side.updateId !== null && side.history ? `/doc/${side.slug}?${SCRUB_PARAM}=${side.updateId}` : `/doc/${side.slug}`;
+  // viewer, and the doc as it is now otherwise, at a wiki page's address for
+  // one.
+  const href = side.updateId !== null && side.history ? `${side.path}?${SCRUB_PARAM}=${side.updateId}` : side.path;
   return (
     <div className={styles.side}>
       {/* Never prefetched: its address changes with every pair drawn. */}

@@ -1422,15 +1422,16 @@ What the wiki adds:
   membership leaks either. The pair route then answers 404, from the same function. The rule
   goes in `gateDiffPair` alone, which both callers share (FORKS.md, "Giving the diff page or
   its pair route a check or a read of its own").
-- **A side links at its wiki address.** `DiffSideRead` carries a doc's `slug`, from which the
-  page and the slider's pair assembly build `/doc/<slug>` links; it carries the side's path
-  instead, built once by `readDiffPair` with `wikiPath` for a wiki page. Four places read it:
-  `readDiffPair`, `DiffView`'s heading link, and `diff-slider.ts`'s pair validator and
+- **A side links at its wiki address.** `DiffSideRead` carries the side's `path`, built once by
+  `readDiffPair` with `docPagePath`: a wiki page's address, `/doc/<slug>` for any other doc.
+  Four places read it: `readDiffPair`, `DiffView`'s heading link (with `?at=` for a side at a
+  version whose history the viewer may see), and `diff-slider.ts`'s pair validator and
   `assemblePair`.
 - **A wiki page's side is headed by its current name**, at whatever version the side is
-  ("The name is the title"). Today a side's heading is its title fragment at that version, read
+  ("The name is the title"). Any other side's heading is its title fragment at that version, read
   by `readDiffPair` on the server and by `doc-version.worker.ts` in the browser. For a wiki page
-  both take the name from the row the pair route reads, so a diff slid to a version and the same
+  both take the name from the row the pair route reads (`headedByName` on the side, which
+  `assemblePair` reads to keep the server's heading over the build's), so a diff slid to a version and the same
   pair reloaded agree (FORKS.md, "Turning a Y.Doc into a doc's blocks anywhere but through
   `docBodyOf`", for why the two builds must agree). Two variants of one name get the same
   heading, each linking to its own page; labels here are deferred ("Labels").
@@ -1888,11 +1889,30 @@ not the wiki's; the other five are its, in an order in which each deployed state
    PR 5, since only a doc moved out of the wiki has rows and still lists there. The rename
    field and the Settings panel's notes about the front page wait for PR 4, which brings the
    front page.
-4. **Into the wiki.** Forking into the wiki and moving a doc in, on main's `readForkSource`,
-   `forkSeed` and `createDocWithContent`; the Fork dialog's Where and "Move into the wiki…";
-   the family line on the public render, for a null viewer and in its wording, which no page
-   needs sooner, since none has a parent or a fork until now; "Same name"; diff sides linked at
-   their addresses and headed by name; the front page, with its deploy step ("The front page").
+4. **Into the wiki. Built 2026-11-18.** Forking into the wiki and moving a doc in, on main's
+   `readForkSource`, `forkSeed` and `createDocWithContent`; the Fork dialog's Where and "Move
+   into the wiki…"; the family line on the public render, for a null viewer and in its wording,
+   which no page needs sooner, since none has a parent or a fork until now; "Same name"; diff
+   sides linked at their addresses and headed by name; the front page, with its deploy step ("The
+   front page"). **As built**: `forkIntoWiki` (`src/lib/wiki-fork.ts`) and `moveDocIntoWiki`
+   (`src/lib/wiki-move.ts`), wrapped by `forkIntoWikiAction` and `moveDocIntoWikiAction`; a
+   fork's title fragment is the parent's at the version and its row's title the name. The
+   dialogs' previews are `previewWikiForkAddress` and `previewWikiMoveAddress`, which answer a
+   refusal in words; the fork's asks `checkForkParent`, the first three of `readForkSource`'s
+   checks, split out so a preview reads no text. The dialogs share
+   `src/components/wiki/wiki-dialog-parts.tsx`; the move's is `MoveIntoWikiDialog.tsx`. The menu
+   reads the viewer's namespaces through `wikiNamespacesFor` and counts the doc's posts,
+   deleted ones included, itself. The family line takes a `surface` (`doc`, `wiki`, `public`)
+   for its wording; Same name sorts the commons first, then oldest, then by id. A diff side
+   carries `path` and `headedByName`. The front page is `src/lib/front-page.ts`, its name
+   `FRONT_PAGE_NAME`, typed as one of `HELD_COMMONS_NAMES`; `/` is revalidated through
+   `src/lib/front-page-revalidate.ts`, `revalidateFrontPage()` where the write is known to be in
+   the commons (create, fork, move in) and `revalidateFrontPageFor(docId)` where the row says
+   (visibility, delete, restore, rename, and MCP's `manage`). The editor learns it is that page
+   from `isFrontPageAddress`, and the Settings panel and the name field say so while it is
+   `PUBLIC`. `scripts/seed-front-page.ts` asks `createWikiPage`'s checks and calls
+   `createDocWithContent` with the `wiki` option and a body. Only `e2e/wiki.spec.ts`'s "front
+   page" block takes the commons' `Front Page`, so no two workers race for it.
 5. **Moving between namespaces and out of the wiki.** Released rows; the title fragment written
    through the collab server; the menu's Move… and its dialog.
 
