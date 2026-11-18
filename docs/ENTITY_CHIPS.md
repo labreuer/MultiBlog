@@ -433,6 +433,11 @@ doesn't cover are in [YDOC.md](YDOC.md).
      this viewer see anyway (the kind contract, item 8). So a chip that a collaborator has just
      inserted resolves before the next store, and the endpoint can't be used to look up any other
      record.
+   - The diff page's sliders ask it too, for the targets an earlier version of a doc names
+     (FORKS.md, "Sliders on the diff page"). An earlier version can name a person the viewer may
+     not be answered for now. The server labels such a version by name, from every record, so a
+     browser that builds one builds it only from every record, and leaves it to the server
+     otherwise.
    - The doc's first paint gets its renderings as props, so the swap from the static body to the
      live editor doesn't flash.
 6. **Node views and decorations.** The editor, the reading views and side-by-side render chips as

@@ -528,31 +528,39 @@ development machine.
 - **If long logs do make a replay slow**, snapshots along the log at a fixed spacing may serve
   better than one per fork point, since they bound the scrub bar's and a diff's replay too.
 
-## A diff slider replays its side's log at every pair
+## A diff slider's log is fetched whole, and a pair the server reads replays its side's
 
 **Status:** not measured where it could matter. Nothing is built for it, on purpose
 (docs/FORKS.md, "Sliders on the diff page").
 
-The diff page asks the server for each pair its sliders name, one request at a time, so a
-drag is a run of reads of both sides, and a side at a version is one replay from the newest
-`ydoc_snapshot` at or before it, or from row #1. Docs have no snapshots but the ones
-publishing a post leaves. In a copy of a production database the logs are short (the median
-doc has 2 updates, the 99th percentile 40, the longest 1,270), and `loadDocStateAt` at the end
-of the longest takes 11 ms on a development machine; near the end of a made-up log of 10,000
-it takes 87 ms. An instance whose docs are typed by hand, a keystroke or a burst to an update,
-has not been measured, and an instance's one vCPU serves every reader from the event loop a
-replay holds.
+A slider's first touch fetches its doc's whole log, every update's bytes as base64 in JSON,
+into a worker that keeps it for as long as the reader stays on diff pages and replays to each
+version the slider names. A pair the browser can't put together is read by the server, where
+a side at a version is one replay from the newest `ydoc_snapshot` at or before it, or from
+row #1. Docs have no snapshots but the ones publishing a post leaves. In a copy of a
+production database the logs are short (the median doc has 2 updates and 12 KB of them, the
+95th percentile 225 KB, the longest 1,270 updates, the largest 522 KB), and `loadDocStateAt`
+at the end of the longest takes 11 ms on a development machine; near the end of a made-up log
+of 10,000 it takes 87 ms. An instance whose docs are typed by hand, a keystroke or a burst
+to an update, has not been measured, and an instance's one vCPU serves every reader from the
+event loop a replay holds.
 
-- **Next:** count `ydoc_update` rows per doc on such an instance, time `loadDocStateAt` at
-  the tail of its longest log, on the instance, and watch its web process while a slider is
-  dragged there.
-- **If a replay per pair is slow there, the fix is snapshots along the log** at a fixed
+- **Next:** count `ydoc_update` rows and their bytes per doc on such an instance, time
+  `loadDocStateAt` at the tail of its longest log, on the instance, and drag a slider over
+  that doc on a phone.
+- **If a log is too much to send whole**, the replay route can send bytes and not base64,
+  which is a third less, or a range of the log around the slider. It sends every
+  `ydoc_snapshot` whole too ("A snapshot at a fork point", above).
+- **A move backward is a rebuild from the log's start**, in the worker. States kept every so
+  many updates as it replays would bound that by their spacing, for memory.
+- **If a replay on the server is slow there, the fix is snapshots along the log** at a fixed
   spacing, which `materializeYdocAt` already starts from, and which bound the doc page's
-  scrub bar and a fork's read too ("A snapshot at a fork point", above, has what they cost
-  the replay routes).
-- **Each answer carries both sides' blocks**, about half a megabyte of JSON for 300 long
-  paragraphs a side, though a slider moves one side. Naming in the request the side the
-  browser already holds would halve it, and spare that side's read.
+  scrub bar, the worker's rebuild and a fork's read too.
+- **A pair the server reads carries both sides' blocks**, about half a megabyte of JSON for
+  300 long paragraphs a side, though the browser may hold one of them.
+- **The worker's chip records are as of their first fetch.** A person or a work renamed
+  while a reader slides shows in a side the server reads and not in one the browser builds,
+  until a reload.
 - **The index is the log's length too**, about 60 bytes an update, sent once a doc per visit
   (`/api/doc/[id]/versions`), and a range input with a position per update. Neither is
   capped.
@@ -644,20 +652,27 @@ What the first set leaves:
   cap on the oldest phone the baseline claims (`npx tsx scripts/remote-console.ts`), and lower
   the worker's caps, apart from the server's, if a tab dies or the deadline always bites.
 
-## The diff page's worker has not run on an iPad, or on the oldest engines in the baseline
+## The diff page's workers have not run on the oldest engines in the baseline
 
-**Status:** it runs in Safari 27.2 and on an iPhone on iOS 18.6.2 (2026-11-17), as in
-Chromium, Firefox and Playwright's WebKit build. The baseline is Safari 26 / iPadOS 18.4+
-(docs/PDF.md §10), and nothing that old has opened a diff; nor has any iPad.
+**Status:** the worker that compares runs in Safari 27.2 and on an iPhone on iOS 18.6.2
+(2026-11-17), as in Chromium, Firefox and Playwright's WebKit build. The worker that builds a
+version for a slider runs in those three builds. A diff and its sliders work on an iPad
+(2026-11-18), where nobody looked at whether that worker built the sides or the server read
+each pair, which the page doesn't show. The baseline is Safari 26 / iPadOS 18.4+
+(docs/PDF.md §10), and nothing that old has opened a diff.
 
-`src/lib/doc-diff.worker.ts` is the first worker the repo makes itself (docs/FORKS.md, "Where
-the comparing is done"), a module worker built by `new Worker(new URL(…), { type: "module" })`.
-What its bundle assumes of the engine underneath is what an older WebKit may lack. A browser
-where it can't start shows "Couldn't compare these two texts in this browser", with no diff.
+`src/lib/doc-diff.worker.ts` and `src/lib/doc-version.worker.ts` are the workers the repo
+makes itself (docs/FORKS.md, "Where the comparing is done", "Sliders on the diff page"),
+module workers built by `new Worker(new URL(…), { type: "module" })`. What their bundles
+assume of the engine underneath is what an older WebKit may lack, and the second holds Yjs,
+TipTap's schema and the chip kinds, none of which had run in a worker before. A browser
+where the first can't start shows "Couldn't compare these two texts in this browser", with no
+diff. One where the second can't start shows nothing of it: the server reads every pair, and
+a slider is slower.
 
-- **Next:** open a diff of two versions on an iPad, and on the oldest Safari and iPhone to
-  hand (`npx tsx scripts/remote-console.ts`), and read `data-state` on the island: `done`, or
-  `failed`.
+- **Next:** open a diff of two versions on the oldest Safari, iPhone and iPad to hand (`npx tsx scripts/remote-console.ts`), and read `data-state` on the island: `done`, or
+  `failed`. Then move a slider to a version with the network panel open: no `/api/diff/`
+  request means the second worker built the side.
 
 ## The claude.ai trial: what to undo
 
