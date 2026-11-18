@@ -4951,6 +4951,14 @@ Built 2026-10-23 on `paginate-blog`: `/page/N` beyond the landing page's ten pos
 post linking to the posts published just before and after it. **As built:
 [docs/BLOG.md](docs/BLOG.md) §5–§8.**
 
+## 27. Wiki pages
+
+Planned 2026-11-17: docs with an address under `/wiki`, `/wiki/@jane/Mercury_(planet)~2` or
+`/wiki/commons/…`, whose name is their title by MediaWiki's rules, compared without case; `PUBLIC`
+pages readable signed out; renames that keep old addresses; forking and moving docs in, on §36's
+forks and diffs; and the commons' `Front Page` as the landing page's preamble. Built fresh on
+main, with the `wiki` branch as a reference. **The plan: [docs/WIKI.md](docs/WIKI.md).**
+
 ## 29. Entity chips: mentions and citations
 
 Planned 2026-11-04: a mention of a person and a citation of a work, each an
