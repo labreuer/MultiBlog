@@ -468,7 +468,8 @@ doesn't cover are in [YDOC.md](YDOC.md).
    - So DOCS.md's "`prose_json` is the document" becomes "the document, plus each chip's label as
      of the write".
 9. **Posts and the landing preamble.**
-   - `postContentFromYdoc`, at publish, and front-page.ts's strip, at each render of `/`, replace
+   - `postContentFromYdoc`, at publish, and `docJsonForPostSide`, at each render of `/`'s
+     preamble (the commons' `Front Page`, front-page.ts) and of a public wiki page, replace
      each chip with linked text. That text is the chip's label, linked where its chip kind sends a
      post's reader, and it carries the chip as one `chip` attribute on the link, holding the chip
      kind and its identity.

@@ -33,7 +33,7 @@ to re-derive the decision from.
 | [docs/TIPTAP.md](docs/TIPTAP.md) | TipTap v3 / y-prosemirror / ProseMirror traps. |
 | [docs/PDF.md](docs/PDF.md) | The PDF viewer, anchors, file storage, and pdfjs's many non-obvious failures; §13 is versions of a file: a file takes a new version (upload, promotion, abandoning), every address and anchor goes by version, a link names its version with `v=` and is carried through the page maps between versions, a bulk carry moves forward the notes that place themselves and a note's author moves one at a time, with the SQL that undoes a carry; §14 is a file's manage page: `/files/<id>/manage`, where its managers change its title, slug, visibility and owners, delete or restore it, and upload, promote, abandon and carry its versions (a candidate's page map under its card, the map build and the carry preview as Route Handlers), and what the viewer keeps: the reading half of the Metadata pane, and a waiting version pinned there, a dot on its tab and a line under the selection popover. |
 | [docs/mobile/coordinates.html](docs/mobile/coordinates.html) | Fixed popovers vs. the iOS keyboard: the two coordinate spaces, and what changed on desktop. |
-| [docs/BLOG.md](docs/BLOG.md) | The public blog as built: the landing page (the banner, the `FRONT PAGE` preamble, the latest posts, the contributor list and the dashboard panel a contributor edits it from), a post's page at its `/yyyy/mm/dd/slug` URL, why its date is UTC, and how a slug changes and redirects, the date archives, the author pages, the RSS feed, the links between a post's three pages, which posts are public (published and due, with no status column and no sweep) and the one order every listing uses, `/page/N` continuing `/` (a path, not `?page=`, so `/` keeps its cache), a post's older and newer neighbours, which public pages are cached at all, and what each change revalidates. |
+| [docs/BLOG.md](docs/BLOG.md) | The public blog as built: the landing page (the banner, the preamble from the commons' `Front Page`, the latest posts, the contributor list and the dashboard panel a contributor edits it from), a post's page at its `/yyyy/mm/dd/slug` URL, why its date is UTC, and how a slug changes and redirects, the date archives, the author pages, the RSS feed, the links between a post's three pages, which posts are public (published and due, with no status column and no sweep) and the one order every listing uses, `/page/N` continuing `/` (a path, not `?page=`, so `/` keeps its cache), a post's older and newer neighbours, which public pages are cached at all, and what each change revalidates. |
 | [docs/DASHBOARD.md](docs/DASHBOARD.md) | /dashboard: the section cards, Recent docs, the Settings tiers, the Connections card, and where an author color is cached. |
 | [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Who may do what, as tables over roles × visibility × byline. Tags have their own section: minting vs. applying vs. curating. So do API tokens: who connects, as whom, the rules for bots, and the tools each token lists. |
 | [docs/EMAIL.md](docs/EMAIL.md) | Resend, the `sendMail()` seam, invites, what's deferred. |
@@ -301,10 +301,12 @@ before changing the behavior it describes.
   `loadDocStateAt`, `isDocVersion` or `docBodyOf`, serves a doc's `ydoc_update` rows, or takes
   an update id from a request), or that seeds a doc from another doc's text, read
   docs/FORKS.md, "Mistakes that fail no check".**
-- **The landing page's preamble is the body of whichever `Doc` is titled exactly `FRONT PAGE`**
-  (case-insensitive, first-created wins); its own title is never shown. Seed one with
-  `npx tsx scripts/seed-front-page.ts`. No `DocVisibility` check — the title alone is what
-  makes its body public here. docs/BLOG.md §1, "The preamble".
+- **The landing page's preamble is the body of the commons' wiki page `Front Page`, while it is
+  `PUBLIC`** — matched by its key, never a variant or a person's page; a doc titled
+  `FRONT PAGE` is just a doc. A write that can put a commons page there or take it off
+  revalidates `/` (`src/lib/front-page-revalidate.ts`), or it lingers in the ISR cache. Seed
+  one with `npx tsx scripts/seed-front-page.ts`. docs/WIKI.md "The front page", docs/BLOG.md
+  §1.
 
 ## Running
 
