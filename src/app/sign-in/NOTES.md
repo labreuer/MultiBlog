@@ -306,6 +306,15 @@ page mounting the header out of static rendering unless wrapped in Suspense,
 which is exactly the cost the next section explains the header exists to avoid.
 `usePathname` carries no such bailout.
 
+**A destination with a fragment finishes with a full page load.** The fragment a reader
+arrived with rides along (`withArrivalFragment`), and a client-side navigation to a destination
+that redirects, such as a doc's old slug, commits the URL the server answered with, which has
+none: a reader following an annotation card's permalink through sign-in would land on the doc
+without the card. The browser carries a fragment across a redirect it follows itself, so with
+one the form calls `window.location.assign`, and the page starts its session afresh from the
+cookie `signIn` set. Without one it keeps `router.push`, which `e2e/auth.setup.ts`'s no-reload
+header check relies on. `e2e/sign-in-callback.spec.ts` pins the card case.
+
 **A callbackUrl must name a page.** `signIn` finishes with `router.push`, which fetches
 an RSC payload — so a route handler as the destination is silently wrong. It shipped that
 way on `/files/[slug]/download`: the router got bytes, the browser downloaded them, and
