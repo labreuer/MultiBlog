@@ -1,46 +1,87 @@
 "use client";
 
 import { useRef, useState } from "react";
+import type { DocVisibility } from "@/generated/prisma/enums";
 import { createPostFromDoc } from "@/app/actions/posts";
 import { useDocScrubPosition, type ScrubPosition } from "@/components/DocScrubContext";
 import { useCloseOnOutsideClick } from "@/components/use-close-on-outside-click";
+import MoveIntoWikiDialog from "@/components/wiki/MoveIntoWikiDialog";
+import type { WikiNamespaces } from "@/components/wiki/wiki-dialog-parts";
 import ForkDialog from "./ForkDialog";
 import styles from "./DocActionsMenu.module.css";
 
+/** What the Fork and Move dialogs read of the doc and the viewer. */
+export type DocActionsContext = {
+  /** The doc's title as the view shows it, a wiki page's being its name. */
+  title: string;
+  visibility: DocVisibility;
+  isWikiPage: boolean;
+  namespaces: WikiNamespaces;
+};
+
 /**
- * docs/FORKS.md "The doc view: an Actions menu and the Fork dialog" — the
- * byline's menu on the doc view. Each item is shown only to whoever may do
- * it, decided by the page (src/app/doc/[slug]/page.tsx):
+ * docs/FORKS.md "The doc view: an Actions menu and the Fork dialog", and
+ * docs/WIKI.md "The Actions menu" — the byline's menu on the doc view. Each
+ * item is shown only to whoever may do it, decided by the page
+ * (src/app/doc/[slug]/doc-reading-view.tsx):
  *
  * - **Publish as blog post**, for an editor of a doc with no post (PLAN.md
- *   §15d's doc-page entry point into post creation);
+ *   §15d's doc-page entry point into post creation), never on a wiki page;
  * - **Fork…**, for any reader with canManageDocs, which includes readers who
- *   can't edit.
+ *   can't edit. One item with a Where: a doc, your namespace, or the commons;
+ * - **Move into the wiki…**, for an editor on the byline of a doc that isn't
+ *   a wiki page and has no post, a deleted one included.
  *
  * The server still decides each one; the menu only keeps from offering what
- * would be refused. A <details>, as the header's tool menus are. The dialog
- * sits outside it, since a modal inside a closed <details> isn't rendered.
+ * would be refused. A <details>, as the header's tool menus are. The dialogs
+ * sit outside it, since a modal inside a closed <details> isn't rendered.
  */
-export default function DocActionsMenu({ docId, publish, fork }: { docId: string; publish: boolean; fork: boolean }) {
+export default function DocActionsMenu({
+  docId,
+  publish,
+  fork,
+  moveIn,
+  context,
+}: {
+  docId: string;
+  publish: boolean;
+  fork: boolean;
+  moveIn: boolean;
+  context: DocActionsContext;
+}) {
   const menuRef = useRef<HTMLDetailsElement>(null);
   useCloseOnOutsideClick(menuRef);
   const forkRef = useRef<HTMLDialogElement>(null);
+  const moveRef = useRef<HTMLDialogElement>(null);
   const getScrubPosition = useDocScrubPosition();
   // Where the scrub bar was when the dialog last opened: asked once, at the
   // click, so the dialog names one version however the slider moves behind it.
   const [position, setPosition] = useState<ScrubPosition | null>(null);
+  // Which dialog is showing, so only that one asks the server for its default address.
+  const [showing, setShowing] = useState<"fork" | "move" | null>(null);
 
-  if (!publish && !fork) return null;
+  if (!publish && !fork && !moveIn) return null;
+
+  function closeMenu() {
+    if (menuRef.current) menuRef.current.open = false;
+  }
 
   function openFork() {
-    if (menuRef.current) menuRef.current.open = false;
+    closeMenu();
     setPosition(getScrubPosition());
+    setShowing("fork");
     forkRef.current?.showModal();
+  }
+
+  function openMove() {
+    closeMenu();
+    setShowing("move");
+    moveRef.current?.showModal();
   }
 
   return (
     <span className={styles.menuWrap}>
-      <details ref={menuRef} >
+      <details ref={menuRef}>
         <summary className={styles.summary}>
           Actions <span aria-hidden="true">▾</span>
         </summary>
@@ -57,9 +98,36 @@ export default function DocActionsMenu({ docId, publish, fork }: { docId: string
               Fork…
             </button>
           )}
+          {moveIn && (
+            <button type="button" className={styles.item} onClick={openMove}>
+              Move into the wiki…
+            </button>
+          )}
         </div>
       </details>
-      {fork && <ForkDialog dialogRef={forkRef} parentId={docId} position={position} />}
+      {fork && (
+        <ForkDialog
+          dialogRef={forkRef}
+          open={showing === "fork"}
+          onClose={() => setShowing(null)}
+          parentId={docId}
+          position={position}
+          title={context.title}
+          isWikiPage={context.isWikiPage}
+          namespaces={context.namespaces}
+        />
+      )}
+      {moveIn && (
+        <MoveIntoWikiDialog
+          dialogRef={moveRef}
+          open={showing === "move"}
+          onClose={() => setShowing(null)}
+          docId={docId}
+          title={context.title}
+          visibility={context.visibility}
+          namespaces={context.namespaces}
+        />
+      )}
     </span>
   );
 }

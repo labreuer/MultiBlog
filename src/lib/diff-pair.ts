@@ -3,6 +3,7 @@ import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canUserReadDoc, canUserSeeDocHistory, canUserSeeDocVersion } from "@/lib/doc-authz";
 import { diffBlocks } from "@/lib/doc-body";
 import { docTitleOrFallback } from "@/lib/doc-title";
+import { docPagePath } from "@/lib/wiki-address";
 import { isDocVersion, loadDocStateAt, loadDocStateNow } from "@/lib/doc-state";
 import { parseDiffSide, pastForkPoint, sideOrder, type DiffSide, type PairLineage } from "@/lib/diff-side";
 import type { DiffBlock } from "@/lib/doc-diff";
@@ -21,7 +22,11 @@ const DOC_SELECT = {
   slug: true,
   title: true,
   visibility: true,
+  // DOC_PATH_SELECT's: a side's link, at a wiki page's address
+  // (docs/WIKI.md "Diffs"), and whether its heading is its name.
   wikiName: true,
+  wikiVariant: true,
+  wikiOwner: { select: { slug: true } },
   deletedByUserId: true,
   // Whether one side was forked from the other, for "Which side is later".
   forkedFromDocId: true,
@@ -48,7 +53,11 @@ function pairLineage(left: PairDoc, right: PairDoc): Omit<PairLineage, "parentNo
   return null;
 }
 
-export type GatedSide = { side: DiffSide; doc: { id: string; slug: string; title: string }; history: boolean };
+export type GatedSide = {
+  side: DiffSide;
+  doc: { id: string; slug: string; title: string; wikiName: string | null; wikiVariant: string; wikiOwner: { slug: string } | null };
+  history: boolean;
+};
 export type GatedPair = { left: GatedSide; right: GatedSide; lineage: Omit<PairLineage, "parentNow"> | null };
 
 /**
@@ -173,11 +182,14 @@ export async function readDiffPair({ left, right, lineage }: GatedPair): Promise
   // version stands at the update it was just read at.
   const parentLoaded = lineage?.parentDocId === left.doc.id ? leftLoaded : rightLoaded;
   const withNow = lineage && { ...lineage, parentNow: parentLoaded.ok ? parentLoaded.nowVersion : null };
+  // A wiki page's side is headed by its name as it is now, which its row's
+  // title mirrors, at whatever version the side is (docs/WIKI.md "Diffs").
   const sideRead = ({ side, doc, history }: GatedSide, loaded: LoadedSide): DiffSideRead => ({
     docId: doc.id,
     updateId: side.updateId?.toString() ?? null,
-    slug: doc.slug,
-    title: loaded.ok ? loaded.title : docTitleOrFallback(doc.title),
+    path: docPagePath(doc),
+    title: loaded.ok && doc.wikiName === null ? loaded.title : docTitleOrFallback(doc.title),
+    headedByName: doc.wikiName !== null,
     history,
     at: loaded.ok ? (loaded.at?.toISOString() ?? null) : null,
     nowVersion: history && loaded.ok ? (loaded.nowVersion?.toString() ?? null) : null,

@@ -1,42 +1,43 @@
-// Creates the doc the landing page's preamble is sourced from (PLAN.md §17c)
-// if one doesn't already exist. Never clears anything — deliberately not
-// folded into seed-sample-data.ts as the primary path, since that script
-// empties the content tables wholesale and isn't something to point at a
-// database with real content in it.
+// Creates the page the landing page's preamble is sourced from — the commons'
+// `Front Page`, PUBLIC (docs/WIKI.md "The front page", docs/BLOG.md §1) — if
+// there isn't one. Never clears anything — deliberately not folded into
+// seed-sample-data.ts as the primary path, since that script empties the
+// content tables wholesale and isn't something to point at a database with
+// real content in it.
 //
 // Usage:
 //   npx tsx scripts/seed-front-page.ts
 //
-// No-op (prints a message and exits 0) if a doc titled FRONT_PAGE_DOC_TITLE
-// already exists — src/lib/front-page.ts's own first-created-wins lookup, so
-// running this twice is safe. Attributed to the earliest-created ADMIN user,
-// since this is site content with no natural single author; the script
-// refuses to run if there isn't one yet (create one first — sign up and
-// promote via /users, or scripts/test-user.ts for a throwaway).
+// No-op (prints a message and exits 0) if a live page is already at the
+// commons' `Front Page` address, whatever its visibility, so running this
+// twice is safe; one that isn't PUBLIC is said so, since it shows nothing.
+// Made by the earliest-created ADMIN, since this is site content with no
+// natural single author; the script refuses to run if there isn't one yet
+// (create one first — sign up and promote via /users, or
+// scripts/test-user.ts for a throwaway).
 //
-// Mechanics copied from seed-sample-data.ts's createDoc rather than
-// reinvented: the ydoc row is created eagerly (§12b), and the title is
-// seeded into the title fragment as well as the Doc.title column — the
-// fragment is canonical (§3d), and server/doc-cache.ts would otherwise
-// overwrite the column with an empty title on the collab server's first
-// flush.
+// The page is made as createWikiPage (src/lib/wiki-create.ts) makes one —
+// the same name and namespace checks, the address claimed under its lock in
+// the create's transaction — but with its sample body in place of the empty
+// one that function starts a page with, through createDocWithContent's
+// `wiki` option, which is what createWikiPage itself calls. The body is
+// written straight into the new doc's ydoc, which is safe only because
+// nobody can have the page open yet.
 
 import "dotenv/config";
-import * as Y from "yjs";
-import { TiptapTransformer } from "@hocuspocus/transformer";
 import type { JSONContent } from "@tiptap/core";
-import { prisma } from "../src/lib/prisma";
-import { uniqueDocSlug } from "../src/lib/doc-slug";
-import { contentExtensions, titleExtensions } from "../src/lib/tiptap-schema";
-import { docContentFromYdoc } from "../src/lib/doc-content";
-import { FRONT_PAGE_DOC_TITLE } from "../src/lib/front-page";
-import { ydocIdForDoc } from "../src/lib/ydoc-names";
-import { ydocStore, encodeYdocState } from "../server/ydoc-store";
-import type { Prisma } from "../src/generated/prisma/client";
+import { prisma, prismaIncludingDeleted } from "../src/lib/prisma";
+import { createDocWithContent } from "../src/lib/doc-create";
+import { allowedVisibilities } from "../src/lib/doc-visibility";
+import { FRONT_PAGE_NAME } from "../src/lib/front-page";
+import { foldWikiName, WikiAddressTaken } from "../src/lib/wiki-claim";
+import { claimableNamespace, requireWikiName } from "../src/lib/wiki-create";
+import { wikiPagePath } from "../src/lib/wiki-address";
+import type { Actor } from "../src/lib/actor";
 
 const SAMPLE_TEXT = [
   "Welcome to MultiBlog — a multi-author blog with real-time collaborative editing, revision history, and quote-anchored comments.",
-  "This paragraph is the site's preamble, sourced from a doc titled “FRONT PAGE”. Edit that doc (from /docs, or by opening it directly) to change what appears here — the doc's own title is never shown, only its body.",
+  "This paragraph is the site's preamble, sourced from the wiki page Front Page in the commons, while that page is PUBLIC. Edit the page (at /wiki/commons/Front_Page) to change what appears here — its name is never shown, only its text.",
 ].join("\n\n");
 
 function docFromText(text: string): JSONContent {
@@ -50,54 +51,62 @@ function docFromText(text: string): JSONContent {
 }
 
 async function main() {
-  const existing = await prisma.doc.findFirst({
-    where: { title: { equals: FRONT_PAGE_DOC_TITLE, mode: "insensitive" } },
+  const name = requireWikiName(FRONT_PAGE_NAME);
+  const path = wikiPagePath({ owner: { kind: "commons" }, name, variant: "" });
+
+  // The name matched by its key, as getFrontPagePreamble matches it: the
+  // fold is the database's (docs/WIKI.md "Case").
+  const { key } = await foldWikiName(prisma, name);
+  const existing = await prismaIncludingDeleted.doc.findFirst({
+    where: { wikiOwnerUserId: null, wikiName: { not: null }, wikiNameKey: key, wikiVariant: "", deletedByUserId: null },
+    select: { id: true, visibility: true },
   });
   if (existing) {
-    console.log(`A doc titled "${FRONT_PAGE_DOC_TITLE}" already exists (${existing.id}) — nothing to do.`);
+    const shown = existing.visibility === "PUBLIC" ? "" : ` It is ${existing.visibility}, so the landing page shows no preamble until it is made PUBLIC.`;
+    console.log(`The commons' ${FRONT_PAGE_NAME} already exists (${existing.id}, ${path}) — nothing to do.${shown}`);
     return;
   }
 
-  const author = await prisma.user.findFirst({
-    where: { role: "ADMIN" },
+  const admin = await prisma.user.findFirst({
+    where: { role: "ADMIN", worksForUserId: null },
     orderBy: { createdAt: "asc" },
+    select: { id: true, email: true, role: true },
   });
-  if (!author) {
-    throw new Error("No ADMIN user exists yet — create one before seeding the front-page doc.");
+  if (!admin) {
+    throw new Error("No ADMIN user exists yet — create one before seeding the front page.");
+  }
+  const actor: Actor = { userId: admin.id, role: admin.role };
+
+  // createWikiPage's checks, asked as it asks them: the commons is an
+  // ADMIN's or EDITOR's, and a commons page may be PUBLIC.
+  const { ownerUserId } = await claimableNamespace(actor, "commons");
+  const visibility = "PUBLIC";
+  if (!allowedVisibilities({ visibility, wikiName: name, wikiOwnerUserId: ownerUserId }, actor.userId).includes(visibility)) {
+    throw new Error(`A commons page can't be ${visibility}.`);
   }
 
-  const doc = await prisma.doc.create({
-    data: {
-      slug: await uniqueDocSlug(FRONT_PAGE_DOC_TITLE),
-      title: FRONT_PAGE_DOC_TITLE,
-      visibility: "PRIVATE",
-      createdByUserId: author.id,
-      authors: { create: { userId: author.id, bylineOrder: 0 } },
-    },
-  });
-
-  const seed = new Y.Doc();
-  const seededBody = TiptapTransformer.toYdoc(docFromText(SAMPLE_TEXT), "default", contentExtensions);
-  Y.applyUpdate(seed, Y.encodeStateAsUpdate(seededBody));
-  seededBody.destroy();
-  const seededTitle = TiptapTransformer.toYdoc(
-    { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: FRONT_PAGE_DOC_TITLE }] }] },
-    "title",
-    titleExtensions,
-  );
-  Y.applyUpdate(seed, Y.encodeStateAsUpdate(seededTitle));
-  seededTitle.destroy();
-  const { ydoc, stateVector } = encodeYdocState(seed);
-
-  const cached = docContentFromYdoc(seed);
-  seed.destroy();
-  await ydocStore.createIfAbsent(ydocIdForDoc(doc.id), ydoc, stateVector);
-  await prisma.doc.update({
-    where: { id: doc.id },
-    data: { proseJson: cached.proseJson as Prisma.InputJsonValue, title: cached.title },
-  });
-
-  console.log(`Created "${FRONT_PAGE_DOC_TITLE}" doc ${doc.id} (/doc/${doc.slug}), authored by ${author.email}.`);
+  try {
+    const doc = await createDocWithContent(actor.userId, name, docFromText(SAMPLE_TEXT), {
+      author: actor.userId,
+      visibility,
+      wiki: {
+        ownerUserId,
+        name,
+        choice: { variant: "" },
+        actorRole: actor.role,
+        verify: async (tx) => {
+          await claimableNamespace(actor, "commons", tx);
+        },
+      },
+    });
+    console.log(`Created the commons' ${FRONT_PAGE_NAME}, PUBLIC: doc ${doc.id} (${path}), by ${admin.email}.`);
+  } catch (err) {
+    if (err instanceof WikiAddressTaken) {
+      console.log(`The commons' ${FRONT_PAGE_NAME} was made meanwhile (${path}) — nothing to do.`);
+      return;
+    }
+    throw err;
+  }
 }
 
 main()

@@ -105,3 +105,13 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* The Fork dialog's and "Move into the wiki…"'s Where: one radio per line. */
+.fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}

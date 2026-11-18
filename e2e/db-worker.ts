@@ -80,6 +80,8 @@ import { setDocByline, setDocDeleted, setDocSlug, setDocVisibility } from "@/lib
 import { wikiPathOfDoc } from "@/lib/wiki-address";
 import { foldWikiName, type FoldedWikiName } from "@/lib/wiki-claim";
 import { createWikiPage } from "@/lib/wiki-create";
+import { forkIntoWiki } from "@/lib/wiki-fork";
+import { moveDocIntoWiki } from "@/lib/wiki-move";
 import { deleteWikiAddressRow, renameWikiPage, revertWikiAddress } from "@/lib/wiki-rename";
 import { getFrontPagePreamble } from "@/lib/front-page";
 import { createBot, moveBot, requireBotRole, requireInvitable, restoreAccount, setBotAgent } from "@/lib/bots";
@@ -429,7 +431,8 @@ export async function unpublishTestPost(postId: string): Promise<void> {
 }
 
 export async function deleteTestPost(idOrSlug: string): Promise<void> {
-  const post = await prisma.post.findFirst({
+  // Deleted rows included: a post a spec soft-deleted still holds its doc.
+  const post = await prismaIncludingDeleted.post.findFirst({
     where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
     include: { authors: { include: { user: true } } },
   });
@@ -3792,8 +3795,6 @@ export async function createTestWikiPage(opts: {
   bodyText?: string;
   /** A body as TipTap JSON, in place of `bodyText`. */
   body?: JSONContent;
-  /** ISO, to backdate the row, for a rule that picks the first-created. */
-  createdAt?: string;
 }): Promise<TestWikiPage> {
   const visibility = opts.visibility ?? (opts.namespace === "person" ? "PRIVATE" : "SHARED");
   const name = opts.name ?? uniqueTitle("wiki");
@@ -3810,7 +3811,6 @@ export async function createTestWikiPage(opts: {
       wikiVariant: variant,
       wikiOwnerUserId: opts.namespace === "person" ? owner.id : null,
       visibility,
-      ...(opts.createdAt ? { createdAt: new Date(opts.createdAt) } : {}),
     },
     select: { title: true },
   });
@@ -3971,20 +3971,77 @@ export async function forkDocAs(opts: {
   parentId: string;
   revision?: string | null;
   visibility?: string;
-}): Promise<{ ok: true; id: string; slug: string; path: string } | { ok: false; code: string; message: string }> {
+  /**
+   * docs/WIKI.md "Forking into the wiki": forkIntoWiki in place of forkDoc,
+   * into a namespace with a name, and a variant (null or absent for the
+   * server's default).
+   */
+  wiki?: { namespace: "person" | "commons"; name: string; variant?: string | null };
+}): Promise<{ ok: true; id: string; slug: string; path: string } | { ok: false; code: string; message: string; path?: string }> {
+  assertSafe(opts.actorEmail);
+  const user = await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email: opts.actorEmail }, select: { id: true, role: true } });
+  const actor = { userId: user.id, role: opts.sessionRole ?? user.role };
+  try {
+    const fork = opts.wiki
+      ? await forkIntoWiki(actor, {
+          parentId: opts.parentId,
+          revision: opts.revision ?? null,
+          namespace: opts.wiki.namespace,
+          name: opts.wiki.name,
+          variant: opts.wiki.variant ?? null,
+          visibility: (opts.visibility ?? (opts.wiki.namespace === "commons" ? "SHARED" : "PRIVATE")) as DocVisibility,
+        })
+      : await forkDoc(actor, { parentId: opts.parentId, revision: opts.revision ?? null, visibility: (opts.visibility ?? "PRIVATE") as DocVisibility });
+    const row = await prisma.doc.findUniqueOrThrow({ where: { id: fork.id }, select: { slug: true } });
+    return { ok: true, id: fork.id, path: fork.path, slug: row.slug };
+  } catch (err) {
+    const e = err as { code?: string; message?: string; details?: { path?: unknown } };
+    const path = typeof e.details?.path === "string" ? e.details.path : undefined;
+    return { ok: false, code: e.code ?? "error", message: e.message ?? String(err), ...(path ? { path } : {}) };
+  }
+}
+
+/** A post soft-deleted, as /posts' Delete leaves it: still counted against moving its doc into the wiki. */
+export async function softDeleteTestPost(postId: string, byEmail: string): Promise<void> {
+  assertSafe(byEmail);
+  const by = await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email: byEmail }, select: { id: true } });
+  await prismaIncludingDeleted.post.update({ where: { id: postId }, data: { deletedByUserId: by.id, deletedAt: new Date() } });
+}
+
+/** docs/WIKI.md "Moving a doc into the wiki": moveDocIntoWiki as `actorEmail`, with the session role given (or the account's). */
+export async function moveDocAs(opts: {
+  actorEmail: string;
+  sessionRole?: Role;
+  docId: string;
+  namespace: "person" | "commons";
+  name: string;
+  variant?: string | null;
+  visibility?: DocVisibility | null;
+}): Promise<{ ok: true; path: string } | { ok: false; code: string; message: string; path?: string }> {
   assertSafe(opts.actorEmail);
   const user = await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email: opts.actorEmail }, select: { id: true, role: true } });
   try {
-    const fork = await forkDoc(
+    const moved = await moveDocIntoWiki(
       { userId: user.id, role: opts.sessionRole ?? user.role },
-      { parentId: opts.parentId, revision: opts.revision ?? null, visibility: (opts.visibility ?? "PRIVATE") as DocVisibility },
+      { docId: opts.docId, namespace: opts.namespace, name: opts.name, variant: opts.variant ?? null, visibility: opts.visibility ?? null },
     );
-    const row = await prisma.doc.findUniqueOrThrow({ where: { id: fork.id }, select: { slug: true } });
-    return { ok: true, ...fork, slug: row.slug };
+    return { ok: true, path: moved.path };
   } catch (err) {
-    const e = err as { code?: string; message?: string };
-    return { ok: false, code: e.code ?? "error", message: e.message ?? String(err) };
+    const e = err as { code?: string; message?: string; details?: { path?: unknown } };
+    const path = typeof e.details?.path === "string" ? e.details.path : undefined;
+    return { ok: false, code: e.code ?? "error", message: e.message ?? String(err), ...(path ? { path } : {}) };
   }
+}
+
+/**
+ * Records `docId` as a fork of `parentId` at the parent's newest update, the
+ * two columns forkDoc writes, without seeding the fork from the parent: for
+ * a family line, where only the relation is read.
+ */
+export async function setTestDocForkedFrom(docId: string, parentId: string): Promise<void> {
+  const at = await ydocStore.maxUpdateId(ydocIdForDoc(parentId));
+  if (at === null) throw new Error(`Test doc ${parentId} has no update history to fork at.`);
+  await prismaIncludingDeleted.doc.update({ where: { id: docId }, data: { forkedFromDocId: parentId, forkedFromUpdateId: at } });
 }
 
 /** What a fork's row records, and the chip styles its ydoc and its row hold. Its marks are getDocMarkFacts'. */
@@ -4299,6 +4356,8 @@ export async function addTestDocSlugHistory(docId: string, slug: string): Promis
 }
 
 const handlers = {
+  moveDocAs,
+  softDeleteTestPost,
   createWikiPageAs,
   findTestWikiPageId,
   renameTestUserSlug,
@@ -4459,6 +4518,7 @@ const handlers = {
   forkDocAs,
   getTestForkFacts,
   deleteTestDocYdoc,
+  setTestDocForkedFrom,
 };
 
 export type DbHandlers = typeof handlers;

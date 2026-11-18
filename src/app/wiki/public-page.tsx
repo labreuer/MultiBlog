@@ -2,6 +2,7 @@ import Link from "next/link";
 import * as Y from "yjs";
 import type { JSONContent } from "@tiptap/core";
 import { renderToReactElement } from "@tiptap/static-renderer";
+import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { contentExtensions } from "@/lib/tiptap-schema";
 import { readYdocContent } from "@/lib/ydoc-render";
@@ -9,6 +10,8 @@ import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { docJsonForPostSide } from "@/lib/post-content";
 import { chipStylesOf, parseChipStyles } from "@/lib/entity-chips/settings";
 import { docTitleOrFallback } from "@/lib/doc-title";
+import { loadDocFamily } from "@/lib/doc-family";
+import DocFamily from "@/components/DocFamily";
 import { wikiNamespacePath, type WikiOwner } from "@/lib/wiki-address";
 import proseStyles from "@/styles/prose.module.css";
 import styles from "./wiki.module.css";
@@ -18,7 +21,8 @@ import styles from "./wiki.module.css";
 // and whose page it is, and nothing that reads past the text. No DocView, no
 // providers, no annotations, no tags, no live connection and no scrub bar,
 // whose endpoints keep their own gates; it reads no session below its
-// route's gate and mounts nothing that would. No byline, by decision: a
+// route's gate and mounts nothing that would: the route hands it the viewer
+// it read, for the family line's queries alone. No byline, by decision: a
 // person's page names its owner, and a commons page credits nobody.
 
 /** What the render reads of a page. */
@@ -27,6 +31,11 @@ export type PublicPageDoc = {
   title: string;
   proseJson: unknown;
   chipStyles: unknown;
+  /** The family line's (docs/WIKI.md "The family line"). */
+  wikiName: string | null;
+  forkedFromDocId: string | null;
+  forkedFromUpdateId: bigint | null;
+  createdAt: Date;
 };
 
 /**
@@ -55,8 +64,20 @@ async function publicBody(doc: PublicPageDoc): Promise<JSONContent | null> {
   }
 }
 
-export default async function PublicWikiPage({ doc, owner }: { doc: PublicPageDoc; owner: WikiOwner }) {
-  const body = await publicBody(doc);
+/**
+ * `viewer` is the route's, null signed out: a reader without canViewDocs,
+ * whose family line names PUBLIC pages alone and links no diff.
+ */
+export default async function PublicWikiPage({
+  doc,
+  owner,
+  viewer,
+}: {
+  doc: PublicPageDoc;
+  owner: WikiOwner;
+  viewer: { id: string; role: Role } | null;
+}) {
+  const [body, family] = await Promise.all([publicBody(doc), loadDocFamily(viewer, doc)]);
   return (
     <main className={styles.main} data-public-render="">
       <h1>{docTitleOrFallback(doc.title)}</h1>
@@ -73,6 +94,7 @@ export default async function PublicWikiPage({ doc, owner }: { doc: PublicPageDo
           </>
         )}
       </p>
+      {family && <DocFamily family={family} surface="public" />}
       <div className={proseStyles.prose}>
         {body ? renderToReactElement({ content: body, extensions: contentExtensions }) : <p className={styles.empty}>This page is empty.</p>}
       </div>

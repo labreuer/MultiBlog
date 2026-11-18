@@ -3,13 +3,18 @@
 // them. Until pages can be created in the app, a page is a test doc given an
 // address by writing its columns (createTestWikiPage), as the claims will.
 import type { APIRequestContext, Page } from "@playwright/test";
-import { test, expect, visibleText, waitForDocCollabReady } from "./fixtures";
+import { test, expect, docActionItems, docActionsMenu, freshGoto, openDocActions, visibleText, waitForDocCollabReady } from "./fixtures";
 import {
   ADMIN_EMAIL,
   addTestDocAuthor,
   addTestDocSlugHistory,
   createTestAnnotation,
   createWikiPageAs,
+  createTestPost,
+  deleteTestPost,
+  getTestUserSlug,
+  moveDocAs,
+  softDeleteTestPost,
   findTestWikiPageId,
   getUserIdByEmail,
   renameTestUserSlug,
@@ -266,26 +271,6 @@ test.describe("doc rules a wiki page doesn't inherit (docs/WIKI.md)", () => {
       await expect(page).not.toHaveURL(/\/post\/[^/]+\/edit/);
     } finally {
       await page.goto("about:blank").catch(() => {});
-      await deleteTestDoc(wiki.id);
-    }
-  });
-
-  test("a wiki page named FRONT PAGE is never the landing page's preamble", async () => {
-    // Backdated, so it would win as the first-created FRONT PAGE doc if wiki
-    // pages weren't left out. Its name is its title, by the mirror.
-    const marker = `E2E wiki front page ${Date.now()}`;
-    const wiki = await createTestWikiPage({
-      authorEmail: ADMIN_EMAIL,
-      namespace: "commons",
-      name: "FRONT PAGE",
-      variant: `e2e-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-      bodyText: marker,
-      createdAt: "2000-01-01T00:00:00.000Z",
-    });
-    try {
-      expect((await getTestWikiFacts(wiki.id)).title).toBe("FRONT PAGE");
-      expect((await frontPagePreambleText()) ?? "").not.toContain(marker);
-    } finally {
       await deleteTestDoc(wiki.id);
     }
   });
@@ -1433,6 +1418,261 @@ test.describe("deleting a page (docs/WIKI.md \"Deleting a page\")", () => {
   });
 });
 
+test.describe("into the wiki (docs/WIKI.md \"Forking into the wiki\", \"Moving a doc into the wiki\", \"The Actions menu\")", () => {
+  /** A stamp for names, so copies of a test running at once don't collide on the commons' addresses. */
+  const stamp = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  test("a fork into the wiki: PUBLIC allowed, the variant a PUBLIC parent lends, then 2, a typed taken one refused, an unreadable parent not found", async ({
+    secondUser,
+  }) => {
+    const { user: owner } = await secondUser({ role: "AUTHOR" });
+    const name = `E2E Lent (variant) ${stamp()}`;
+    const parent = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", name, visibility: "PUBLIC", bodyText: "Roots." });
+    const hidden = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "PRIVATE", bodyText: "Mine." });
+    const made: string[] = [];
+    const fork = async (opts: Partial<Parameters<typeof forkDocAs>[0]> & { wiki: NonNullable<Parameters<typeof forkDocAs>[0]["wiki"]> }) => {
+      const result = await forkDocAs({ actorEmail: ADMIN_EMAIL, parentId: parent.id, ...opts });
+      if (result.ok) made.push(result.id);
+      return result;
+    };
+    try {
+      await appendTestDocParagraph({ docId: parent.id, text: "More roots." });
+      await appendTestDocParagraph({ docId: hidden.id, text: "Still mine." });
+      const segment = wikiNameSegment(name);
+
+      // The page itself first, PUBLIC allowed, onto the forker's byline, recorded as a fork.
+      const first = await fork({ visibility: "PUBLIC", wiki: { namespace: "commons", name } });
+      expect(first).toMatchObject({ ok: true, path: `/wiki/commons/${segment}` });
+      if (!first.ok) return;
+      expect(await getTestWikiFacts(first.id)).toMatchObject({ title: name, wikiName: name, wikiVariant: "", visibility: "PUBLIC", bylineEmails: [ADMIN_EMAIL] });
+      expect((await getTestForkFacts(first.id)).forkedFromDocId).toBe(parent.id);
+      // Taken: the PUBLIC parent lends its owner's slug, then 2.
+      const ownerSlug = await getTestUserSlug(owner.email);
+      expect(await fork({ wiki: { namespace: "commons", name } })).toMatchObject({ ok: true, path: `/wiki/commons/${segment}~${ownerSlug}` });
+      expect(await fork({ wiki: { namespace: "commons", name } })).toMatchObject({ ok: true, path: `/wiki/commons/${segment}~2` });
+      // A typed variant is taken as typed, and refused naming the address.
+      expect(await fork({ wiki: { namespace: "commons", name, variant: "2" } })).toMatchObject({
+        ok: false,
+        code: "conflict",
+        path: `/wiki/commons/${segment}~2`,
+      });
+      // The commons' pages are never PRIVATE; a person's may be.
+      expect(await fork({ visibility: "PRIVATE", wiki: { namespace: "commons", name: `${name} b` } })).toMatchObject({ ok: false, code: "invalid" });
+      const own = await fork({ wiki: { namespace: "person", name } });
+      expect(own).toMatchObject({ ok: true, path: `/wiki/@e2e-admin/${segment}` });
+      if (own.ok) expect(await getTestWikiFacts(own.id)).toMatchObject({ visibility: "PRIVATE" });
+      // An unreadable wiki parent is not found, as its address answers.
+      expect(await fork({ parentId: hidden.id, wiki: { namespace: "commons", name: `${name} c` } })).toMatchObject({ ok: false, code: "not_found" });
+      // An AUTHOR may fork into their own namespace and not the commons.
+      expect(
+        await forkDocAs({ actorEmail: owner.email, parentId: parent.id, wiki: { namespace: "commons", name: `${name} d` } }),
+      ).toMatchObject({ ok: false, code: "forbidden" });
+      const theirs = await forkDocAs({ actorEmail: owner.email, parentId: parent.id, wiki: { namespace: "person", name } });
+      // Their own namespace already holds the parent at that name, and lends nothing to itself.
+      expect(theirs).toMatchObject({ ok: true, path: `/wiki/@${ownerSlug}/${segment}~2` });
+      if (theirs.ok) made.push(theirs.id);
+      // A session that outlives the owner's demotion is refused, by the fresh read of their row.
+      await setTestUserRole(owner.email, "COMMENTER");
+      expect(
+        await forkDocAs({ actorEmail: owner.email, sessionRole: "AUTHOR", parentId: parent.id, wiki: { namespace: "person", name: `${name} e` } }),
+      ).toMatchObject({ ok: false });
+    } finally {
+      for (const id of made) await deleteTestDoc(id);
+      await deleteTestDoc(parent.id);
+      await deleteTestDoc(hidden.id);
+    }
+  });
+
+  test("a doc forks into the wiki under its title, and two claims of one name in other capitals at once take the first two free addresses", async () => {
+    const name = `E2E Apple ${stamp()}`;
+    const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: name, visibility: "SHARED", bodyText: "Fruit." });
+    const made: string[] = [];
+    try {
+      await appendTestDocParagraph({ docId: doc.id, text: "More fruit." });
+      const [a, b] = await Promise.all([
+        forkDocAs({ actorEmail: ADMIN_EMAIL, parentId: doc.id, wiki: { namespace: "commons", name } }),
+        forkDocAs({ actorEmail: ADMIN_EMAIL, parentId: doc.id, wiki: { namespace: "commons", name: name.toLowerCase() } }),
+      ]);
+      for (const r of [a, b]) {
+        expect(r).toMatchObject({ ok: true });
+        if (r.ok) made.push(r.id);
+      }
+      const variants = await Promise.all(made.map(async (id) => (await getTestWikiFacts(id)).wikiVariant));
+      expect(variants.sort()).toEqual(["", "2"]);
+      // A SHARED parent that isn't a wiki page lends nothing.
+      const third = await forkDocAs({ actorEmail: ADMIN_EMAIL, parentId: doc.id, wiki: { namespace: "commons", name } });
+      expect(third).toMatchObject({ ok: true, path: `/wiki/commons/${wikiNameSegment(name)}~3` });
+      if (third.ok) made.push(third.id);
+    } finally {
+      for (const id of made) await deleteTestDoc(id);
+      await deleteTestDoc(doc.id);
+    }
+  });
+
+  test("a fork to its parent's own name racing the parent's rename ends neither as a deadlock", async () => {
+    const name = `E2E Racing ${stamp()}`;
+    const parent = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", name, bodyText: "Off." });
+    const made: string[] = [];
+    try {
+      await appendTestDocParagraph({ docId: parent.id, text: "And away." });
+      for (let round = 0; round < 3; round++) {
+        const [forked, renamed] = await Promise.all([
+          forkDocAs({ actorEmail: ADMIN_EMAIL, parentId: parent.id, wiki: { namespace: "commons", name } }),
+          renameWikiPageAs({ actorEmail: ADMIN_EMAIL, docId: parent.id, change: { name: `${name} ${round}` } }),
+        ]);
+        expect(forked).toMatchObject({ ok: true });
+        expect(renamed).toMatchObject({ ok: true });
+        if (forked.ok) made.push(forked.id);
+      }
+    } finally {
+      for (const id of made) await deleteTestDoc(id);
+      await deleteTestDoc(parent.id);
+    }
+  });
+
+  test("a move keeps the doc, its notes and its /doc/ url, which now redirects; a PRIVATE doc is made SHARED or PUBLIC by its move into the commons", async ({
+    page,
+  }) => {
+    const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "PRIVATE", bodyText: "Kept in place." });
+    await createTestAnnotation({ docId: doc.id, authorEmail: ADMIN_EMAIL, bodyText: "A note that stays." });
+    const name = `E2E Moved (in) ${stamp()}`;
+    try {
+      // The commons is never PRIVATE: a PRIVATE doc's move there asks.
+      expect(await moveDocAs({ actorEmail: ADMIN_EMAIL, docId: doc.id, namespace: "commons", name })).toMatchObject({ ok: false, code: "invalid" });
+      const moved = await moveDocAs({ actorEmail: ADMIN_EMAIL, docId: doc.id, namespace: "commons", name, visibility: "PUBLIC" });
+      expect(moved).toEqual({ ok: true, path: `/wiki/commons/${wikiNameSegment(name)}` });
+      expect(await getTestWikiFacts(doc.id, "moved")).toMatchObject({ title: name, wikiName: name, visibility: "PUBLIC", slug: doc.slug, searchMatches: true });
+      expect(await answer(page.request, `/doc/${doc.slug}`)).toEqual([307, `/wiki/commons/${wikiNameSegment(name)}`]);
+      await page.goto(`/doc/${doc.slug}`);
+      await page.waitForURL((url) => url.pathname === `/wiki/commons/${wikiNameSegment(name)}`);
+      // The note is the doc's still: its card is on the page (collapsed or not).
+      await expect(page.getByText("A note that stays.").first()).toBeAttached();
+      // Moving a wiki page in again is a rename, not a move.
+      expect(await moveDocAs({ actorEmail: ADMIN_EMAIL, docId: doc.id, namespace: "commons", name: `${name} again` })).toMatchObject({
+        ok: false,
+        code: "invalid",
+      });
+    } finally {
+      await deleteTestDoc(doc.id);
+    }
+  });
+
+  test("who may move a doc in: an editor on its byline, a commons move an ADMIN's or EDITOR's on it, and never a doc with any post, a deleted one included", async ({
+    secondUser,
+  }) => {
+    const { user: editor } = await secondUser({ role: "EDITOR" });
+    const { user: author } = await secondUser({ role: "AUTHOR" });
+    const shared = await createTestDoc({ authorEmail: author.email, visibility: "SHARED", bodyText: "Theirs." });
+    const withPost = await createTestPost({ authorEmail: ADMIN_EMAIL });
+    const name = `E2E Who moves ${stamp()}`;
+    try {
+      // An EDITOR may edit a SHARED doc, and still not move it while off its byline.
+      expect(await moveDocAs({ actorEmail: editor.email, docId: shared.id, namespace: "commons", name })).toMatchObject({ ok: false, code: "forbidden" });
+      // Nor into their own namespace, which would put the author's words under the editor's name.
+      expect(await moveDocAs({ actorEmail: editor.email, docId: shared.id, namespace: "person", name })).toMatchObject({ ok: false, code: "forbidden" });
+      // The author may not choose the commons.
+      expect(await moveDocAs({ actorEmail: author.email, docId: shared.id, namespace: "commons", name })).toMatchObject({ ok: false, code: "forbidden" });
+      // Once the author adds the EDITOR to the byline, the EDITOR may.
+      await addTestDocAuthor(shared.id, editor.email);
+      const moved = await moveDocAs({ actorEmail: editor.email, docId: shared.id, namespace: "commons", name });
+      expect(moved).toMatchObject({ ok: true });
+      expect(await getTestWikiFacts(shared.id)).toMatchObject({ wikiName: name, visibility: "SHARED" });
+
+      // A doc with a post, a deleted one included, can't be moved, only forked.
+      expect(await moveDocAs({ actorEmail: ADMIN_EMAIL, docId: withPost.docId, namespace: "person", name })).toMatchObject({ ok: false, code: "invalid" });
+      await softDeleteTestPost(withPost.id, ADMIN_EMAIL);
+      expect(await countPostsForDoc(withPost.docId)).toBe(1);
+      expect(await moveDocAs({ actorEmail: ADMIN_EMAIL, docId: withPost.docId, namespace: "person", name })).toMatchObject({ ok: false, code: "invalid" });
+    } finally {
+      await deleteTestDoc(shared.id);
+      await deleteTestPost(withPost.id);
+    }
+  });
+
+  test("the menu offers Move into the wiki… only on a doc with no post, and the Fork dialog's Where starts at a doc on a doc and your pages on a wiki page", async ({
+    page,
+  }) => {
+    const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, visibility: "SHARED", bodyText: "Plain." });
+    const wiki = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", bodyText: "Paged." });
+    const withPost = await createTestPost({ authorEmail: ADMIN_EMAIL });
+    try {
+      await page.goto(`/doc/${doc.slug}`);
+      expect(await docActionItems(page)).toEqual(["Publish as blog post", "Fork…", "Move into the wiki…"]);
+      await docActionsMenu(page).getByRole("button", { name: "Fork…" }).click();
+      let dialog = page.getByRole("dialog", { name: "Fork this doc" });
+      await expect(dialog.getByRole("radio", { name: "A doc" })).toBeChecked();
+      await expect(dialog.getByLabel("Name")).toHaveCount(0);
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+
+      await softDeleteTestPost(withPost.id, ADMIN_EMAIL);
+      await page.goto(`/doc/${withPost.docId}`);
+      // The deleted post isn't on the page's list, so publishing is offered
+      // again, and it still refuses the move.
+      expect(await docActionItems(page)).toEqual(["Publish as blog post", "Fork…"]);
+
+      await page.goto(`/doc/${wiki.id}`);
+      expect(await docActionItems(page)).toEqual(["Fork…"]);
+      await docActionsMenu(page).getByRole("button", { name: "Fork…" }).click();
+      dialog = page.getByRole("dialog", { name: "Fork this page" });
+      await expect(dialog.getByRole("radio", { name: /^Your wiki pages/ })).toBeChecked();
+      await expect(dialog.getByLabel("Name")).toHaveValue(wiki.wikiName);
+      await expect(dialog.locator("[data-wiki-dialog-address]")).toHaveText(`/wiki/@e2e-admin/${wikiNameSegment(wiki.wikiName)}`);
+      await expect(dialog.getByLabel("Who can read it")).toHaveValue("PRIVATE");
+      await dialog.getByRole("radio", { name: "The commons" }).click();
+      await expect(dialog.getByLabel("Who can read it")).toHaveValue("SHARED");
+      // The commons holds the page itself, and its parent is SHARED: 2.
+      await expect(dialog.locator("[data-wiki-dialog-address]")).toHaveText(`/wiki/commons/${wikiNameSegment(wiki.wikiName)}~2`);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(doc.id);
+      await deleteTestDoc(wiki.id);
+      await deleteTestPost(withPost.id);
+    }
+  });
+
+  test("the dialogs: a fork lands on its wiki editor, and a title the rules refuse is edited before the move, which lands at the address", async ({
+    page,
+  }) => {
+    const base = `E2E Dialog ${stamp()}`;
+    const parent = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: `${base} parent`, visibility: "SHARED", bodyText: "Fork me." });
+    const mover = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: `${base} why?`, visibility: "PRIVATE", bodyText: "Move me." });
+    let forkId: string | null = null;
+    try {
+      await appendTestDocParagraph({ docId: parent.id, text: "And again." });
+      await page.goto(`/doc/${parent.slug}`);
+      await openDocActions(page);
+      await docActionsMenu(page).getByRole("button", { name: "Fork…" }).click();
+      const fork = page.getByRole("dialog", { name: "Fork this doc" });
+      await fork.getByRole("radio", { name: "The commons" }).click();
+      await expect(fork.getByLabel("Name")).toHaveValue(`${base} parent`);
+      await expect(fork.locator("[data-wiki-dialog-address]")).toHaveText(`/wiki/commons/${wikiNameSegment(`${base} parent`)}`);
+      await fork.getByRole("button", { name: "Fork", exact: true }).click();
+      await page.waitForURL((url) => url.pathname === `/wiki/commons/${wikiNameSegment(`${base} parent`)}/edit`);
+      forkId = await findTestWikiPageId(null, `${base} parent`);
+      expect(forkId).not.toBeNull();
+      expect((await getTestForkFacts(forkId!)).forkedFromDocId).toBe(parent.id);
+
+      await page.goto(`/doc/${mover.slug}`);
+      await openDocActions(page);
+      await docActionsMenu(page).getByRole("button", { name: "Move into the wiki…" }).click();
+      const move = page.getByRole("dialog", { name: "Move into the wiki" });
+      await expect(move.getByLabel("Name")).toHaveValue(`${base} why?`);
+      await expect(move.getByText(checkWikiNameMessage(`${base} why?`))).toBeVisible();
+      await expect(move.getByRole("button", { name: "Move", exact: true })).toBeDisabled();
+      await move.getByLabel("Name").fill(`${base} why`);
+      await expect(move.locator("[data-wiki-dialog-address]")).toHaveText(`/wiki/@e2e-admin/${wikiNameSegment(`${base} why`)}`);
+      await move.getByRole("button", { name: "Move", exact: true }).click();
+      await page.waitForURL((url) => url.pathname === `/wiki/@e2e-admin/${wikiNameSegment(`${base} why`)}`);
+      expect(await getTestWikiFacts(mover.id)).toMatchObject({ wikiName: `${base} why`, visibility: "PRIVATE" });
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      if (forkId) await deleteTestDoc(forkId);
+      await deleteTestDoc(parent.id);
+      await deleteTestDoc(mover.id);
+    }
+  });
+});
+
 test.describe("MCP and a page's address (docs/WIKI.md \"URLs\")", () => {
   test("read and tag take a page's address, in other capitals too, and an unreadable page is not_found as a missing one is", async ({
     request,
@@ -1462,6 +1702,204 @@ test.describe("MCP and a page's address (docs/WIKI.md \"URLs\")", () => {
       await deleteTestDoc(wiki.id);
       await deleteTestDoc(hidden.id);
       await agent.dispose();
+    }
+  });
+});
+
+// Imported here rather than above, beside the block that uses them.
+import { getDocYdocUpdateIds, setTestDocForkedFrom } from "./db";
+
+test.describe("family line and diffs (docs/WIKI.md \"The family line\", \"Diffs\")", () => {
+  const pageFamily = (page: Page) => page.getByRole("complementary", { name: "This page's family" });
+  /** Every link in one of the family's lines, in order: each page, then its diffs. */
+  const lineHrefs = (page: Page, kind: string) =>
+    pageFamily(page)
+      .locator(`[data-kind="${kind}"] a`)
+      .evaluateAll((links) => links.map((a) => a.getAttribute("href")));
+  const stamped = (name: string) => `E2E ${name} ${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+  test("Same name lists the other pages with the name's key, the commons' first, at their addresses with how they differ, and not the forks", async ({
+    page,
+    secondUser,
+  }) => {
+    const { user: other } = await secondUser({ role: "AUTHOR" });
+    const name = stamped("Gentian");
+    const made: TestWikiPage[] = [];
+    const make = async (opts: Parameters<typeof createTestWikiPage>[0]) => {
+      const wiki = await createTestWikiPage(opts);
+      made.push(wiki);
+      return wiki;
+    };
+    try {
+      const mine = await make({ authorEmail: ADMIN_EMAIL, namespace: "person", name, visibility: "SHARED" });
+      // Another person's, in other capitals: the same key.
+      const theirs = await make({ authorEmail: other.email, namespace: "person", name: name.toUpperCase(), visibility: "SHARED" });
+      // Not the admin's to read, so not named.
+      await make({ authorEmail: other.email, namespace: "person", name, variant: "2", visibility: "PRIVATE" });
+      const commons = await make({ authorEmail: ADMIN_EMAIL, namespace: "commons", name, visibility: "SHARED" });
+      // A fork of `mine` with the name: a fork, not a page of the same name.
+      const fork = await make({ authorEmail: ADMIN_EMAIL, namespace: "commons", name, variant: "fork", visibility: "SHARED" });
+      await setTestDocForkedFrom(fork.id, mine.id);
+
+      await page.goto(mine.path);
+      await expect(pageFamily(page).locator('[data-kind="same-name"]')).toContainText("Same name:");
+      await expect(pageFamily(page).locator('[data-kind="same-name"]')).toContainText("(how they differ)");
+      expect(await lineHrefs(page, "same-name")).toEqual([commons.path, `/diff/${mine.id}/${commons.id}`, theirs.path, `/diff/${mine.id}/${theirs.id}`]);
+      expect((await lineHrefs(page, "forks"))[0]).toBe(fork.path);
+
+      // From the fork's side: its parent at its address, and the others by name.
+      await page.goto(fork.path);
+      await expect(pageFamily(page).locator('[data-kind="forked-from"]')).toContainText(`Forked from: ${mine.wikiName}`);
+      expect((await lineHrefs(page, "forked-from"))[0]).toBe(mine.path);
+      expect(await lineHrefs(page, "same-name")).toEqual([commons.path, `/diff/${fork.id}/${commons.id}`, theirs.path, `/diff/${fork.id}/${theirs.id}`]);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      for (const wiki of made.reverse()) await deleteTestDoc(wiki.id);
+    }
+  });
+
+  test("the public render's family line names PUBLIC pages alone, says its parent isn't public, and links no diff", async ({
+    browser,
+    page,
+    secondUser,
+  }) => {
+    const { user: other } = await secondUser({ role: "AUTHOR" });
+    const name = stamped("Saxifrage");
+    const parent = await createTestWikiPage({ authorEmail: other.email, namespace: "person", name, visibility: "PRIVATE" });
+    const subject = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "person", name, visibility: "PUBLIC" });
+    const open = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", name, visibility: "PUBLIC" });
+    const shut = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", name, variant: "2", visibility: "SHARED" });
+    const anonymous = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    try {
+      await setTestDocForkedFrom(subject.id, parent.id);
+
+      const reader = await anonymous.newPage();
+      await reader.goto(subject.path);
+      await expect(reader.locator("[data-public-render]")).toBeVisible();
+      await expect(pageFamily(reader).locator('[data-kind="forked-from"]')).toContainText("Forked from: a page that isn't public");
+      expect(await lineHrefs(reader, "forked-from")).toEqual([]);
+      expect(await lineHrefs(reader, "same-name")).toEqual([open.path]);
+      await expect(pageFamily(reader).locator('[data-kind="family-diffs"]')).toHaveCount(0);
+
+      // The doc view of the same page: the parent in its own words, and the
+      // SHARED page of the name, each with how they differ.
+      await page.goto(subject.path);
+      await expect(pageFamily(page).locator('[data-kind="forked-from"]')).toContainText("Forked from: a page you can't read");
+      expect(await lineHrefs(page, "same-name")).toEqual([open.path, `/diff/${subject.id}/${open.id}`, shut.path, `/diff/${subject.id}/${shut.id}`]);
+    } finally {
+      await anonymous.close();
+      await page.goto("about:blank").catch(() => {});
+      for (const wiki of [subject, parent, open, shut]) await deleteTestDoc(wiki.id);
+    }
+  });
+
+  test("a diff of two wiki pages heads each side by its name, at any version, and links it at its address", async ({ page }) => {
+    const name = stamped("Campion");
+    // createTestDoc seeded each title fragment with a title of its own,
+    // which a side of a doc would be headed by.
+    const left = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", name, visibility: "SHARED", bodyText: "Pink." });
+    const right = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "person", name: `${name} (white)`, visibility: "SHARED", bodyText: "White." });
+    try {
+      const [first] = await getDocYdocUpdateIds(left.id);
+      await appendTestDocParagraph({ docId: left.id, text: "Pinker." });
+
+      await page.goto(`/diff/${left.id}/${right.id}`);
+      await expect(page.getByRole("link", { name: left.wikiName, exact: true })).toHaveAttribute("href", left.path);
+      await expect(page.getByRole("link", { name: right.wikiName, exact: true })).toHaveAttribute("href", right.path);
+
+      // At a version: the name it has now, and the address with ?at=.
+      await page.goto(`/diff/${left.id}@${first}/${left.id}`);
+      const sides = page.getByRole("link", { name: left.wikiName, exact: true });
+      await expect(sides).toHaveCount(2);
+      await expect(sides.first()).toHaveAttribute("href", `${left.path}?at=${first}`);
+      await expect(sides.last()).toHaveAttribute("href", left.path);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      for (const wiki of [left, right]) await deleteTestDoc(wiki.id);
+    }
+  });
+});
+
+test.describe("front page (docs/WIKI.md \"The front page\")", () => {
+  // The commons' `Front Page` is one address, which these tests take in turn,
+  // and no other spec file takes, so no other worker meets them there. A real
+  // page there leaves them nothing to take.
+  async function requireFreeFrontPage(): Promise<void> {
+    test.skip((await findTestWikiPageId(null, "Front Page")) !== null, "The commons' Front Page exists in this database.");
+  }
+  const marker = (what: string) => `E2E front page ${what} ${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+
+  test("a doc titled FRONT PAGE is just a doc", async () => {
+    const text = marker("doc");
+    const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: "FRONT PAGE", visibility: "SHARED", bodyText: text });
+    try {
+      expect((await frontPagePreambleText()) ?? "").not.toContain(text);
+    } finally {
+      await deleteTestDoc(doc.id);
+    }
+  });
+
+  test("the commons' PUBLIC Front Page is the preamble, by any capitals, without its name; lowered, it isn't", async ({ page }) => {
+    await requireFreeFrontPage();
+    const text = marker("public");
+    const wiki = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", name: "fRONT pAGE", visibility: "PUBLIC", bodyText: text });
+    try {
+      expect(await frontPagePreambleText()).toContain(text);
+      // Repeated, as freshGotoComment is: a render already under way when `/`
+      // is revalidated can put the page from before the write back in the cache.
+      await expect(async () => {
+        await freshGoto(page, "/");
+        await expect(page.getByText(text)).toBeVisible({ timeout: 2_000 });
+      }).toPass({ timeout: 30_000 });
+      // exact: getByText's default is a case-blind substring, which the
+      // marker itself, "E2E front page …", would match.
+      await expect(page.getByText("fRONT pAGE", { exact: true })).toHaveCount(0);
+
+      expect(await changeTestDocSetting({ actorEmail: ADMIN_EMAIL, docId: wiki.id, change: { visibility: "SHARED" } })).toMatchObject({ ok: true });
+      expect(await frontPagePreambleText()).toBeNull();
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(wiki.id);
+    }
+  });
+
+  test("a doc titled FRONT PAGE moved into the commons as Front Page, PUBLIC, becomes the preamble, keeping its body", async () => {
+    await requireFreeFrontPage();
+    const text = marker("moved");
+    const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: "FRONT PAGE", visibility: "PRIVATE", bodyText: text });
+    try {
+      expect((await frontPagePreambleText()) ?? "").not.toContain(text);
+      expect(
+        await moveDocAs({ actorEmail: ADMIN_EMAIL, docId: doc.id, namespace: "commons", name: "Front Page", visibility: "PUBLIC" }),
+      ).toEqual({ ok: true, path: "/wiki/commons/Front_Page" });
+      expect(await frontPagePreambleText()).toContain(text);
+    } finally {
+      await deleteTestDoc(doc.id);
+    }
+  });
+
+  test("a SHARED Front Page, a variant and a person's page of that name are not the preamble", async ({ secondUser }) => {
+    await requireFreeFrontPage();
+    const { user: person } = await secondUser({ role: "AUTHOR" });
+    const text = marker("not");
+    const pages: TestWikiPage[] = [];
+    try {
+      pages.push(await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", name: "Front Page", visibility: "SHARED", bodyText: `${text} shared` }));
+      pages.push(
+        await createTestWikiPage({
+          authorEmail: ADMIN_EMAIL,
+          namespace: "commons",
+          name: "Front Page",
+          variant: `e2e-${Date.now().toString(36)}`,
+          visibility: "PUBLIC",
+          bodyText: `${text} variant`,
+        }),
+      );
+      pages.push(await createTestWikiPage({ authorEmail: person.email, namespace: "person", name: "Front Page", visibility: "PUBLIC", bodyText: `${text} person` }));
+      // The SHARED page holds the address, so no PUBLIC page can be there.
+      expect(await frontPagePreambleText()).toBeNull();
+    } finally {
+      for (const wiki of pages) await deleteTestDoc(wiki.id);
     }
   });
 });

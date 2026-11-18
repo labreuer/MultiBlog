@@ -1,21 +1,19 @@
-// The landing page (PLAN.md §17): a doc-sourced preamble, the latest
-// published posts, and an opt-in contributor sidebar with self-service
-// editing on /dashboard.
+// The landing page (PLAN.md §17): the commons' PUBLIC `Front Page` as its
+// preamble, the latest published posts, and an opt-in contributor sidebar
+// with self-service editing on /dashboard.
 //
-// What this deliberately does NOT assert: specific preamble text. §17c's
-// first-created-wins tie-break means a doc this spec creates loses to any
-// pre-existing "FRONT PAGE" doc (a real deployment, or scripts/seed-front-
-// page.ts having already run) — the same class of problem
-// admin-table.spec.ts hit against the site-wide column-order default. So the
-// only assertion here is the one that holds regardless of which doc won:
-// the literal title string never reaches the page.
+// The preamble's rule — which page is it, by any capitals, and which
+// pages of that name aren't — is pinned in wiki.spec.ts's "front page"
+// block, the one spec file that takes the commons' `Front Page` address, so
+// no two workers race for it. What stays here is that a doc titled
+// `FRONT PAGE` is just a doc, its text and its title kept off `/`.
 //
 // The banner is also untested here — it's an env var (SITE_BANNER plus a
 // gitignored file, or SITE_BANNER_TEXT), not app state this suite's fixtures
 // control either way.
 import type { Browser, Page } from "@playwright/test";
 import { test, expect, freshGoto, openDashboardCard, signIn } from "./fixtures";
-import { createTestUser, deleteTestUser, getAvatarFacts, getContributorFields, uniqueEmail } from "./db";
+import { ADMIN_EMAIL, createTestDoc, createTestUser, deleteTestDoc, deleteTestUser, getAvatarFacts, getContributorFields, uniqueEmail } from "./db";
 
 // A fresh browser context, not the shared `page`'s — the browser pane's
 // "tabs share one cookie jar" trap (docs/BROWSER_PANE.md) applies to Playwright pages
@@ -42,9 +40,19 @@ function cardFor(page: Page, slug: string) {
   return page.locator(`[data-contributor-slug="${slug}"]`);
 }
 
-test("never shows the FRONT PAGE doc's own title", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByText("FRONT PAGE", { exact: true })).toHaveCount(0);
+test("a doc titled FRONT PAGE puts neither its title nor its text on the landing page", async ({ page }) => {
+  const marker = `E2E landing FRONT PAGE doc ${Date.now()}`;
+  const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: "FRONT PAGE", visibility: "SHARED", bodyText: marker });
+  try {
+    // freshGoto: `/` is ISR-cached, and a render from before the doc existed
+    // would pass whatever the rule.
+    await freshGoto(page, "/");
+    await expect(page.locator("main")).toBeVisible();
+    await expect(page.getByText(marker)).toHaveCount(0);
+    await expect(page.getByText("FRONT PAGE", { exact: true })).toHaveCount(0);
+  } finally {
+    await deleteTestDoc(doc.id);
+  }
 });
 
 test("contributor sidebar lists an opted-in contributor and omits everyone else", async ({ page }) => {

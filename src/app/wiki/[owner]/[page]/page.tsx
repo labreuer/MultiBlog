@@ -75,7 +75,7 @@ export default async function WikiPageRoute({
   }
   if (access.status !== "ok") notFound();
   const { value } = access;
-  if (value.view === "public") return <PublicWikiPage doc={value.doc} owner={value.namespace} />;
+  if (value.view === "public") return <PublicWikiPage doc={value.doc} owner={value.namespace} viewer={value.user} />;
   const sel = typeof query.sel === "string" ? query.sel : undefined;
   const at = typeof query.at === "string" ? query.at : undefined;
   return <DocReadingView doc={value.doc} user={value.user} sel={sel} scrubUpdateId={parseScrubUpdateId(at)} />;

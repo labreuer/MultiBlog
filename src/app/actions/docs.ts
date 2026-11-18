@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { revertDocSlug as revertDocSlugInDb } from "@/lib/doc-slug";
 import { docBylineIds, setDocByline, setDocDeleted, setDocSlug, setDocVisibility, type DocDeletedResult } from "@/lib/doc-manage";
+import { revalidateFrontPageFor } from "@/lib/front-page-revalidate";
 import { actorFromSessionUser } from "@/lib/actor";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
 import {
@@ -260,11 +261,15 @@ export async function updateDocVisibility(docId: string, visibility: DocVisibili
   revalidatePath(`/doc/${docId}`);
   revalidatePath("/docs");
   revalidateWiki();
+  await revalidateFrontPageFor(docId);
 }
 
 // Every route under /wiki/ lists or shows pages by their visibility, byline
 // and deletion, and none is cached beyond the client's router cache, so a
-// change to any of those clears the lot.
+// change to any of those clears the lot. `/` is cached, and shows the
+// commons' PUBLIC Front Page, so a visibility change, delete or restore of a
+// commons page revalidates it too (revalidateFrontPageFor; the bulk actions
+// reach it through the per-row ones).
 function revalidateWiki(): void {
   revalidatePath("/wiki", "layout");
 }
@@ -353,6 +358,7 @@ async function setDocDeletedAction(docId: string, deleted: boolean): Promise<Doc
   const result = await setDocDeleted(actorFromSessionUser(session.user), docId, deleted);
   revalidatePath("/docs");
   revalidateWiki();
+  await revalidateFrontPageFor(docId);
   return result;
 }
 

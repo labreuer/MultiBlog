@@ -34,9 +34,20 @@ export type DiffSideRead = {
   docId: string;
   /** The side's version; null for the doc as it was when read. */
   updateId: string | null;
-  slug: string;
-  /** As of the side, or the doc's current title when the side couldn't be read. */
+  /** The doc's own page: a wiki page's address, else `/doc/<slug>` (`docPagePath`). */
+  path: string;
+  /**
+   * As of the side, or the doc's current title when the side couldn't be
+   * read; a wiki page's current name at whatever version (`headedByName`).
+   */
   title: string;
+  /**
+   * A wiki page, headed by its current name at any version (docs/WIKI.md
+   * "Diffs"): a side built in the browser keeps the title the server sent
+   * rather than the build's title fragment, so a slid-to side and the same
+   * pair reloaded agree.
+   */
+  headedByName: boolean;
   /** Whether this viewer may see the doc's history: the side has a slider, and the doc's reading view honours `?at=`. */
   history: boolean;
   /** When the side's version was written; null for a side with none. */
@@ -83,8 +94,9 @@ function isDiffSideRead(value: unknown): value is DiffSideRead {
   return (
     isText(side.docId) &&
     isTextOrNull(side.updateId) &&
-    isText(side.slug) &&
+    isText(side.path) &&
     isText(side.title) &&
+    typeof side.headedByName === "boolean" &&
     typeof side.history === "boolean" &&
     isTextOrNull(side.at) &&
     isTextOrNull(side.nowVersion) &&
@@ -186,7 +198,7 @@ export function planPair(shown: DiffPairRead, wanted: DiffPairSides): Record<Whi
   return left && right ? { left, right } : null;
 }
 
-/** A side built in the browser: its title as of the version, when the version was written, and its blocks. */
+/** A side built in the browser: its title as of the version (a wiki page's side keeps its name instead), when the version was written, and its blocks. */
 export type BuiltSide = { title: string; at: string; blocks: DiffBlock[] };
 
 /**
@@ -211,8 +223,9 @@ export function assemblePair(shown: DiffPairRead, wanted: DiffPairSides, built: 
     return {
       docId: shown[which].docId,
       updateId: wanted[which].updateId?.toString() ?? null,
-      slug: shown[which].slug,
-      title: made.title,
+      path: shown[which].path,
+      title: shown[which].headedByName ? shown[which].title : made.title,
+      headedByName: shown[which].headedByName,
       history: true,
       at: made.at,
       nowVersion: null,

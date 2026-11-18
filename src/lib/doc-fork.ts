@@ -7,6 +7,7 @@ import { createDocWithContent } from "@/lib/doc-create";
 import { isDocVersion, loadDocStateAt, loadDocStateNow, type DocState } from "@/lib/doc-state";
 import { parseUpdateId } from "@/lib/diff-side";
 import { forkSeed } from "@/lib/fork-seed";
+import type { WikiOwner } from "@/lib/wiki-address";
 
 // docs/FORKS.md "Forks" — a new doc seeded from another doc's text at one
 // version, which records the doc and the version it came from. A function
@@ -26,13 +27,53 @@ export type ForkRequest = {
   visibility: DocVisibility;
 };
 
+/**
+ * The parent as the checks read it. `wikiName` is the parent's name when it
+ * is a wiki page, else null: the fork's title then (docs/WIKI.md "Forking
+ * into the wiki"). `wikiOwner` is its namespace, which a fork into the wiki
+ * reads for the variant a `PUBLIC` parent lends.
+ */
+export type ForkParent = {
+  id: string;
+  visibility: DocVisibility;
+  wikiName: string | null;
+  wikiOwner: WikiOwner | null;
+};
+
 export type ForkSource = {
-  /** `wikiName` is the parent's name when it is a wiki page, else null: the fork's title then (docs/WIKI.md "Forking into the wiki"). */
-  parent: { id: string; visibility: DocVisibility; wikiName: string | null };
+  parent: ForkParent;
   state: Omit<DocState, "version">;
   /** The parent's update the state is at, which becomes the fork point. */
   version: bigint;
 };
+
+/**
+ * Steps 1 to 3 of readForkSource below, for a parent with no version: who may
+ * fork, then whether the parent is there and readable, answered as the fork
+ * would answer them. The Fork dialog's address preview asks these alone, so it
+ * says what the fork would before saying anything about an address, and
+ * reads no text.
+ */
+export async function checkForkParent(actor: Actor, parentId: string): Promise<ForkParent> {
+  if (typeof parentId !== "string") throw invalid("That isn't a doc and a version.");
+  if (!canManageDocs(actor.role)) throw forbidden("You don't have permission to create docs.");
+
+  const parent = await prismaIncludingDeleted.doc.findUnique({
+    where: { id: parentId },
+    select: { id: true, visibility: true, deletedByUserId: true, wikiName: true, wikiOwner: { select: { slug: true } } },
+  });
+  if (!parent || parent.deletedByUserId !== null) throw new ApiError("not_found", "That doc doesn't exist.");
+  if (!(await canUserReadDoc(actor.userId, actor.role, parent))) {
+    // An unreadable wiki page is not found, as it is wherever a wiki doc is
+    // looked up (docs/WIKI.md "Forking into the wiki"): a Forbidden would
+    // confirm that a page exists.
+    if (parent.wikiName !== null) throw new ApiError("not_found", "That doc doesn't exist.");
+    throw forbidden("You don't have permission to read that doc.");
+  }
+  const wikiOwner: WikiOwner | null =
+    parent.wikiName === null ? null : parent.wikiOwner ? { kind: "person", slug: parent.wikiOwner.slug } : { kind: "commons" };
+  return { id: parent.id, visibility: parent.visibility, wikiName: parent.wikiName, wikiOwner };
+}
 
 /**
  * The parent as a fork copies it, for an actor who may fork it. In order:
@@ -64,24 +105,8 @@ export type ForkSource = {
  * forking a parent at a version stays its editors'.
  */
 export async function readForkSource(actor: Actor, parentId: string, revision: string | null): Promise<ForkSource> {
-  if (typeof parentId !== "string" || (revision !== null && typeof revision !== "string")) {
-    throw invalid("That isn't a doc and a version.");
-  }
-  if (!canManageDocs(actor.role)) throw forbidden("You don't have permission to create docs.");
-
-  const parent = await prismaIncludingDeleted.doc.findUnique({
-    where: { id: parentId },
-    select: { id: true, visibility: true, deletedByUserId: true, wikiName: true },
-  });
-  if (!parent || parent.deletedByUserId !== null) throw new ApiError("not_found", "That doc doesn't exist.");
-  if (!(await canUserReadDoc(actor.userId, actor.role, parent))) {
-    // An unreadable wiki page is not found, as it is wherever a wiki doc is
-    // looked up (docs/WIKI.md "Forking into the wiki"): a Forbidden would
-    // confirm that a page exists.
-    if (parent.wikiName !== null) throw new ApiError("not_found", "That doc doesn't exist.");
-    throw forbidden("You don't have permission to read that doc.");
-  }
-  const source = { id: parent.id, visibility: parent.visibility, wikiName: parent.wikiName };
+  if (revision !== null && typeof revision !== "string") throw invalid("That isn't a doc and a version.");
+  const parent = await checkForkParent(actor, parentId);
 
   if (revision !== null) {
     if (!(await canUserSeeDocHistory(actor.userId, actor.role, parent.id))) {
@@ -89,12 +114,12 @@ export async function readForkSource(actor: Actor, parentId: string, revision: s
     }
     const at = parseUpdateId(revision);
     if (at === null || !(await isDocVersion(parent.id, at))) throw invalid("That version isn't in this doc's history.");
-    return { parent: source, state: await loadDocStateAt(parent.id, at), version: at };
+    return { parent, state: await loadDocStateAt(parent.id, at), version: at };
   }
 
   const now = await loadDocStateNow(parent.id);
   if (now.version === null) throw invalid("That doc has no history yet, so there is no version to fork it at.");
-  return { parent: source, state: now, version: now.version };
+  return { parent, state: now, version: now.version };
 }
 
 /**

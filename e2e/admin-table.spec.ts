@@ -661,10 +661,10 @@ test.describe("admin table kit", () => {
       // assumed every title is long enough that appending the next columns'
       // text (Edit/Author(s)/Visibility/…) never lands within the first 20
       // characters — true of every doc title in this suite's own fixtures,
-      // but not of a real ≤20-char title like a "FRONT PAGE" doc seeded into
-      // the same dev database (PLAN.md §17c) can be, where the `cols=title`
-      // view (just "FRONT PAGE") and the full-columns view ("FRONT
-      // PAGEeditLBPRIV…") produced different slices for the identical row.
+      // but not of a real ≤20-char title in the same dev database, such as
+      // "Notes", where the `cols=title` view (just "Notes") and the
+      // full-columns view ("NoteseditLBPRIV…") produce different slices for
+      // the identical row.
       // Pinned to this test's own two docs via ?q=, not the ambient listing.
       // These are three separate page loads compared for exact equality, so
       // against every doc in the database any row another worker creates or

@@ -72,8 +72,11 @@ type Props = {
    * (docs/WIKI.md "The name is the title", "Telling a wiki page from a doc"):
    * its name stands where a doc's title field does, the address line and the
    * PUBLIC notice above it, and its own links go to its address.
+   * `frontPage` says it is at the front page's address (isFrontPageAddress),
+   * where the name field and the Settings panel say what renaming, lowering
+   * or deleting it does to the landing page (docs/WIKI.md "The front page").
    */
-  wiki: { address: WikiAddress; ownerUserId: string | null } | null;
+  wiki: { address: WikiAddress; ownerUserId: string | null; frontPage: boolean } | null;
   /** The doc's past wiki addresses, which the Settings panel's Delete lists first (docs/WIKI.md "Deleting a page"). */
   addressHistory: WikiAddressHistoryEntry[];
   createdAt: Date;
@@ -355,6 +358,7 @@ export default function DocEditor({
             docId={docId}
             name={wiki.address.name}
             editable={!deleted}
+            onLandingPage={wiki.frontPage && currentVisibility === "PUBLIC" && !deleted}
             className={`${styles.titleInput} ${deleted ? styles.titleInputDisabled : ""}`}
           />
         ) : provider ? (
@@ -482,7 +486,7 @@ export default function DocEditor({
         <DocSettingsPanel
           docId={docId}
           visibility={visibility}
-          wiki={wiki && { name: wiki.address.name, ownerUserId: wiki.ownerUserId, path: wikiPath! }}
+          wiki={wiki && { name: wiki.address.name, ownerUserId: wiki.ownerUserId, path: wikiPath!, frontPage: wiki.frontPage }}
           addressHistory={addressHistory}
           onVisibilityChange={setCurrentVisibility}
           viewerId={userId}
