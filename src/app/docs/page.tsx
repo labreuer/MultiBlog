@@ -254,7 +254,7 @@ export default async function DocsPage({
       // them, so a PRIVATE doc it brings into view carries no Edit link and the
       // column agrees with what /doc/[slug]/edit would answer.
       canEdit: canEditDocRow({ visibility: doc.visibility, wikiOwnerUserId: doc.wikiOwnerUserId, isAuthor }, session.user.role),
-      visibilities: allowedVisibilities(doc, session.user.id),
+      visibilities: allowedVisibilities(doc, { id: session.user.id, role: session.user.role }),
       // Whether the bulk "+ tag" applies to this row: canUserTagTarget's rule,
       // which is the role floor (every role reaching this page clears it) and
       // the read rule. An affordance only — bulkTagObjects asks again per row.

@@ -201,7 +201,8 @@ export default async function WikiPagesPage({
     // docs/WIKI.md "Permissions": canEditDocRow, which refuses the SHARED
     // bypass on a person's page, decides Edit. The Visibility cell adds an
     // ADMIN's lowering of a person's page they can't edit, to the values
-    // allowedVisibilities offers a non-owner. Deleting and restoring a
+    // allowedVisibilities offers a non-owner, and PUBLIC is offered by the
+    // viewer's role (canMakePagesPublic). Deleting and restoring a
     // person's page is its owner's alone; a commons page's, its editors'.
     // setDocVisibility and setDocDeleted ask all of it again under the row
     // lock: these only decide what is offered.
@@ -224,7 +225,7 @@ export default async function WikiPagesPage({
       editPath: deleted ? `/doc/${doc.id}/edit` : `${path}/edit`,
       authors: doc.metrics?.byline ?? "",
       visibility: doc.visibility,
-      visibilities: allowedVisibilities(doc, viewerId),
+      visibilities: allowedVisibilities(doc, { id: viewerId, role }),
       updatedAt: doc.updatedAt,
       length: doc.proseJsonLength,
       // Null, withheld, on a row only the override lists, as on /docs.

@@ -143,7 +143,7 @@ export type CreateDocOptions = {
    * `title` column are made from the name. A refusal is thrown as a typed
    * error (WikiAddressTaken, ApiError), which passes through the slug retry
    * untouched. `visibility` must be passed for the commons, whose pages are
-   * never PRIVATE; the caller checks it against allowedVisibilities.
+   * never PRIVATE; the caller checks it against newPageVisibilities.
    *
    * `verify` is the caller's own check, run in the transaction before the
    * claim: the namespace's rules, read afresh there (wiki-create.ts), so a

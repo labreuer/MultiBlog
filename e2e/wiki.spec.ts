@@ -221,7 +221,8 @@ test.describe("a wiki page's settings (docs/WIKI.md \"Permissions\")", () => {
   });
 
   test("a doc takes only a visibility allowedVisibilities offers: no PUBLIC off the wiki, no PRIVATE in the commons", async ({ secondUser }) => {
-    const { user: owner } = await secondUser({ role: "AUTHOR" });
+    // An EDITOR, since making a page PUBLIC is an ADMIN's or EDITOR's ("making a page PUBLIC", below).
+    const { user: owner } = await secondUser({ role: "EDITOR" });
     const doc = await createTestDoc({ authorEmail: ADMIN_EMAIL });
     const commons = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons" });
     const personal = await createTestWikiPage({ authorEmail: owner.email, namespace: "person" });
@@ -504,6 +505,266 @@ test.describe("a person's page and its owner (docs/WIKI.md \"Permissions\")", ()
       if (mine.ok) created.push(mine.id);
     } finally {
       for (const id of created) await deleteTestDoc(id);
+    }
+  });
+});
+
+test.describe("making a page PUBLIC (docs/WIKI.md \"Permissions\")", () => {
+  const stamp = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const EDITORS_ONLY = { ok: false, code: "forbidden", message: "Only an ADMIN or EDITOR can make a page PUBLIC." };
+  /** The start of PUBLIC_VISIBILITY_NOTE, said only beside a choice that offers PUBLIC. */
+  const PUBLIC_NOTE = "PUBLIC: anyone can read it, signed out included";
+
+  /** The editor's Settings panel, opened. */
+  async function openSettings(page: Page, wiki: { path: string }) {
+    await page.goto(`${wiki.path}/edit`);
+    await waitForDocCollabReady(page);
+    const settings = page.locator("details").filter({ has: page.locator("summary", { hasText: "Settings" }) });
+    await settings.locator("summary").click();
+    return settings;
+  }
+
+  test("an AUTHOR who owns a page is not offered PUBLIC, and setDocVisibility refuses it; one that is PUBLIC they may lower, and not put back", async ({
+    secondUser,
+  }) => {
+    const { user: owner, page } = await secondUser({ role: "AUTHOR" });
+    const wiki = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "SHARED" });
+    const open = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "PUBLIC" });
+    const asOwner = (docId: string, visibility: string) => changeTestDocSetting({ actorEmail: owner.email, docId, change: { visibility } });
+    try {
+      const settings = await openSettings(page, wiki);
+      await expect(settings.getByLabel("Visibility").locator("option")).toHaveText(["PRIVATE", "SHARED"]);
+      await expect(settings.getByText(PUBLIC_NOTE)).toHaveCount(0);
+      await expect((await wikiTableRow(page, wiki)).locator("select option")).toHaveText(["PRIVATE", "SHARED"]);
+      expect(await asOwner(wiki.id, "PUBLIC")).toEqual(EDITORS_ONLY);
+      expect((await getTestWikiFacts(wiki.id)).visibility).toBe("SHARED");
+
+      // A page that is PUBLIC shows its value, which its owner may lower.
+      const row = await wikiTableRow(page, open);
+      await expect(row.locator("select option")).toHaveText(["PRIVATE", "SHARED", "PUBLIC"]);
+      // Setting it to what it is raises nothing.
+      expect(await asOwner(open.id, "PUBLIC")).toEqual({ ok: true });
+      await row.locator("select").selectOption("SHARED");
+      await expect.poll(async () => (await getTestWikiFacts(open.id)).visibility).toBe("SHARED");
+      await expect((await wikiTableRow(page, open)).locator("select option")).toHaveText(["PRIVATE", "SHARED"]);
+      expect(await asOwner(open.id, "PUBLIC")).toEqual(EDITORS_ONLY);
+      expect((await getTestWikiFacts(open.id)).visibility).toBe("SHARED");
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(wiki.id);
+      await deleteTestDoc(open.id);
+    }
+  });
+
+  test("an EDITOR who owns a page is offered PUBLIC and makes it public; a session that outlives the role, or runs behind it, is refused", async ({
+    playwright,
+    baseURL,
+    secondUser,
+  }) => {
+    const { user: owner, page } = await secondUser({ role: "EDITOR" });
+    const wiki = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "PRIVATE" });
+    const other = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "SHARED" });
+    const anonymous = await playwright.request.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+    try {
+      expect((await anonymous.get(wiki.path, { maxRedirects: 0 })).status()).toBe(307);
+      const settings = await openSettings(page, wiki);
+      await expect(settings.getByLabel("Visibility").locator("option")).toHaveText(["PRIVATE", "SHARED", "PUBLIC"]);
+      await expect(settings.getByText(PUBLIC_NOTE)).toBeVisible();
+      await settings.getByLabel("Visibility").selectOption("PUBLIC");
+      await expect.poll(async () => (await getTestWikiFacts(wiki.id)).visibility).toBe("PUBLIC");
+      // Public is what it says: someone signed out reads the page.
+      const read = await anonymous.get(wiki.path, { maxRedirects: 0 });
+      expect(read.status()).toBe(200);
+      expect(await read.text()).toContain("data-public-render");
+
+      // The role is read from the account's row inside the write: a session
+      // still saying EDITOR after a demotion makes nothing public,
+      await setTestUserRole(owner.email, "AUTHOR");
+      const raise = (sessionRole: "EDITOR" | "AUTHOR") =>
+        changeTestDocSetting({ actorEmail: owner.email, sessionRole, docId: other.id, change: { visibility: "PUBLIC" } });
+      expect(await raise("EDITOR")).toEqual(EDITORS_ONLY);
+      // and one still saying AUTHOR after a promotion is refused as its select,
+      // which offered no PUBLIC, would have it.
+      await setTestUserRole(owner.email, "EDITOR");
+      expect(await raise("AUTHOR")).toEqual(EDITORS_ONLY);
+      expect((await getTestWikiFacts(other.id)).visibility).toBe("SHARED");
+      expect(await raise("EDITOR")).toEqual({ ok: true });
+    } finally {
+      await anonymous.dispose();
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(wiki.id);
+      await deleteTestDoc(other.id);
+    }
+  });
+
+  test("an AUTHOR on a commons page's byline can't raise it to PUBLIC, and may lower one that is; an ADMIN or EDITOR raises it", async ({
+    secondUser,
+  }) => {
+    const { user: author, page } = await secondUser({ role: "AUTHOR" });
+    const { user: editor } = await secondUser({ role: "EDITOR" });
+    const shared = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", visibility: "SHARED" });
+    const open = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", visibility: "PUBLIC" });
+    const as = (actorEmail: string, docId: string, visibility: string) => changeTestDocSetting({ actorEmail, docId, change: { visibility } });
+    try {
+      await addTestDocAuthor(shared.id, author.email);
+      await addTestDocAuthor(open.id, author.email);
+      const settings = await openSettings(page, shared);
+      await expect(settings.getByLabel("Visibility").locator("option")).toHaveText(["SHARED"]);
+      await expect(settings.getByText(PUBLIC_NOTE)).toHaveCount(0);
+      expect(await as(author.email, shared.id, "PUBLIC")).toEqual(EDITORS_ONLY);
+      expect((await getTestWikiFacts(shared.id)).visibility).toBe("SHARED");
+
+      // One that is PUBLIC: its value is shown, and lowering it is its byline's.
+      await expect((await wikiTableRow(page, open)).locator("select option")).toHaveText(["SHARED", "PUBLIC"]);
+      expect(await as(author.email, open.id, "SHARED")).toEqual({ ok: true });
+      expect(await as(author.email, open.id, "PUBLIC")).toEqual(EDITORS_ONLY);
+      expect((await getTestWikiFacts(open.id)).visibility).toBe("SHARED");
+
+      // An EDITOR off the byline and the ADMIN on it each may.
+      expect(await as(editor.email, open.id, "PUBLIC")).toEqual({ ok: true });
+      expect(await as(ADMIN_EMAIL, shared.id, "PUBLIC")).toEqual({ ok: true });
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(shared.id);
+      await deleteTestDoc(open.id);
+    }
+  });
+
+  test("a page created, forked or moved in as PUBLIC needs an ADMIN or EDITOR, by their role and by their row as it is then", async ({
+    secondUser,
+  }) => {
+    const { user: author } = await secondUser({ role: "AUTHOR" });
+    const { user: editor } = await secondUser({ role: "EDITOR" });
+    const name = `E2E Publishing ${stamp()}`;
+    const parent = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: `${name} parent`, visibility: "SHARED", bodyText: "Fork me." });
+    const made: string[] = [parent.id];
+    const create = (actorEmail: string, suffix: string, visibility: "PUBLIC" | "SHARED", sessionRole?: "EDITOR") =>
+      createWikiPageAs({ actorEmail, sessionRole, page: { namespace: "person", name: `${name} ${suffix}`, visibility } });
+    const fork = (actorEmail: string, suffix: string, namespace: "person" | "commons", sessionRole?: "EDITOR") =>
+      forkDocAs({ actorEmail, sessionRole, parentId: parent.id, visibility: "PUBLIC", wiki: { namespace, name: `${name} ${suffix}` } });
+    try {
+      await appendTestDocParagraph({ docId: parent.id, text: "And again." });
+
+      // An AUTHOR, in their own namespace: a new page has no PUBLIC to keep.
+      expect(await create(author.email, "made", "PUBLIC")).toEqual(EDITORS_ONLY);
+      expect(await fork(author.email, "forked", "person")).toEqual(EDITORS_ONLY);
+      expect(await findTestWikiPageId(author.email, `${name} made`)).toBeNull();
+      expect(await findTestWikiPageId(author.email, `${name} forked`)).toBeNull();
+      // The same page as SHARED is theirs to make.
+      const shared = await create(author.email, "made", "SHARED");
+      expect(shared).toMatchObject({ ok: true });
+      if (shared.ok) made.push(shared.id);
+
+      // An EDITOR may, in their own namespace and the commons.
+      const own = await create(editor.email, "made", "PUBLIC");
+      expect(own).toMatchObject({ ok: true });
+      if (own.ok) {
+        made.push(own.id);
+        expect((await getTestWikiFacts(own.id)).visibility).toBe("PUBLIC");
+      }
+      const forked = await fork(editor.email, "forked", "commons");
+      expect(forked).toMatchObject({ ok: true });
+      if (forked.ok) {
+        made.push(forked.id);
+        expect((await getTestWikiFacts(forked.id)).visibility).toBe("PUBLIC");
+      }
+
+      // Demoted, with a session that still says EDITOR: the row is read inside
+      // each write, and nothing is made or raised.
+      const doc = await createTestDoc({ authorEmail: editor.email, title: `${name} doc`, visibility: "PRIVATE", bodyText: "Move me." });
+      made.push(doc.id);
+      const page = await createTestWikiPage({ authorEmail: editor.email, namespace: "person", name: `${name} page`, visibility: "PRIVATE" });
+      made.push(page.id);
+      const moveDoc = (sessionRole?: "EDITOR") =>
+        moveDocAs({ actorEmail: editor.email, sessionRole, docId: doc.id, namespace: "commons", name: `${name} doc`, visibility: "PUBLIC" });
+      const movePage = (sessionRole?: "EDITOR") =>
+        moveWikiPageAs({ actorEmail: editor.email, sessionRole, docId: page.id, to: { namespace: "commons", name: `${name} page` }, visibility: "PUBLIC" });
+      await setTestUserRole(editor.email, "AUTHOR");
+      expect(await create(editor.email, "late", "PUBLIC", "EDITOR")).toEqual(EDITORS_ONLY);
+      expect(await fork(editor.email, "late fork", "person", "EDITOR")).toEqual(EDITORS_ONLY);
+      expect(await moveDoc("EDITOR")).toEqual(EDITORS_ONLY);
+      expect(await movePage("EDITOR")).toEqual(EDITORS_ONLY);
+      expect(await findTestWikiPageId(editor.email, `${name} late`)).toBeNull();
+      expect(await findTestWikiPageId(editor.email, `${name} late fork`)).toBeNull();
+      expect(await getTestWikiFacts(doc.id)).toMatchObject({ wikiName: null, visibility: "PRIVATE" });
+      expect(await getTestWikiFacts(page.id)).toMatchObject({ wikiName: `${name} page`, visibility: "PRIVATE" });
+      expect(await findTestWikiPageId(null, `${name} page`)).toBeNull();
+
+      // An EDITOR again, each move takes the PUBLIC it asks for,
+      await setTestUserRole(editor.email, "EDITOR");
+      expect(await moveDoc()).toMatchObject({ ok: true });
+      expect(await getTestWikiFacts(doc.id)).toMatchObject({ wikiName: `${name} doc`, visibility: "PUBLIC" });
+      expect(await movePage()).toMatchObject({ ok: true });
+      expect(await getTestWikiFacts(page.id)).toMatchObject({ wikiName: `${name} page`, visibility: "PUBLIC" });
+      // and a page that is PUBLIC stays so through a move that asks for nothing.
+      expect(await moveWikiPageAs({ actorEmail: editor.email, docId: page.id, to: { namespace: "person", name: `${name} page` } })).toMatchObject({ ok: true });
+      expect((await getTestWikiFacts(page.id)).visibility).toBe("PUBLIC");
+    } finally {
+      for (const id of made.reverse()) await deleteTestDoc(id);
+    }
+  });
+
+  test("the forms offer PUBLIC to an ADMIN and not to an AUTHOR, and /wiki/new's action refuses an AUTHOR who sends it anyway", async ({
+    page,
+    secondUser,
+  }) => {
+    const { user: author, page: authorPage } = await secondUser({ role: "AUTHOR" });
+    const name = `E2E Offered ${stamp()}`;
+    const parent = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: `${name} parent`, visibility: "SHARED", bodyText: "Fork me." });
+    const mover = await createTestDoc({ authorEmail: ADMIN_EMAIL, title: `${name} mover`, visibility: "PRIVATE", bodyText: "Move me." });
+    const values = (select: ReturnType<Page["getByLabel"]>) => select.locator("option").evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));
+    try {
+      // /wiki/new, as each.
+      await authorPage.goto("/wiki/new");
+      expect(await values(authorPage.getByLabel("Who can read it"))).toEqual(["PRIVATE", "SHARED"]);
+      await expect(authorPage.getByText(PUBLIC_NOTE)).toHaveCount(0);
+      await page.goto("/wiki/new");
+      expect(await values(page.getByLabel("Who can read it"))).toEqual(["PRIVATE", "SHARED", "PUBLIC"]);
+      await expect(page.getByText(PUBLIC_NOTE)).toBeVisible();
+      await page.getByRole("radio", { name: "The commons" }).click();
+      expect(await values(page.getByLabel("Who can read it"))).toEqual(["SHARED", "PUBLIC"]);
+
+      // The Fork dialog, into a namespace.
+      await authorPage.goto(`/doc/${parent.slug}`);
+      await openDocActions(authorPage);
+      await docActionsMenu(authorPage).getByRole("button", { name: "Fork…" }).click();
+      const theirs = authorPage.getByRole("dialog", { name: "Fork this doc" });
+      await theirs.getByRole("radio", { name: /^Your wiki pages/ }).click();
+      expect(await values(theirs.getByLabel("Who can read it"))).toEqual(["PRIVATE", "SHARED"]);
+      await page.goto(`/doc/${parent.slug}`);
+      await openDocActions(page);
+      await docActionsMenu(page).getByRole("button", { name: "Fork…" }).click();
+      const mine = page.getByRole("dialog", { name: "Fork this doc" });
+      await mine.getByRole("radio", { name: /^Your wiki pages/ }).click();
+      expect(await values(mine.getByLabel("Who can read it"))).toEqual(["PRIVATE", "SHARED", "PUBLIC"]);
+
+      // "Move into the wiki…", a PRIVATE doc into the commons, which only an ADMIN or EDITOR is offered at all.
+      await page.goto(`/doc/${mover.slug}`);
+      await openDocActions(page);
+      await docActionsMenu(page).getByRole("button", { name: "Move into the wiki…" }).click();
+      const move = page.getByRole("dialog", { name: "Move into the wiki" });
+      await move.getByRole("radio", { name: "The commons" }).click();
+      expect(await values(move.getByLabel("Who can read it"))).toEqual(["SHARED", "PUBLIC"]);
+
+      // A form is sent whatever its sender likes: PUBLIC from an AUTHOR is
+      // refused by the action, in words, and no page is made.
+      await authorPage.goto("/wiki/new");
+      await authorPage.getByLabel("Name").fill(name);
+      await authorPage.getByLabel("Who can read it").evaluate((select) => {
+        const option = document.createElement("option");
+        option.value = "PUBLIC";
+        option.textContent = "PUBLIC";
+        select.append(option);
+        (select as HTMLSelectElement).value = "PUBLIC";
+      });
+      await authorPage.getByRole("button", { name: "Create page" }).click();
+      await expect(authorPage.getByText("Only an ADMIN or EDITOR can make a page PUBLIC.")).toBeVisible();
+      expect(await findTestWikiPageId(author.email, name)).toBeNull();
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await authorPage.goto("about:blank").catch(() => {});
+      await deleteTestDoc(parent.id);
+      await deleteTestDoc(mover.id);
     }
   });
 });

@@ -36,7 +36,7 @@ export default async function NewWikiPageRoute({
     <main className={styles.main}>
       <h1>New wiki page</h1>
       <NewWikiPageForm
-        viewerId={session.user.id}
+        viewer={{ id: session.user.id, role: session.user.role }}
         person={namespaces.person && { id: namespaces.person.id, slug: namespaces.person.slug }}
         personRefusal={namespaces.personRefusal}
         commons={namespaces.commons}

@@ -4,6 +4,7 @@ import { useActionState, useState, type RefObject } from "react";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import { moveWikiPageAction, previewWikiMoveAddressAction, type WikiClaimState } from "@/app/actions/wiki";
 import { PUBLIC_VISIBILITY_NOTE } from "@/lib/doc-visibility";
+import { canMakePagesPublic } from "@/lib/role-checks";
 import { ClaimError, NameFields, nameFieldsOk, ownerOf, useDefaultAddress, type WikiNamespace, type WikiNamespaces } from "./wiki-dialog-parts";
 import styles from "@/components/DocActionsMenu.module.css";
 
@@ -24,7 +25,9 @@ type Where = WikiNamespace | "out";
  * "Move…" on a wiki page: to the other namespace its mover may take it to,
  * under a name (its own by default) and a variant, or out of the wiki, as a
  * doc. A `PRIVATE` page entering the commons is asked for `SHARED` or
- * `PUBLIC`, and a `PUBLIC` page leaving the wiki for `SHARED` or `PRIVATE`;
+ * `PUBLIC`, `PUBLIC` being offered to a viewer who may make pages public
+ * (canMakePagesPublic), and a `PUBLIC` page leaving the wiki for `SHARED` or
+ * `PRIVATE`;
  * every other move keeps the page's visibility. The front page says that
  * moving it takes the preamble off the landing page. The action lands on the
  * page at its new address, or on the doc.
@@ -63,6 +66,7 @@ export default function MoveWikiPageDialog({
   const preview = useDefaultAddress(previewWikiMoveAddressAction, namespace, name, open && variant.trim() === "");
   const asksVisibility = (where === "commons" && pageVisibility === "PRIVATE") || (where === "out" && pageVisibility === "PUBLIC");
   const ready = where === "out" || nameFieldsOk(name, variant);
+  const offersPublic = canMakePagesPublic(namespaces.viewer.role);
 
   return (
     <dialog ref={dialogRef} className={styles.dialog} aria-labelledby="move-wiki-page-title" onClose={onClose}>
@@ -120,7 +124,7 @@ export default function MoveWikiPageDialog({
                 Who can read it
                 <select name="visibility" value={visibility} onChange={(e) => setVisibility(e.target.value as DocVisibility)}>
                   <option value="SHARED">SHARED: everyone who can read docs here</option>
-                  <option value="PUBLIC">PUBLIC: anyone, signed out included</option>
+                  {offersPublic && <option value="PUBLIC">PUBLIC: anyone, signed out included</option>}
                 </select>
               </label>
               <p className={styles.note}>

@@ -4,6 +4,7 @@ import { useActionState, useState, type RefObject } from "react";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import { moveDocIntoWikiAction, previewWikiMoveAddressAction, type WikiClaimState } from "@/app/actions/wiki";
 import { PUBLIC_VISIBILITY_NOTE } from "@/lib/doc-visibility";
+import { canMakePagesPublic } from "@/lib/role-checks";
 import {
   ClaimError,
   defaultWikiName,
@@ -25,8 +26,9 @@ const initialState: WikiClaimState = {};
  * rules' normal form, edited where they refuse it) and a variant, empty
  * unless the address is taken, and then `2`, `3`, …, since there is no parent
  * to name. A `PRIVATE` doc moving into the commons, which is never
- * `PRIVATE`, is asked for `SHARED` or `PUBLIC`; every other move keeps the
- * doc's visibility. The action lands on the page at its address.
+ * `PRIVATE`, is asked for `SHARED` or `PUBLIC`, `PUBLIC` being offered to a
+ * viewer who may make pages public (canMakePagesPublic); every other move
+ * keeps the doc's visibility. The action lands on the page at its address.
  */
 export default function MoveIntoWikiDialog({
   dialogRef,
@@ -54,6 +56,7 @@ export default function MoveIntoWikiDialog({
 
   const preview = useDefaultAddress(previewWikiMoveAddressAction, where, name, open && variant.trim() === "");
   const asksVisibility = where === "commons" && docVisibility === "PRIVATE";
+  const offersPublic = canMakePagesPublic(namespaces.viewer.role);
 
   return (
     <dialog ref={dialogRef} className={styles.dialog} aria-labelledby="move-into-wiki-title" onClose={onClose}>
@@ -87,7 +90,7 @@ export default function MoveIntoWikiDialog({
                   Who can read it
                   <select name="visibility" value={visibility} onChange={(e) => setVisibility(e.target.value as DocVisibility)}>
                     <option value="SHARED">SHARED: everyone who can read docs here</option>
-                    <option value="PUBLIC">PUBLIC: anyone, signed out included</option>
+                    {offersPublic && <option value="PUBLIC">PUBLIC: anyone, signed out included</option>}
                   </select>
                 </label>
                 <p className={styles.note}>

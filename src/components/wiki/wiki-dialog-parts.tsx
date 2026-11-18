@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import type { Role } from "@/generated/prisma/enums";
 import type { WikiAddressPreview } from "@/lib/wiki-fork";
 import { isWikiVariant, wikiPagePath, type WikiOwner } from "@/lib/wiki-address";
 import { checkWikiName } from "@/lib/wiki-name";
@@ -17,10 +18,11 @@ export type WikiNamespace = "person" | "commons";
 /**
  * Where a viewer may put a page, as wikiNamespacesFor answers it on the
  * server: their own namespace (null, with the reason, when they may not) and
- * the commons for an ADMIN or EDITOR.
+ * the commons for an ADMIN or EDITOR. `viewer` is who is asking, whose role
+ * decides whether a dialog offers `PUBLIC` (canMakePagesPublic).
  */
 export type WikiNamespaces = {
-  viewerId: string;
+  viewer: { id: string; role: Role };
   person: { slug: string } | null;
   personRefusal: string | null;
   commons: boolean;

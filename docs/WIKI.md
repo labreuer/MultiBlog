@@ -45,6 +45,16 @@ most of what the specs make. CLAUDE.md points here and holds none of it.
   `FILE_VISIBILITIES` in a file's, and check a value against `allowedVisibilities` where it is
   accepted. A literal `"PRIVATE" | "SHARED"` type is the harmless kind: `tsc` refuses it.
   ("`PUBLIC` outside the wiki's routes".)
+- **A new page's visibility checked with `allowedVisibilities`.** That function takes a doc
+  that exists, with the value it has, and keeps `PUBLIC` on a page that already is `PUBLIC` for
+  a viewer who couldn't make it so. Handed the value a create or a fork asks for, it would
+  accept an AUTHOR's `PUBLIC`. A page being made asks `newPageVisibilities`, which has no value
+  to keep ("`PUBLIC` outside the wiki's routes").
+- **A raise to `PUBLIC` allowed on the actor's role alone.** The role an `Actor` carries from a
+  browser is its session's, which can be five minutes behind its account. Every write that can
+  make something `PUBLIC` asks `requireCanMakePublic` inside its transaction, which reads the
+  actor's row ("Permissions"). A page that keeps `PUBLIC` through a move or a restore is not a
+  raise.
 - **The edit rule restated.** `SHARED && canEditAnySharedDoc(role)` inline gives an ADMIN or
   EDITOR a person's page, which has no bypass. Ask `canEditDocRow` of a row in hand, and
   `editableDocsWhere` as a filter; `wikiName: null` belongs in `editableDocsFor` alone, since
@@ -778,7 +788,7 @@ out of the wiki, with the title as its text, which for a wiki page is its name.
 | Move a doc into | `x`, for a doc x can edit and is on the byline of, with a slug not made from their email | ADMIN or EDITOR on its byline, for a doc they can edit; a `PRIVATE` one is made `SHARED` or `PUBLIC` in the move |
 | Rename within the namespace | its byline | its byline, plus ADMIN and EDITOR; to a held name, ADMIN or EDITOR alone (below) |
 | Move to another namespace, or out | `x` alone ("Renaming") | ADMIN or EDITOR on its byline |
-| Change visibility | `x` may raise it; its byline and ADMIN may lower it (`allowedVisibilities`, below) | as for any doc, within `allowedVisibilities` |
+| Change visibility | `x` may raise it, and to `PUBLIC` only as an ADMIN or EDITOR; its byline and ADMIN may lower it (`allowedVisibilities`, below) | as for any doc, within `allowedVisibilities`; to `PUBLIC`, an ADMIN or EDITOR alone |
 | Delete or restore | `x` alone | as for any doc: its byline, plus ADMIN and EDITOR; restoring to a held name, ADMIN or EDITOR alone |
 
 PERMISSIONS.md gains these as tables of its own after its doc tables, with main's "See history"
@@ -852,7 +862,8 @@ once, as **`canEditDocRow`** in `src/lib/doc-authz.ts`, which skips the role bra
 it, since MCP's `manage` calls `setDocByline`, `setDocVisibility` and `setDocDeleted` directly
 (`src/lib/mcp/tools/manage.ts`), and a rule in an action would bind the editor and `/docs` and not
 MCP. So these all live in those three functions: the owner staying on the byline; the owner alone
-raising and deleting; `allowedVisibilities`; ADMIN's lowering; a restore's next free variant; and,
+raising and deleting; `allowedVisibilities`; who may make a page `PUBLIC`; ADMIN's lowering; a
+restore's next free variant; and,
 with renaming, a deleted page's history rows. **Each checks its rules under the doc's row lock**
 (`lockDoc`, "Moving a doc into the wiki"): it locks the row first, in its transaction, and only
 then asks `canEditDocRow` and its own rules, which read the address columns under the lock.
@@ -879,12 +890,56 @@ owner's name, since the public render names the owner alone.
 judged by their account as it is now. `setDocVisibility` and `setDocDeleted` accept a raise, a
 delete or a restore only from the owner, and only after reading the owner's row again through the
 filtered `prisma` and finding a live person who holds `canManageDocs` (`ownerWhoCanAct`). The
-actor's role isn't enough: a browser session is a JWT that keeps the role it was signed in with,
-and outlives a deleted account (src/app/sign-in/NOTES.md). Creating, forking, moving and renaming
+actor's role isn't enough: a browser session is a JWT that reads its account again only every
+five minutes, and until it does it keeps the role of an account since demoted or deleted
+(src/app/sign-in/NOTES.md). Creating, forking, moving and renaming
 into `@x` make the same read of `x`'s row, inside their transactions, and run the email-slug test
 on it. An owner whose account is deleted, or whose role drops below AUTHOR, loses all of these at
 once, and they pass to nobody. That is what makes an ADMIN's lowering stick: an ADMIN whose
 takedown keeps being undone demotes the owner, and the re-read makes that hold at once.
+
+**Making a page `PUBLIC` is an ADMIN's or EDITOR's.** `PUBLIC` puts a page in front of anyone
+signed out, which is publishing, and PLAN.md §38 plans the same rule for publishing a post.
+
+- **`canMakePagesPublic(role)`, in `src/lib/role-checks.ts`, is ADMIN and EDITOR.** It is stated
+  apart from the predicates that hold the same two roles, for the reason that file keeps its
+  pairs apart.
+- **What is offered goes by the viewer's role.** `allowedVisibilities` and `newPageVisibilities`
+  ("`PUBLIC` outside the wiki's routes") take the viewer's role with their id, and every select
+  takes its options from one of them: the Settings panel, the wiki table's and `/docs`' cells
+  and bulk actions, `/wiki/new` and the Fork dialog. The two move dialogs offer `PUBLIC` by the
+  same predicate.
+  - **A commons page:** `SHARED`, plus `PUBLIC` for an ADMIN or EDITOR.
+  - **A person's page, for its owner:** all three for an owner who is an ADMIN or EDITOR, and
+    `PRIVATE` and `SHARED` for one who isn't.
+  - **A page that already is `PUBLIC`** shows `PUBLIC` to whoever may set its visibility, so
+    the select holds its value and they can lower it. Once lowered, it is theirs to raise only
+    with the role.
+- **Every write that can raise something to `PUBLIC` asks `requireCanMakePublic`**
+  (`src/lib/wiki-claim.ts`), inside its transaction:
+  - `setDocVisibility`, which the editor, the tables and MCP's `manage` reach;
+  - `createWikiPage` and `forkIntoWiki`, for a page made `PUBLIC` (`verifyNewPage`);
+  - `moveDocIntoWiki` and `moveWikiPage`, for a `PRIVATE` doc or page that enters the commons
+    as `PUBLIC` (`visibilityEnteringCommons`).
+
+  It asks `canMakePagesPublic` twice: of the role the actor came with, and of the role their row
+  holds at that moment, on a live account. The row is read because a session can still hold a
+  role its account has lost, as `ownerWhoCanAct` reads the owner's: without it, a demoted
+  EDITOR could go on making pages public until their session next read its account. Both are
+  asked, so a session that hasn't caught up with a promotion is refused as its select, which
+  offered no `PUBLIC`, would have it. The refusal says only an ADMIN or EDITOR can make a page
+  `PUBLIC`.
+- **A page that keeps `PUBLIC` is not raised.** A `PUBLIC` page moved to another namespace
+  stays `PUBLIC`, and restoring a deleted `PUBLIC` page brings it back `PUBLIC`, as restoring a
+  deleted post brings it back published.
+- **The owner keeps the say over their own page.** An ADMIN or EDITOR gains no raise of someone
+  else's page: a person's page has no ADMIN/EDITOR bypass (above), and publishing a person's
+  words without them is what that rule is there to prevent.
+- **So an AUTHOR's pages go as far as `SHARED`.** Their route to the public is an editor forking
+  the page into the commons and making the fork `PUBLIC`: forking into the commons is an ADMIN's
+  or EDITOR's, from a page they can read, and the family line keeps the link to the original.
+  A request an owner could make of an editor, the counterpart of a post's draft, is deferred.
+- **Lowering, deleting and restoring ask nothing of it.**
 
 **ADMIN may lower a person's page's visibility, and do nothing else to it**, the counterpart of an
 ADMIN unpublishing any post. It is reached from the wiki table's Visibility cell and from MCP's `manage`;
@@ -931,15 +986,25 @@ keeps the file side's comparisons correct as they are; its selects offer `FILE_V
 raw SQL, view, trigger or collab-server code names a visibility value.
 
 **Which values a doc may take is one function, `allowedVisibilities(doc, viewer)`**, pure and
-browser-safe, in `src/lib/doc-visibility.ts`. The Settings panel, and the wiki table's and
-`/docs`' cells and bulk actions, take their options from it, and `setDocVisibility` validates
-against it, so what is offered and what is accepted can't differ:
+browser-safe, in `src/lib/doc-visibility.ts`. The viewer is their id and their role. The
+Settings panel, and the wiki table's and `/docs`' cells and bulk actions, take their options
+from it, and `setDocVisibility` validates against it, so what is offered and what is accepted
+can't differ:
 
 - `PRIVATE` and `SHARED` for a doc that isn't a wiki page;
-- `PUBLIC` as well for a wiki page;
+- `PUBLIC` as well for a wiki page, for a viewer with `canMakePagesPublic`; anyone else gets
+  `PUBLIC` only on a page that already is `PUBLIC` ("Permissions");
 - no `PRIVATE` for a commons page;
 - on a person's page, for anyone but its owner (a co-author, or an ADMIN lowering it), only its
-  current value and those below it.
+  current value and those below it, whatever their role.
+
+**A page being made asks `newPageVisibilities(owner, viewer)`, beside it.** `/wiki/new`, the
+Fork dialog, `createWikiPage` and `forkIntoWiki` have no page yet, only the namespace it will
+be in and the value asked for. `allowedVisibilities` takes the value a doc has and keeps
+`PUBLIC` where it finds it, so given the value asked for it would grant `PUBLIC` to anyone who
+asked. `newPageVisibilities` takes no value: `PUBLIC` is there for a viewer with
+`canMakePagesPublic` and for nobody else, and a namespace that isn't the viewer's own or the
+commons takes nothing.
 
 A bulk action offers the values some applicable row allows, and drops the rows a value
 isn't allowed for: the `wiki` branch's `allows(row, value)` in `BulkToolbar.tsx`, ported with
@@ -951,6 +1016,9 @@ understands wiki addresses ("Deferred").
 **A fork's visibility is its own, whatever its parent's**, as FORKS.md decided for every fork.
 
 ## Public pages
+
+**Making a page `PUBLIC` is an ADMIN's or EDITOR's choice** ("Permissions"), and on a person's
+page its owner's as well. What follows is what that choice publishes.
 
 **A signed-out reader of a `PUBLIC` page gets a static render**, and so does a signed-in one
 without `canViewDocs`. Its body is `prose_json` through `docJsonForPostSide`
@@ -996,7 +1064,8 @@ since a mention's label and a citation's change without the doc changing ("Defer
 - **Link text**: the editor's link picker writes the linked doc's title as a link's text, a wiki
   page's name included ("Labels"), so a link to a private doc puts that doc's title on a public
   page.
-  Choosing `PUBLIC` says so beside the choice, in the Settings panel and every dialog.
+  Choosing `PUBLIC` says so beside the choice, in the Settings panel and every dialog, wherever
+  `PUBLIC` is offered and nowhere else.
 
 **A public page's links lead where they lead.** A link to `/link/`, `/pdf/` or `/files/` sends a
 signed-out reader to sign in, since those routes are gated and a file is never `PUBLIC`. A `/doc/`
@@ -1180,7 +1249,8 @@ it is asked for docs, so its results don't change.
 - **a name**, which is the page's title, checked by the rules as it is typed ("What a name may
   hold"), with the rules' messages;
 - **a variant**, empty unless typed;
-- **a visibility**, defaulting to `PRIVATE` in your namespace and `SHARED` in the commons.
+- **a visibility**, defaulting to `PRIVATE` in your namespace and `SHARED` in the commons, with
+  `PUBLIC` offered to an ADMIN or EDITOR (`newPageVisibilities`).
 
 The 404's offer ("Requests and responses") opens it with the missing address filled in.
 
@@ -1195,6 +1265,8 @@ the lock in.
 
 - **Into your own namespace, it reads your row afresh first**, inside its transaction, as
   raising does ("Permissions").
+- **A page made `PUBLIC` has its creator's role read there too** (`verifyNewPage`), since that
+  is making a page public ("Permissions").
 - **A taken address is refused**, "that address is taken", with a link to the page there. The
   address was typed, and a variant picked for the creator would make a second page where they
   may have meant to reach the first. The link reveals nothing, since whoever may create in a
@@ -1221,7 +1293,7 @@ already one interactive transaction, so:
   fragment, the slug before the transaction opens, and a fork's fragment is its parent's title
   at the forked version, so the option replaces the source of both;
 - **`visibility` must be passed for the commons**, since the default, `PRIVATE`, fails
-  `doc_commons_not_private`. The caller checks the value against `allowedVisibilities`, as
+  `doc_commons_not_private`. The caller checks the value against `newPageVisibilities`, as
   `forkDoc` checks its own: the create checks nothing (its comment says so).
 
 `createInTransaction` is left as it is on main: it stamps no update id, and `loadDocStateNow`
@@ -1246,7 +1318,8 @@ behind `canUserSeeDocHistory` and then `isDocVersion`, a parent with no log; and
   other unreadable doc. Its select gains `wikiName` for that. The wiki's other routes answer an
   unreadable wiki doc as a missing one wherever it is looked up, and the fork's answer would
   otherwise be the one place to confirm one exists.
-- **`PUBLIC` is allowed**, by `allowedVisibilities` for the target. Main's `forkDoc` refuses it
+- **`PUBLIC` is allowed, to an ADMIN or EDITOR**, by `newPageVisibilities` for the target, and
+  by their row inside the create's transaction ("Permissions"). Main's `forkDoc` refuses it
   by name, and keeps refusing it: a fork that isn't a wiki page can't hold it. The visibility
   defaults to `PRIVATE` in your namespace and `SHARED` in the commons, whatever the parent's.
 - **The name defaults to the parent's**, or for a parent that isn't a wiki page to its title,
@@ -1309,7 +1382,8 @@ is taken, and then `2`, `3`, …, since there is no parent to name. Then:
   move takes from the doc's authors the choice of `PRIVATE` and of publishing it as a post, so
   one of them makes it: an author who wants their doc in the commons adds an ADMIN or EDITOR to
   its byline. A commons page is never `PRIVATE`, so the dialog asks for `SHARED` or `PUBLIC`
-  when the doc is `PRIVATE`, and the move sets it.
+  when the doc is `PRIVATE`, and the move sets it. `PUBLIC` there is a raise, so the move reads
+  the mover's role again under its lock (`requireCanMakePublic`, "Permissions").
 - **The visibility, the address and the title are one `UPDATE`.** A CHECK is checked on every
   statement, never deferred to the commit, so for a move to `PUBLIC` the address written first
   fails `doc_commons_not_private`, and `PUBLIC` set first fails `doc_public_only_wiki`. The
@@ -1364,8 +1438,9 @@ on a doc it becomes:
   unreadable parent as the fork would, before saying anything about the address.
 - **"Move into the wiki…" needs a post count of its own**, deleted posts included, since the
   page's list of posts leaves deleted ones out.
-- **Choosing `PUBLIC` says so beside the choice**, in every dialog and the Settings panel, as
-  the link text a public page carries goes public with it ("Public pages").
+- **Choosing `PUBLIC` says so beside the choice**, in every dialog and the Settings panel that
+  offers it, as the link text a public page carries goes public with it ("Public pages"). A
+  dialog offers it to a viewer with `canMakePagesPublic` ("Permissions").
 
 ## The family line
 
@@ -1495,8 +1570,9 @@ where this says otherwise:
   can fork the page into `@y` instead.
 - **A rename into another namespace meets that namespace's rules for moving a doc in**: into
   `@x`'s for `x` on the byline, with a slug not made from their email; into the commons, a
-  `PRIVATE` page made `SHARED` or `PUBLIC` in the same `UPDATE`. The new namespace's owner takes
-  the owner's rules, and the variant defaults as a move's does.
+  `PRIVATE` page made `SHARED` or `PUBLIC` in the same `UPDATE`, `PUBLIC` by the mover's role
+  read again there ("Permissions"). A page that is `PUBLIC` stays so. The new namespace's owner
+  takes the owner's rules, and the variant defaults as a move's does.
 - **The locks are taken in moving's and restoring's order.** A rename locks the doc's row first
   (`lockDoc`), refuses a deleted page, and reads the address it leaves under that lock. Only then
   does it take the address locks of the name it leaves and the name it takes, in key order. So
@@ -1617,10 +1693,10 @@ by an ADMIN or EDITOR on its byline ("Renaming").
 | migrations `doc_visibility_public`, `wiki_pages`, `wiki_address_history` | The enum value; the address columns, the key's function and trigger, the title mirror, their CHECKs and indexes; the history table ("Data model", "Renaming") |
 | `src/lib/wiki-name.ts` | The name's rules: normalizing and refusing, with messages. Pure and browser-safe, with its unit test |
 | `src/lib/wiki-address.ts` | Addresses: parsing and building (`wikiPagePath`), encoding, the fixed redirects, the reserved list, the held commons names, the email-slug test, the default variant sequences. Pure and browser-safe, with its unit test |
-| `src/lib/wiki-claim.ts` | The address lock, the folding helper's query, the held-name check, the variants a claim walks past, the claim itself, and `ownerWhoCanAct` |
+| `src/lib/wiki-claim.ts` | The address lock, the folding helper's query, the held-name check, the variants a claim walks past, the claim itself, and the two fresh reads of an account, `ownerWhoCanAct` and `requireCanMakePublic` |
 | `src/lib/wiki-create.ts`, `wiki-fork.ts`, `wiki-move.ts`, `wiki-rename.ts` | Creating, forking into the wiki, moving in and out, renaming: each a function taking an `Actor` |
 | `src/app/actions/wiki.ts` | Their server actions, and the dialogs' default-address previews, named apart from main's `forkDoc`, `forkDocAction` and `ForkDocState` |
-| `src/lib/doc-visibility.ts` | `isSharedOrPublic`, `sharedOrPublic()`, `allowedVisibilities`, `FILE_VISIBILITIES` |
+| `src/lib/doc-visibility.ts` | `isSharedOrPublic`, `sharedOrPublic()`, `allowedVisibilities`, `newPageVisibilities`, `FILE_VISIBILITIES` |
 | `src/lib/doc-authz.ts` | `canEditDocRow`; the carve-out in `editableDocsWhere`; `canReadWikiDoc` and `readableWikiDocsWhere` |
 | `src/lib/doc-manage.ts` | `lockDoc`, and the byline, visibility and deletion rules checked under it |
 | `src/lib/doc-create.ts`, `doc-fork.ts`, `doc-family.ts`, `diff-pair.ts` | main's, gaining the `wiki` option, a wiki parent's name as its fork's title, "Same name" and a null viewer, and the wiki doc's not-found and address |
@@ -1690,8 +1766,9 @@ names replace slugs.
   `%20`, runs of `_`, `_` at an end, a decomposed accent and a bidi mark each answered with the
   canonical path; uppercase in the owner, the variant and a sub-path lowercased, never in the
   name; a path needing two redirects answered in one; the default sequences; the email-slug test.
-- `allowedVisibilities`: each kind of doc, and on a person's page the owner's values, a
-  co-author's and an ADMIN's.
+- `allowedVisibilities`: each kind of doc under each role, and on a person's page the owner's
+  values, a co-author's and an ADMIN's; `newPageVisibilities`: a page being made, which keeps no
+  `PUBLIC` for a viewer without the role.
 - A Markdown round trip of a doc linking to a name with parentheses, both export forms.
 - `src/lib/mcp/url.test.ts`: a page's address parsed, with a variant, `/edit`, a fragment, an
   encoded name and an absolute URL; `/wiki` and a namespace list refused.
@@ -1716,6 +1793,14 @@ changed. Ported:
   taken; an AUTHOR on a commons page's byline refused renaming it `ABOUT` or `Front Page~x` and
   refused restoring a deleted `About`, an EDITOR allowed each, and `/wiki/@x/About` allowed its
   owner.
+- **Making a page `PUBLIC`**: an AUTHOR who owns a page offered `PRIVATE` and `SHARED` in
+  Settings and the wiki table, refused by `setDocVisibility`, and able to lower a page that is
+  `PUBLIC` but not to put it back; an EDITOR who owns one offered `PUBLIC`, making it public and
+  read signed out; an AUTHOR on a commons page's byline refused the raise; a session whose
+  account has been demoted refused, and one behind a promotion refused; creating, forking and
+  both moves into the commons refused as `PUBLIC` to an AUTHOR and to a demoted EDITOR's
+  session, with nothing written; `/wiki/new` and the dialogs offering `PUBLIC` by role, and
+  `/wiki/new`'s action refusing an AUTHOR who sends it anyway.
 - **Addresses**: a page at its address; the `common`, uppercase and canonical-spelling 308s for
   everyone; the case and old-address 307s for readers only, keeping the sub-path and the query,
   and one hop for `/wiki/COMMONS/NAME`; the old user slug 307; `/doc/<id|slug|old slug>` 307s
@@ -1737,9 +1822,9 @@ changed. Ported:
   one) with a link; a nameless
   account refused its namespace and allowed the commons as an EDITOR; the 404's offer to the owner
   and to an EDITOR in the commons, with the name encoded.
-- **Forking**: `PUBLIC` allowed into the wiki and refused for a doc; a wiki page forked as a
-  doc, titled with its current name after a rename and publishable; an unreadable wiki parent
-  not found; the variant defaulting to a `PUBLIC`
+- **Forking**: `PUBLIC` allowed into the wiki, to an ADMIN, and refused for a doc; a wiki page
+  forked as a doc, titled with its current name after a rename and publishable; an unreadable
+  wiki parent not found; the variant defaulting to a `PUBLIC`
   parent's owner slug, else `2`, skipping reserved rows; a typed taken variant refused; two claims
   of `Apple` and `apple` at once at the first two free addresses; a fork to its parent's own
   name racing the parent's rename, neither ended as a deadlock; a demoted session refused.
@@ -1943,57 +2028,6 @@ building the claims after the history table means writing each once.
 instance's preamble down until then. Main's rule stays until then, hole and all ("The front
 page"), by decision: a narrower one in PR 0 would be written to be deleted.
 
-## Planned: making a page `PUBLIC` becomes an editor's
-
-**Not built.** Planned 2026-11-18, in the first PR of docs/EMAIL.md §10's build order, with the
-session's re-read of its account (`src/app/sign-in/NOTES.md`). `PUBLIC` puts a page in front of
-anyone signed out, which is publishing, and PLAN.md §38 makes publishing a post an editor's for
-the same reason.
-
-- **`canMakePagesPublic(role)`, in `src/lib/role-checks.ts`, is ADMIN and EDITOR.** It is stated
-  apart from `canPublishPosts`, for the reason that file keeps its pairs apart.
-- **`allowedVisibilities` takes the viewer's role** as well as their id, and offers `PUBLIC` to a
-  viewer without that predicate only when the page already is `PUBLIC`. So lowering it still
-  works, and the select still shows its value.
-  - **A commons page:** `SHARED`, plus `PUBLIC` for an ADMIN or EDITOR.
-  - **A person's page, for its owner:** all three for an owner who is an ADMIN or EDITOR, and
-    `PRIVATE` and `SHARED` for one who isn't.
-  - **For anyone else:** the page's value and those below it, as now.
-- **Every writer asks it with the actor's role**:
-  - `src/lib/wiki-create.ts` and `src/lib/wiki-fork.ts`, which call `allowedVisibilities`;
-  - `src/lib/wiki-move.ts`'s visibility for a doc moved in;
-  - `setDocVisibility`, which MCP's `manage` reaches too.
-
-  The five places that offer the choice pass the role in, and the `PUBLIC_VISIBILITY_NOTE`
-  shows only where `PUBLIC` is offered.
-- **A raise to `PUBLIC` reads the actor's role again**, from their row, as `ownerWhoCanAct`
-  already reads a person's page's owner. A session keeps the role it signed in with
-  (`src/app/sign-in/NOTES.md`), so without the read, a demoted EDITOR could still make pages
-  public.
-- **The owner keeps the say over their own page.** An ADMIN or EDITOR doesn't gain a raise of
-  someone else's page. A person's page has no ADMIN/EDITOR bypass ("Permissions"), and
-  publishing a person's words without them is what that rule exists to prevent.
-  - **So an AUTHOR's pages go as far as `SHARED`.** Their route to the public is an editor
-    forking the page into the commons and making the fork `PUBLIC`. Forking into the commons
-    is an ADMIN's or EDITOR's, from a page they can read, and the family line keeps the link
-    to the original.
-  - **A request an owner can make**, the counterpart of a post's draft, is deferred.
-- **Lowering, deleting and restoring are unchanged.** Restoring a deleted `PUBLIC` page keeps
-  it `PUBLIC`, putting back what someone allowed to publish published, as restoring a
-  published post does (PLAN.md §38).
-- **No page needs converting.** The wiki is on no instance yet.
-
-**Tests.** `src/lib/doc-visibility.test.ts`'s table gains the role. `e2e/wiki.spec.ts` gains
-these cases:
-- an AUTHOR owner is not offered `PUBLIC`, and `setDocVisibility` refuses it;
-- an EDITOR owner is offered it and can make the page public;
-- an AUTHOR on a commons page's byline can't raise the page.
-
-Pages the fixtures make `PUBLIC` in the database are unaffected.
-
-**Docs.** "Permissions"' table, its Change visibility row and the paragraphs on raising,
-"Public pages", and docs/PERMISSIONS.md's wiki tables.
-
 ## Open
 
 - **How the diff page shows a fork against its parent**, FORKS.md's open choice, applies to
@@ -2024,6 +2058,8 @@ Pages the fixtures make `PUBLIC` in the database are unaffected.
   control's search, search hits, the mentions-of and cited-by lists, tag pages and the MCP reads
   ("Labels"), and a doc's byline and date beside its title in the lists that show a title alone.
 - **Searching `PUBLIC` pages signed out** ("Listing wiki pages").
+- **A request to have a page made `PUBLIC`**, which an owner who isn't an ADMIN or EDITOR could
+  make of one, as a post's draft waits for an editor ("Permissions").
 
 ## Decisions
 
@@ -2098,3 +2134,8 @@ Made on 2026-11-18, after the plan's review:
 - **Main's front-page rule stays as it is until PR 4** ("Build order").
 - **The name's key is the NFC form of the fold** ("Case").
 - **A name can't end in `.rsc`** ("What a name may hold").
+
+Made on 2026-11-18, with the plan for one-off join codes (docs/EMAIL.md §10):
+
+- **Making a page `PUBLIC` is an ADMIN's or EDITOR's**, and on a person's page its owner's as
+  well, judged by a fresh read of the actor's row ("Permissions").

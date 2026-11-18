@@ -31,7 +31,7 @@ import { annotationAnchorInputs } from "@/lib/annotation-highlight-extension";
 import { entryHasVisibleContent } from "@/lib/annotation-visibility";
 import { useRegisterMarginNotesEditor } from "./margin-notes/margin-notes-context";
 import { EDITOR_SCROLL_ATTRIBUTE } from "./editor-scroll";
-import type { DocVisibility } from "@/generated/prisma/enums";
+import type { DocVisibility, Role } from "@/generated/prisma/enums";
 import styles from "./DocEditor.module.css";
 
 // PLAN.md §18f — the marker sits *beside* the document, so this floor is
@@ -81,6 +81,8 @@ type Props = {
   addressHistory: WikiAddressHistoryEntry[];
   createdAt: Date;
   userId: string;
+  /** The viewer's role, which decides whether the Settings panel offers PUBLIC (docs/WIKI.md "Permissions"). */
+  userRole: Role;
   userName: string;
   userColor: string;
   userInitials: string;
@@ -114,6 +116,7 @@ export default function DocEditor({
   addressHistory,
   createdAt,
   userId,
+  userRole,
   userName,
   userColor,
   userInitials,
@@ -489,7 +492,7 @@ export default function DocEditor({
           wiki={wiki && { name: wiki.address.name, ownerUserId: wiki.ownerUserId, path: wikiPath!, frontPage: wiki.frontPage }}
           addressHistory={addressHistory}
           onVisibilityChange={setCurrentVisibility}
-          viewerId={userId}
+          viewer={{ id: userId, role: userRole }}
           createdAt={createdAt}
           authorIds={authorIds}
           eligibleUsers={eligibleUsers}

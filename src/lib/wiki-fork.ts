@@ -1,14 +1,20 @@
 import type { DocVisibility } from "@/generated/prisma/enums";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import type { Actor } from "@/lib/actor";
-import { ApiError, forbidden, invalid } from "@/lib/api/errors";
+import { ApiError } from "@/lib/api/errors";
 import { createDocWithContent } from "@/lib/doc-create";
 import { checkForkParent, readForkSource, type ForkParent } from "@/lib/doc-fork";
-import { allowedVisibilities } from "@/lib/doc-visibility";
 import { forkSeed } from "@/lib/fork-seed";
 import { firstFreeVariant, lentVariant, wikiPagePath, type VariantDefaults, type WikiOwner } from "@/lib/wiki-address";
 import { foldWikiName, takenVariants, WikiAddressTaken } from "@/lib/wiki-claim";
-import { claimableNamespace, requireWikiName, requireWikiVariant, type WikiNamespaceChoice } from "@/lib/wiki-create";
+import {
+  claimableNamespace,
+  requireNewPageVisibility,
+  requireWikiName,
+  requireWikiVariant,
+  verifyNewPage,
+  type WikiNamespaceChoice,
+} from "@/lib/wiki-create";
 
 // docs/WIKI.md "Forking into the wiki" — main's fork (src/lib/doc-fork.ts)
 // with an address, as a function taking an Actor, which the Fork dialog's
@@ -39,26 +45,20 @@ function forkDefaults(parent: ForkParent, target: WikiOwner): VariantDefaults {
   return { kind: "fork", lent: lentVariant({ visibility: parent.visibility, owner: parent.wikiOwner }, target) };
 }
 
-/** The visibility a fork into `ownerUserId`'s namespace (null: the commons) may take, or a refusal. */
-function requireForkVisibility(actor: Actor, visibility: DocVisibility, name: string, ownerUserId: string | null): DocVisibility {
-  const allowed = allowedVisibilities({ visibility, wikiName: name, wikiOwnerUserId: ownerUserId }, actor.userId);
-  if (!allowed.includes(visibility)) throw invalid(`A page here can't be ${String(visibility)}.`);
-  return visibility;
-}
-
 /**
  * Forks a doc into the wiki: readForkSource's checks and read, in main's
  * order, then the target namespace (claimableNamespace, read afresh inside
  * the create's transaction as well), the visibility against
- * allowedVisibilities for the page it will be, then the create, which locks
+ * newPageVisibilities for the page it will be, then the create, which locks
  * the parent's row `FOR KEY SHARE` before it claims the address
  * (docs/WIKI.md "Claiming an address"). With no variant typed, the server
  * walks the fork's default sequence under the lock; a typed one that is taken
  * is refused, naming the address.
  *
- * The visibility is the forker's choice, whatever the parent's, `PUBLIC`
- * included; the commons' pages are never `PRIVATE`. Returns the fork's wiki
- * editor.
+ * The visibility is the forker's choice, whatever the parent's; `PUBLIC`
+ * is an ADMIN's or EDITOR's to choose, asked of their row again inside the
+ * transaction (verifyNewPage), and the commons' pages are never `PRIVATE`.
+ * Returns the fork's wiki editor.
  */
 export async function forkIntoWiki(actor: Actor, request: WikiForkRequest): Promise<{ id: string; path: string; editPath: string }> {
   const name = requireWikiName(String(request.name));
@@ -66,7 +66,7 @@ export async function forkIntoWiki(actor: Actor, request: WikiForkRequest): Prom
 
   const { parent, state, version } = await readForkSource(actor, request.parentId, request.revision);
   const { owner, ownerUserId } = await claimableNamespace(actor, request.namespace);
-  const visibility = requireForkVisibility(actor, request.visibility, name, ownerUserId);
+  const visibility = requireNewPageVisibility(actor, request.visibility, ownerUserId);
   const seed = forkSeed(state);
   try {
     // The title fragment is the parent's at the version, as main's fork
@@ -81,10 +81,7 @@ export async function forkIntoWiki(actor: Actor, request: WikiForkRequest): Prom
         name,
         choice: typed !== null ? { variant: typed } : { defaults: forkDefaults(parent, owner) },
         actorRole: actor.role,
-        verify: async (tx) => {
-          const now = await claimableNamespace(actor, request.namespace, tx);
-          if (now.ownerUserId !== ownerUserId) throw forbidden("Your account changed while the page was being made; try again.");
-        },
+        verify: (tx) => verifyNewPage(tx, actor, { namespace: request.namespace, ownerUserId, visibility }),
       },
     });
     const path = wikiPagePath({ owner, name, variant: created.wikiVariant });

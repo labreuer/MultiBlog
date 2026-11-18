@@ -99,6 +99,7 @@ export default async function DocEditView({ doc, user }: { doc: DocForEditing; u
               addressHistory={addressHistories.get(doc.id) ?? []}
               createdAt={doc.createdAt}
               userId={user.id}
+              userRole={user.role}
               userName={displayNameOf(user)}
               userColor={user.color}
               userInitials={user.adminInitials}

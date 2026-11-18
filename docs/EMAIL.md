@@ -295,8 +295,9 @@ once the single-row path has seen real use — TODO.md.
 - Send at sign-up (`src/app/actions/sign-up.ts`, before its existing redirect) and on
   demand from `/dashboard`, which already does a scoped `findUnique` — adding
   `emailVerified: true` to its `select` costs nothing extra. **Never bake `emailVerified`
-  into the session JWT** — it's set once at sign-in (`src/app/sign-in/NOTES.md`), so a
-  user who verifies mid-session would keep seeing a stale "please verify" notice.
+  into the session JWT** — the token reads its account only every five minutes
+  (`src/app/sign-in/NOTES.md`), so a user who verifies mid-session would keep seeing a stale
+  "please verify" notice until it did.
 - `/verify-email` stamps via an idempotent `updateMany` (`emailVerified: null` in the
   `where`), the same idempotency shape `/invite`'s click-stamping already uses.
 - A 60-second resend cooldown off the newest token's `createdAt`, the same shape as §3.
@@ -400,9 +401,9 @@ front page is (docs/WIKI.md, "Permissions" and "The front page").
 ("Build order"):
 
 - **a session that reads its account again every five minutes**, so that deleting or demoting
-  an account takes effect (`src/app/sign-in/NOTES.md`, "Planned: the session reads its account
-  again every five minutes"), with **making a wiki page `PUBLIC` made an editor's**
-  (docs/WIKI.md, "Planned: making a page `PUBLIC` becomes an editor's");
+  an account takes effect (`src/app/sign-in/NOTES.md`, "The session is a JWT, and reads its
+  account again every five minutes"), with **making a wiki page `PUBLIC` an editor's**
+  (docs/WIKI.md, "Permissions"). Both are built;
 - **commenter identities kept apart**, with every place an email meets an identity it doesn't
   belong to logged for an ADMIN to review (docs/COMMENTS.md, "Planned: identities kept apart,
   and a log of where they meet");
@@ -421,8 +422,8 @@ Read this before printing a batch for an instance. AUTHOR is a role, and these a
 - **Not posts.** Publishing is an EDITOR's (PLAN.md §38), so a post a card's account drafts
   stays off `/`, the archives and the RSS feed until an editor publishes it.
 - **Not wiki pages.** Their name gives them a namespace of their own, `/wiki/@<slug>/`, but
-  making a page `PUBLIC` is an editor's too (docs/WIKI.md, "Planned: making a page `PUBLIC`
-  becomes an editor's"), so their pages go as far as `SHARED`.
+  making a page `PUBLIC` is an editor's too (docs/WIKI.md, "Permissions"), so their pages go as
+  far as `SHARED`.
 - **References.** An AUTHOR adds works to the reference library (`canWriteReferences`), and a
   reference's page, `/references/<key>`, is public.
 - **Their author page**, `/authors/<slug>`, with their name and any avatar they upload.
@@ -443,8 +444,9 @@ Read this before printing a batch for an instance. AUTHOR is a role, and these a
 wiki page, send mail, or reach `/users`.
 
 **Stopping one:** deleting or demoting the account on `/users` reaches its session within five
-minutes (`src/app/sign-in/NOTES.md`, "Planned: the session reads its account again every five
-minutes"). An editor tab it already has open keeps its live connection until that reconnects.
+minutes (`src/app/sign-in/NOTES.md`, "The session is a JWT, and reads its account again every
+five minutes"). An editor tab it already has open keeps its live connection until that
+reconnects.
 
 ### Mistakes that fail no check
 
@@ -833,16 +835,19 @@ shortly" is the answer, and a failed send costs the card nothing (step 3).
   comments and approvals stay where they are. The collision log puts both sides' IP addresses
   in front of an ADMIN, who can merge them by hand.
 - **A card that raises an existing account's role, or trusts it.** It would be a third action
-  at `/join/<code>`, and it would meet sign-in's staleness: a raised role reaches the session
-  only after a visit to `/dashboard` (`src/app/sign-in/NOTES.md`). An ADMIN raises a role on
-  `/users`.
+  at `/join/<code>`, and it would meet the session's lag: a raised role reaches a session
+  already signed in within five minutes, or at a visit to `/dashboard`
+  (`src/app/sign-in/NOTES.md`). An ADMIN raises a role on `/users`.
 - **A batch role or a trust switch**, before any batch needs one ("The data").
 
 ### Build order
 
 **PR 1: a session that reads its account again every five minutes**
-(`src/app/sign-in/NOTES.md`'s plan), **and making a wiki page `PUBLIC` an editor's**
-(docs/WIKI.md's plan). It deploys to every instance on its own.
+(`src/app/sign-in/NOTES.md`, "The session is a JWT, and reads its account again every five
+minutes"), **and making a wiki page `PUBLIC` an editor's** (docs/WIKI.md, "Permissions"). Built
+2026-11-18. It deploys to every instance on its own, with no migration and nothing to convert:
+a session signed in before it is read again at its first request, and a page that is `PUBLIC`
+stays `PUBLIC`.
 
 **PR 2: commenter identities kept apart, and the collision log**, as docs/COMMENTS.md's plan
 describes, with `/email-collisions`. It fixes holes that are open everywhere today, and deploys

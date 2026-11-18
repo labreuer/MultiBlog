@@ -8,7 +8,14 @@ import { requestDocEdit } from "@/lib/doc-edit-client";
 import { lockDoc, type LockedDoc } from "@/lib/doc-manage";
 import { NO_CHIP_INPUTS } from "@/lib/entity-chips/types";
 import { wikiPagePath, type WikiOwner } from "@/lib/wiki-address";
-import { claimWikiAddress, foldWikiName, lockWikiName, ownerWhoCanAct, WikiAddressTaken } from "@/lib/wiki-claim";
+import {
+  claimWikiAddress,
+  foldWikiName,
+  lockWikiName,
+  ownerWhoCanAct,
+  requireCanMakePublic,
+  WikiAddressTaken,
+} from "@/lib/wiki-claim";
 import { ydocIdForDoc } from "@/lib/ydoc-names";
 import { claimableNamespace, requireWikiName, requireWikiVariant, type WikiNamespaceChoice } from "@/lib/wiki-create";
 import { previewAddress, previewOrRefusal, type WikiAddressPreview } from "@/lib/wiki-fork";
@@ -34,6 +41,21 @@ export type MoveIntoWikiRequest = {
    */
   visibility: DocVisibility | null;
 };
+
+/**
+ * The visibility a `PRIVATE` doc or page takes on entering the commons, from
+ * what the mover asked for: `SHARED` or `PUBLIC`, and `PUBLIC` only from an
+ * ADMIN or EDITOR, by their role and by their row as it is in `tx`
+ * (requireCanMakePublic). It is the one place a move can raise anything to
+ * `PUBLIC`: every other move keeps the visibility the doc or page has.
+ */
+async function visibilityEnteringCommons(tx: Prisma.TransactionClient, actor: Actor, requested: DocVisibility | null): Promise<DocVisibility> {
+  if (requested !== "SHARED" && requested !== "PUBLIC") {
+    throw invalid("A commons page is never PRIVATE: choose SHARED or PUBLIC.");
+  }
+  if (requested === "PUBLIC") await requireCanMakePublic(actor, tx);
+  return requested;
+}
 
 export const HAS_POSTS_REFUSED =
   "A doc with a post, a draft or a deleted one included, can't be moved into the wiki, since a wiki page publishes nothing. Fork it instead.";
@@ -61,7 +83,10 @@ export const HAS_POSTS_REFUSED =
  *    takes them in), a typed variant as typed and refused when taken, none as
  *    the first free of `2`, `3`, … after the page itself, since there is no
  *    parent to name;
- * 6. **the address, the title and the visibility are one UPDATE**, since a
+ * 6. a `PRIVATE` doc entering the commons takes the `SHARED` or `PUBLIC`
+ *    asked for, `PUBLIC` from an ADMIN or EDITOR alone, read afresh
+ *    (visibilityEnteringCommons);
+ * 7. **the address, the title and the visibility are one UPDATE**, since a
  *    CHECK is checked on every statement: a `PRIVATE` doc moving into the
  *    commons written address-first fails `doc_commons_not_private`, and
  *    `PUBLIC` first fails `doc_public_only_wiki`. The title is named there,
@@ -87,13 +112,10 @@ export async function moveDocIntoWiki(actor: Actor, request: MoveIntoWikiRequest
       if (now.ownerUserId !== ownerUserId) throw forbidden("Your account changed while the doc was being moved; try again.");
       if ((await tx.post.count({ where: { docId: request.docId } })) > 0) throw invalid(HAS_POSTS_REFUSED);
 
-      let visibility: DocVisibility = doc.visibility;
-      if (ownerUserId === null && doc.visibility === "PRIVATE") {
-        if (request.visibility !== "SHARED" && request.visibility !== "PUBLIC") {
-          throw invalid("A commons page is never PRIVATE: choose SHARED or PUBLIC.");
-        }
-        visibility = request.visibility;
-      }
+      const visibility =
+        ownerUserId === null && doc.visibility === "PRIVATE"
+          ? await visibilityEnteringCommons(tx, actor, request.visibility)
+          : doc.visibility;
 
       const { variant } = await claimWikiAddress(tx, actor.role, {
         ownerUserId,
@@ -246,8 +268,9 @@ function lockOrder(ownerUserId: string | null, key: string): string {
  *   to another's, since leaving `@x` is `x`'s and entering `@y` is `y`'s;
  * - **into a namespace**, under the rules for moving a doc in there
  *   (claimableNamespace, read afresh in the transaction), a `PRIVATE` page
- *   entering the commons made `SHARED` or `PUBLIC` in the same UPDATE, and the
- *   variant defaulting as a move's does;
+ *   entering the commons made `SHARED` or `PUBLIC` in the same UPDATE
+ *   (visibilityEnteringCommons), a page that is `PUBLIC` already staying so,
+ *   and the variant defaulting as a move's does;
  * - **out of the wiki**, the name written into the ydoc's title fragment
  *   through the collab server first, with no transaction open, and a `PUBLIC`
  *   page made `SHARED` or `PRIVATE` in the UPDATE that clears the address;
@@ -276,13 +299,10 @@ export async function moveWikiPage(actor: Actor, request: WikiPageMoveRequest): 
         throw invalid("The page is in that namespace already: rename it instead.");
       }
 
-      let visibility: DocVisibility = doc.visibility;
-      if (now.ownerUserId === null && doc.visibility === "PRIVATE") {
-        if (request.visibility !== "SHARED" && request.visibility !== "PUBLIC") {
-          throw invalid("A commons page is never PRIVATE: choose SHARED or PUBLIC.");
-        }
-        visibility = request.visibility;
-      }
+      const visibility =
+        now.ownerUserId === null && doc.visibility === "PRIVATE"
+          ? await visibilityEnteringCommons(tx, actor, request.visibility)
+          : doc.visibility;
 
       const from = await ownerOf(tx, doc.wikiOwnerUserId);
       const movedFrom = wikiPagePath({ owner: from, name: doc.wikiName, variant: doc.wikiVariant });

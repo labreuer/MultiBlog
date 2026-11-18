@@ -160,7 +160,7 @@ export default async function DocReadingView({
     isWikiPage: doc.wikiName !== null,
     frontPage,
     namespaces: {
-      viewerId: user.id,
+      viewer: { id: user.id, role: user.role },
       person: namespaces?.person ? { slug: namespaces.person.slug } : null,
       personRefusal: namespaces?.personRefusal ?? null,
       commons: namespaces?.commons ?? false,

@@ -2,9 +2,9 @@
 
 import { useActionState, useState } from "react";
 import Link from "next/link";
-import type { DocVisibility } from "@/generated/prisma/enums";
+import type { DocVisibility, Role } from "@/generated/prisma/enums";
 import { createWikiPageAction, type CreateWikiPageState } from "@/app/actions/wiki";
-import { allowedVisibilities, PUBLIC_VISIBILITY_NOTE } from "@/lib/doc-visibility";
+import { newPageVisibilities, PUBLIC_VISIBILITY_NOTE } from "@/lib/doc-visibility";
 import { isWikiVariant, wikiPagePath, type WikiOwner } from "@/lib/wiki-address";
 import { checkWikiName } from "@/lib/wiki-name";
 import styles from "../wiki.module.css";
@@ -16,16 +16,17 @@ const initialState: CreateWikiPageState = {};
  * it. The name is the page's title, checked by the rules as it is typed, with
  * their messages; the server checks it again. The variant is empty unless
  * typed, and the visibility starts PRIVATE in your namespace and SHARED in
- * the commons, which is never PRIVATE (allowedVisibilities).
+ * the commons, which is never PRIVATE; PUBLIC is offered to an ADMIN or
+ * EDITOR alone (newPageVisibilities).
  */
 export default function NewWikiPageForm({
-  viewerId,
+  viewer,
   person,
   personRefusal,
   commons,
   initial,
 }: {
-  viewerId: string;
+  viewer: { id: string; role: Role };
   person: { id: string; slug: string } | null;
   personRefusal: string | null;
   commons: boolean;
@@ -40,10 +41,7 @@ export default function NewWikiPageForm({
   const owner: WikiOwner = where === "person" && person ? { kind: "person", slug: person.slug } : { kind: "commons" };
   const checked = checkWikiName(name);
   const variantOk = isWikiVariant(variant);
-  const options = allowedVisibilities(
-    { visibility, wikiName: checked.ok ? checked.name : "x", wikiOwnerUserId: where === "person" ? (person?.id ?? null) : null },
-    viewerId,
-  );
+  const options = newPageVisibilities(where === "person" ? (person?.id ?? null) : null, viewer);
 
   function chooseWhere(next: "person" | "commons") {
     setWhere(next);
@@ -96,7 +94,7 @@ export default function NewWikiPageForm({
           ))}
         </select>
       </label>
-      <p className={styles.address}>{PUBLIC_VISIBILITY_NOTE}</p>
+      {options.includes("PUBLIC") && <p className={styles.address}>{PUBLIC_VISIBILITY_NOTE}</p>}
       {state.error && (
         <p className={styles.error}>
           {state.error}
