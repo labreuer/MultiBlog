@@ -852,7 +852,9 @@ async function sessionSources(): Promise<{ sources: Source[]; empty: number } | 
   if (outDir) mkdirSync(outDir, { recursive: true });
 
   // Matched by key, and for a doc imported before keys by the chat link its
-  // first block holds (see conversationToMarkdown).
+  // first block holds (see conversationToMarkdown). Never a wiki page: one
+  // moved into the wiki is no longer the importer's to update, and its title
+  // is its name (docs/WIKI.md "The name is the title").
   const byKey = new Map<string, ExistingDoc>();
   const byHref = new Map<string, ExistingDoc>();
   if (!dryRun) {
@@ -860,7 +862,7 @@ async function sessionSources(): Promise<{ sources: Source[]; empty: number } | 
       SELECT prose_json->'content'->0->'content'->0->'marks'->0->'attrs'->>'href' AS href,
              id, slug, title, prose_json AS body, imported_update_id AS "importedUpdateId",
              import_key AS "importKey", record
-        FROM doc WHERE deleted_at IS NULL`;
+        FROM doc WHERE deleted_at IS NULL AND wiki_name IS NULL`;
     for (const r of rows) {
       if (r.importKey) byKey.set(r.importKey, r);
       if (r.href) byHref.set(r.href, r);
@@ -924,12 +926,13 @@ async function markdownSources(): Promise<{ sources: Source[]; empty: number }> 
       process.exitCode = 1;
       continue;
     }
-    const keyed = await prisma.doc.findMany({ where: { importKey, deletedAt: null }, select });
+    // Never a wiki page, for the reason the chat sources' lookup gives.
+    const keyed = await prisma.doc.findMany({ where: { importKey, deletedAt: null, wikiName: null }, select });
     const docs =
       keyed.length > 0
         ? keyed
         : await prisma.doc.findMany({
-            where: { title, importKey: null, deletedAt: null, authors: { some: { userId: importer.id } } },
+            where: { title, importKey: null, deletedAt: null, wikiName: null, authors: { some: { userId: importer.id } } },
             select,
           });
     if (docs.length > 1) {
@@ -969,7 +972,7 @@ async function markEarlierRecords(): Promise<void> {
   const rows = await prisma.$queryRaw<{ id: string; slug: string; href: string | null; importKey: string | null; record: boolean }[]>`
     SELECT id, slug, prose_json->'content'->0->'content'->0->'marks'->0->'attrs'->>'href' AS href,
            import_key AS "importKey", record
-      FROM doc WHERE deleted_at IS NULL`;
+      FROM doc WHERE deleted_at IS NULL AND wiki_name IS NULL`;
   let marked = 0;
   for (const row of rows) {
     const match = row.href ? /^https:\/\/claude\.ai\/chat\/([0-9a-f-]{36})$/.exec(row.href) : null;

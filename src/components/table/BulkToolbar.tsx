@@ -43,6 +43,12 @@ export type BulkAction<T> = BulkActionBase<T> &
         // *has* that value.
         kind: "select";
         options: readonly string[];
+        // For values that differ per row (a doc's allowedVisibilities): the
+        // select then offers, in `options`' order, only the values some row
+        // the action applies to at all allows, and a value runs only on the
+        // rows that allow it. A row it isn't allowed for is dropped, as any
+        // row an action doesn't apply to is, never refused.
+        allows?: (row: T, value: string) => boolean;
         run: (ids: string[], value: string) => Promise<BulkResult>;
       }
     | {
@@ -95,9 +101,13 @@ export function BulkToolbar<T extends { id: string }>({
 
   if (selectedRows.length === 0) return null;
 
+  // Whether a row takes an action, given the value picked for a select.
+  const takes = (action: BulkAction<T>, row: T, value?: string) =>
+    action.applicableTo(row) && (action.kind !== "select" || !action.allows || action.allows(row, value!));
+
   async function handle(action: BulkAction<T>, value?: string) {
     setError(null);
-    const targetRows = selectedRows.filter(action.applicableTo);
+    const targetRows = selectedRows.filter((row) => takes(action, row, value));
     if (targetRows.length === 0) return;
     const ids = targetRows.map((r) => r.id);
 
@@ -156,6 +166,10 @@ export function BulkToolbar<T extends { id: string }>({
           return <Fragment key={action.key}>{action.render((value) => void handle(action, value), pending)}</Fragment>;
         }
         if (action.kind === "select") {
+          // Taken over the rows this applies to at all, so a value allowed
+          // only on a row it would skip anyway (a deleted one) isn't offered.
+          const applicable = selectedRows.filter((row) => action.applicableTo(row));
+          const options = action.options.filter((option) => applicable.some((row) => takes(action, row, option)));
           return (
             <label key={action.key}>
               {action.label}:{" "}
@@ -170,7 +184,7 @@ export function BulkToolbar<T extends { id: string }>({
                 }}
               >
                 <option value="">—</option>
-                {action.options.map((option) => (
+                {options.map((option) => (
                   <option key={option} value={option}>
                     {option}
                   </option>

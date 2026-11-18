@@ -47,24 +47,31 @@ export async function uniqueDocSlug(title: string, excludeDocId?: string): Promi
 // scripts), and the write below moves Doc.updatedAt regardless — see the
 // note above updateDocVisibility (src/app/actions/docs.ts).
 export async function changeDocSlug(docId: string, newSlugInput: string, updatedByUserId: string): Promise<string> {
-  const newSlug = slugify(newSlugInput, "doc");
+  return prismaIncludingDeleted.$transaction((tx) => changeDocSlugIn(tx, docId, newSlugInput, updatedByUserId));
+}
 
-  return prismaIncludingDeleted.$transaction(async (tx) => {
-    const doc = await tx.doc.findUnique({ where: { id: docId }, select: { slug: true } });
-    if (!doc) {
-      throw new Error("Doc not found.");
-    }
-    if (doc.slug === newSlug) {
-      return newSlug;
-    }
-    if (await docSlugInUse(newSlug, tx, docId)) {
-      throw new Error(`Url "${newSlug}" is already in use.`);
-    }
-    await tx.docSlugHistory.deleteMany({ where: { docId, slug: newSlug } });
-    await tx.docSlugHistory.create({ data: { docId, slug: doc.slug } });
-    await tx.doc.update({ where: { id: docId }, data: { slug: newSlug, updatedByUserId } });
+/** changeDocSlug inside a transaction the caller holds: setDocSlug's, which has locked the doc's row first (doc-manage.ts). */
+export async function changeDocSlugIn(
+  tx: Prisma.TransactionClient,
+  docId: string,
+  newSlugInput: string,
+  updatedByUserId: string,
+): Promise<string> {
+  const newSlug = slugify(newSlugInput, "doc");
+  const doc = await tx.doc.findUnique({ where: { id: docId }, select: { slug: true } });
+  if (!doc) {
+    throw new Error("Doc not found.");
+  }
+  if (doc.slug === newSlug) {
     return newSlug;
-  });
+  }
+  if (await docSlugInUse(newSlug, tx, docId)) {
+    throw new Error(`Url "${newSlug}" is already in use.`);
+  }
+  await tx.docSlugHistory.deleteMany({ where: { docId, slug: newSlug } });
+  await tx.docSlugHistory.create({ data: { docId, slug: doc.slug } });
+  await tx.doc.update({ where: { id: docId }, data: { slug: newSlug, updatedByUserId } });
+  return newSlug;
 }
 
 // Swaps a doc's slug back to its most recent past one — see

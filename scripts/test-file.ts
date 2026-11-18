@@ -37,10 +37,12 @@ import { countVersionsHolding, createFileWithFirstVersion } from "../src/lib/fil
 import { deleteBytesIfUnreferenced, storagePathFor, storeUploadStream } from "../src/lib/file-storage";
 import { extractPdf } from "../src/lib/pdf-extract";
 import { buildTestPdf } from "./make-test-pdf";
-import { DocVisibility } from "../src/generated/prisma/enums";
+import type { DocVisibility } from "../src/generated/prisma/enums";
+import { FILE_VISIBILITIES } from "../src/lib/doc-visibility";
 
 const SAFE_EMAIL = /^[\w.+-]+@example\.com$/i;
-const VISIBILITY_VALUES = Object.values(DocVisibility);
+// A file never takes PUBLIC (the file_not_public CHECK).
+const VISIBILITY_VALUES = FILE_VISIBILITIES;
 
 function parseCreateArgs(args: string[]): { title: string; visibility: DocVisibility; pages: number } {
   const titleWords: string[] = [];

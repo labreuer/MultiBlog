@@ -1,7 +1,8 @@
-import type { Role } from "@/generated/prisma/enums";
+import type { DocVisibility, Role } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canManageDocs, canViewDocs } from "@/lib/role-checks";
+import { isSharedOrPublic, sharedOrPublic } from "@/lib/doc-visibility";
 
 export { canManageDocs, canViewDocs } from "@/lib/role-checks";
 
@@ -11,6 +12,13 @@ export { canManageDocs, canViewDocs } from "@/lib/role-checks";
 //            the byline says, or by any listed author.
 //   PRIVATE  read and edit by its listed DocAuthors alone — every role,
 //            ADMIN and EDITOR included.
+//
+// PUBLIC, a wiki page's, is SHARED here: every rule below asks
+// isSharedOrPublic or sharedOrPublic() (src/lib/doc-visibility.ts). Reading
+// one signed out is the wiki's own read rule, which these functions stay
+// outside of (docs/WIKI.md, "Public pages"). And a person's wiki page has no
+// ADMIN/EDITOR bypass: canEditDocRow below states it, and editableDocsWhere
+// carries it (docs/WIKI.md, "Permissions").
 //
 // `/docs` carries a "Show all docs" checkbox (src/app/docs/page.tsx) that
 // widens what that one listing selects. It is not an argument to anything
@@ -33,7 +41,7 @@ async function isDocAuthor(docId: string, userId: string): Promise<boolean> {
 // what earns a place in that file is a client consumer — canViewDocs and
 // canManageDocs are there for SiteHeader's sake, not for being about docs.
 // Nothing in the browser asks this question, and both halves of the rule it
-// expresses (canUserEditDoc's SHARED branch and editableDocsFor's carve-out)
+// expresses (canEditDocRow's SHARED branch and editableDocsWhere's carve-out)
 // are in this file, so it belongs with them.
 //
 // The same two roles as canEditAnyPost, and deliberately *not* delegating to
@@ -45,10 +53,32 @@ export function canEditAnySharedDoc(role: Role): boolean {
   return role === "ADMIN" || role === "EDITOR";
 }
 
-// Editing: ADMIN/EDITOR edit any SHARED doc; a PRIVATE doc is editable by its
-// listed authors only. One query reads the visibility and tests author
-// membership together, which is what lets the signature take a bare `docId`
-// instead of making every call site fetch and pass the visibility too.
+/**
+ * The editing rule over a doc already read: who may edit it, given its
+ * visibility, its wiki owner and whether the user is on its byline. ADMIN and
+ * EDITOR edit any SHARED (or PUBLIC) doc whatever its byline, except a
+ * person's wiki page, whose byline alone edits it (docs/WIKI.md
+ * "Permissions"): under `/wiki/@x/` the bypass would put other people's words
+ * under x's name, and forking is how someone who disagrees changes it. A
+ * PRIVATE doc is its byline's alone.
+ *
+ * canUserEditDoc asks this after its own read, doc-manage.ts after reading the
+ * row under its lock, and the editor's gate and /docs' Edit link with the row
+ * they already hold, so the rule is stated once. editableDocsWhere below is
+ * the same rule as a filter.
+ */
+export function canEditDocRow(
+  doc: { visibility: DocVisibility; wikiOwnerUserId: string | null; isAuthor: boolean },
+  role: Role,
+): boolean {
+  if (!canManageDocs(role)) return false;
+  if (doc.wikiOwnerUserId === null && isSharedOrPublic(doc.visibility) && canEditAnySharedDoc(role)) return true;
+  return doc.isAuthor;
+}
+
+// Editing, by canEditDocRow's rule. One query reads the visibility, the wiki
+// owner and author membership together, which is what lets the signature take
+// a bare `docId` instead of making every call site fetch and pass them too.
 //
 // A soft-deleted doc answers false by default, through the filtered `prisma`,
 // and some callers have no other deletion check: creating, publishing and
@@ -68,16 +98,16 @@ export async function canUserEditDoc(
   }
   const args = {
     where: { id: docId },
-    select: { visibility: true, authors: { where: { userId }, select: { userId: true } } },
+    select: { visibility: true, wikiOwnerUserId: true, authors: { where: { userId }, select: { userId: true } } },
   } satisfies Prisma.DocFindUniqueArgs;
   const doc = opts.includeDeleted
     ? await prismaIncludingDeleted.doc.findUnique(args)
     : await prisma.doc.findUnique(args);
   if (!doc) return false;
-  if (doc.visibility === "SHARED" && canEditAnySharedDoc(role)) {
-    return true;
-  }
-  return doc.authors.length > 0;
+  return canEditDocRow(
+    { visibility: doc.visibility, wikiOwnerUserId: doc.wikiOwnerUserId, isAuthor: doc.authors.length > 0 },
+    role,
+  );
 }
 
 // Reading: canViewDocs is enough for a SHARED doc; a PRIVATE doc is readable
@@ -87,9 +117,9 @@ export async function canUserEditDoc(
 export async function canUserReadDoc(
   userId: string,
   role: Role,
-  doc: { id: string; visibility: "PRIVATE" | "SHARED" },
+  doc: { id: string; visibility: DocVisibility },
 ): Promise<boolean> {
-  if (doc.visibility === "SHARED") {
+  if (isSharedOrPublic(doc.visibility)) {
     return canViewDocs(role);
   }
   if (!canManageDocs(role)) {
@@ -141,7 +171,7 @@ export function readableDocsWhere(
   opts: { includeDeleted?: boolean } = {},
 ): Prisma.DocWhereInput | null {
   const or: Prisma.DocWhereInput[] = [];
-  if (canViewDocs(role)) or.push({ visibility: "SHARED" });
+  if (canViewDocs(role)) or.push({ visibility: sharedOrPublic() });
   if (canManageDocs(role)) or.push({ visibility: "PRIVATE", authors: { some: { userId } } });
   if (or.length === 0) return null;
   return opts.includeDeleted ? { OR: or } : { deletedByUserId: null, OR: or };
@@ -229,8 +259,11 @@ export async function searchReadableDocsFor(
 /**
  * canUserEditDoc as a `where` on Doc, for this viewer, or null for one who
  * can edit no doc: the same relationship readableDocsWhere has to
- * canUserReadDoc, above. ADMIN/EDITOR get every SHARED doc; a PRIVATE doc is
- * its byline's, for every role.
+ * canUserReadDoc, above, over canEditDocRow's rule. ADMIN/EDITOR get every
+ * SHARED doc but a person's wiki page, which is its byline's, as a PRIVATE doc
+ * is for every role. It feeds the history filter as well as the post
+ * pickers, so the family line and the fork-point exception agree with the
+ * per-row check.
  *
  * `deletedByUserId: null` is spelled out for the reason readableDocsWhere
  * gives: a relation filter goes around the soft-delete extension.
@@ -239,19 +272,22 @@ function editableDocsWhere(userId: string, role: Role): Prisma.DocWhereInput | n
   if (!canManageDocs(role)) return null;
 
   const or: Prisma.DocWhereInput[] = [{ authors: { some: { userId } } }];
-  if (canEditAnySharedDoc(role)) or.push({ visibility: "SHARED" });
+  if (canEditAnySharedDoc(role)) or.push({ visibility: sharedOrPublic(), wikiOwnerUserId: null });
   return { deletedByUserId: null, OR: or };
 }
 
 // Backs the doc picker at /posts/new and "Change doc…" on /post/[id]/edit
 // (PLAN.md §15d): only a doc its creator/publisher could open the editor for
-// is offered.
+// is offered, and no wiki page, which publishes nothing (docs/WIKI.md "Doc
+// rules a wiki page doesn't inherit"). The `wikiName: null` is here and not on
+// editableDocsWhere, which the history filter shares: there it would strip
+// every wiki page's history from the family line.
 export async function editableDocsFor(userId: string, role: Role): Promise<ReadableDoc[]> {
   const where = editableDocsWhere(userId, role);
   if (!where) return [];
 
   return prisma.doc.findMany({
-    where,
+    where: { ...where, wikiName: null },
     select: { id: true, slug: true, title: true },
     orderBy: { title: "asc" },
   });

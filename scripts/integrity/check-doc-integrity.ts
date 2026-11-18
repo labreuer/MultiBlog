@@ -41,6 +41,10 @@
 //      fragment at all and a non-empty Doc.title is a title scheduled for
 //      deletion the next time anyone opens the doc — a WARN, since nothing is
 //      corrupt yet. An ordinary difference is only reported with --verbose.
+//      A wiki page's title is its name, not the fragment's text (docs/WIKI.md
+//      "The name is the title"): the doc_mirror_wiki_name trigger writes it,
+//      so its Doc.title is checked against `wiki_name` instead, and any
+//      difference is an ERROR: nothing settles it.
 //   2. body-cache    — Doc.proseJson vs the ydoc's `default` (body) fragment,
 //      decoded exactly the way doc-cache decodes it (both call
 //      docContentFromYdoc, so they cannot disagree about the derivation).
@@ -152,7 +156,16 @@ async function main() {
   const docs = await prisma.doc.findMany({
     where: docArg ? { OR: [{ id: docArg }, { slug: docArg }] } : undefined,
     orderBy: { id: "asc" },
-    select: { id: true, slug: true, title: true, proseJson: true, proseJsonLength: true, chipStyles: true, deletedAt: true },
+    select: {
+      id: true,
+      slug: true,
+      title: true,
+      wikiName: true,
+      proseJson: true,
+      proseJsonLength: true,
+      chipStyles: true,
+      deletedAt: true,
+    },
   });
 
   if (docs.length === 0) {
@@ -176,7 +189,9 @@ async function main() {
     // ydocOnLoadDocument creates it on first connect. It is only notable if
     // the doc already has cached content, which would then have no source.
     if (!ydocRow) {
-      if (doc.title !== "" || doc.proseJson !== null) {
+      // A wiki page's title is its name, which is never empty and has no
+      // ydoc behind it to be overwritten from.
+      if ((doc.wikiName === null && doc.title !== "") || doc.proseJson !== null) {
         findings.push({
           level: "warn",
           docId: doc.id,
@@ -228,7 +243,19 @@ async function main() {
 
     // --- 1. title-cache ---------------------------------------------------
     const fragmentTitle = titleTextOf(ydoc);
-    if (fragmentTitle === null && doc.title !== "") {
+    if (doc.wikiName !== null) {
+      if (doc.title !== doc.wikiName) {
+        findings.push({
+          level: "error",
+          docId: doc.id,
+          slug: doc.slug,
+          check: "title-cache",
+          detail:
+            `Doc.title ${JSON.stringify(doc.title)} isn't the wiki page's name ${JSON.stringify(doc.wikiName)} — ` +
+            "the doc_mirror_wiki_name trigger should make them equal on every write.",
+        });
+      }
+    } else if (fragmentTitle === null && doc.title !== "") {
       findings.push({
         level: "warn",
         docId: doc.id,

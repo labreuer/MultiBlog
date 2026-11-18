@@ -63,6 +63,8 @@ type Props = {
   slug: string;
   initialTitle: string;
   visibility: DocVisibility;
+  /** The doc's wiki address columns, null for a doc that isn't a wiki page. */
+  wiki: { name: string; ownerUserId: string | null } | null;
   createdAt: Date;
   userId: string;
   userName: string;
@@ -94,6 +96,7 @@ export default function DocEditor({
   slug,
   initialTitle,
   visibility,
+  wiki,
   createdAt,
   userId,
   userName,
@@ -437,6 +440,8 @@ export default function DocEditor({
         <DocSettingsPanel
           docId={docId}
           visibility={visibility}
+          wiki={wiki}
+          viewerId={userId}
           createdAt={createdAt}
           authorIds={authorIds}
           eligibleUsers={eligibleUsers}

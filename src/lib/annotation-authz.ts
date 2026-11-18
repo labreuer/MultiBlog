@@ -1,11 +1,11 @@
-import type { Role } from "@/generated/prisma/enums";
+import type { DocVisibility, Role } from "@/generated/prisma/enums";
 import type { AnnotationStatus } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
 import { isAdmin } from "./role-checks";
 import { canUserReadDoc, readableDocsWhere } from "./doc-authz";
 import { canUserReadFile, readableFilesWhere } from "./file-authz";
 
-type Container = { id: string; visibility: "PRIVATE" | "SHARED" };
+type Container = { id: string; visibility: DocVisibility };
 
 // PLAN.md §13a/§13d — who may open a writable connection to an annotation's
 // own ydoc. Deliberately one gate, not the writable/readOnly split

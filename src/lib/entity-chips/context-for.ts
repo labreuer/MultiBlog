@@ -1,3 +1,4 @@
+import type { DocVisibility } from "@/generated/prisma/enums";
 import type { JSONContent } from "@tiptap/core";
 import type { Actor } from "@/lib/actor";
 import { canUserAccessAnnotationYdoc } from "@/lib/annotation-authz";
@@ -24,9 +25,9 @@ export type ResolvedChipTarget = {
   /** The styles the body's chips are shown in: a doc's own; none for a note, whose body has no style of its own. */
   styles: ChipStyles;
   /** The doc itself, or the doc an annotation is on. Null for a note on a PDF. */
-  doc: { id: string; visibility: "PRIVATE" | "SHARED" } | null;
+  doc: { id: string; visibility: DocVisibility } | null;
   /** The file a note on a PDF is on. Null for a doc and for a note on one. */
-  file: { id: string; visibility: "PRIVATE" | "SHARED" } | null;
+  file: { id: string; visibility: DocVisibility } | null;
 };
 
 /**

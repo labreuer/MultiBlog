@@ -1,3 +1,4 @@
+import type { DocVisibility } from "@/generated/prisma/enums";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 
@@ -29,7 +30,7 @@ export async function resolveDocParam<T extends Prisma.DocSelect>(
 // Returns what the caller needs to gate on before disclosing the current slug.
 export async function resolveDocSlugHistory(
   slug: string,
-): Promise<{ id: string; slug: string; visibility: "PRIVATE" | "SHARED"; deletedByUserId: string | null } | null> {
+): Promise<{ id: string; slug: string; visibility: DocVisibility; deletedByUserId: string | null } | null> {
   const entry = await prismaIncludingDeleted.docSlugHistory.findUnique({
     where: { slug },
     select: { doc: { select: { id: true, slug: true, visibility: true, deletedByUserId: true } } },

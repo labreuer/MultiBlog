@@ -83,6 +83,13 @@ async function create(authorEmail: string, docRef: string | null, title: string,
     process.exitCode = 1;
     return;
   }
+  // docs/WIKI.md "Doc rules a wiki page doesn't inherit": this writes a post
+  // through none of the publish actions, so it refuses a wiki page itself.
+  if (doc.wikiName !== null) {
+    console.error(`Doc "${docRef}" is a wiki page, which can't be published as a blog post.`);
+    process.exitCode = 1;
+    return;
+  }
 
   const postTitle = title || docTitleOrFallback(doc.title);
   const slug = await uniquePostSlug(postTitle);

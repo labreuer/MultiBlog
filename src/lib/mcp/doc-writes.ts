@@ -221,6 +221,15 @@ export async function editDocFor(
   input: { url: string; version?: string; edits?: EditInput[]; title?: string; settings?: DocSettingsInput },
 ): Promise<ToolResult> {
   const doc = await editableDoc(ctx, input.url);
+  // A wiki page's title is its name (docs/WIKI.md "The name is the title"):
+  // the doc_mirror_wiki_name trigger would put the name back over any title
+  // written here, and nothing on a page shows the fragment this would edit.
+  if (input.title !== undefined) {
+    const page = await prisma.doc.findUnique({ where: { id: doc.id }, select: { wikiName: true } });
+    if (page?.wikiName != null) {
+      throw invalid("This doc is a wiki page, whose title is its name; rename the page instead of setting a title.");
+    }
+  }
   // The doc as it stands: whose chips an edit may write back, and what its
   // quotes are matched against on both servers.
   const current = await loadDocState(doc.id);

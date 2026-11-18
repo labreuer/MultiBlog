@@ -351,7 +351,8 @@ async function main() {
   }
   const flag = args.indexOf("--visibility");
   const visibility = (flag === -1 ? "SHARED" : args[flag + 1]) as DocVisibility;
-  if (!["PRIVATE", "SHARED", "PUBLIC"].includes(visibility)) throw new Error(`Bad visibility: ${visibility}`);
+  // PUBLIC is a wiki page's alone (docs/WIKI.md), and this doc isn't one.
+  if (!["PRIVATE", "SHARED"].includes(visibility)) throw new Error(`Bad visibility: ${visibility}`);
   await create(visibility);
 }
 

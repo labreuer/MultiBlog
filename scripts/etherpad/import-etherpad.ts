@@ -599,7 +599,12 @@ async function main() {
   const dryRun = process.argv.includes("--dry-run");
   const replace = process.argv.includes("--replace");
   const timeout = Number(arg("timeout") ?? 900_000);
-  const visibility = asEnum(DocVisibility, arg("visibility") ?? DocVisibility.PRIVATE, "--visibility");
+  // Not PUBLIC, which is a wiki page's alone (docs/WIKI.md): these docs aren't.
+  const visibility = asEnum(
+    { PRIVATE: DocVisibility.PRIVATE, SHARED: DocVisibility.SHARED },
+    arg("visibility") ?? DocVisibility.PRIVATE,
+    "--visibility",
+  );
   const titleMode = arg("titles") === "raw" ? "raw" : "pretty";
   const indentAs = arg("indent-as") === "paragraph" ? "paragraph" : "blockquote";
   const headingAttributeRaw = arg("heading-attribute") ?? "heading";

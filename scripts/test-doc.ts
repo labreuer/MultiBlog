@@ -34,11 +34,13 @@ import { titleExtensions } from "../src/lib/tiptap-schema";
 import { docContentFromYdoc } from "../src/lib/doc-content";
 import { ydocIdForDoc, ydocIdForAnnotation } from "../src/lib/ydoc-names";
 import { ydocStore, encodeYdocState } from "../server/ydoc-store";
-import { DocVisibility } from "../src/generated/prisma/enums";
+import type { DocVisibility } from "../src/generated/prisma/enums";
 import type { Prisma } from "../src/generated/prisma/client";
 
 const SAFE_EMAIL = /^[\w.+-]+@example\.com$/i;
-const VISIBILITY_VALUES = Object.values(DocVisibility);
+// What a doc that isn't a wiki page may take (allowedVisibilities): PUBLIC is
+// a wiki page's alone, and the doc_public_only_wiki CHECK would refuse it.
+const VISIBILITY_VALUES: readonly DocVisibility[] = ["PRIVATE", "SHARED"];
 
 function parseCreateArgs(args: string[]): { title: string; visibility: DocVisibility } {
   const titleWords: string[] = [];

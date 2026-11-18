@@ -1,6 +1,7 @@
 # Wiki pages — docs with a name and an address under /wiki
 
-**Planned 2026-11-17; nothing built.** A **wiki page** is a doc in every respect
+**Planned 2026-11-17; being built in the order "Build order" gives, which says what each PR
+holds.** A **wiki page** is a doc in every respect
 [DOCS.md](DOCS.md) describes, plus an address: whose page it is, its name, and its variant.
 Its name is its title, written as people write one, `Mercury (planet)`, and its URL is made
 from it, `/wiki/commons/Mercury_(planet)`. A doc gets an address by being created under
@@ -29,6 +30,35 @@ What it does not repeat:
 | [FORKS.md](FORKS.md) | Forks, diffs, the family lines, and who may see a doc's history. |
 | [PERMISSIONS.md](PERMISSIONS.md) | Who may do what, as tables; the wiki adds its own (below, "Permissions"). |
 | [MCP.md](MCP.md) | The tools. They take a page's address wherever they take a doc's URL ("URLs"); the rest is deferred. |
+
+## Mistakes that fail no check
+
+Read these before changing code that tests or offers a doc's visibility, decides who may edit
+a doc, changes a doc's settings, or writes a doc's `title` or its `wiki_*` columns. Each
+compiles, lints and gives the right answer for every doc that isn't a wiki page, which is
+most of what the specs make. CLAUDE.md points here and holds none of it.
+
+- **A visibility compared to a literal.** `=== "SHARED"` or `{ visibility: "SHARED" }` treats
+  `PUBLIC` as `PRIVATE`: `readableDocsWhere` written that way lists a public page to nobody,
+  its author included. Ask `isSharedOrPublic` or `sharedOrPublic()`
+  (`src/lib/doc-visibility.ts`), offer `allowedVisibilities` in a doc's select and
+  `FILE_VISIBILITIES` in a file's, and check a value against `allowedVisibilities` where it is
+  accepted. A literal `"PRIVATE" | "SHARED"` type is the harmless kind: `tsc` refuses it.
+  ("`PUBLIC` outside the wiki's routes".)
+- **The edit rule restated.** `SHARED && canEditAnySharedDoc(role)` inline gives an ADMIN or
+  EDITOR a person's page, which has no bypass. Ask `canEditDocRow` of a row in hand, and
+  `editableDocsWhere` as a filter; `wikiName: null` belongs in `editableDocsFor` alone, since
+  on the shared filter it strips every page's history from the family line ("Permissions").
+- **A settings rule checked before the lock.** Each function in `doc-manage.ts` takes
+  `lockDoc` first and asks its rules of the row it returns; a check before the lock can be
+  overtaken by a move into the wiki ("Moving a doc into the wiki").
+- **A write of `wiki_name` that doesn't name `title`.** The mirror trigger puts the name in
+  `title` either way, but the search vector's trigger fires by the columns a statement names,
+  so a rename naming `wiki_name` alone leaves search on the old name ("The name is the title").
+- **A name folded anywhere but `wiki_name_key()`.** No JavaScript function agrees with
+  `casefold` (`toLowerCase` keeps `ß`), and `casefold` without `COLLATE pg_unicode_fast`
+  folds by the database's default collation, with no error. `wiki_name_key` the column is
+  written only by its trigger ("Case").
 
 ## What it is for
 
@@ -97,8 +127,8 @@ Refused:
     `Smile_:`;
   - **a name ending in `.rsc`, in any capitals**: Next takes that suffix off a path and answers
     with the page's RSC payload, so the page could never be opened. `/authors/x.rsc` answers 200
-    as `text/x-component` on `next dev` (16.2.11), where `/authors/x` is a 404; PR 1 checks a
-    production build, and the refusal stays either way;
+    as `text/x-component`, where `/authors/x` is a 404, on `next dev` and on a production build
+    alike (16.2.11), and so does `/wiki/commons/x.rsc`;
   - **a code point Unicode hasn't assigned**, by the database's Unicode (`unicode_assigned`).
     `casefold` and NFC follow the server's Unicode tables, which change at major versions, and
     Unicode freezes both only for characters already assigned. A letter assigned later with a
@@ -1770,16 +1800,30 @@ not the wiki's; the other five are its, in an order in which each deployed state
      `/users/…/slug`, and `/files/…/manage`, offers it, since `unique*Slug` passes over the
      entity's own rows. Each accepts it and consumes its row, as Revert does, and as
      `changeTagSlug` does already. A rename back to an old address does the same ("Renaming").
-1. **Names and data.** `PUBLIC`; the `wiki_pages` migration; `src/lib/wiki-name.ts` and
-   `src/lib/wiki-address.ts`, with their unit tests; the folding helper; the title mirror;
-   `doc-visibility.ts` and every visibility comparison through it; `allowedVisibilities`;
-   `canEditDocRow` and the carve-out in `editableDocsWhere`; `lockDoc` and the settings rules
-   under it; the doc rules a wiki page doesn't inherit (publishing refused), and `forkDoc` titling
-   a wiki parent's fork with its name; the integrity check's title rule; the scripts that refuse `PUBLIC`;
-   `getFrontPagePreamble` passing over wiki pages (`wikiName: null`) until PR 4 replaces its
-   rule, since the title mirror makes every page named `Front Page` a doc titled so, a `PRIVATE`
-   one in a person's namespace included. No route, and nothing in the UI offers `PUBLIC`, since
-   no doc can hold it yet.
+1. **Names and data. Built 2026-11-18.** `PUBLIC`, in a migration of its own
+   (`doc_visibility_public`); the `wiki_pages` migration; `src/lib/wiki-name.ts` and
+   `src/lib/wiki-address.ts`, with their unit tests, and the Markdown round trip
+   (`wiki-markdown.test.ts`); the folding helper, `foldWikiName`, which is all of
+   `src/lib/wiki-claim.ts` so far; the title mirror; `doc-visibility.ts` and every visibility
+   comparison through it; `allowedVisibilities`, which the Settings panel and `/docs`' cell and
+   bulk action offer (`BulkToolbar`'s `allows`), and `/files`' `FILE_VISIBILITIES`;
+   `canEditDocRow` and the carve-out in `editableDocsWhere`; `lockDoc`, under which all five of
+   `doc-manage.ts`'s functions ask `canEditDocRow` and `setDocVisibility` asks
+   `allowedVisibilities` (`setDocSlug` through `changeDocSlugIn`, in the lock's transaction);
+   the doc rules a wiki page doesn't inherit (publishing refused), and `forkDoc` titling a wiki
+   parent's fork with its name; the integrity check's title rule; the scripts that refuse
+   `PUBLIC`; `getFrontPagePreamble` passing over wiki pages (`wikiName: null`) until PR 4
+   replaces its rule, since the title mirror makes every page named `Front Page` a doc titled
+   so, a `PRIVATE` one in a person's namespace included. Also here, being the title mirror's:
+   MCP's `edit_doc` refusing a title for a wiki page, and the Claude-chat importer's matching
+   passing over wiki pages ("The name is the title"). No route, and nothing in the UI offers
+   `PUBLIC`, since no doc can hold it yet; `e2e/wiki.spec.ts` makes its pages by writing a
+   test doc's address columns (`createTestWikiPage`). **Left for PR 2**, which brings
+   `ownerWhoCanAct` and the claims they need: the rules on a person's page beyond
+   `canEditDocRow` (the owner kept on the byline, raising, deleting and restoring the owner's
+   alone, an ADMIN's lowering, the visibility actions gating on the session alone, and the
+   wiki table's `canSetVisibility` and `canDelete` with `softDeleteBulkActions`' `canToggle`),
+   and a restore's next free variant.
 2. **Pages.** `gatedAnyViewer`; the wiki read rule; `/wiki`, the namespace lists, a page and its
    editor, the catch-all, the fixed redirects and the case 307; `/doc/<slug>`'s redirect and the
    lookups that answer an unreadable wiki doc as a missing one; the public render; a person's

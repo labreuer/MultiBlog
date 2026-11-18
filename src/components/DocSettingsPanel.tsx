@@ -8,7 +8,8 @@ import { updateDocVisibility, updateDocAuthor, updateDocAuthorOrder, deleteDoc, 
 import { loadTaggerState, type TaggerState } from "@/app/actions/tags";
 import TagStrip from "@/components/tags/TagStrip";
 import { CitationStyleSelect, MentionStyleSelect } from "@/components/ChipStyleSettings";
-import { DocVisibility, type Role } from "@/generated/prisma/enums";
+import type { DocVisibility, Role } from "@/generated/prisma/enums";
+import { allowedVisibilities } from "@/lib/doc-visibility";
 import styles from "./DocSettingsPanel.module.css";
 
 export type EligibleUser = {
@@ -21,6 +22,10 @@ export type EligibleUser = {
 type Props = {
   docId: string;
   visibility: DocVisibility;
+  /** The doc's wiki address columns, null for a doc that isn't a wiki page: which visibilities it may take (allowedVisibilities). */
+  wiki: { name: string; ownerUserId: string | null } | null;
+  /** The viewer, whom allowedVisibilities asks about on a person's page. */
+  viewerId: string;
   createdAt: Date;
   authorIds: string[];
   eligibleUsers: EligibleUser[];
@@ -41,6 +46,8 @@ type Props = {
 export default function DocSettingsPanel({
   docId,
   visibility,
+  wiki,
+  viewerId,
   createdAt,
   authorIds,
   eligibleUsers,
@@ -253,7 +260,10 @@ export default function DocSettingsPanel({
                   onChange={(e) => handleVisibilityChange(e.target.value as DocVisibility)}
                   className={styles.visibilitySelect}
                 >
-                  {Object.values(DocVisibility).map((option) => (
+                  {allowedVisibilities(
+                    { visibility: visibilityValue, wikiName: wiki?.name ?? null, wikiOwnerUserId: wiki?.ownerUserId ?? null },
+                    viewerId,
+                  ).map((option) => (
                     <option key={option} value={option}>
                       {option}
                     </option>

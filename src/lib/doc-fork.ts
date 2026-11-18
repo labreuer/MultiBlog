@@ -27,7 +27,8 @@ export type ForkRequest = {
 };
 
 export type ForkSource = {
-  parent: { id: string; visibility: DocVisibility };
+  /** `wikiName` is the parent's name when it is a wiki page, else null: the fork's title then (docs/WIKI.md "Forking into the wiki"). */
+  parent: { id: string; visibility: DocVisibility; wikiName: string | null };
   state: Omit<DocState, "version">;
   /** The parent's update the state is at, which becomes the fork point. */
   version: bigint;
@@ -69,11 +70,11 @@ export async function readForkSource(actor: Actor, parentId: string, revision: s
 
   const parent = await prismaIncludingDeleted.doc.findUnique({
     where: { id: parentId },
-    select: { id: true, visibility: true, deletedByUserId: true },
+    select: { id: true, visibility: true, deletedByUserId: true, wikiName: true },
   });
   if (!parent || parent.deletedByUserId !== null) throw new ApiError("not_found", "That doc doesn't exist.");
   if (!(await canUserReadDoc(actor.userId, actor.role, parent))) throw forbidden("You don't have permission to read that doc.");
-  const source = { id: parent.id, visibility: parent.visibility };
+  const source = { id: parent.id, visibility: parent.visibility, wikiName: parent.wikiName };
 
   if (revision !== null) {
     if (!(await canUserSeeDocHistory(actor.userId, actor.role, parent.id))) {
@@ -94,6 +95,12 @@ export async function readForkSource(actor: Actor, parentId: string, revision: s
  * chip styles at the version (`forkSeed`), on the forker's byline alone, with
  * the visibility asked for, whatever the parent's.
  *
+ * **A wiki page's fork is titled with the page's name**, not the seed's: a
+ * wiki page's title fragment is not its title (docs/WIKI.md "The name is the
+ * title"), and may hold an earlier name, or the title the doc had before it
+ * was moved in. A fork at an earlier version takes the current name too, as
+ * the scrub bar shows it there.
+ *
  * **The visibility is checked by name, before anything is read**, as
  * setDocVisibility checks it, and never by membership of `DocVisibility`: a
  * value added to that enum later would have a rule of its own for who may
@@ -110,7 +117,7 @@ export async function forkDoc(actor: Actor, request: ForkRequest): Promise<{ id:
 
   const { parent, state, version } = await readForkSource(actor, request.parentId, request.revision);
   const seed = forkSeed(state);
-  const created = await createDocWithContent(actor.userId, seed.title, seed.body, {
+  const created = await createDocWithContent(actor.userId, parent.wikiName ?? seed.title, seed.body, {
     visibility,
     forkedFrom: { docId: parent.id, updateId: version },
     chipStyles: seed.chipStyles,

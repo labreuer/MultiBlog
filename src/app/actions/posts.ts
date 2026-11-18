@@ -65,6 +65,34 @@ function sameJson(a: unknown, b: unknown): boolean {
   return JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 }
 
+// docs/WIKI.md "Doc rules a wiki page doesn't inherit" — a wiki page publishes
+// nothing. The feed lists only published posts, so a post is the one way a
+// wiki page's text could reach it, and each action below takes its doc id
+// from the client, so each refuses a wiki doc here, whatever the UI offers.
+// It tests the doc the request names, which "Change doc…" makes differ from
+// the post's own.
+const WIKI_DOC_REFUSED = "A wiki page can't be published as a blog post.";
+
+/** The early check, before publishing replays the doc's log. */
+async function refuseWikiDoc(docId: string): Promise<void> {
+  const doc = await prismaIncludingDeleted.doc.findUnique({ where: { id: docId }, select: { wikiName: true } });
+  if (doc && doc.wikiName !== null) throw new Error(WIKI_DOC_REFUSED);
+}
+
+/**
+ * The same check as the first statement of the write's transaction, under
+ * `FOR KEY SHARE`. Moving a doc into the wiki holds its row `FOR UPDATE`
+ * while it counts the doc's posts; a post written in that window after the
+ * early check passed would otherwise wait for the move and then succeed,
+ * since under READ COMMITTED its foreign key's check sees the same key. A
+ * locking read that has to wait reads the moved row instead, and refuses.
+ */
+async function refuseWikiDocLocked(tx: TransactionClient, docId: string): Promise<void> {
+  const rows = await tx.$queryRaw<{ wiki_name: string | null }[]>`
+    SELECT wiki_name FROM doc WHERE id = ${docId} FOR KEY SHARE`;
+  if (rows.length > 0 && rows[0].wiki_name !== null) throw new Error(WIKI_DOC_REFUSED);
+}
+
 async function requireEditableSession(postId: string) {
   const session = await auth();
   if (!session?.user) {
@@ -100,6 +128,7 @@ export async function createPostFromDoc(docId: string): Promise<void> {
   if (!(await canUserEditDoc(session.user.id, session.user.role, docId))) {
     throw new Error("You don't have permission to create a post from this doc.");
   }
+  await refuseWikiDoc(docId);
 
   const doc = await prisma.doc.findUnique({
     where: { id: docId },
@@ -115,19 +144,22 @@ export async function createPostFromDoc(docId: string): Promise<void> {
   const title = docTitleOrFallback(doc.title);
   const slug = await uniquePostSlug(title);
 
-  const post = await prisma.post.create({
-    data: {
-      slug,
-      title,
-      docId,
-      authors: {
-        create: doc.authors.map((a) => ({
-          userId: a.userId,
-          bylineOrder: a.bylineOrder,
-          createdUserId: session.user.id,
-        })),
+  const post = await prisma.$transaction(async (tx: TransactionClient) => {
+    await refuseWikiDocLocked(tx, docId);
+    return tx.post.create({
+      data: {
+        slug,
+        title,
+        docId,
+        authors: {
+          create: doc.authors.map((a) => ({
+            userId: a.userId,
+            bylineOrder: a.bylineOrder,
+            createdUserId: session.user.id,
+          })),
+        },
       },
-    },
+    });
   });
 
   revalidatePath("/posts");
@@ -190,6 +222,7 @@ export async function publishPostFromDoc(postId: string, opts: PublishFromDocOpt
   if (!(await canUserEditDoc(session.user.id, session.user.role, opts.docId))) {
     throw new Error("You don't have permission to publish from this doc.");
   }
+  await refuseWikiDoc(opts.docId);
 
   const { snapshotId, proseJson, title } = await resolvePublishContent(opts, session.user.id, post.chipStyles);
 
@@ -230,6 +263,7 @@ export async function publishPostFromDoc(postId: string, opts: PublishFromDocOpt
   const publishedAt = post.publishedAt && post.publishedAt <= now ? post.publishedAt : now;
 
   const event = await prisma.$transaction(async (tx: TransactionClient) => {
+    await refuseWikiDocLocked(tx, opts.docId);
     const created = await tx.postPublicationEvent.create({
       data: {
         postId,
@@ -277,6 +311,7 @@ export async function schedulePostFromDoc(
   if (!(await canUserEditDoc(session.user.id, session.user.role, opts.docId))) {
     throw new Error("You don't have permission to publish from this doc.");
   }
+  await refuseWikiDoc(opts.docId);
   if (derivePostStatus(post) === "published") {
     throw new Error("Unpublish this post before scheduling a new version of it.");
   }
@@ -287,6 +322,7 @@ export async function schedulePostFromDoc(
   const { snapshotId, proseJson, title } = await resolvePublishContent(opts, session.user.id, post.chipStyles);
 
   const event = await prisma.$transaction(async (tx: TransactionClient) => {
+    await refuseWikiDocLocked(tx, opts.docId);
     const created = await tx.postPublicationEvent.create({
       data: {
         postId,
