@@ -16,6 +16,22 @@ export function canEditAnyPost(role: Role): boolean {
   return role === "ADMIN" || role === "EDITOR";
 }
 
+// PLAN.md §38 — who may put a version of a post on the blog: publishing,
+// republishing, scheduling and rescheduling. That reaches readers who aren't
+// signed in, so it is an editor's, however many posts an AUTHOR is credited
+// on; everything else about a post stays with whoever may edit it. Here for
+// its client consumers, PostPublisher and the doc's Actions menu.
+//
+// The same two roles as canEditAnyPost and canMakePagesPublic, and not
+// defined in terms of either, for the reason this file keeps its other pairs
+// apart. A role floor read from the session: the publish actions also read it
+// from the actor's row (requireCanPublishPosts, src/app/actions/posts.ts).
+export const POST_PUBLISHER_ROLES: Role[] = ["ADMIN", "EDITOR"];
+
+export function canPublishPosts(role: Role): boolean {
+  return POST_PUBLISHER_ROLES.includes(role);
+}
+
 export function isAdmin(role: Role): boolean {
   return role === "ADMIN";
 }

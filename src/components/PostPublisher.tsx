@@ -60,6 +60,14 @@ type Props = {
   sourceDocSlug: string;
   canReadSourceDoc: boolean;
   canEditSourceDoc: boolean;
+  /** PLAN.md §38 — whether this viewer may publish, republish and schedule: `canPublishPosts`. */
+  canPublish: boolean;
+  /**
+   * PLAN.md §38 — whether an editor could publish from `docId`'s doc, for a
+   * viewer who can't publish: false for a PRIVATE doc with no ADMIN or EDITOR
+   * on its byline. Always true when `canPublish` is.
+   */
+  editorCanEditSource: boolean;
   /**
    * PLAN.md §15i — the post's stored content, rendered on the server. Non-null
    * only when `canEditSourceDoc` is false and the post has published something:
@@ -97,6 +105,8 @@ export default function PostPublisher({
   sourceDocSlug,
   canReadSourceDoc,
   canEditSourceDoc,
+  canPublish,
+  editorCanEditSource,
   storedBody,
 }: Props) {
   const router = useRouter();
@@ -249,14 +259,19 @@ export default function PostPublisher({
     !restyled;
   const publishLabel = postStatus === "published" ? "Republish" : postStatus === "scheduled" ? "Publish Now" : "Publish";
 
-  // PLAN.md §15i — why the button is disabled, in the order the reasons
-  // actually bite. Without doc-edit rights there is no selection to publish
-  // and the server would refuse anyway, so that reason outranks the no-op one.
-  const publishBlockedReason = !selectedEditable
-    ? "Publishing needs edit access to this post's source doc."
-    : alreadyPublished
-      ? "Already published at this version with the present title"
+  // PLAN.md §15i, §38 — why the buttons are disabled, in the order the
+  // reasons actually bite. The role comes first: without it nothing this
+  // viewer selects can be published, whatever their rights over the doc.
+  // Without doc-edit rights there is no selection to publish and the server
+  // would refuse anyway, so that reason outranks the no-op one. Schedule
+  // shares the first two; it has no no-op.
+  const roleOrDocReason = !canPublish
+    ? "An editor publishes posts."
+    : !selectedEditable
+      ? "Publishing needs edit access to this post's source doc."
       : undefined;
+  const publishBlockedReason =
+    roleOrDocReason ?? (alreadyPublished ? "Already published at this version with the present title" : undefined);
 
   // PLAN.md §15i — what the stored content *is*, which depends on the post's
   // state rather than on the content. `proseJson` survives an unpublish, so
@@ -346,7 +361,7 @@ export default function PostPublisher({
             type="button"
             className={styles.actionButton}
             onClick={handlePublish}
-            disabled={pending || !selection || deleted || alreadyPublished}
+            disabled={pending || !canPublish || !selection || deleted || alreadyPublished}
           >
             {publishLabel}
           </button>
@@ -362,17 +377,19 @@ export default function PostPublisher({
               type="datetime-local"
               aria-label="Schedule for"
               value={scheduleInput}
-              disabled={pending || deleted}
+              disabled={pending || !canPublish || deleted}
               onChange={(e) => setScheduleInput(e.target.value)}
             />
-            <button
-              type="button"
-              className={styles.actionButton}
-              onClick={handleSchedule}
-              disabled={pending || !selection || !scheduleInput || deleted}
-            >
-              {postStatus === "scheduled" ? "Reschedule" : "Schedule"}
-            </button>
+            <span title={roleOrDocReason}>
+              <button
+                type="button"
+                className={styles.actionButton}
+                onClick={handleSchedule}
+                disabled={pending || !canPublish || !selection || !scheduleInput || deleted}
+              >
+                {postStatus === "scheduled" ? "Reschedule" : "Schedule"}
+              </button>
+            </span>
           </>
         )}
       </div>
@@ -380,6 +397,17 @@ export default function PostPublisher({
       {status && <p className={styles.statusMessage}>{status}</p>}
       {error && <p className={styles.errorMessage}>{error}</p>}
 
+      {/* PLAN.md §38 — a draft made by someone who can't publish waits for
+          an editor, who can publish only from a doc they can edit. Said
+          here, since a greyed button's tooltip is all the page says
+          otherwise. */}
+      {!canPublish && (
+        <p className={styles.sourceDocNote}>
+          {editorCanEditSource
+            ? "An editor publishes posts."
+            : "An editor publishes posts, and needs to be able to edit the doc: share it, or add them to its byline."}
+        </p>
+      )}
       {/* PLAN.md §15i — said once, where the controls it explains are, rather
           than left for the reader to infer from a greyed-out button and a
           content pane that never loads. A post's byline and its doc's byline

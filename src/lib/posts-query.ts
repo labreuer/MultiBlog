@@ -1,8 +1,10 @@
 import type { SortColumn } from "@/lib/table-sort";
+import type { PostStatus } from "@/lib/post-status";
 import {
   buildBaseQueryString,
   parseAuthorMode,
   parseBaseFilters,
+  parseSetParam,
   parseSlugListParam,
   DEFAULT_AUTHOR_MODE,
   type AuthorMode,
@@ -67,11 +69,21 @@ const SORT_KEYS: readonly PostsSortKey[] = [
 ];
 export const DEFAULT_SORT: SortColumn<PostsSortKey>[] = [{ key: "created", dir: "desc" }];
 
+// PLAN.md §38 — the Status filter, so an editor can find the drafts waiting
+// for one. A post has no status column (docs/BLOG.md): these are
+// derivePostStatus's three values, which the page turns into a `where` on
+// publishEventId and publishedAt (postStatusWhere, src/app/posts/page.tsx).
+// Lowercase, as derivePostStatus spells them, since they are no schema enum.
+// The table has no Status column: Published shows a date, greyed while it is
+// ahead, and nothing for a draft.
+export const POST_STATUS_OPTIONS: readonly PostStatus[] = ["draft", "scheduled", "published"];
+
 // The Authors filter (src/lib/author-filter.ts) — /posts' first table-specific
 // params, following the same shape /docs' showAllDocs already established.
 export type PostsFilters = BaseFilters<PostsSortKey> & {
   authors: string[];
   authorMode: AuthorMode;
+  status: Set<PostStatus> | "ALL";
 };
 
 function spec(prefs: TablePrefs): BaseFilterSpec<PostsSortKey> {
@@ -90,6 +102,7 @@ export function parsePostsFilters(
     ...parseBaseFilters(searchParams, spec(prefs)),
     authors: parseSlugListParam(searchParams.get("authors"), knownAuthorSlugs),
     authorMode: parseAuthorMode(searchParams.get("authorMode")),
+    status: parseSetParam(searchParams.get("status"), POST_STATUS_OPTIONS),
   };
 }
 
@@ -97,6 +110,9 @@ export function buildPostsQueryString(filters: PostsFilters, extra: URLSearchPar
   const params = buildBaseQueryString(filters, extra, spec(prefs));
   params.delete("authors");
   params.delete("authorMode");
+  params.delete("status");
+  const status = filters.status;
+  if (status !== "ALL") params.set("status", POST_STATUS_OPTIONS.filter((o) => status.has(o)).join(","));
   if (filters.authors.length > 0) params.set("authors", filters.authors.join(","));
   if (filters.authorMode !== DEFAULT_AUTHOR_MODE) params.set("authorMode", filters.authorMode);
   return params.toString();

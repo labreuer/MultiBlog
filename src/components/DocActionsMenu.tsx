@@ -29,7 +29,9 @@ export type DocActionsContext = {
  * (src/app/doc/[slug]/doc-reading-view.tsx):
  *
  * - **Publish as blog post**, for an editor of a doc with no post (PLAN.md
- *   §15d's doc-page entry point into post creation), never on a wiki page;
+ *   §15d's doc-page entry point into post creation), never on a wiki page.
+ *   It makes a draft either way; to a viewer who may not publish (PLAN.md
+ *   §38) it says **Draft a blog post**, since an editor publishes it;
  * - **Fork…**, for any reader with canManageDocs, which includes readers who
  *   can't edit. One item with a Where: a doc, your namespace, or the commons;
  * - **Move into the wiki…**, for an editor on the byline of a doc that isn't
@@ -43,14 +45,15 @@ export type DocActionsContext = {
  */
 export default function DocActionsMenu({
   docId,
-  publish,
+  postItem,
   fork,
   moveIn,
   moveOut,
   context,
 }: {
   docId: string;
-  publish: boolean;
+  /** Which label the post item takes, or null when it isn't offered. */
+  postItem: "publish" | "draft" | null;
   fork: boolean;
   moveIn: boolean;
   /** Where "Move…" may take this wiki page, or null when it isn't offered. */
@@ -69,7 +72,7 @@ export default function DocActionsMenu({
   // Which dialog is showing, so only that one asks the server for its default address.
   const [showing, setShowing] = useState<"fork" | "move" | "moveOut" | null>(null);
 
-  if (!publish && !fork && !moveIn && !moveOut) return null;
+  if (!postItem && !fork && !moveIn && !moveOut) return null;
 
   function closeMenu() {
     if (menuRef.current) menuRef.current.open = false;
@@ -101,10 +104,10 @@ export default function DocActionsMenu({
           Actions <span aria-hidden="true">▾</span>
         </summary>
         <div className={styles.panel}>
-          {publish && (
+          {postItem && (
             <form action={createPostFromDoc.bind(null, docId)}>
               <button type="submit" className={styles.item}>
-                Publish as blog post
+                {postItem === "publish" ? "Publish as blog post" : "Draft a blog post"}
               </button>
             </form>
           )}
