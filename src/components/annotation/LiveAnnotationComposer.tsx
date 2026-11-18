@@ -70,7 +70,7 @@ type Props = {
 };
 
 // PLAN.md §13d — DRAFT/LIVE/RAISED as a single choice rather than two
-// independent toggles ("keep private" + "notify authors"): the three
+// independent toggles ("keep private" + "raise"): the three
 // outcomes are mutually exclusive (there's no such thing as a private
 // RAISED annotation), so a select reads the actual state space directly
 // instead of letting the UI express a combination that can't exist.
@@ -80,13 +80,19 @@ type Visibility = "private" | "post" | "raise";
 // PRIVATE/SHARED is what a file's visibility is called everywhere else in the
 // app (DocVisibility, /files' Visibility column), so an annotation on one reads
 // in the same vocabulary rather than a second one meaning the same thing.
-// "Post & notify" is deliberately absent there — the `raise` path itself is
+// "Post & raise" is deliberately absent there — the `raise` path itself is
 // untouched and still reachable from a doc.
-const VISIBILITY_OPTIONS: Record<AnnotationTarget["kind"], { value: Visibility; label: string }[]> = {
+//
+// Raising marks a note for the container's authors on /annotations and sends
+// no mail (docs/ANNOTATIONS.md, "Raising sends no mail"), so the option
+// promises none: its title says so.
+const RAISE_TITLE = "Marks the note for the authors on /annotations. Sends no email.";
+
+const VISIBILITY_OPTIONS: Record<AnnotationTarget["kind"], { value: Visibility; label: string; title?: string }[]> = {
   doc: [
     { value: "private", label: "Keep private" },
     { value: "post", label: "Post" },
-    { value: "raise", label: "Post & notify authors" },
+    { value: "raise", label: "Post & raise", title: RAISE_TITLE },
   ],
   file: [
     { value: "private", label: "PRIVATE" },
@@ -233,7 +239,7 @@ export default function LiveAnnotationComposer({
         : visibility === "private"
           ? "Save privately"
           : visibility === "raise"
-            ? "Post & notify authors"
+            ? "Post & raise"
             : "Post annotation";
 
   return (
@@ -259,7 +265,7 @@ export default function LiveAnnotationComposer({
           aria-label="Annotation visibility"
         >
           {VISIBILITY_OPTIONS[container].map((option) => (
-            <option key={option.value} value={option.value}>
+            <option key={option.value} value={option.value} title={option.title}>
               {option.label}
             </option>
           ))}
@@ -268,6 +274,7 @@ export default function LiveAnnotationComposer({
           type="button"
           onClick={handleSubmit}
           disabled={pending || outOfDate}
+          title={visibility === "raise" ? RAISE_TITLE : undefined}
           className={`${styles.submit} ${pending ? styles.submitPending : ""}`}
         >
           {submitLabel}

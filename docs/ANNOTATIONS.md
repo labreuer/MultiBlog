@@ -28,8 +28,9 @@ The row carries:
 - **A body that is its own Yjs document**, `ydoc:annotation:<id>`, with `proseJson`,
   `bodyText` and `proseJsonUpdateId` as a cache of it ("The body is a ydoc").
 - **`status`** — `DRAFT` (the author's alone, no inline mark, no presence), `LIVE` (posted),
-  or `RAISED` (posted and the container's authors emailed, `raisedAt` stamped). One direction
-  of travel; nothing about visibility differs between the last two.
+  or `RAISED` (posted and marked for the container's authors, `raisedAt` stamped, and no mail
+  sent: "Raising sends no mail"). One direction of travel; nothing about visibility differs
+  between the last two.
 - **An anchor**, in one of three forms picked by the surface that wrote it ("Anchoring"):
   an `annotation` mark inside the doc's ydoc and no columns; `anchorFrom`/`anchorTo`/
   `quotedText` into a document that keeps moving; or `pdfTarget`, a renderer-neutral blob
@@ -396,11 +397,9 @@ non-empty; a body has no length limit, as a doc has none. Then it captures the a
 chosen mode and, in one transaction, writes **version 1** — a `ydoc_snapshot` at that mark — the cache columns
 from the same decoded document, `postedAt`, and the status. "Post" is `LIVE`; "Keep private" stays `DRAFT` (`saveDraftAnnotation`,
 reachable again through `OwnDraftsList`, as is a draft whose composer a reload took away);
-"Post & notify authors" is `RAISED` — one
-`sendMail` per byline author, or per file owner, and `raisedAt` stamped. The poster is never
-among the recipients, nor is a soft-deleted account still on the byline
-(`raiseRecipientWhere`, applied in the query). Any `DRAFT` can be
-posted later, any `LIVE` raised later; a `RAISED` annotation re-notifies nobody on edit.
+"Post & raise" is `RAISED`: `LIVE` with `raisedAt` stamped, which `/annotations` shows and
+sorts, and nothing sent ("Raising sends no mail", below). Any `DRAFT` can be posted later, any
+`LIVE` raised later; a `RAISED` annotation notifies nobody on edit.
 
 **Deleting** stamps the soft-delete columns and removes the mark. It is the writer's, or an
 ADMIN's once the annotation is posted — a `DRAFT` is its writer's alone, here as when reading
@@ -415,6 +414,30 @@ badge and the strip's tick as well. A deleted root whose replies survive keeps a
 
 **`/annotations` excludes `DRAFT` rows outright** rather than scoping them, because "keep
 private" means private from an `ADMIN` too.
+
+## Raising sends no mail
+
+Raising an annotation marks it for the authors on the doc's byline, or the owners of the file,
+and mails no one. Whether, and how, `RAISED` should mail anyone is undecided. A raise could
+mail each of them once per raise, with no limit, and any account that can annotate a `SHARED`
+doc can raise, so until the question is settled it mails no one.
+
+- **`RAISED` stays a status.** Posting as `RAISED` stamps `raisedAt`, and `/annotations` shows
+  and sorts it. Only the mail is gone.
+- **Both mail paths are kept, and one constant turns them off**: `RAISE_SENDS_MAIL` in
+  `src/app/actions/annotations.ts`, a `false` typed `boolean` so the code behind it still
+  typechecks. The doc's path writes to its byline's authors and the file's to its owners, one
+  `sendMail` each, never to the poster nor to a soft-deleted account still listed
+  (`raiseRecipientWhere`, applied in the query). It is not exported, since a `"use server"`
+  file exports only async functions.
+- **The composer promises none.** The doc composer's choice is "Post & raise"
+  (`src/components/annotation/LiveAnnotationComposer.tsx`), and the option and the submit
+  button carry a title saying it marks the note for the authors on `/annotations` and sends no
+  email.
+- **MCP never raises** (`src/lib/mcp/tools/annotations.ts`, `src/lib/annotation-post.ts`):
+  what a raise should do is undecided, so a machine client isn't given it.
+- **Tested** by `e2e/annotation-composer.spec.ts`'s "Post & raise" case, which raises a note and finds
+  it `RAISED` on `/annotations`.
 
 ## Editing after posting
 
@@ -813,8 +836,8 @@ from `@tiptap/y-tiptap`, not `y-prosemirror`, because the wrong package's key re
 `undefined` without an error.
 
 From §19: the annotation panel is a **tabbed side panel** with an icon toggle, not a button;
-it speaks the file's vocabulary; **`RAISED` is unreachable from the PDF UI** though the mail
-path is live; `PdfAnnotationList` is `PdfAnnotationPanel` with `use-pdf-margin-notes.ts`.
+it speaks the file's vocabulary; **`RAISED` is unreachable from the PDF UI**, though the action
+still raises a file's note when asked; `PdfAnnotationList` is `PdfAnnotationPanel` with `use-pdf-margin-notes.ts`.
 
 From §22e: **the reply stamp is the parent's newest settled version, not a client snapshot**
 (a client reading a body has no `Y.Doc`); **staleness is a loader field**, since reading the
@@ -853,31 +876,6 @@ in its columns or `pdfTarget`, and the stamp keeps its overload ("The version st
   deep-link filters have no UI; the Quote column cannot say what a reply's quote is a quote of.
 - **The rails' own gaps** are docs/MARGIN_NOTES.md, "Known gaps".
 - **The append-queue drain has no test**, and rows from before the stamp existed stay null.
-
-## Planned: `RAISED` sends no mail
-
-**Not built.** Planned 2026-11-18, in docs/EMAIL.md §10's PR 3. Raising an annotation mails
-each author on the doc's byline, or each owner of the file, once per raise, with no limit. Any
-account that can annotate a `SHARED` doc can do that. Whether, and how, `RAISED` should mail
-anyone is undecided, so until it is decided it mails no one.
-
-- **`RAISED` stays a status.** Posting as `RAISED` still stamps `raisedAt`, and `/annotations`
-  still shows and sorts it. Only the mail stops.
-- **Both mail paths are switched off by one constant** in `src/app/actions/annotations.ts`,
-  with their code kept for when the question is settled: the doc's (its byline's authors) and
-  the file's (its owners). The PDF UI can't raise today, but the path is live.
-- **The composer stops promising mail.** "Post & notify authors"
-  (`src/components/annotation/LiveAnnotationComposer.tsx`) becomes "Post & raise", with a
-  title saying it marks the note for the authors on `/annotations` and sends no email. The
-  comments in the action and the composer that say a raise mails change with it.
-- **MCP is unaffected.** Its tools never raise (`src/lib/mcp/tools/annotations.ts`). The comment
-  there giving mail as the reason changes to say the reason is undecided.
-- **Docs:**
-  - "Lifecycle" above, on what posting as `RAISED` does;
-  - docs/EMAIL.md §2's "One sender identity", which names the notifier;
-  - this file's §19 note that the PDF's mail path is live.
-- **Tests:** no spec clicks the old label. A case in the annotation specs raises a note with "Post
-  & raise", and finds it `RAISED` on `/annotations`.
 
 ## History
 

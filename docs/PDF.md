@@ -1601,7 +1601,8 @@ Three rules hold throughout:
 - **A version that is not the latest is called `<title>, version <n>`**, on its page and
   wherever a note on it is listed: `/annotations`, search, a reference's cited-by, mentions,
   MCP's threads and a link's groups. Each links the note at `/pdf/<slug>/v/<n>`, and so does
-  the email sent when a note is raised. The compiler finds no link built from a template string, so
+  the email a raise would send, a path switched off (docs/ANNOTATIONS.md, "Raising sends no
+  mail"). The compiler finds no link built from a template string, so
   each goes through one helper that takes the version: `pdfPath` for the address
   (`src/lib/file-version.ts`), with `pdfNoteContainer` for a listing's title and address
   together. One that is missed lands on the note's entry and not its card (below).
@@ -1610,8 +1611,8 @@ Three rules hold throughout:
     would read as though every part were on it. A file whose parts are all on the latest
     keeps its bare title. `linkPartsVersions` is the one rule for that title and for where
     the link lands, for the landing route, `/links` and MCP.
-  - **The raise email links the version's address with no card fragment**, as it linked the
-    file's.
+  - **The raise email, while switched off, links the version's address with no card
+    fragment**, as it linked the file's.
 - **A version's own address always names its version**, the latest's included. The page at
   `/pdf/<slug>/v/<n>` is titled `<title>, version <n>` whatever the version's state, and
   says "the latest" beside it, in the viewer's toolbar, while it is. A tab left open there across a promotion writes
