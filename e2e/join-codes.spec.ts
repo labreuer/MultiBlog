@@ -21,6 +21,7 @@ import {
   writeTestWikiColumns,
   uniqueEmail,
 } from "./db";
+import { uniqueTitle } from "./naming";
 
 // docs/EMAIL.md §10 — a one-off join card, from the scan to the account.
 // Every context here starts with no session, and no mail is read: every
@@ -476,6 +477,172 @@ test.describe("emails ignore case", () => {
     } finally {
       await page.context().close();
       await deleteTestUser(email);
+    }
+  });
+});
+
+// docs/EMAIL.md §10, "Minting and printing" — the admin table. `page` is the
+// suite's ADMIN; a card holder is a fresh context, as above.
+
+/** The codes on a printed sheet, by serial, read from each card's `data-url`. */
+function sheetCodes(html: string): Map<number, string> {
+  const codes = new Map<number, string>();
+  for (const match of html.matchAll(/data-serial="(\d+)" data-url="[^"]*\/join\/([0-9A-Z]+)"/g)) {
+    codes.set(Number(match[1]), match[2]);
+  }
+  return codes;
+}
+
+/** The card table's body: the first table on the page, ahead of FilterHelp's own. */
+function cardTable(page: Page) {
+  return page.locator("table").first().locator("tbody");
+}
+
+function cardRows(page: Page) {
+  return cardTable(page).locator("tr");
+}
+
+function cardRow(page: Page, serial: number) {
+  return cardRows(page).filter({ has: page.getByRole("cell", { name: String(serial), exact: true }) });
+}
+
+/** A date two days ahead, as the mint form's date input takes it. */
+function dateAhead(): string {
+  return new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+test.describe("/join-codes", () => {
+  test("an ADMIN mints, prints, and revokes a card, a selection and the batch", async ({ page, browser }) => {
+    const label = uniqueTitle("join table");
+    let batchId: string | null = null;
+    const holder = await freshPage(browser);
+    const email = uniqueEmail("card-table");
+    try {
+      await page.goto("/join-codes");
+      await page.getByText("Mint a batch", { exact: true }).click();
+      await page.getByLabel("Label", { exact: true }).fill(label);
+      await page.getByLabel("Cards", { exact: true }).fill("3");
+      await page.getByLabel("Expires at the end of (UTC)").fill(dateAhead());
+      await page.getByRole("button", { name: "Mint", exact: true }).click();
+      await expect(page).toHaveURL(/[?&]batch=/);
+      batchId = new URL(page.url()).searchParams.get("batch");
+      expect(batchId).toBeTruthy();
+      await expect(page.getByText("Minted 3 card(s).")).toBeVisible();
+      await expect(cardRows(page)).toHaveCount(3);
+      await expect(cardTable(page).getByRole("cell", { name: "Unclaimed", exact: true })).toHaveCount(3);
+
+      // The sheet: every card, the line given, and nothing cached.
+      const sheet = await page.request.get(`/join-codes/print?batch=${batchId}&line=${encodeURIComponent("Hello, table")}`);
+      expect(sheet.status()).toBe(200);
+      expect(sheet.headers()["cache-control"]).toBe("no-store");
+      expect(sheet.headers()["content-security-policy"]).toContain("default-src 'none'");
+      const html = await sheet.text();
+      expect(html).toContain("Hello, table");
+      const codes = sheetCodes(html);
+      expect([...codes.keys()].sort()).toEqual([1, 2, 3]);
+      await holder.goto(`/join/${codes.get(1)}`);
+      await expect(holder.getByLabel("Choose a password")).toBeVisible();
+
+      // One card from its row: its code stops working, and the sheet leaves it out.
+      await cardRow(page, 1).getByRole("button", { name: "Revoke", exact: true }).click();
+      await expect(cardRow(page, 1).getByRole("cell", { name: "Revoked", exact: true })).toBeVisible();
+      await holder.goto(`/join/${codes.get(1)}`);
+      await expect(holder.getByRole("heading", { name: "This card can no longer be used" })).toBeVisible();
+      const reprinted = sheetCodes(await (await page.request.get(`/join-codes/print?batch=${batchId}`)).text());
+      expect([...reprinted.keys()].sort()).toEqual([2, 3]);
+
+      // A claim waits on card 2, and the table shows its email.
+      await claim(holder, codes.get(2)!, { name: uniqueName(), email });
+      await expect(holder.getByRole("heading", { name: CHECK_EMAIL })).toBeVisible();
+      await page.reload();
+      await expect(cardRow(page, 2).getByRole("cell", { name: "Claim pending", exact: true })).toBeVisible();
+      await expect(cardRow(page, 2).getByRole("cell", { name: email, exact: true })).toBeVisible();
+
+      // Card 3 by selection.
+      await cardRow(page, 3).getByRole("checkbox").check();
+      await page.getByRole("button", { name: "Revoke selected" }).click();
+      await expect(cardRow(page, 3).getByRole("cell", { name: "Revoked", exact: true })).toBeVisible();
+
+      // The batch: the waiting claim goes, password hash and all.
+      page.once("dialog", (dialog) => void dialog.accept());
+      await page.getByRole("button", { name: "Revoke batch" }).click();
+      await expect(page.getByText(`Revoked "${label}".`)).toBeVisible();
+      await expect(cardRow(page, 2).getByRole("cell", { name: "Revoked", exact: true })).toBeVisible();
+      const card2 = await getTestJoinCode(batchId!, 2);
+      expect(card2.pendingEmail).toBeNull();
+      expect(card2.hasPasswordHash).toBe(false);
+      await holder.goto(`/join/${codes.get(2)}`);
+      await expect(holder.getByRole("heading", { name: "This card can no longer be used" })).toBeVisible();
+      expect((await page.request.get(`/join-codes/print?batch=${batchId}`)).status()).toBe(400);
+    } finally {
+      await holder.context().close();
+      await deleteTestUser(email);
+      if (batchId) await deleteTestJoinBatch(batchId);
+    }
+  });
+
+  test("the status column says what /join/<code> says", async ({ page, browser }) => {
+    const { batchId, cards } = await mintTestJoinBatch({ count: 5 });
+    const expired = await mintTestJoinBatch({ count: 1 });
+    const holder = await freshPage(browser);
+    const pendingEmail = uniqueEmail("card-status-pending");
+    const claimedEmail = uniqueEmail("card-status-claimed");
+    try {
+      const [, pending, sendsUsed, claimed, revoked] = cards;
+      await claim(holder, pending.code, { name: uniqueName(), email: pendingEmail });
+      await expect(holder.getByRole("heading", { name: CHECK_EMAIL })).toBeVisible();
+      await setTestJoinState(batchId, { serial: sendsUsed.serial, confirmSends: 5 });
+      await claim(holder, claimed.code, { name: uniqueName(), email: claimedEmail });
+      await expect(holder.getByRole("heading", { name: CHECK_EMAIL })).toBeVisible();
+      await confirm(holder, await setTestJoinClaimToken(batchId, claimed.serial));
+      await expect(holder.getByRole("heading", { name: "Your account is ready" })).toBeVisible();
+      await setTestJoinState(batchId, { serial: revoked.serial, revoked: true });
+      await setTestJoinState(expired.batchId, { batchExpired: true });
+
+      await page.goto(`/join-codes?batch=${batchId}`);
+      const expected = ["Unclaimed", "Claim pending", "Sends used up", "Claimed", "Revoked"];
+      for (const [i, status] of expected.entries()) {
+        await expect(cardRow(page, i + 1).getByRole("cell", { name: status, exact: true })).toBeVisible();
+      }
+      // The claimed card names its account, and nothing else offers a revoke.
+      await expect(cardRow(page, 4).getByRole("link")).toHaveCount(1);
+      await expect(cardTable(page).getByRole("button", { name: "Revoke", exact: true })).toHaveCount(3);
+
+      await page.goto(`/join-codes?batch=${batchId}&status=claimed,revoked`);
+      await expect(cardRows(page)).toHaveCount(2);
+
+      await page.goto(`/join-codes?batch=${expired.batchId}`);
+      await expect(cardRow(page, 1).getByRole("cell", { name: "Expired", exact: true })).toBeVisible();
+      await expect(page.getByText("Expired, not revoked", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Print live cards" })).toHaveCount(0);
+      await holder.goto(`/join/${expired.cards[0].code}`);
+      await expect(holder.getByRole("heading", { name: "This card can no longer be used" })).toBeVisible();
+    } finally {
+      await holder.context().close();
+      await deleteTestUser(pendingEmail);
+      await deleteTestUser(claimedEmail);
+      await deleteTestJoinBatch(batchId);
+      await deleteTestJoinBatch(expired.batchId);
+    }
+  });
+
+  test("only an ADMIN reaches the table and the sheet", async ({ browser, secondUser }) => {
+    const { batchId } = await mintTestJoinBatch({ count: 1 });
+    const signedOut = await freshPage(browser);
+    try {
+      const editor = await secondUser({ role: "EDITOR" });
+      await editor.page.goto("/join-codes");
+      await expect(editor.page.getByText("doesn't have permission to manage join cards")).toBeVisible();
+      expect((await editor.page.request.get(`/join-codes/print?batch=${batchId}`)).status()).toBe(403);
+
+      await signedOut.goto("/join-codes?batch=x");
+      await expect(signedOut).toHaveURL(/\/sign-in\?callbackUrl=%2Fjoin-codes%3Fbatch%3Dx/);
+      const print = await signedOut.request.get(`/join-codes/print?batch=${batchId}`, { maxRedirects: 0 });
+      expect(print.status()).toBe(307);
+      expect(print.headers()["location"]).toContain("/sign-in?callbackUrl=%2Fjoin-codes%2Fprint");
+    } finally {
+      await signedOut.context().close();
+      await deleteTestJoinBatch(batchId);
     }
   });
 });

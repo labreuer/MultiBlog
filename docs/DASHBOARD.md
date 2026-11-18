@@ -20,6 +20,13 @@ review, linked to `/email-collisions` (docs/COMMENTS.md, "The log"). It shows at
 since it is the page's way in, and a reviewed row is still worth reaching. Not a card: it is
 one count, and nobody else sees it.
 
+## Join cards
+
+An ADMIN sees a second line: how many join-card batches can still be claimed, and how many are
+past their expiry without being revoked, linked to `/join-codes` (docs/EMAIL.md §10, "Minting
+and printing"). An expired batch is named because it still holds its waiting claims' password
+hashes until it is revoked. It shows with no batches too, as the page's way in.
+
 ## Section cards
 
 Each major section is a native `<details className={styles.card}>` with its

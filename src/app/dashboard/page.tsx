@@ -110,6 +110,20 @@ export default async function DashboardPage() {
     ? await prisma.emailCollision.count({ where: { reviewedAt: null } })
     : null;
 
+  // Join-card batches for an ADMIN (docs/DASHBOARD.md, "Join cards"): how
+  // many can still be claimed, and how many are past their expiry without
+  // being revoked, which keeps their waiting claims' password hashes.
+  const joinBatches = isAdmin(session.user.role)
+    ? await (async () => {
+        const now = new Date();
+        const [live, expired] = await Promise.all([
+          prisma.joinBatch.count({ where: { revokedAt: null, expiresAt: { gt: now } } }),
+          prisma.joinBatch.count({ where: { revokedAt: null, expiresAt: { lte: now } } }),
+        ]);
+        return { live, expired };
+      })()
+    : null;
+
   return (
     <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
       {/* Pulls role/name/color back from the DB into the JWT on every visit, so
@@ -125,6 +139,14 @@ export default async function DashboardPage() {
         <p>
           <Link href="/email-collisions">Email collisions</Link>:{" "}
           {waitingCollisions === 0 ? "none waiting" : `${waitingCollisions} waiting for review`}
+        </p>
+      )}
+      {joinBatches !== null && (
+        <p>
+          <Link href="/join-codes">Join cards</Link>:{" "}
+          {joinBatches.live === 0 ? "no live batches" : `${joinBatches.live} live batch${joinBatches.live === 1 ? "" : "es"}`}
+          {joinBatches.expired > 0 &&
+            `, ${joinBatches.expired} expired and not revoked`}
         </p>
       )}
       <details className={`${account.card} ${styles.card}`} open>
