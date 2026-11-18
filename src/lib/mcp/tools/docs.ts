@@ -79,7 +79,7 @@ export const editDocTool = defineTool({
   scope: "WRITE",
   description: `Edit a doc you're on the byline of: revise or rewrite a passage, append, insert after a heading, retitle it, or revert an edit — targeted edits, never a whole-body replace. Each edit replaces a passage (old: its exact words, from a format:"text" read, or {start,end} for a long one; prefix/suffix when it occurs twice) with new Markdown, appends, or inserts after a heading; title sets the title. Words that survive keep their marks — a note's highlight, a person's colour, a link; new words are yours and keep the notes of the words they replace. All-or-nothing: a passage that isn't there is no_match with near misses, one that occurs twice ambiguous. A passage named by its ends needs \`version\`, the read's, and is refused if someone changed it since. Answers the new version, the blocks changed (read them to check), and the notes and link parts it touched, saying whether each still resolves. When an edit does what someone's note asked, reply to the note with ${listedName("add_note")}: what was done, and a link. revert:<version> undoes one edit, dryRun:true lists its hunks first. Records (imported chats) can't be edited.`,
   input: z.strictObject({
-    url: objectRef.describe("The doc: /doc/<slug> or its id."),
+    url: objectRef.describe("The doc: /doc/<slug>, a wiki page's /wiki/<owner>/<name>, or its id."),
     version: versionString.optional().describe("The version you read the passages at; needed for any named by start and end."),
     edits: z.array(editItem).min(1).max(50).optional(),
     title: z.string().max(500).optional(),

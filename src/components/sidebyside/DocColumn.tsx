@@ -25,6 +25,12 @@ import styles from "./DocColumn.module.css";
 type Props = {
   docId: string;
   initialTitle: string;
+  /**
+   * A wiki page's name (docs/WIKI.md "The name is the title"): its heading in
+   * either mode, and no CollabTitleField in write mode, since nothing on a
+   * wiki page shows or edits its title fragment.
+   */
+  fixedTitle?: string;
   initialBodyJSON: JSONContent;
   staticBody: ReactNode;
   side: "left" | "right";
@@ -66,6 +72,7 @@ type Mode = "read" | "write";
 export default function DocColumn({
   docId,
   initialTitle,
+  fixedTitle,
   initialBodyJSON,
   staticBody,
   side,
@@ -193,7 +200,14 @@ export default function DocColumn({
       <ChipSurfaceProvider doc={docId}>
         <div className={styles.column} data-side={side}>
           <div className={styles.titleRow}>
-            {mode === "write" && provider ? (
+            {mode === "write" && provider && fixedTitle !== undefined ? (
+              <>
+                <h2 className={styles.titleText}>{fixedTitle}</h2>
+                <button type="button" className={styles.titleButton} onClick={() => setMode("read")}>
+                  Doc Links
+                </button>
+              </>
+            ) : mode === "write" && provider ? (
               <>
                 <CollabTitleField
                   ydoc={ydoc}
@@ -216,7 +230,7 @@ export default function DocColumn({
             ) : (
               <>
                 <h2 className={styles.titleText}>
-                  <Link href={canEdit ? `/doc/${docId}/edit` : `/doc/${docId}`}>{docTitleOrFallback(title)}</Link>
+                  <Link href={canEdit ? `/doc/${docId}/edit` : `/doc/${docId}`}>{docTitleOrFallback(fixedTitle ?? title)}</Link>
                 </h2>
                 {canEdit && (
                   <button type="button" className={styles.titleButton} onClick={() => setMode("write")}>

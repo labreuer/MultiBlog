@@ -3,6 +3,7 @@ import type { SearchKind } from "@/lib/search/params";
 /** What the page calls each kind: a section heading, a filter label, an "All N …" link. */
 export const KIND_LABELS: Record<SearchKind, { plural: string; lower: string }> = {
   docs: { plural: "Docs", lower: "docs" },
+  wiki: { plural: "Wiki pages", lower: "wiki pages" },
   posts: { plural: "Posts", lower: "posts" },
   pdfs: { plural: "PDFs", lower: "PDFs" },
   annotations: { plural: "Annotations", lower: "annotations" },

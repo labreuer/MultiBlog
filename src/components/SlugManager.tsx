@@ -32,6 +32,10 @@ type Props = {
   // its slug meanwhile (docs/PDF.md §14).
   linkCurrent?: boolean;
   history: SlugHistoryRow[];
+  // A wiki page's slug (docs/WIKI.md "URLs"): an internal handle, frozen
+  // while the doc is in the wiki, so no control changes it. Its past urls
+  // still redirect, now on to the page's address, and can still be deleted.
+  frozen?: boolean;
 };
 
 /** A file action's answer as the value, or its refusal thrown here in the browser, where its message survives. */
@@ -67,6 +71,7 @@ export default function SlugManager({
   urlSuffix = "",
   linkCurrent = true,
   history,
+  frozen = false,
 }: Props) {
   const router = useRouter();
   const [slug, setSlug] = useState(currentSlug);
@@ -199,7 +204,7 @@ export default function SlugManager({
             {urlSuffix}
           </strong>
         )}
-        {!editing && (
+        {!editing && !frozen && (
           <>
             {" "}
             <button type="button" onClick={startEditing} style={{ marginLeft: 4 }}>
@@ -208,6 +213,7 @@ export default function SlugManager({
           </>
         )}
       </p>
+      {!frozen && (
       <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", marginTop: "0.5em" }}>
         Auto-generated url: {urlPrefix}/{standardSlug}
         {urlSuffix}
@@ -222,11 +228,14 @@ export default function SlugManager({
           </>
         )}
       </p>
+      )}
+      {!frozen && (
       <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: "1em" }}>
         Urls may contain lowercase letters, numbers, and hyphens. Anything else — spaces,
         punctuation, uppercase — is converted automatically, and repeated or leading/trailing
         hyphens are trimmed.
       </p>
+      )}
 
       {editing && (
         <div style={{ margin: "8px 0" }}>
@@ -270,7 +279,7 @@ export default function SlugManager({
                   <LocalTime value={row.createdAt} />
                 </td>
                 <td style={{ padding: "4px 8px 4px 0" }}>
-                  {i === rows.length - 1 && (
+                  {i === rows.length - 1 && !frozen && (
                     <button type="button" onClick={handleRevert} disabled={pending}>
                       Revert
                     </button>

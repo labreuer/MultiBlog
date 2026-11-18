@@ -1,85 +1,62 @@
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
-import type { JSONContent } from "@tiptap/react";
-import * as Y from "yjs";
-import { prisma } from "@/lib/prisma";
-import { resolveDocParam, resolveDocSlugHistory } from "@/lib/resolve-doc-param";
-import { gated, titleWhenOk } from "@/lib/route-access";
-import { canManageDocs, canUserReadDoc, canUserEditDoc, canUserSeeDocHistory } from "@/lib/doc-authz";
-import { loadDocFamily } from "@/lib/doc-family";
+import type { Session } from "next-auth";
+import type { DocVisibility } from "@/generated/prisma/enums";
+import { isDocParamShape, resolveDocParam, resolveDocSlugHistory } from "@/lib/resolve-doc-param";
+import { gatedAnyViewer, titleWhenOk } from "@/lib/route-access";
+import { canReadWikiDoc, canUserReadDoc } from "@/lib/doc-authz";
 import { docTitleOrFallback } from "@/lib/doc-title";
-import { docContentExtensions } from "@/lib/tiptap-schema";
-import { readYdocContent } from "@/lib/ydoc-render";
-import { chipInputsForBody } from "@/lib/entity-chips/context";
-import { parseChipStyles } from "@/lib/entity-chips/settings";
-import { renderWithChips } from "@/lib/entity-chips/static";
-import { StaticBibliography } from "@/components/bibliography/Bibliography";
-import { ChipSurfaceProvider } from "@/lib/entity-chips/chip-surface";
-import { ydocIdForDoc } from "@/lib/ydoc-names";
-import DocView from "@/components/DocView";
-import AuthorByline from "@/components/AuthorByline";
-import DocPostsLine from "@/components/DocPostsLine";
-import DocActionsMenu from "@/components/DocActionsMenu";
-import DocFamily from "@/components/DocFamily";
-import AnnotationSection from "@/components/annotation/AnnotationSection";
-import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
-import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
-import { annotationAnchorInputs, anchoredLinkAnchorInputs } from "@/lib/annotation-highlight-extension";
-import { entryHasVisibleContent } from "@/lib/annotation-visibility";
-import { anchoredLinkForViewer } from "@/lib/anchored-link-data";
-import AnchoredLinkBanner from "@/components/anchored-link/AnchoredLinkBanner";
-import AnchoredLinkTray from "@/components/anchored-link/AnchoredLinkTray";
+import { wikiPathOfDoc } from "@/lib/wiki-address";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 import { SCRUB_PARAM, parseScrubUpdateId } from "@/lib/scrub-url";
-import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
-import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
-import { DocScrubProvider } from "@/components/DocScrubContext";
-import { MarginNotesProvider, MarginNotesRail } from "@/components/margin-notes/margin-notes-context";
-import TagChips from "@/components/tags/TagChips";
-import proseStyles from "@/styles/prose.module.css";
+import DocReadingView, { DOC_READ_SELECT } from "./doc-reading-view";
 import styles from "./page.module.css";
 
-const EMPTY_DOC: JSONContent = { type: "doc", content: [{ type: "paragraph" }] };
-
-// Inherently dynamic (per-user gated, and the decode-from-ydoc fallback
-// below is a live decode) — no generateStaticParams, and none should be
-// added (PLAN.md §12f: a route eligible for static generation that also
+// Inherently dynamic (per-user gated, and the decode-from-ydoc fallback in
+// DocReadingView is a live decode) — no generateStaticParams, and none should
+// be added (PLAN.md §12f: a route eligible for static generation that also
 // calls a dynamic API throws DYNAMIC_SERVER_USAGE at build, §10 item 17).
 // prose_json is what keeps this cheap, not a Next cache — see CACHING.md.
 
-const DOC_SELECT = {
-  id: true,
-  title: true,
-  visibility: true,
-  proseJson: true,
-  chipStyles: true,
-  deletedByUserId: true,
-  updatedAt: true,
-  // The family lines' (docs/FORKS.md "A doc's family"): what this doc was
-  // forked from, at which of the parent's updates, and when.
-  createdAt: true,
-  forkedFromDocId: true,
-  forkedFromUpdateId: true,
-  authors: {
-    orderBy: { bylineOrder: "asc" },
-    select: { userId: true, user: { select: { slug: true, name: true } } },
+/**
+ * docs/WIKI.md "URLs" — a wiki doc's `/doc/<slug>` is only an internal
+ * handle, so it answers with a 307 to the page's address for a viewer the
+ * wiki read rule lets read it (canReadWikiDoc): signed in or out, a COMMENTER
+ * included, since the editor's link picker writes `/doc/` links and a PUBLIC
+ * page's would otherwise send its readers to Forbidden or to sign in. Anyone
+ * else signed in gets a 404, not Forbidden, which would confirm that a page
+ * of that name exists, a wiki doc's slug being made from its name; signed
+ * out, the sign-in redirect, as for a missing doc. A 307 rather than a 308:
+ * the answer depends on who asks, and the address can change under the link.
+ */
+async function wikiAnswer(
+  user: Session["user"] | null,
+  doc: {
+    id: string;
+    visibility: DocVisibility;
+    deletedByUserId: string | null;
+    wikiName: string | null;
+    wikiVariant: string;
+    wikiOwner: { slug: string } | null;
   },
-  // The posts made from this doc (PLAN.md §15d), for the byline's post
-  // line (§21i). deletedByUserId filtered by hand: resolveDocParam reads
-  // through prismaIncludingDeleted, and the soft-delete extension never
-  // reaches a nested relation anyway.
-  posts: {
-    where: { deletedByUserId: null },
-    orderBy: { createdAt: "asc" },
-    select: { id: true, slug: true, title: true, publishedAt: true, publishEventId: true },
-  },
-} as const;
+): Promise<{ redirect: string } | "not-found" | "signed-out"> {
+  if (!(await canReadWikiDoc(user, doc))) return user ? "not-found" : "signed-out";
+  return { redirect: wikiPathOfDoc({ wikiName: doc.wikiName, wikiVariant: doc.wikiVariant, ownerSlug: doc.wikiOwner?.slug ?? null })! };
+}
 
 // One select for both callers rather than a narrow one for the title: the memo
-// in `gated` keys on arguments, so two different selects would be two misses
-// and so two queries, which is the thing being removed.
-const loadDocForRead = gated(async (user, slug: string) => {
-  const doc = await resolveDocParam(slug, DOC_SELECT);
+// in the envelope keys on arguments, so two different selects would be two
+// misses and so two queries, which is the thing being removed.
+//
+// On gatedAnyViewer rather than gated(), since a signed-out request has to be
+// looked up to be redirected to a PUBLIC page. The cost is a lookup of one to
+// three queries per signed-out request (by id, by slug, the slug history),
+// which cost none before; anything else signed out is still the sign-in
+// redirect, a missing doc included, so the two still look alike.
+const loadDocForRead = gatedAnyViewer(async (user, slug: string) => {
+  // Before any lookup: a param can carry a NUL, which Postgres refuses.
+  if (!isDocParamShape(slug)) return user ? "not-found" : "signed-out";
+  const doc = await resolveDocParam(slug, DOC_READ_SELECT);
   if (!doc) {
     // A past slug redirects to the current one (docs/DOCS.md "Routes"). Gated
     // before redirecting, not after: the new slug is derived from the title,
@@ -88,6 +65,8 @@ const loadDocForRead = gated(async (user, slug: string) => {
     // current URL would give them.
     const moved = await resolveDocSlugHistory(slug);
     if (moved && moved.deletedByUserId === null) {
+      if (moved.wikiName !== null) return wikiAnswer(user, moved);
+      if (user === null) return "signed-out";
       if (!(await canUserReadDoc(user.id, user.role, moved))) {
         return "forbidden";
       }
@@ -99,12 +78,14 @@ const loadDocForRead = gated(async (user, slug: string) => {
   // route is the caller that must not show a soft-deleted doc, so it checks
   // deletedByUserId itself rather than relying on the soft-delete extension.
   if (!doc || doc.deletedByUserId !== null) {
-    return "not-found";
+    return user ? "not-found" : "signed-out";
   }
+  if (doc.wikiName !== null) return wikiAnswer(user, doc);
+  if (user === null) return "signed-out";
   if (!(await canUserReadDoc(user.id, user.role, doc))) {
     return "forbidden";
   }
-  return doc;
+  return { doc, user };
 });
 
 export async function generateMetadata({
@@ -113,7 +94,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  return titleWhenOk(await loadDocForRead(slug), (doc) => docTitleOrFallback(doc.title));
+  return titleWhenOk(await loadDocForRead(slug), (value) => docTitleOrFallback(value.doc.title));
 }
 
 export default async function PublicDocPage({
@@ -130,27 +111,21 @@ export default async function PublicDocPage({
   // malformed value never reaches the client at all, and so the redirect
   // below re-emits a canonical one.
   const scrubUpdateId = parseScrubUpdateId(at);
+  // The query both redirects and the sign-in return path keep: ?sel= and
+  // ?at=. A shared anchored link is the one URL a signed-out reader is
+  // likeliest to arrive by, and a link to a revision is a link somebody was
+  // sent; a redirect or a callbackUrl that kept only the pathname would land
+  // on the right doc with its passages or its revision silently gone
+  // (docs/ANCHORED_LINKS.md), as /pdf/[slug] avoids too.
+  const preserved = new URLSearchParams();
+  if (sel) preserved.set("sel", sel);
+  if (scrubUpdateId) preserved.set(SCRUB_PARAM, scrubUpdateId);
   // Free — generateMetadata already ran this for the same request.
   const access = await loadDocForRead(slug);
   if (access.status === "signed-out") {
-    // The return path keeps ?sel=: a shared anchored link is the one URL a
-    // signed-out reader is likeliest to arrive by, and a callbackUrl that
-    // kept only the pathname would sign them in onto the doc with its
-    // passages silently gone (docs/ANCHORED_LINKS.md). ?at= rides along for
-    // exactly the same reason — a link to a revision is a link somebody was
-    // sent, and signing in should land on the revision, not on the head.
-    const preserved = new URLSearchParams();
-    if (sel) preserved.set("sel", sel);
-    if (scrubUpdateId) preserved.set(SCRUB_PARAM, scrubUpdateId);
     redirect(signInPath(pathWithQuery(`/doc/${slug}`, preserved)));
   }
   if (access.status === "redirect") {
-    // The slug-history redirect names only the path — re-append ?sel= and
-    // ?at=, or a link shared before a rename would land on the right doc with
-    // its passages or its revision silently gone (as /pdf/[slug] does).
-    const preserved = new URLSearchParams();
-    if (sel) preserved.set("sel", sel);
-    if (scrubUpdateId) preserved.set(SCRUB_PARAM, scrubUpdateId);
     redirect(pathWithQuery(access.to, preserved));
   }
   if (access.status === "not-found") {
@@ -164,214 +139,5 @@ export default async function PublicDocPage({
       </main>
     );
   }
-  const { value: doc, user } = access;
-
-  // Two questions, which have one answer only while a doc's history is its
-  // editors' (docs/FORKS.md, "Who may see a doc's history"): the title's link
-  // to the editor and the posts line ask the first, the scrub bar and the
-  // room left for it the second.
-  const [canEdit, canSeeHistory] = await Promise.all([
-    canUserEditDoc(user.id, user.role, doc.id),
-    canUserSeeDocHistory(user.id, user.role, doc.id),
-  ]);
-
-  // docs/FORKS.md "The doc view: an Actions menu and the Fork dialog" — who
-  // is offered what. Publishing is an editor's, of a doc with no post yet;
-  // forking is any reader's who may create docs, readers who can't edit this
-  // one included. The server decides each again when it is asked.
-  const canPublish = canEdit && doc.posts.length === 0;
-  const canFork = canManageDocs(user.role);
-  const family = await loadDocFamily(user, doc);
-
-  // PLAN.md §13o — fetched here rather than inside AnnotationSection because
-  // the body needs them too: a column-anchored annotation's highlight is a
-  // decoration this page has to supply, where a mark-anchored one's arrives
-  // with the content. One fetch, so the highlight and the card can't be
-  // derived from two different snapshots.
-  const threads = await getDocAnnotationsAsThreads(doc.id);
-
-  // docs/ANCHORED_LINKS.md — a ?sel= page resolves the link it names, per
-  // viewer. Outside the `gated` memo on purpose: the memo keys on its
-  // arguments and generateMetadata already ran it without the searchParam,
-  // so folding `sel` in would just split the doc load into two queries. Null
-  // (no such link, or nothing this viewer may see) renders as if ?sel= were
-  // absent.
-  const link = sel ? await anchoredLinkForViewer(sel, user) : null;
-  const linkGroupHere = link?.groups.find((g) => g.target.kind === "doc" && g.target.id === doc.id) ?? null;
-
-  // This doc's DOC_RANGE parts merge into the same anchor list the
-  // annotations ride: one list, one plugin state, one per-transaction
-  // resolve pass — the `kind` field on each input keeps the two apart
-  // downstream (annotation-highlight-extension.ts).
-  // A deleted annotation stays in `threads` (a soft delete; its replies may
-  // still be a conversation), so the highlight is filtered here by the rule
-  // its card is: a stored-offset anchor has no mark for the delete to remove.
-  const annotationAnchors = [
-    ...annotationAnchorInputs((await buildAnnotationEntries(threads)).filter(entryHasVisibleContent)),
-    ...(linkGroupHere ? anchoredLinkAnchorInputs(linkGroupHere.parts) : []),
-  ];
-
-  // bodyJSON seeds DocReadingBody's editor so its first paint is identical to
-  // staticBody's SSR output (no hydration mismatch, no flash); staticBody is
-  // what's shown until that editor reports ready.
-  let bodyJSON: JSONContent = EMPTY_DOC;
-  let bodyError: string | null = null;
-  if (doc.proseJson) {
-    bodyJSON = doc.proseJson as JSONContent;
-  } else {
-    // decode-from-ydoc fallback (§12d) — prose_json is still null because no
-    // store debounce has fired yet, e.g. a doc that was created but never
-    // edited. A scratch Y.Doc decoded once for this render, then discarded;
-    // DocReadingBody below opens the real live connection.
-    const row = await prisma.ydoc.findUnique({ where: { id: ydocIdForDoc(doc.id) }, select: { ydoc: true } });
-    const scratch = new Y.Doc();
-    if (row) Y.applyUpdate(scratch, row.ydoc);
-    const result = readYdocContent(scratch);
-    if (result.ok) {
-      bodyJSON = result.bodyJSON;
-    } else {
-      bodyError = result.error;
-    }
-    scratch.destroy();
-  }
-
-  // Entity chips (docs/ENTITY_CHIPS.md): the context the static body's labels
-  // are computed from, loaded once and handed to the live editor too, so the
-  // swap from one to the other changes no label.
-  const chipInputs = await chipInputsForBody(bodyJSON, parseChipStyles(doc.chipStyles));
-  const staticBody = bodyError ? (
-    <p style={{ color: "var(--error)" }}>{bodyError}</p>
-  ) : (
-    <>
-      {renderWithChips(bodyJSON, docContentExtensions, chipInputs)}
-      <StaticBibliography body={bodyJSON} inputs={chipInputs} download={`doc=${doc.id}`} />
-    </>
-  );
-
-  return (
-    <main className={`${styles.container} ${canSeeHistory ? styles.containerScrubbable : ""}`}>
-      {/* Wraps both trees so "Move to bottom" (PLAN.md §13g) can hand a
-          draft's id from the inline popover (inside DocView) to the bottom
-          composer (AnnotationSection), and so every LiveAnnotationComposer
-          (§13i) can publish presence onto DocView's own read-only
-          connection — siblings here, not parent/child, so a prop can't
-          carry either across on its own. */}
-      <DocPresenceProvider>
-        <AnnotationMoveProvider>
-          {/* PLAN.md §12p/§13 — same cross-tree reason as the two providers
-              above: AnnotationNode's "at this revision" control (inside
-              AnnotationSection) reaches DocScrubBar's slider (inside
-              DocView) through this, since neither is the other's ancestor.
-              `hasScrubBar` is the same answer the bar itself is gated on:
-              that control is a link now (docs/DOCS.md, "?at="), so it renders
-              before the bar has loaded — but never on a page where no bar
-              will ever exist, which is what a read-only viewer has. */}
-          <DocScrubProvider hasScrubBar={canSeeHistory}>
-            {/* PLAN.md §18. AnnotationSection stays exactly where it was —
-                below the doc, heading and composer and sort control included,
-                along with every annotation whose mark is gone — and only the
-                presently-anchored cards are portaled out into the rail beside
-                the text. Inside AnnotationMoveProvider rather than outside
-                because "move to bottom" spans the same two subtrees and there
-                is no reason for two different nesting orders. */}
-            <MarginNotesProvider>
-              <div className={styles.layout}>
-                <div className={styles.mainColumn}>
-                  {link && (
-                    <AnchoredLinkBanner link={link} currentTarget={{ kind: "doc", id: doc.id }} />
-                  )}
-                  {/* The key makes doc identity a mount boundary. A client-side
-                      nav between two docs (the anchored-link banner's group
-                      links are the first surface that does this) otherwise
-                      *reuses* DocReadingBody: its editor still holds the old
-                      doc until the new provider syncs, so the anchors effect
-                      pushes the new doc's quotes against the old doc's text and
-                      detaches every one — and detachment is only re-evaluated
-                      on the next anchor push (annotation-highlight-extension.ts),
-                      which never comes. Remounting also retires the same-class
-                      staleness in ready/synced and in DocView's scrub state. */}
-                  <ChipSurfaceProvider doc={doc.id} initial={chipInputs}>
-                    <DocView
-                      key={doc.id}
-                      docId={doc.id}
-                      initialTitle={docTitleOrFallback(doc.title)}
-                      initialBodyJSON={bodyJSON}
-                      staticBody={<div className={proseStyles.prose}>{staticBody}</div>}
-                      canEdit={canEdit}
-                      canSeeHistory={canSeeHistory}
-                      userColor={user.color}
-                      annotationAnchors={annotationAnchors}
-                      initialScrubUpdateId={scrubUpdateId}
-                      // docs/FORKS.md "A doc's family" — under the byline.
-                      // Keyed for the byline's own reason: a prop DocView
-                      // renders among siblings.
-                      family={family && <DocFamily key="family" family={family} />}
-                      byline={
-                        // A <div>, not <p> — <form> isn't valid inside <p> (HTML
-                        // rejects it; React hydrates it anyway and then warns), same
-                        // reason docs/page.tsx's own create-doc form isn't wrapped in
-                        // one. .byline's styling (page.module.css) is purely visual,
-                        // so the tag swap changes nothing about how this renders.
-                        //
-                        // The `key` is load-bearing, like TagChips' below, for a
-                        // second reason: this element is a *prop* that DocView
-                        // renders among siblings. While TagChips is still awaiting
-                        // (a doc that has tags), the RSC stream hands the whole div
-                        // to the client as a lazy chunk, and the reconciler checks
-                        // the resolved element for a key at DocView's level —
-                        // "Check the top-level render call using <DocView>" — which
-                        // the static-JSX validation that normally exempts it never
-                        // ran on. CLAUDE.md's Gotchas has the fuller story.
-                        <div key="byline" className={styles.byline}>
-                          <AuthorByline
-                            authors={doc.authors.map((a) => ({ userId: a.userId, slug: a.user.slug, name: a.user.name }))}
-                            showPrefix={false}
-                          />
-                          {/* updatedAt, not createdAt: a doc has no publish step (PLAN.md
-                              §12k), so "last edited" is the only date that means anything.
-                              Short date visible, full timestamp on hover. */}
-                          <span title={doc.updatedAt.toLocaleString()}>{doc.updatedAt.toLocaleDateString()}</span>
-                          {/* PLAN.md §21i — the doc's posts, once it has any.
-                              Gated on canEdit: a scheduled post is not public
-                              information. The key is load-bearing for the same
-                              reason TagChips' below is. */}
-                          {canEdit && doc.posts.length > 0 && (
-                            <DocPostsLine key="posts" docTitle={doc.title} posts={doc.posts} />
-                          )}
-                          {/* docs/FORKS.md — "Publish as blog post" (§15d's
-                              entry point into post creation) and "Fork…", each
-                              for whoever may. A client island, which renders
-                              nothing with neither; keyed for the same reason. */}
-                          <DocActionsMenu key="actions" docId={doc.id} publish={canPublish} fork={canFork} />
-                          {/* PLAN.md §20k — a second line of the byline rather
-                              than a block below the text, and "bare" is what
-                              drops the "Tags" label. Gated by this page's own
-                              canUserReadDoc above (docs/PERMISSIONS.md, "Chips
-                              are as private as the thing they are on").
-
-                              The `key` is load-bearing and this is not a list:
-                              it is a Server Component with element siblings
-                              inside a prop that crosses into DocView, a client
-                              component. Drop it and the page logs "Each child in
-                              a list should have a unique key prop" against this
-                              div — CLAUDE.md's Gotchas has why. */}
-                          <TagChips key="tags" target={{ kind: "doc", id: doc.id }} variant="bare" />
-                        </div>
-                      }
-                    />
-                  </ChipSurfaceProvider>
-                  <AnnotationSection docId={doc.id} threads={threads} />
-                </div>
-                <MarginNotesRail className={styles.rail} />
-              </div>
-            </MarginNotesProvider>
-          </DocScrubProvider>
-        </AnnotationMoveProvider>
-      </DocPresenceProvider>
-      {/* docs/ANCHORED_LINKS.md — self-fetching, fixed-position, renders
-          nothing without a draft; the server row is its state, so it needs
-          nothing from this page but a mount point outside the layout grid. */}
-      <AnchoredLinkTray />
-    </main>
-  );
+  return <DocReadingView doc={access.value.doc} user={access.value.user} sel={sel} scrubUpdateId={scrubUpdateId} />;
 }

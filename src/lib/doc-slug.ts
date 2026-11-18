@@ -36,6 +36,13 @@ export async function uniqueDocSlug(title: string, excludeDocId?: string): Promi
   return candidate;
 }
 
+// docs/WIKI.md "URLs" — a wiki page's URL is its address, and its slug only
+// an internal handle that /doc/<slug> redirects from. A change would only
+// mint another redirect, for a URL nobody sees, so both changes refuse one,
+// whichever door they come through: SlugManager's change, its "use standard"
+// and its Revert, and MCP's `manage`.
+export const WIKI_SLUG_FROZEN = "A wiki page's url is its address; its slug can't be changed while it is in the wiki.";
+
 // Renames a doc's slug, recording the old one in DocSlugHistory. No-ops if
 // newSlugInput normalizes to the doc's current slug. A slug this doc held
 // before comes back out of its own history, as revertDocSlug's does, rather
@@ -58,9 +65,12 @@ export async function changeDocSlugIn(
   updatedByUserId: string,
 ): Promise<string> {
   const newSlug = slugify(newSlugInput, "doc");
-  const doc = await tx.doc.findUnique({ where: { id: docId }, select: { slug: true } });
+  const doc = await tx.doc.findUnique({ where: { id: docId }, select: { slug: true, wikiName: true } });
   if (!doc) {
     throw new Error("Doc not found.");
+  }
+  if (doc.wikiName !== null) {
+    throw new Error(WIKI_SLUG_FROZEN);
   }
   if (doc.slug === newSlug) {
     return newSlug;
@@ -79,9 +89,12 @@ export async function changeDocSlugIn(
 // updatedByUserId as in changeDocSlug above.
 export async function revertDocSlug(docId: string, updatedByUserId: string): Promise<string> {
   return prismaIncludingDeleted.$transaction(async (tx) => {
-    const doc = await tx.doc.findUnique({ where: { id: docId }, select: { slug: true } });
+    const doc = await tx.doc.findUnique({ where: { id: docId }, select: { slug: true, wikiName: true } });
     if (!doc) {
       throw new Error("Doc not found.");
+    }
+    if (doc.wikiName !== null) {
+      throw new Error(WIKI_SLUG_FROZEN);
     }
     const lastHistory = await tx.docSlugHistory.findFirst({ where: { docId }, orderBy: { createdAt: "desc" } });
     if (!lastHistory) {

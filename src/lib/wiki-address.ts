@@ -334,3 +334,23 @@ export function lentVariant(parent: { visibility: string; owner: WikiOwner | nul
   if (ownerSegment(parent.owner) === ownerSegment(target)) return null;
   return parent.owner.kind === "person" ? parent.owner.slug : "commons";
 }
+
+/**
+ * What a link builder selects of a doc to write the doc's own path: its slug,
+ * and its wiki address, which is a wiki page's URL (docs/WIKI.md "URLs").
+ */
+export const DOC_PATH_SELECT = {
+  slug: true,
+  wikiName: true,
+  wikiVariant: true,
+  wikiOwner: { select: { slug: true } },
+} as const;
+
+/**
+ * A doc's own page: a wiki page's address, else `/doc/<slug>`. A link with a
+ * `#fragment` needs it: `/doc/<slug>` redirects a wiki page to its address,
+ * and a `<Link>` followed through a redirect lands without the fragment.
+ */
+export function docPagePath(doc: { slug: string; wikiName: string | null; wikiVariant: string; wikiOwner: { slug: string } | null }): string {
+  return wikiPathOfDoc({ wikiName: doc.wikiName, wikiVariant: doc.wikiVariant, ownerSlug: doc.wikiOwner?.slug ?? null }) ?? `/doc/${doc.slug}`;
+}

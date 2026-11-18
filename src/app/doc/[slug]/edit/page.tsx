@@ -1,49 +1,39 @@
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { prisma } from "@/lib/prisma";
-import { resolveDocParam } from "@/lib/resolve-doc-param";
+import { isDocParamShape, resolveDocParam } from "@/lib/resolve-doc-param";
 import { gated, titleWhenOk } from "@/lib/route-access";
-import { canEditDocRow } from "@/lib/doc-authz";
-import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
-import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
-import { MarginNotesProvider } from "@/components/margin-notes/margin-notes-context";
-import { EDITOR_MARGIN_NOTES_MEDIA_QUERY } from "@/lib/margin-notes-layout";
-import { AnnotationMoveProvider } from "@/components/annotation/annotation-move-context";
-import { DocPresenceProvider } from "@/components/annotation/doc-presence-context";
-import DocEditor from "@/components/DocEditor";
-import { ChipSurfaceProvider } from "@/lib/entity-chips/chip-surface";
+import { canUserReadDoc } from "@/lib/doc-authz";
 import { docEditorTabTitle } from "@/lib/doc-title";
 import { signInPath } from "@/lib/sign-in-redirect";
-import { displayNameOf } from "@/lib/display-name";
-import { staffDisplayNameOf } from "@/lib/display-name";
+import { wikiPathOfDoc } from "@/lib/wiki-address";
+import DocEditView, { DOC_EDIT_SELECT, canEditLoadedDoc } from "./doc-edit-view";
 
 // resolveDocParam rather than a direct query — the id-or-slug ambiguity this
 // route shares with /doc/[slug] and /doc/[slug]/slug (PLAN.md §12f). No
 // deletedByUserId check, unlike the reading route: a soft-deleted doc must
 // still load here so the Settings panel can offer Undelete.
 //
-// The rule canUserEditDoc states (src/lib/doc-authz.ts), asked of the row
-// already loaded through canEditDocRow rather than through a second query:
-// ADMIN/EDITOR edit any SHARED doc but a person's wiki page, and a PRIVATE doc
-// is editable by its listed authors alone (docs/PERMISSIONS.md). /docs' "Show
-// all docs" checkbox belongs to that listing and carries no weight here.
+// A wiki doc (docs/WIKI.md "URLs"): a live one is edited at its address, so
+// an editor is sent there with a 307; a deleted one isn't, since its address
+// may already be another page's, and loads here for its Undelete ("Deleting
+// a page"). A viewer who can't read it gets a 404 rather than Forbidden,
+// which would confirm that a page of that name exists.
 const loadDocForEdit = gated(async (user, slug: string) => {
-  const doc = await resolveDocParam(slug, {
-    id: true,
-    slug: true,
-    title: true,
-    visibility: true,
-    wikiName: true,
-    wikiOwnerUserId: true,
-    createdAt: true,
-    deletedByUserId: true,
-    authors: { select: { userId: true }, orderBy: { bylineOrder: "asc" } },
-  });
+  if (!isDocParamShape(slug)) return "not-found";
+  const doc = await resolveDocParam(slug, DOC_EDIT_SELECT);
   if (!doc) {
     return "not-found";
   }
-  const isAuthor = doc.authors.some((a) => a.userId === user.id);
-  if (!canEditDocRow({ visibility: doc.visibility, wikiOwnerUserId: doc.wikiOwnerUserId, isAuthor }, user.role)) {
+  const canEdit = canEditLoadedDoc(doc, user);
+  if (doc.wikiName !== null) {
+    if (!canEdit) return (await canUserReadDoc(user.id, user.role, doc)) ? "forbidden" : "not-found";
+    if (doc.deletedByUserId === null) {
+      const path = wikiPathOfDoc({ wikiName: doc.wikiName, wikiVariant: doc.wikiVariant, ownerSlug: doc.wikiOwner?.slug ?? null });
+      return { redirect: `${path}/edit` };
+    }
+    return doc;
+  }
+  if (!canEdit) {
     return "forbidden";
   }
   return doc;
@@ -79,59 +69,5 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
       </main>
     );
   }
-  const { value: doc, user } = access;
-
-  const [eligibleUsers, threads] = await Promise.all([
-    prisma.user.findMany({
-      where: { role: { in: ["ADMIN", "EDITOR", "AUTHOR"] } },
-      select: { id: true, name: true, email: true, role: true },
-      orderBy: { name: "asc" },
-    }).then((users) =>
-      users.map((u) => ({ id: u.id, role: u.role, label: staffDisplayNameOf(u, user.role) })),
-    ),
-    getDocAnnotationsAsThreads(doc.id),
-  ]);
-
-  // "focus mode" pulls all annotations rather than just anchored ones and we
-  // don't know whether we're in it at this point
-  const annotations = await buildAnnotationEntries(threads);
-
-  return (
-    // AnnotationMoveProvider: required by AnnotationPopover's own
-    // useAnnotationMove() call, even though DocEditor always passes it
-    // allowMoveToBottom={false} — there is no bottom composer on this page
-    // for a draft to move to, but the hook throws outside a provider
-    // regardless of whether that path is ever reached.
-    // DocPresenceProvider: PLAN.md §13i's presence channel, fed
-    // provider.awareness by DocEditor itself here (the reading view instead
-    // feeds it its own read-only tap) — same channel either way.
-    <DocPresenceProvider>
-      <AnnotationMoveProvider>
-        {/* The one surface that overrides the rail's threshold: on a phone
-            in landscape the rail engages where 1180px alone would refuse
-            (EDITOR_MARGIN_NOTES_MEDIA_QUERY). */}
-        <MarginNotesProvider query={EDITOR_MARGIN_NOTES_MEDIA_QUERY}>
-          {/* Names the doc for its editors' entity chips (docs/ENTITY_CHIPS.md). */}
-          <ChipSurfaceProvider doc={doc.id}>
-            <DocEditor
-              docId={doc.id}
-              slug={doc.slug}
-              initialTitle={doc.title}
-              visibility={doc.visibility}
-              wiki={doc.wikiName === null ? null : { name: doc.wikiName, ownerUserId: doc.wikiOwnerUserId }}
-              createdAt={doc.createdAt}
-              userId={user.id}
-              userName={displayNameOf(user)}
-              userColor={user.color}
-              userInitials={user.adminInitials}
-              authorIds={doc.authors.map((a) => a.userId)}
-              eligibleUsers={eligibleUsers}
-              initialDeleted={doc.deletedByUserId !== null}
-              annotations={annotations}
-            />
-          </ChipSurfaceProvider>
-        </MarginNotesProvider>
-      </AnnotationMoveProvider>
-    </DocPresenceProvider>
-  );
+  return <DocEditView doc={access.value} user={access.user} />;
 }

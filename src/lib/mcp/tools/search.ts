@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { search, PAGE_SIZE, OVERVIEW_SIZE } from "@/lib/search";
-import { SEARCH_KINDS, DEFAULT_TIME_ZONE, isTimeZone, MAX_CITED_LENGTH, parseDay, type SearchParams } from "@/lib/search/params";
+import { DEFAULT_TIME_ZONE, isTimeZone, MAX_CITED_LENGTH, parseDay, type SearchKind, type SearchParams } from "@/lib/search/params";
 import { KEY_SHAPE_RE } from "@/lib/references/keys";
 import { referencesByKeys } from "@/lib/reference-data";
 import { isEmptyQuery, websearchQuery, headlineTexts, sqlConfig, type TsQuery } from "@/lib/search/sql";
@@ -30,6 +30,14 @@ import { pdfLabels } from "../read/pdf-meta";
 // would drop its filter, an unknown zone would become UTC. The schema below
 // refuses each as `invalid` instead.
 
+/**
+ * The kinds this tool takes, in page order: search's own but `wiki`. Wiki
+ * pages are searched as docs here (`search()`'s `wikiInDocs`), so a docs
+ * section holds both, ranked together, and the results are what they were
+ * before the two kinds split (docs/WIKI.md, "Listing wiki pages").
+ */
+const MCP_KINDS = ["docs", "posts", "pdfs", "annotations", "comments"] as const satisfies readonly SearchKind[];
+
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "a slug");
 const day = z
   .string()
@@ -41,7 +49,7 @@ const input = z.strictObject({
     .max(200)
     .optional()
     .describe('Words, "a phrase", or, -word. Without q, a filter lists what it selects, newest first.'),
-  kinds: z.array(z.enum(SEARCH_KINDS)).min(1).max(5).optional().describe("One kind pages 20 at a time; several give 5 each."),
+  kinds: z.array(z.enum(MCP_KINDS)).min(1).max(MCP_KINDS.length).optional().describe("One kind pages 20 at a time; several give 5 each."),
   authors: z.array(slug).min(1).max(20).optional().describe("Author slugs: docs, posts and annotations by any of them."),
   tags: z.array(slug).min(1).max(20).optional().describe("Tag slugs: what carries any of them."),
   mentions: z
@@ -104,7 +112,7 @@ export async function runSearch(
   if (cursor.offset % cursor.size !== 0) throw invalid("That cursor isn't one this server gave out.");
   const params: SearchParams = {
     q: (args.q ?? "").trim(),
-    kinds: args.kinds ? SEARCH_KINDS.filter((kind) => args.kinds!.includes(kind)) : null,
+    kinds: args.kinds ? MCP_KINDS.filter((kind) => args.kinds!.includes(kind)) : null,
     authors: args.authors ?? [],
     mentions: args.mentions ?? [],
     cites: args.cites ?? [],
@@ -127,6 +135,7 @@ export async function runSearch(
   const result = await search(searchActorOf(ctx.actor), params, {
     pageSize: oneKind ? cursor.size : OVERVIEW_SIZE,
     tagIds,
+    wikiInDocs: true,
   });
 
   // search() keeps only the slugs on this viewer's author picker, and over

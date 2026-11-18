@@ -1,4 +1,5 @@
 import { noteVersions } from "@/lib/file-version-data";
+import { DOC_PATH_SELECT, docPagePath } from "@/lib/wiki-address";
 import { pdfNoteContainer } from "@/lib/file-version";
 import { markAnchoredQuote } from "@/lib/annotation-marked-quote";
 import { materializedLabels } from "@/lib/entity-chips/materialize";
@@ -194,7 +195,7 @@ export default async function AnnotationsPage({
       skip: (filters.page - 1) * filters.pageSize,
       include: {
         user: { select: { name: true, email: true } },
-        doc: { select: { id: true, slug: true, title: true, proseJson: true } },
+        doc: { select: { id: true, title: true, proseJson: true, ...DOC_PATH_SELECT } },
         // A file has no proseJson to excerpt: a PDF annotation's quote is
         // always the stored column (derived server-side at post time), so
         // there is no mark to hunt for and no document body to read.
@@ -233,7 +234,7 @@ export default async function AnnotationsPage({
   const rowsWithContainer = present.map((a) => {
     const version = versionOf.get(a.id) ?? null;
     const container = a.doc
-      ? ({ kind: "doc", id: a.doc.id, path: `/doc/${a.doc.slug}`, title: docTitleOrFallback(a.doc.title) } as const)
+      ? ({ kind: "doc", id: a.doc.id, path: docPagePath(a.doc), title: docTitleOrFallback(a.doc.title) } as const)
       : a.file
         ? ({ kind: "file", id: a.file.id, ...pdfNoteContainer(a.file, version) } as const)
         : null;

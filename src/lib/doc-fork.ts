@@ -46,7 +46,8 @@ export type ForkSource = {
  *    hand since canUserReadDoc doesn't consider it, and one the actor can't
  *    read is Forbidden: the two answers the doc's own page gives. To an
  *    actor who has got this far the difference is useful, since Forbidden
- *    says the doc is there and to ask its authors;
+ *    says the doc is there and to ask its authors. An unreadable wiki page
+ *    is not found, as its address answers;
  * 4. a version needs the parent's history (`canUserSeeDocHistory`) and
  *    **then** `isDocVersion`, in that order, as a diff asks them: otherwise
  *    the fork would copy out text from a history its forker may never have
@@ -73,7 +74,13 @@ export async function readForkSource(actor: Actor, parentId: string, revision: s
     select: { id: true, visibility: true, deletedByUserId: true, wikiName: true },
   });
   if (!parent || parent.deletedByUserId !== null) throw new ApiError("not_found", "That doc doesn't exist.");
-  if (!(await canUserReadDoc(actor.userId, actor.role, parent))) throw forbidden("You don't have permission to read that doc.");
+  if (!(await canUserReadDoc(actor.userId, actor.role, parent))) {
+    // An unreadable wiki page is not found, as it is wherever a wiki doc is
+    // looked up (docs/WIKI.md "Forking into the wiki"): a Forbidden would
+    // confirm that a page exists.
+    if (parent.wikiName !== null) throw new ApiError("not_found", "That doc doesn't exist.");
+    throw forbidden("You don't have permission to read that doc.");
+  }
   const source = { id: parent.id, visibility: parent.visibility, wikiName: parent.wikiName };
 
   if (revision !== null) {

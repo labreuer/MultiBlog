@@ -18,6 +18,7 @@ const QUOTE_CHARS = 200;
 export function shapeSection(section: SearchSection): Record<string, unknown>[] {
   switch (section.kind) {
     case "docs":
+    case "wiki":
       return section.hits.map((hit) => ({
         url: hit.href,
         title: markedSnippet(hit.title),

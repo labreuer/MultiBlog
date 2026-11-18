@@ -1,0 +1,75 @@
+/* The wiki's reader-facing pages (docs/WIKI.md "URLs"): /wiki, a namespace's
+   list of pages, and the page-level notices. Reader lists, not admin tables. */
+
+.main {
+  max-width: 720px;
+  margin: 4rem auto;
+  padding: 0 1rem;
+  font-family: sans-serif;
+}
+
+.intro {
+  color: var(--text-secondary);
+  margin: 0.75rem 0 1.5rem;
+}
+
+.pages {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.page {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+}
+
+.address {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.visibility {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+}
+
+.empty {
+  color: var(--text-secondary);
+}
+
+.links {
+  margin-top: 2rem;
+  display: flex;
+  gap: 1.5rem;
+}
+
+.notice {
+  margin: 0.5rem 0 1rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--fill-warning);
+  color: var(--warning-text);
+  font-size: 0.85rem;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fieldset {
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.error {
+  color: var(--error);
+}

@@ -98,7 +98,7 @@ export default function SearchForm({
           {readableKinds.length > 1 && (
             <fieldset className={styles.fieldset}>
               {/* Nothing checked means every kind, so a reader narrows by
-                  checking rather than by unchecking four boxes. */}
+                  checking rather than by unchecking all the others. */}
               <legend>Only these kinds</legend>
               {readableKinds.map((kind) => (
                 <label key={kind} className={styles.check}>

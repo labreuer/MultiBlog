@@ -9,6 +9,7 @@
 // the passage, derived from the mark as /annotations derives it.
 
 import { noteVersions } from "@/lib/file-version-data";
+import { DOC_PATH_SELECT, docPagePath } from "@/lib/wiki-address";
 import { pdfNoteContainer } from "@/lib/file-version";
 import { markAnchoredQuote } from "@/lib/annotation-marked-quote";
 import { materializedLabels } from "@/lib/entity-chips/materialize";
@@ -102,7 +103,7 @@ export const annotationsSearch: KindSearch<AnnotationHit> = {
           parentAnnotationId: true,
           status: true,
           user: { select: { name: true, slug: true } },
-          doc: { select: { id: true, slug: true, title: true } },
+          doc: { select: { id: true, title: true, ...DOC_PATH_SELECT } },
           file: { select: { slug: true, title: true } },
         },
       }),
@@ -138,7 +139,7 @@ export const annotationsSearch: KindSearch<AnnotationHit> = {
       const row = byId.get(id);
       if (!row || !row.postedAt) return [];
       const container = row.doc
-        ? { kind: "doc" as const, title: docTitleOrFallback(row.doc.title), path: `/doc/${row.doc.slug}` }
+        ? { kind: "doc" as const, title: docTitleOrFallback(row.doc.title), path: docPagePath(row.doc) }
         : row.file
           ? { kind: "pdf" as const, ...pdfNoteContainer(row.file, versionOf.get(id)) }
           : null;

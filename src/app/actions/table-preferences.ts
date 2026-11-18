@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import type { AdminTableName } from "@/lib/user-preferences";
+import { adminTablePath } from "@/lib/column-order";
 
 // "Save as my default" from an admin table's column picker (PLAN.md §16i).
 //
@@ -53,5 +54,5 @@ export async function saveTableColumns(table: AdminTableName, cols: string[]): P
   // The preference is read server-side on the next render of that table, so
   // the page has to be re-rendered for a save to take effect without the
   // ?cols= override that is currently carrying it.
-  revalidatePath(`/${table}`);
+  revalidatePath(adminTablePath(table));
 }

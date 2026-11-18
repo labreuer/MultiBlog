@@ -1,4 +1,5 @@
 import type { Actor } from "@/lib/actor";
+import { DOC_PATH_SELECT, docPagePath } from "@/lib/wiki-address";
 import { readableAnnotationsWhere } from "@/lib/annotation-authz";
 import { annotationAnchorName } from "@/lib/annotation-anchor-name";
 import { displayNameOf } from "@/lib/display-name";
@@ -160,7 +161,7 @@ export async function referenceCitedBy(actor: Actor, referenceId: string): Promi
             id: true,
             createdAt: true,
             user: { select: { name: true, slug: true } },
-            doc: { select: { slug: true, title: true } },
+            doc: { select: { title: true, ...DOC_PATH_SELECT } },
             file: { select: { slug: true, title: true } },
           },
           orderBy: [{ postedAt: "desc" }, { id: "desc" }],
@@ -183,7 +184,7 @@ export async function referenceCitedBy(actor: Actor, referenceId: string): Promi
     notes: notes.slice(0, CITED_BY_LIMIT).flatMap((note) => {
       const pdf = note.file ? pdfNoteContainer(note.file, versionOf.get(note.id)) : null;
       const container = note.doc
-        ? { href: `/doc/${note.doc.slug}`, title: docTitleOrFallback(note.doc.title) }
+        ? { href: docPagePath(note.doc), title: docTitleOrFallback(note.doc.title) }
         : pdf
           ? { href: pdf.path, title: pdf.title }
           : null;

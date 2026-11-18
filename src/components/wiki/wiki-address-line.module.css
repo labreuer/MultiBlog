@@ -1,0 +1,24 @@
+/* A wiki page's address line above its title (WikiAddressLine.tsx): small
+   and in the byline's secondary color, but for PUBLIC, which is a filled
+   chip so it reads at a glance. */
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.4rem;
+  margin-bottom: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.separator {
+  color: var(--text-muted);
+}
+
+.public {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--fill-warning);
+  color: var(--warning-text);
+  font-weight: 600;
+}

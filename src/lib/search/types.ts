@@ -103,6 +103,7 @@ export type CommentHit = {
 
 export type SearchSection =
   | { kind: "docs"; total: number; hits: DocHit[] }
+  | { kind: "wiki"; total: number; hits: DocHit[] }
   | { kind: "posts"; total: number; hits: PostHit[] }
   | { kind: "pdfs"; total: number; hits: PdfHit[] }
   | { kind: "annotations"; total: number; hits: AnnotationHit[] }

@@ -36,6 +36,7 @@ const EMPTY_DOC: JSONContent = { type: "doc", content: [{ type: "paragraph" }] }
 const DOC_SELECT = {
   id: true,
   title: true,
+  wikiName: true,
   visibility: true,
   proseJson: true,
   chipStyles: true,
@@ -104,6 +105,11 @@ const loadPairForRead = gated(async (user, left: string, right: string) => {
     canUserReadDoc(user.id, user.role, leftDoc),
     canUserReadDoc(user.id, user.role, rightDoc),
   ]);
+  // An unreadable wiki doc is answered as a missing one (docs/WIKI.md
+  // "URLs"): a Forbidden would confirm that a page of that name exists.
+  if ((!leftReadable && leftDoc.wikiName !== null) || (!rightReadable && rightDoc.wikiName !== null)) {
+    return "not-found";
+  }
   if (!leftReadable || !rightReadable) {
     return "forbidden";
   }
@@ -177,12 +183,14 @@ export default async function SideBySidePage({
         left={{
           docId: leftDoc.id,
           initialTitle: docTitleOrFallback(leftDoc.title),
+          fixedTitle: leftDoc.wikiName ?? undefined,
           initialBodyJSON: leftBody.bodyJSON,
           staticBody: leftBody.staticBody,
         }}
         right={{
           docId: rightDoc.id,
           initialTitle: docTitleOrFallback(rightDoc.title),
+          fixedTitle: rightDoc.wikiName ?? undefined,
           initialBodyJSON: rightBody.bodyJSON,
           staticBody: rightBody.staticBody,
         }}

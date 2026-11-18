@@ -450,7 +450,8 @@ export default function DocsTable({
             byline on. ADMIN accounts also get a &quot;Show all docs&quot; checkbox above, which adds everyone
             else&apos;s PRIVATE docs for the current visit; opening one still needs a byline on it (docs/PERMISSIONS.md),
             and so does seeing its tags — those rows show a dash under Tags, and Tags doesn&apos;t sort while the box
-            is checked.
+            is checked. Wiki pages aren&apos;t listed here: they have a table of their own, at{" "}
+            <code>/wiki/special/pages</code>.
             The <strong>Authors</strong> filter narrows this listing; it never widens it. Without &quot;Show all
             docs&quot; the listing is still your own bylines plus every SHARED doc, so filtering on someone else&apos;s
             name returns the SHARED docs they co-author and not their PRIVATE ones — and your own name under{" "}

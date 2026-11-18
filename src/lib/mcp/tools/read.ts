@@ -6,7 +6,7 @@ import { displayNameOf } from "@/lib/display-name";
 import type { DocState } from "@/lib/doc-state";
 import type { BlockSpan } from "@/lib/doc-text";
 import { defineTool, type McpContext, type ToolResult } from "../tool";
-import { parse, readableDocByParam, readableFileBySlug, refuseRef } from "../resolve";
+import { parseDocRef, readableDocByParam, readableFileBySlug, refuseRef } from "../resolve";
 import { isViewerFragment } from "../url";
 import { DEFAULT_READ_CHARS, MAX_READ_CHARS, readBoundFor, readInput, type ReadArgs } from "../read/args";
 import type { ApiTokenClient } from "@/generated/prisma/enums";
@@ -16,6 +16,7 @@ import { allThreads, annotationByFragment, containerThreads, oneThread } from ".
 import { linksInto, readLink } from "../read/links";
 import { readPost } from "../read/posts";
 import { runSearch } from "./search";
+import { userByOldSlug } from "@/lib/user-slug";
 
 // docs/MCP.md §15, "What `read` takes" — any MultiBlog URL on this instance,
 // absolute or as a path, past slugs followed as each reading route follows
@@ -71,13 +72,7 @@ async function readTag(ctx: McpContext, slug: string): Promise<ToolResult> {
  */
 async function readAuthor(ctx: McpContext, slug: string): Promise<ToolResult> {
   let user = await prisma.user.findUnique({ where: { slug }, select: { name: true, slug: true } });
-  if (!user) {
-    const moved = await prisma.userSlugHistory.findFirst({
-      where: { slug, user: { deletedByUserId: null } },
-      select: { user: { select: { name: true, slug: true } } },
-    });
-    user = moved?.user ?? null;
-  }
+  if (!user) user = await userByOldSlug(slug);
   if (!user || !user.name?.trim()) throw notFound("That author");
   let listing: ToolResult;
   try {
@@ -153,7 +148,7 @@ export const readTool = defineTool({
   maxResultSizeChars: MAX_READ_CHARS,
   searchHint: "open url doc pdf page outline section blocks quote around thread annotation link post comment tag",
   async run(args, ctx) {
-    const parsed = parse(args.url);
+    const parsed = await parseDocRef(args.url);
     switch (parsed.kind) {
       case "doc":
         return readDocRef(ctx, parsed.param, parsed.fragment, args);

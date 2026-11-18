@@ -131,6 +131,9 @@ export default async function DocsPage({
   //     nowhere. It widens this query and only this query: a PRIVATE doc the
   //     admin doesn't author still goes through canUserReadDoc/canUserEditDoc
   //     on its own routes, which refuse it.
+  // No wiki page is listed here, whatever the override: wiki pages have their
+  // own table, /wiki/special/pages, which takes this same scope (docs/WIKI.md
+  // "Listing wiki pages").
   const viewerIsAdmin = isAdmin(session.user.role);
   const viewerCanEditAnyShared = canEditAnySharedDoc(session.user.role);
   const bypassAuthorScoping = viewerIsAdmin && filters.showAllDocs;
@@ -141,7 +144,7 @@ export default async function DocsPage({
     ],
   };
   const where: Prisma.DocWhereInput = {
-    AND: [bypassAuthorScoping ? {} : authorScope, buildFilterWhere(filters)],
+    AND: [{ wikiName: null }, bypassAuthorScoping ? {} : authorScope, buildFilterWhere(filters)],
   };
   // The override lists PRIVATE docs this admin may not read, and which terms
   // are on such a doc is the doc's to disclose (docs/PERMISSIONS.md, Tags) —

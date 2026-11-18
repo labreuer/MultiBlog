@@ -11,7 +11,7 @@ import { setLinkDeleted } from "@/lib/anchored-link-write";
 import { displayNameOf } from "@/lib/display-name";
 import { invalid, notFound } from "@/lib/api/errors";
 import { defineTool, listedName, objectRef, type McpContext, type ToolResult } from "../tool";
-import { parse } from "../resolve";
+import { parseDocRef } from "../resolve";
 import { isViewerFragment } from "../url";
 import { annotationByFragment } from "../read/threads";
 import { resolveTagTarget, tagFor } from "../tag-writes";
@@ -184,7 +184,7 @@ async function manageFile(ctx: McpContext, fileId: string, args: Args): Promise<
 
 /** An annotation by id or card URL, found deleted or not, and not_found to anyone who can't read it. */
 async function managedAnnotation(ctx: McpContext, ref: string): Promise<string | null> {
-  const parsed = parse(ref);
+  const parsed = await parseDocRef(ref);
   let id: string | null = null;
   if (parsed.kind === "id") id = parsed.id;
   else if (parsed.kind === "doc" && parsed.fragment) {
@@ -228,7 +228,7 @@ export const manageTool = defineTool({
 async function runManage(ctx: McpContext, args: Args): Promise<ToolResult> {
   if (args.delete && args.restore) throw invalid("delete and restore undo each other; send one.");
   if (!FIELDS.some((field) => args[field] !== undefined)) throw invalid("Say what to change.");
-  const parsed = parse(args.target);
+  const parsed = await parseDocRef(args.target);
 
   if (parsed.kind === "link" || (parsed.kind === "id" && (await prisma.anchoredLink.findUnique({ where: { id: parsed.id }, select: { id: true } })))) {
     onlyFieldsFor("link", args);

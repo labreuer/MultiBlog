@@ -3,6 +3,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canManageDocs, canViewDocs } from "@/lib/role-checks";
 import { isSharedOrPublic, sharedOrPublic } from "@/lib/doc-visibility";
+import { wikiAddressOfDoc, wikiLabel } from "@/lib/wiki-address";
 
 export { canManageDocs, canViewDocs } from "@/lib/role-checks";
 
@@ -128,6 +129,41 @@ export async function canUserReadDoc(
   return isDocAuthor(doc.id, userId);
 }
 
+/**
+ * docs/WIKI.md "Public pages" — **the wiki read rule**, a read rule of its own:
+ * a viewer, who may be signed out, may read a wiki page when canUserReadDoc
+ * says so, or when the page is live and PUBLIC. What reads by it: the wiki's
+ * routes (the page, the namespace lists, /wiki), the family line on a wiki
+ * page, the front page, and the redirect /doc/<slug> makes to a wiki page's
+ * address.
+ *
+ * **It stays outside canUserReadDoc**, which every other gate on a doc is
+ * built on — the collab token, replay, annotations, tags, search — and which
+ * refuses a COMMENTER or a signed-out reader a PUBLIC page as it does a
+ * SHARED one. So PUBLIC widens who reads the text, through these routes alone,
+ * and nothing hanging off it.
+ */
+export async function canReadWikiDoc(
+  viewer: { id: string; role: Role } | null,
+  doc: { id: string; visibility: DocVisibility; wikiName: string | null; deletedByUserId: string | null },
+): Promise<boolean> {
+  if (doc.wikiName !== null && doc.visibility === "PUBLIC" && doc.deletedByUserId === null) return true;
+  return viewer !== null && (await canUserReadDoc(viewer.id, viewer.role, doc));
+}
+
+/**
+ * canReadWikiDoc as a `where`, beside it as CLAUDE.md asks of every read
+ * rule. Not inside readableDocsWhere, which takes a user and returns null for
+ * a viewer without canViewDocs, signed out or COMMENTER: exactly who this rule
+ * exists for. Never null: anyone may read a live PUBLIC wiki page.
+ */
+export function readableWikiDocsWhere(viewer: { id: string; role: Role } | null): Prisma.DocWhereInput {
+  const or: Prisma.DocWhereInput[] = [{ visibility: "PUBLIC", wikiName: { not: null } }];
+  const readable = viewer ? readableDocsWhere(viewer.id, viewer.role) : null;
+  if (readable) or.push(readable);
+  return { deletedByUserId: null, OR: or };
+}
+
 export type ReadableDoc = { id: string; slug: string; title: string };
 
 // PLAN.md §14k — every doc this viewer may read, through readableDocsWhere
@@ -182,8 +218,13 @@ export function readableDocsWhere(
 // `updatedAt` is a Date from these queries and an ISO string on the wire
 // (LinkableDocJson) — the server action converts, so the client never
 // depends on a Date surviving the action boundary.
-export type LinkableDoc = ReadableDoc & { updatedAt: Date };
-export type LinkableDocJson = ReadableDoc & { updatedAt: string };
+//
+// `label` is a wiki page's label, its address as stored (`@jane/Mercury
+// (planet)~2`), null for a doc that isn't one: the `[[` menu's option shows
+// it, since every variant of a name, and a page of that name in each
+// namespace, share a title (docs/WIKI.md "Labels").
+export type LinkableDoc = ReadableDoc & { updatedAt: Date; label: string | null };
+export type LinkableDocJson = ReadableDoc & { updatedAt: string; label: string | null };
 
 // The link bubble's preview of a linked doc (LinkBubble.tsx, fetched through
 // previewLinkedDoc in src/app/actions/docs.ts): what the reading route's
@@ -206,7 +247,23 @@ export type LinkedDocPreview =
 // rest, so the cut is visible rather than a silent cap.
 export const LINK_PICKER_LIMIT = 8;
 
-const linkableSelect = { id: true, slug: true, title: true, updatedAt: true } as const;
+const linkableSelect = {
+  id: true,
+  slug: true,
+  title: true,
+  updatedAt: true,
+  wikiName: true,
+  wikiVariant: true,
+  wikiOwner: { select: { slug: true } },
+} as const;
+
+type LinkableRow = Prisma.DocGetPayload<{ select: typeof linkableSelect }>;
+
+/** A picker's row, with a wiki page's label (docs/WIKI.md "Labels"). */
+function linkable(row: LinkableRow): LinkableDoc {
+  const address = wikiAddressOfDoc({ wikiName: row.wikiName, wikiVariant: row.wikiVariant, ownerSlug: row.wikiOwner?.slug ?? null });
+  return { id: row.id, slug: row.slug, title: row.title, updatedAt: row.updatedAt, label: address && wikiLabel(address) };
+}
 
 // readableDocsFor's most recently edited rows — what the picker offers before
 // anything is typed, since the doc someone wants to link is usually one they
@@ -218,7 +275,8 @@ export async function recentReadableDocsFor(
 ): Promise<LinkableDoc[]> {
   const where = readableDocsWhere(userId, role);
   if (!where) return [];
-  return prisma.doc.findMany({ where, select: linkableSelect, orderBy: { updatedAt: "desc" }, take: limit });
+  const rows = await prisma.doc.findMany({ where, select: linkableSelect, orderBy: { updatedAt: "desc" }, take: limit });
+  return rows.map(linkable);
 }
 
 // readableDocsFor filtered by title: the top `limit` matches, title-prefix
@@ -241,7 +299,7 @@ export async function searchReadableDocsFor(
     orderBy: { title: "asc" },
     take: limit,
   });
-  if (prefix.length >= limit) return prefix;
+  if (prefix.length >= limit) return prefix.map(linkable);
 
   const contains = await prisma.doc.findMany({
     where: {
@@ -253,7 +311,7 @@ export async function searchReadableDocsFor(
     orderBy: { title: "asc" },
     take: limit - prefix.length,
   });
-  return [...prefix, ...contains];
+  return [...prefix, ...contains].map(linkable);
 }
 
 /**

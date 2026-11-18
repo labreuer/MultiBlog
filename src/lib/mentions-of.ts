@@ -1,4 +1,5 @@
 import { noteVersions } from "@/lib/file-version-data";
+import { DOC_PATH_SELECT, docPagePath } from "@/lib/wiki-address";
 import { pdfNoteContainer } from "@/lib/file-version";
 import { prisma } from "@/lib/prisma";
 import type { Actor } from "@/lib/actor";
@@ -69,7 +70,7 @@ export async function mentionsOf(actor: Actor, limit: number): Promise<MentionOf
                 id: true,
                 createdAt: true,
                 user: { select: { name: true, email: true } },
-                doc: { select: { slug: true, title: true } },
+                doc: { select: { title: true, ...DOC_PATH_SELECT } },
                 file: { select: { slug: true, title: true } },
               },
             },
@@ -112,7 +113,7 @@ export async function mentionsOf(actor: Actor, limit: number): Promise<MentionOf
     const note = row.annotation;
     if (!note) continue;
     const container = note.doc
-      ? { path: `/doc/${note.doc.slug}`, title: docTitleOrFallback(note.doc.title) }
+      ? { path: docPagePath(note.doc), title: docTitleOrFallback(note.doc.title) }
       : note.file
         ? pdfNoteContainer(note.file, versionOf.get(note.id))
         : null;

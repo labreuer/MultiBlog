@@ -4,6 +4,9 @@ import { changeDocSlugIn } from "@/lib/doc-slug";
 import { BYLINE_ELIGIBLE_ROLES } from "@/lib/role-checks";
 import { ApiError, forbidden, invalid } from "@/lib/api/errors";
 import { allowedVisibilities } from "@/lib/doc-visibility";
+import { isAdmin } from "@/lib/role-checks";
+import { wikiPathOfDoc } from "@/lib/wiki-address";
+import { claimWikiAddress, ownerWhoCanAct } from "@/lib/wiki-claim";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
 import type { Actor } from "@/lib/actor";
@@ -101,6 +104,10 @@ async function lockEditable(
  *   second is told to retry rather than quietly undoing the first: a
  *   reorder would otherwise put back someone just removed, which on a
  *   PRIVATE doc gives back their access;
+ * - **a person's wiki page keeps its owner on it** (docs/WIKI.md
+ *   "Permissions"), and the refusal names the owner's id, since an MCP
+ *   client's byline is user ids from find_users, which never lists a deleted
+ *   or demoted account. Others may be added, and can then edit;
  * - the change is one transaction, holding the doc's row (lockDoc) so two
  *   byline changes can't interleave, and sets `updatedByUserId`. The rules
  *   above are checked under that lock.
@@ -116,7 +123,10 @@ export async function setDocByline(
   if (wanted.length !== orderedUserIds.length) throw invalid("A byline names each person once.");
 
   await prismaIncludingDeleted.$transaction(async (tx) => {
-    await lockEditable(tx, actor, docId);
+    const doc = await lockEditable(tx, actor, docId);
+    if (doc.wikiOwnerUserId !== null && !wanted.includes(doc.wikiOwnerUserId)) {
+      throw invalid("A person's wiki page keeps its owner on its byline.", { owner: doc.wikiOwnerUserId });
+    }
     const byline = (
       await tx.docAuthor.findMany({ where: { docId }, orderBy: { bylineOrder: "asc" }, select: { userId: true } })
     ).map((a) => a.userId);
@@ -161,17 +171,44 @@ export async function docBylineIds(docId: string): Promise<string[]> {
   return authors.map((a) => a.userId);
 }
 
+/** Lowest first: lowering is moving left. */
+const RANK: Record<DocVisibility, number> = { PRIVATE: 0, SHARED: 1, PUBLIC: 2 };
+
 /**
- * A doc's visibility, checked under the doc's row lock: a value
- * `allowedVisibilities` offers this actor, so what a select offers and what is
- * accepted can't differ. PUBLIC only on a wiki page, and never PRIVATE on a
- * commons page (docs/WIKI.md "Permissions").
+ * A doc's visibility, by the rules in docs/WIKI.md "Permissions", checked
+ * under the doc's row lock:
+ *
+ * - the value is one `allowedVisibilities` offers this actor, so what a
+ *   select offers and what is accepted can't differ: PUBLIC only on a wiki
+ *   page, and never PRIVATE on a commons page;
+ * - its editors set it, but **on a person's wiki page only the owner raises
+ *   it**, by a fresh read of their account that finds one able to act
+ *   (`ownerWhoCanAct`), since a session keeps the role it was signed in
+ *   with. Co-authors may lower it;
+ * - **an ADMIN who can't edit a person's page may lower it**, and do nothing
+ *   else to it: taking a PUBLIC page down is moderation, the counterpart of
+ *   unpublishing a post.
+ *
+ * The actions call this on the session alone, so an ADMIN's lowering isn't
+ * refused by an edit check before these rules run.
  */
 export async function setDocVisibility(actor: Actor, docId: string, visibility: DocVisibility): Promise<void> {
+  if (!Object.prototype.hasOwnProperty.call(RANK, visibility)) throw invalid("Invalid visibility.");
   await prismaIncludingDeleted.$transaction(async (tx) => {
-    const doc = await lockEditable(tx, actor, docId);
+    const doc = await lockDoc(tx, actor, docId);
+    if (!doc || doc.deleted) throw new ApiError("not_found", "Doc not found.");
+    const personal = doc.wikiOwnerUserId !== null;
+    const raising = RANK[visibility] > RANK[doc.visibility];
+    const moderating = personal && !raising && isAdmin(actor.role);
+    if (!doc.canEdit && !moderating) throw forbidden("You don't have permission to change this doc's visibility.");
+    if (personal && raising && doc.wikiOwnerUserId !== actor.userId) {
+      throw forbidden("Only its owner can make this page more visible.");
+    }
     if (!allowedVisibilities(doc, actor.userId).includes(visibility)) {
       throw invalid(`This doc can't be made ${String(visibility)}.`);
+    }
+    if (personal && raising && !(await ownerWhoCanAct(doc.wikiOwnerUserId!, tx))) {
+      throw forbidden("Your account can no longer make this page more visible.");
     }
     await tx.doc.update({ where: { id: docId }, data: { visibility, updatedByUserId: actor.userId } });
   });
@@ -205,20 +242,71 @@ export async function setDocRecord(actor: Actor, docId: string, record: boolean)
   });
 }
 
+/** Where a doc lives after setDocDeleted: a wiki page's address, and the one it had when a restore found that taken. */
+export type DocDeletedResult = { wikiPath: string | null; renamedFrom: string | null };
+
 /**
  * Soft delete or restore — each other's undo. Restoring is a question about
  * a deleted row, so it reads through prismaIncludingDeleted. Never a hard
  * delete: that cascades away every anchor into the doc
  * (docs/CLAUDE_IMPORT.md §6).
+ *
+ * On a wiki page (docs/WIKI.md "Permissions", "Data model"), checked under
+ * the doc's row lock:
+ *
+ * - **a person's page is deleted and restored by its owner alone**, by a
+ *   fresh read of their account that finds one able to act;
+ * - deleting gives its address back, so a page **restored after its address
+ *   was taken comes back at the next free variant** (`name~2`, or
+ *   `name~v-2` for a variant `v`), picked under the address lock so the
+ *   unique index never refuses the restore as a raw duplicate key. The claim
+ *   asks the held commons names too: restoring a deleted `About` in the
+ *   commons is an ADMIN's or EDITOR's. The result says where it now lives,
+ *   and the address it had.
  */
-export async function setDocDeleted(actor: Actor, docId: string, deleted: boolean): Promise<void> {
-  await prismaIncludingDeleted.$transaction(async (tx) => {
-    await lockEditable(tx, actor, docId, { includeDeleted: true });
+export async function setDocDeleted(actor: Actor, docId: string, deleted: boolean): Promise<DocDeletedResult> {
+  return prismaIncludingDeleted.$transaction(async (tx) => {
+    const doc = await lockDoc(tx, actor, docId);
+    if (!doc) throw new ApiError("not_found", "Doc not found.");
+    if (doc.wikiOwnerUserId !== null) {
+      if (doc.wikiOwnerUserId !== actor.userId || !doc.canEdit) {
+        throw forbidden("Only its owner can delete or restore this page.");
+      }
+      if (!(await ownerWhoCanAct(doc.wikiOwnerUserId, tx))) {
+        throw forbidden("Your account can no longer delete or restore this page.");
+      }
+    } else if (!doc.canEdit) {
+      throw forbidden("You don't have permission to edit this doc.");
+    }
+
+    if (deleted) {
+      await tx.doc.update({
+        where: { id: docId },
+        data: { deletedByUserId: actor.userId, deletedAt: new Date(), updatedByUserId: actor.userId },
+      });
+      return { wikiPath: null, renamedFrom: null };
+    }
+
+    let variant = doc.wikiVariant;
+    if (doc.wikiName !== null && doc.deleted) {
+      const claim = await claimWikiAddress(
+        tx,
+        actor.role,
+        { ownerUserId: doc.wikiOwnerUserId, name: doc.wikiName, choice: { defaults: { kind: "restore", variant: doc.wikiVariant } } },
+        docId,
+      );
+      variant = claim.variant;
+    }
     await tx.doc.update({
       where: { id: docId },
-      data: deleted
-        ? { deletedByUserId: actor.userId, deletedAt: new Date(), updatedByUserId: actor.userId }
-        : { deletedByUserId: null, deletedAt: null, updatedByUserId: actor.userId },
+      data: { deletedByUserId: null, deletedAt: null, wikiVariant: variant, updatedByUserId: actor.userId },
     });
+    if (doc.wikiName === null) return { wikiPath: null, renamedFrom: null };
+    const ownerSlug =
+      doc.wikiOwnerUserId === null
+        ? null
+        : ((await tx.user.findUnique({ where: { id: doc.wikiOwnerUserId }, select: { slug: true } }))?.slug ?? null);
+    const pathOf = (v: string) => wikiPathOfDoc({ wikiName: doc.wikiName, wikiVariant: v, ownerSlug });
+    return { wikiPath: pathOf(variant), renamedFrom: variant === doc.wikiVariant ? null : pathOf(doc.wikiVariant) };
   });
 }

@@ -25,7 +25,7 @@ import type { SearchKind } from "./params";
 import type { SearchActor, SearchAuthorOption, SearchScope } from "./types";
 
 /** The kinds an author filter applies to; the rest drop out while one is set. */
-export const AUTHORED_KINDS: readonly SearchKind[] = ["docs", "posts", "annotations"];
+export const AUTHORED_KINDS: readonly SearchKind[] = ["docs", "wiki", "posts", "annotations"];
 
 export type ResolvedAuthorOption = SearchAuthorOption & { id: string };
 

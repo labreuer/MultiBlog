@@ -58,7 +58,11 @@ export default function DocRefMenu({ editor, disabled }: { editor: Editor; disab
       itemKey={(doc) => doc.id}
       renderRow={(doc, { receivedAt }) => (
         <>
-          <span className={styles.linkResultTitle}>{docTitleOrFallback(doc.title)}</span>
+          {/* A wiki page's label, as text: the option is what a click
+              chooses, and a link inside it would navigate instead. What is
+              inserted is still the title, the page's name, and a link to
+              /doc/<slug>, which follows the page through a rename. */}
+          <span className={styles.linkResultTitle}>{doc.label ?? docTitleOrFallback(doc.title)}</span>
           <span className={styles.linkResultMeta}>Edited {relativeTime(doc.updatedAt, receivedAt)}</span>
         </>
       )}

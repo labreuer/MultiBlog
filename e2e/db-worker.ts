@@ -76,8 +76,10 @@ import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import { applyAnnotationMark } from "@/lib/annotation-admin";
 import { issueApiToken } from "@/lib/api/tokens";
 import { softDeleteUser } from "@/lib/user-delete";
-import { setDocByline, setDocDeleted, setDocVisibility } from "@/lib/doc-manage";
+import { setDocByline, setDocDeleted, setDocSlug, setDocVisibility } from "@/lib/doc-manage";
+import { wikiPathOfDoc } from "@/lib/wiki-address";
 import { foldWikiName, type FoldedWikiName } from "@/lib/wiki-claim";
+import { createWikiPage } from "@/lib/wiki-create";
 import { getFrontPagePreamble } from "@/lib/front-page";
 import { createBot, moveBot, requireBotRole, requireInvitable, restoreAccount, setBotAgent } from "@/lib/bots";
 import { prosemirrorToYXmlFragment } from "y-prosemirror";
@@ -105,7 +107,8 @@ export type TestUser = { id: string; email: string; name: string; role: Role; sl
 
 export async function createTestUser(opts: {
   email: string;
-  name?: string;
+  /** Default the email's local part; null for a nameless account, whose slug is then made from its email. */
+  name?: string | null;
   role?: Role;
   /** approvedCount 100 — enough to clear any realistic trust threshold. */
   trusted?: boolean;
@@ -122,7 +125,7 @@ export async function createTestUser(opts: {
 }): Promise<TestUser> {
   const {
     email,
-    name = email.split("@")[0],
+    name: givenName,
     role = "ADMIN",
     trusted = false,
     forceModerate = false,
@@ -131,8 +134,9 @@ export async function createTestUser(opts: {
     orcid = null,
     website = null,
     color = colorForSeed(email),
-    adminInitials = name.slice(0, 2).toUpperCase(),
   } = opts;
+  const name = givenName === undefined ? email.split("@")[0] : givenName;
+  const adminInitials = opts.adminInitials ?? (name ?? email).slice(0, 2).toUpperCase();
   assertSafe(email);
 
   // Delete-then-create rather than upsert: a leftover row from a killed run
@@ -162,14 +166,14 @@ export async function createTestUser(opts: {
       data: {
         userId: user.id,
         email: user.email,
-        displayName: name,
+        displayName: name ?? email.split("@")[0],
         approvedCount: trusted ? 100 : 0,
         forceModerate,
       },
     });
   }
 
-  return { id: user.id, email: user.email, name, role, slug: user.slug };
+  return { id: user.id, email: user.email, name: name ?? "", role, slug: user.slug };
 }
 
 /**
@@ -3774,7 +3778,7 @@ export async function softDeleteTestDoc(docId: string, byEmail?: string): Promis
 // so the title it mirrors carries the prefix sweepTestData looks for; the
 // title createTestDoc seeded into the fragment is left there, as on a doc
 // moved into the wiki, since nothing on a page shows it.
-export type TestWikiPage = TestDoc & { wikiName: string; wikiVariant: string };
+export type TestWikiPage = TestDoc & { wikiName: string; wikiVariant: string; path: string };
 
 export async function createTestWikiPage(opts: {
   /** The byline, and for a person's page its owner. */
@@ -3785,13 +3789,15 @@ export async function createTestWikiPage(opts: {
   /** Default PRIVATE for a person's page, SHARED for a commons one, as the create dialog's. */
   visibility?: DocVisibility;
   bodyText?: string;
+  /** A body as TipTap JSON, in place of `bodyText`. */
+  body?: JSONContent;
   /** ISO, to backdate the row, for a rule that picks the first-created. */
   createdAt?: string;
 }): Promise<TestWikiPage> {
   const visibility = opts.visibility ?? (opts.namespace === "person" ? "PRIVATE" : "SHARED");
   const name = opts.name ?? uniqueTitle("wiki");
   const variant = opts.variant ?? "";
-  const doc = await createTestDoc({ authorEmail: opts.authorEmail, bodyText: opts.bodyText, visibility: "SHARED" });
+  const doc = await createTestDoc({ authorEmail: opts.authorEmail, ...(opts.body ? { body: opts.body } : { bodyText: opts.bodyText }), visibility: "SHARED" });
   const owner = await prisma.user.findUniqueOrThrow({ where: { email: opts.authorEmail }, select: { id: true } });
   const row = await prisma.doc.update({
     where: { id: doc.id },
@@ -3807,7 +3813,9 @@ export async function createTestWikiPage(opts: {
     },
     select: { title: true },
   });
-  return { ...doc, title: row.title, wikiName: name, wikiVariant: variant };
+  const ownerSlug = opts.namespace === "person" ? (await prisma.user.findUniqueOrThrow({ where: { email: opts.authorEmail }, select: { slug: true } })).slug : null;
+  const path = wikiPathOfDoc({ wikiName: name, wikiVariant: variant, ownerSlug })!;
+  return { ...doc, title: row.title, wikiName: name, wikiVariant: variant, path };
 }
 
 /**
@@ -3862,11 +3870,32 @@ export async function writeTestFileVisibility(fileId: string, visibility: DocVis
 export async function getTestWikiFacts(
   docId: string,
   query?: string,
-): Promise<{ title: string; wikiName: string | null; wikiNameKey: string | null; wikiVariant: string; visibility: DocVisibility; searchMatches: boolean | null }> {
-  const doc = await prismaIncludingDeleted.doc.findUniqueOrThrow({
+): Promise<{
+  title: string;
+  slug: string;
+  wikiName: string | null;
+  wikiNameKey: string | null;
+  wikiVariant: string;
+  visibility: DocVisibility;
+  deleted: boolean;
+  bylineEmails: string[];
+  searchMatches: boolean | null;
+}> {
+  const row = await prismaIncludingDeleted.doc.findUniqueOrThrow({
     where: { id: docId },
-    select: { title: true, wikiName: true, wikiNameKey: true, wikiVariant: true, visibility: true },
+    select: {
+      title: true,
+      slug: true,
+      wikiName: true,
+      wikiNameKey: true,
+      wikiVariant: true,
+      visibility: true,
+      deletedByUserId: true,
+      authors: { orderBy: { bylineOrder: "asc" }, select: { user: { select: { email: true } } } },
+    },
   });
+  const { deletedByUserId, authors, ...rest } = row;
+  const doc = { ...rest, deleted: deletedByUserId !== null, bylineEmails: authors.map((a) => a.user.email) };
   let searchMatches: boolean | null = null;
   if (query !== undefined) {
     const rows = await prisma.$queryRaw<{ hit: boolean }[]>`
@@ -3900,16 +3929,19 @@ export async function countPostsForDoc(docId: string): Promise<number> {
  */
 export async function changeTestDocSetting(opts: {
   actorEmail: string;
+  /** A session signed in with this role, which it keeps whatever the account has become since. */
+  sessionRole?: Role;
   docId: string;
-  change: { visibility: string } | { deleted: boolean } | { byline: string[] };
-}): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
+  change: { visibility: string } | { deleted: boolean } | { byline: string[] } | { slug: string };
+}): Promise<{ ok: true; wikiPath?: string | null; renamedFrom?: string | null } | { ok: false; code: string; message: string }> {
   assertSafe(opts.actorEmail);
   const user = await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email: opts.actorEmail }, select: { id: true, role: true } });
-  const actor = { userId: user.id, role: user.role };
+  const actor = { userId: user.id, role: opts.sessionRole ?? user.role };
   const { change } = opts;
   try {
     if ("visibility" in change) await setDocVisibility(actor, opts.docId, change.visibility as DocVisibility);
-    if ("deleted" in change) await setDocDeleted(actor, opts.docId, change.deleted);
+    if ("deleted" in change) return { ok: true, ...(await setDocDeleted(actor, opts.docId, change.deleted)) };
+    if ("slug" in change) await setDocSlug(actor, opts.docId, change.slug);
     if ("byline" in change) {
       const users = await prismaIncludingDeleted.user.findMany({ where: { email: { in: change.byline } }, select: { id: true, email: true } });
       const ids = change.byline.map((email) => users.find((u) => u.email === email)!.id);
@@ -4153,7 +4185,64 @@ export async function getFileSlugFacts(fileId: string): Promise<{ slug: string; 
   return file ? { slug: file.slug, past: file.slugHistory.map((row) => row.slug), deleted: file.deletedByUserId !== null } : null;
 }
 
+/**
+ * createWikiPage (src/lib/wiki-create.ts) as an actor the spec names: what
+ * /wiki/new's action wraps, so a spec can ask for what the form never sends.
+ * A refusal comes back as its code and message, with the taken address's path.
+ */
+export async function createWikiPageAs(opts: {
+  actorEmail: string;
+  /** A session signed in with this role, which it keeps whatever the account has become since. */
+  sessionRole?: Role;
+  page: { namespace: "person" | "commons"; name: string; variant?: string; visibility: DocVisibility };
+}): Promise<{ ok: true; id: string; path: string } | { ok: false; code: string; message: string; path?: string }> {
+  assertSafe(opts.actorEmail);
+  const user = await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email: opts.actorEmail }, select: { id: true, role: true } });
+  try {
+    const created = await createWikiPage({ userId: user.id, role: opts.sessionRole ?? user.role }, { ...opts.page, variant: opts.page.variant ?? "" });
+    return { ok: true, id: created.id, path: created.path };
+  } catch (err) {
+    const e = err as { code?: string; message?: string; details?: { path?: unknown } };
+    const path = typeof e.details?.path === "string" ? e.details.path : undefined;
+    return { ok: false, code: e.code ?? "error", message: e.message ?? String(err), ...(path ? { path } : {}) };
+  }
+}
+
+/** The live page at an address, by its name's key as the routes find it; null for none. `ownerEmail` null is the commons. */
+export async function findTestWikiPageId(ownerEmail: string | null, name: string, variant = ""): Promise<string | null> {
+  const owner = ownerEmail === null ? null : await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email: ownerEmail }, select: { id: true } });
+  const { key } = await foldWikiName(prisma, name);
+  const doc = await prismaIncludingDeleted.doc.findFirst({
+    where: { wikiOwnerUserId: owner?.id ?? null, wikiNameKey: key, wikiName: { not: null }, wikiVariant: variant, deletedByUserId: null },
+    select: { id: true },
+  });
+  return doc?.id ?? null;
+}
+
+/** Renames a throwaway user's slug through changeUserSlug, so the old one is in their history. */
+export async function renameTestUserSlug(email: string): Promise<{ oldSlug: string; newSlug: string }> {
+  assertSafe(email);
+  const user = await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email }, select: { id: true, slug: true } });
+  const newSlug = await changeUserSlug(user.id, `${user.slug}-renamed-${Math.random().toString(36).slice(2, 7)}`);
+  return { oldSlug: user.slug, newSlug };
+}
+
+/** A user's current slug. */
+export async function getTestUserSlug(email: string): Promise<string> {
+  return (await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email }, select: { slug: true } })).slug;
+}
+
+/** A past slug of a doc's, as a rename would have left it. */
+export async function addTestDocSlugHistory(docId: string, slug: string): Promise<void> {
+  await prisma.docSlugHistory.create({ data: { docId, slug } });
+}
+
 const handlers = {
+  createWikiPageAs,
+  findTestWikiPageId,
+  renameTestUserSlug,
+  getTestUserSlug,
+  addTestDocSlugHistory,
   createTestWikiPage,
   writeTestWikiColumns,
   writeTestFileVisibility,
