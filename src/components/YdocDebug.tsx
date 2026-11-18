@@ -12,6 +12,7 @@ import { extractText } from "@/lib/diff";
 import { attachIndexeddb } from "@/lib/ydoc-persistence";
 import { getCollabUrl } from "@/lib/collab-url";
 import { isSchemaRefusal } from "@/lib/collab-socket";
+import { base64ToBytes, prepareReplay, ReplayCursor, type PreparedSnapshot, type PreparedUpdate, type ReplayPayload } from "@/lib/replay-log";
 import { useLocalTime } from "./LocalTime";
 import CollabEditorBody from "./CollabEditorBody";
 import CollabTitleField from "./CollabTitleField";
@@ -34,16 +35,6 @@ type DocDetail = {
   snapshots: SnapshotRow[];
 };
 
-// Raw payloads for the replay slider, from GET /api/ydoc/[id]/replay.
-// Exported (with useReplayScrub below) so DocScrubBar.tsx can replay
-// GET /api/doc/[id]/replay's identically-shaped response — "the replay
-// slider is what a doc-side scrub bar is built from" (PLAN.md §12a), not a
-// doc-flavored copy of it.
-export type ReplayPayload = {
-  updates: { id: string; createdAt: string; base64: string }[];
-  snapshots: { id: string; createdAt: string; lastYdocUpdateId: string; base64: string }[];
-};
-
 type Props = {
   initialDocs: DocSummary[];
   userId: string;
@@ -54,15 +45,6 @@ type Props = {
 
 type Mode = "read" | "edit";
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
-
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
 
 // One component per option rather than the timestamp inline, for two reasons:
 // useLocalTime is a hook and so can't be called inside the `.map()`, and an
@@ -436,17 +418,6 @@ function TitleHistory({ replay }: { replay: ReplayPayload }) {
 // nothing here debounces, caches other positions, or precomputes to hide it.
 // ---------------------------------------------------------------------------
 
-type PreparedUpdate = { id: bigint; createdAt: string; bytes: Uint8Array };
-type PreparedSnapshot = {
-  id: string;
-  createdAt: string;
-  lastYdocUpdateId: bigint;
-  bytes: Uint8Array;
-  /** Index in `updates` this snapshot sits at, for placing its dot. */
-  sliderIndex: number;
-};
-type Prepared = { updates: PreparedUpdate[]; snapshots: PreparedSnapshot[] };
-
 type ScrubStatus = {
   mode: "forward" | "rebuild";
   fromSnapshot: boolean;
@@ -456,55 +427,6 @@ type ScrubStatus = {
   appliedThisStep: number;
   elapsedMs: number;
 };
-
-// base64 → bytes once, up front, so the timed section below measures Yjs
-// replay and nothing else. Base64 is a transport artifact of shipping this
-// over JSON; a real reader would fetch binary, so folding its cost into the
-// per-scrub measurement would overstate what replay actually costs.
-function prepare(replay: ReplayPayload): Prepared {
-  const updates: PreparedUpdate[] = replay.updates.map((u) => ({
-    id: BigInt(u.id),
-    createdAt: u.createdAt,
-    bytes: base64ToBytes(u.base64),
-  }));
-
-  const snapshots: PreparedSnapshot[] = replay.snapshots.map((s) => {
-    const mark = BigInt(s.lastYdocUpdateId);
-    // The update this snapshot's high-water mark names. Falls back to the
-    // last update at or below the mark if that exact row is somehow gone.
-    let sliderIndex = updates.findIndex((u) => u.id === mark);
-    if (sliderIndex === -1) {
-      sliderIndex = updates.reduce((acc, u, i) => (u.id <= mark ? i : acc), 0);
-    }
-    return { id: s.id, createdAt: s.createdAt, lastYdocUpdateId: mark, bytes: base64ToBytes(s.base64), sliderIndex };
-  });
-
-  return { updates, snapshots };
-}
-
-/**
- * The newest snapshot at or before `index`, plus the first update index that
- * still has to be applied on top of it. With no qualifying snapshot the base
- * is update row #1, which invariant 1 (PLAN.md §11b) guarantees is a full
- * state — so replaying from index 0 is always self-sufficient.
- */
-function baseFor(prepared: Prepared, index: number): { snapshot: PreparedSnapshot | null; startIndex: number } {
-  const targetId = prepared.updates[index].id;
-
-  let snapshot: PreparedSnapshot | null = null;
-  for (const candidate of prepared.snapshots) {
-    // Ascending by lastYdocUpdateId, so the last one that still qualifies wins.
-    if (candidate.lastYdocUpdateId <= targetId) snapshot = candidate;
-    else break;
-  }
-  if (!snapshot) return { snapshot: null, startIndex: 0 };
-
-  const mark = snapshot.lastYdocUpdateId;
-  const startIndex = prepared.updates.findIndex((u) => u.id > mark);
-  // -1 means the snapshot already covers every update we have; nothing to
-  // apply on top of it.
-  return { snapshot, startIndex: startIndex === -1 ? prepared.updates.length : startIndex };
-}
 
 function formatDelta(bytes: number): string {
   return bytes < 0 ? `−${Math.abs(bytes)}` : `+${bytes}`;
@@ -531,16 +453,14 @@ export type ReplayScrub = {
 // other seek target is; omitted (every other caller) it defaults to the head,
 // unchanged from before this parameter existed.
 export function useReplayScrub(replay: ReplayPayload, initialIndex?: number): ReplayScrub {
-  const prepared = useMemo(() => prepare(replay), [replay]);
+  const prepared = useMemo(() => prepareReplay(replay), [replay]);
   const total = prepared.updates.length;
   const startIndex = Math.min(Math.max(initialIndex ?? total - 1, 0), Math.max(total - 1, 0));
 
-  // Mutable replay machinery, deliberately refs rather than state: a
-  // re-render per applyUpdate would swamp the very measurement this exists to
-  // take.
-  const docRef = useRef<Y.Doc | null>(null);
-  const baseSnapshotIdRef = useRef<string | null>(null);
-  const indexRef = useRef(-1);
+  // The replay machinery (src/lib/replay-log.ts), deliberately a ref rather
+  // than state: a re-render per applyUpdate would swamp the very measurement
+  // this exists to take.
+  const cursorRef = useRef<ReplayCursor | null>(null);
 
   const [index, setIndex] = useState(startIndex);
   const [renderResult, setRenderResult] = useState<YdocRenderResult | null>(null);
@@ -550,73 +470,37 @@ export function useReplayScrub(replay: ReplayPayload, initialIndex?: number): Re
     (target: number) => {
       if (total === 0) return;
       const clamped = Math.min(Math.max(target, 0), total - 1);
-      const required = baseFor(prepared, clamped);
+      if (cursorRef.current?.prepared !== prepared) {
+        cursorRef.current?.destroy();
+        cursorRef.current = new ReplayCursor(prepared);
+      }
 
-      // Forward from the doc already in hand is the only incremental path Yjs
-      // allows. It's unavailable going backward, and also when a *newer*
-      // snapshot now covers the target — in which case rebuilding from that
-      // snapshot is both correct and cheaper than replaying the deltas
-      // between here and there. That second case is the only way a snapshot
-      // ever earns its keep on a forward jump.
-      const incremental =
-        docRef.current !== null &&
-        clamped >= indexRef.current &&
-        (required.snapshot?.id ?? null) === baseSnapshotIdRef.current;
-
-      let appliedThisStep = 0;
       try {
-        const t0 = performance.now();
-        if (incremental) {
-          const doc = docRef.current!;
-          for (let i = indexRef.current + 1; i <= clamped; i++) {
-            Y.applyUpdate(doc, prepared.updates[i].bytes);
-            appliedThisStep++;
-          }
-        } else {
-          const doc = new Y.Doc();
-          if (required.snapshot) Y.applyUpdate(doc, required.snapshot.bytes);
-          for (let i = required.startIndex; i <= clamped; i++) {
-            Y.applyUpdate(doc, prepared.updates[i].bytes);
-            appliedThisStep++;
-          }
-          const previous = docRef.current;
-          docRef.current = doc;
-          baseSnapshotIdRef.current = required.snapshot?.id ?? null;
-          previous?.destroy();
-        }
-        const elapsedMs = performance.now() - t0;
-        indexRef.current = clamped;
+        const step = cursorRef.current.seek(clamped);
 
         // Outside the timer on purpose: encoding the whole document just to
         // report its size is pure instrumentation, not part of the rebuild.
         // It is still real per-step cost the page pays, and on a large
         // document it can easily exceed the rebuild it's reporting on — so
         // don't read the millisecond figure as this view's total step cost.
-        const baseBytes = required.snapshot
-          ? required.snapshot.bytes.byteLength
-          : prepared.updates[0].bytes.byteLength;
-        const resultBytes = Y.encodeStateAsUpdate(docRef.current!).byteLength;
+        const baseBytes = step.snapshot ? step.snapshot.bytes.byteLength : prepared.updates[0].bytes.byteLength;
+        const resultBytes = Y.encodeStateAsUpdate(step.doc).byteLength;
 
         setIndex(clamped);
         setStatus({
-          mode: incremental ? "forward" : "rebuild",
-          fromSnapshot: required.snapshot !== null,
+          mode: step.mode,
+          fromSnapshot: step.snapshot !== null,
           baseBytes,
           deltaBytes: resultBytes - baseBytes,
-          sinceBase: clamped - required.startIndex + 1,
-          appliedThisStep,
-          elapsedMs,
+          sinceBase: clamped - step.startIndex + 1,
+          appliedThisStep: step.applied,
+          elapsedMs: step.elapsedMs,
         });
-        setRenderResult(renderYdocDoc(docRef.current!));
+        setRenderResult(renderYdocDoc(step.doc));
       } catch (err) {
         // A document whose bytes aren't a valid Yjs update at all (the
-        // --garbage fixture) throws here rather than in the renderer. Reset
-        // so the next seek rebuilds from scratch instead of continuing from
-        // a half-applied doc.
-        docRef.current?.destroy();
-        docRef.current = null;
-        baseSnapshotIdRef.current = null;
-        indexRef.current = -1;
+        // --garbage fixture) throws in the cursor rather than in the
+        // renderer, and the cursor has reset itself.
         setIndex(clamped);
         setStatus(null);
         setRenderResult({
@@ -647,8 +531,8 @@ export function useReplayScrub(replay: ReplayPayload, initialIndex?: number): Re
     // eslint-disable-next-line react-hooks/set-state-in-effect
     seek(startIndex);
     return () => {
-      docRef.current?.destroy();
-      docRef.current = null;
+      cursorRef.current?.destroy();
+      cursorRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

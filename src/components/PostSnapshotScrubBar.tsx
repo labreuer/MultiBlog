@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { extractText } from "@/lib/diff";
-import { useReplayScrub, type ReplayPayload } from "./YdocDebug";
+import { useReplayScrub } from "./YdocDebug";
+import type { ReplayPayload } from "@/lib/replay-log";
 import type { YdocRenderResult } from "@/lib/ydoc-render";
 import styles from "./PostSnapshotScrubBar.module.css";
 

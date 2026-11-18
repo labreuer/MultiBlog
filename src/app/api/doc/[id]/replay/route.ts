@@ -6,7 +6,9 @@ import { ydocIdForDoc } from "@/lib/ydoc-names";
 
 // Doc-scoped sibling of /api/ydoc/[id]/replay (that route stays ADMIN-gated
 // and /ydoc-debug-only) — identically shaped response, consumed by
-// DocScrubBar.tsx's embedded scrub bar on /doc/[slug] (PLAN.md §12a/§12n).
+// DocScrubBar.tsx's embedded scrub bar on /doc/[slug] (PLAN.md §12a/§12n),
+// and by the worker that builds a version for a slider on the diff page
+// (src/lib/doc-version.worker.ts; docs/FORKS.md, "Sliders on the diff page").
 // Gated on canUserSeeDocHistory rather than isAdmin: this is a doc's whole
 // history, and that predicate is who may see it (docs/FORKS.md, "Who may see
 // a doc's history").

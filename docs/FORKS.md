@@ -25,13 +25,14 @@ What it does not repeat:
 ## Mistakes that fail no check
 
 Read these before changing code that shows a doc as it was at an earlier version: code that
-calls `loadDocStateAt` or `isDocVersion`, serves a doc's `ydoc_update` rows, or takes an update
-id from a request. Today that is the doc page's scrub bar and its replay route, the diff page,
-its sliders with the index route and the pair route they read, forking, MCP's reads and
-writes, and `/post/[id]/edit`. Read the last of them before writing code that seeds a doc from
-another doc's text. Each mistake compiles, lints and gives a doc's editors the right answer,
-and the specs cover the diff's gate through its page and its route, the index route's and
-`forkDoc` alone.
+calls `loadDocStateAt`, `isDocVersion` or `docBodyOf`, serves a doc's `ydoc_update` rows, or
+takes an update id from a request. Today that is the doc page's scrub bar and its replay route, the diff page,
+its sliders with the index route and the pair route they read and the worker that builds a
+version in the browser, forking, MCP's reads and writes, and `/post/[id]/edit`. Read the last
+of them before writing code that seeds a doc from another doc's text. Each mistake compiles,
+lints and gives a doc's editors the right answer, and the specs cover the diff's gate through
+its page and its route, the index route's, `forkDoc`, and one fixture's sides built in the
+browser against the same addresses reloaded, alone.
 CLAUDE.md points here and holds none of it, so this list is the whole of the warning.
 
 - **Showing history through `canUserEditDoc`.** The two answer alike for a doc's own scrub bar,
@@ -68,6 +69,20 @@ CLAUDE.md points here and holds none of it, so this list is the whole of the war
   `readDiffPair` sends `nowVersion` only for a side with `history`. It is the id of the log's
   newest update, which a reader of the doc as it is now is not told. A slider's bar is its
   only reader, so sending it for every side breaks nothing on the page.
+- **Turning a Y.Doc into a doc's blocks anywhere but through `docBodyOf`.** The server reads
+  every doc through it (`stateOf`, `src/lib/doc-state.ts`), and the diff page's sliders build
+  a version in the reader's browser through it (`versionBlocks`, `src/lib/doc-body.ts`). A
+  second reader, or a step added to one of the two alone, makes a diff slid to differ from
+  its own address reloaded, in whatever the step touches ("Sliders on the diff page").
+- **Building a side in the browser from some of its chips' records.** The server labels a
+  version from every record its chips name (`loadChipContext`); a browser has what
+  `/api/chip-context` answers its viewer. `versionBlocks` gives blocks only when every
+  record is held, and the worker answers nothing otherwise, so the server reads the pair.
+  Labelled from what is held, a person the viewer can't be answered for reads "unknown
+  person" where a reload names them, and a missing work renumbers the citations after it.
+- **Sending a pair's fork point to a viewer without the parent's history.** `readDiffPair`
+  sends `fork` only where that side has `history`. It is one of the parent's update ids, and
+  only a browser that can move the parent's side reads it.
 - **Seeding a doc from another doc's body without `forkSeed`.** The doc schema has the
   `annotation` mark, so `createDocWithContent` accepts a body that still carries the marks of
   the other doc's notes, and nothing after it refuses one. An editor-made annotation is a mark
@@ -95,8 +110,9 @@ state of it but the current one, is its editors', with one exception for forks.
   `canUserEditDoc`'s answer for now. That is everyone on the doc's byline whose role may manage
   docs (ADMIN, EDITOR, AUTHOR), and an ADMIN or EDITOR on any `SHARED` doc. A byline member whose
   role can't (AUTHORIZED, COMMENTER) sees no history.
-- **Every check that shows a doc's history goes through it**: the scrub bar's replay route
-  (`/api/doc/[id]/replay`), the doc page's choice to mount the scrub bar, MCP's `since`
+- **Every check that shows a doc's history goes through it**: the replay route
+  (`/api/doc/[id]/replay`), which the scrub bar and a diff side's slider both read, the doc
+  page's choice to mount the scrub bar, MCP's `since`
   (`src/lib/mcp/read/doc.ts`), a diff's versions, a diff side's slider, its index route
   (`/api/doc/[id]/versions`) and the update its side was read at, and forking at a version
   (`readForkSource`). So the redesign replaces the predicate and its filter form rather than
@@ -240,8 +256,8 @@ live edits would rerun the alignment and every word diff on each incoming update
 reader's rows shifting under them while someone types. A side named by a version never changes,
 so a diff of two versions is final. A side with no version is the doc as it was when the server
 last read it, and its header says so: "when last read" and the time. Reloading the page reads
-it again, and so does moving a slider: each pair a slider names is read whole ("Sliders on the
-diff page"), and is not the pair before it compared again.
+it again, and so does bringing its own slider back to the live end. While the other side's
+slider moves it stays as it was read ("Sliders on the diff page").
 
 ### Who may see one
 
@@ -378,7 +394,9 @@ with a doc's length, and the work that grows with its square costs the reader wh
   node type and whether it is a heading.
 - **The browser is sent nothing its reader couldn't already read.** The gate has passed both
   sides whole by then. A block's text arrives with its chips' labels in it, computed on the
-  server as `DocState.blocks` has them, so the browser loads no chip context.
+  server as `DocState.blocks` has them, so a page that is only read loads no chip context. A
+  side a slider moves to a version is built in the browser, its labels with it ("Sliders on
+  the diff page").
 - **The island starts a worker** (`src/lib/doc-diff.worker.ts`), which calls `diffRows` once
   for each pair it is sent and posts the rows back; `DocDiff` (`src/components/DocDiff.tsx`)
   draws them. In a worker and not on the page's own thread, since the engine doesn't yield:
@@ -422,13 +440,15 @@ and `diffRows` passes it:
 `extractText`, whose chip helpers reach the chip registry and both kinds with it. So
 `diffText` and its tokenizers move to `src/lib/diff-text.ts`, which imports nothing, and
 `diff.ts` exports them again for its callers. The worker's bundle is then `doc-diff.ts`,
-`block-align.ts` and `diff-text.ts`.
+`block-align.ts` and `diff-text.ts`. The worker that builds a version for a slider is a
+second one, and holds what this one is kept clear of ("Sliders on the diff page").
 
-**It is the first worker the repo makes itself**; the PDF viewer's is pdfjs's own. A
-production build serves it to Chromium, to Firefox and to Playwright's WebKit build, where it
-answers, as it does in Safari 27.2 and on an iPhone on iOS 18.6.2. An iPad and the oldest
-engines the baseline claims have not been tried (TODO.md, "The diff page's worker has not run
-on an iPad, or on the oldest engines in the baseline").
+**The two are the workers the repo makes itself**; the PDF viewer's is pdfjs's own. A
+production build serves the diff's to Chromium, to Firefox and to Playwright's WebKit build,
+where it answers, as it does in Safari 27.2 and on an iPhone on iOS 18.6.2. The worker that
+builds a version runs in those three builds, and a diff's sliders work on an iPad. The oldest
+engines the baseline claims have not been tried (TODO.md, "The diff page's workers have not
+run on the oldest engines in the baseline").
 
 ### The engine's size guards
 
@@ -522,13 +542,21 @@ the diff is on the page, which is how a reader finds the version a paragraph cam
 stay: the pin and its links are how a reader gets here from a doc, and the sliders are what
 they do once here.
 
-**A slider names a pair; the server builds both sides, as it does for any `<id>@<update id>`.**
-The page asks a Route Handler for each pair its sliders name, compares it and draws it in
-place of the one before, with no navigation. No update's bytes reach the browser, and nothing
-there turns a version into blocks, so the diff a reader slid to is the diff its address shows
-on reload: one function reads both. `src/lib/diff-slider.ts` holds the shape the browser is
-sent, where a side sits on an index and the side a position stands for, pure, with a unit
-table.
+**A slider names a pair. The page puts the pair together itself where it can, whole, and asks
+the server for it otherwise, whole**, then compares it and draws it in place of the one
+before, with no navigation either way. `src/lib/diff-slider.ts` holds the shape of a pair,
+where a side sits on an index, the side a position stands for, and how a pair is put together
+(`planPair`, `assemblePair`), pure, with a unit table.
+
+- **A side the page already shows is kept**, with its blocks. A side with no version stays
+  the doc as it was when last read, which its header says, while the other side's slider
+  moves.
+- **A side moved to a version is built in the reader's browser**, from its doc's log, so the
+  move makes no request ("A version is built in the browser", below).
+- **Every other pair is the server's, both sides**, from the pair route: a side moved to the
+  live end, which is the doc as it is when next read; a side the browser can't build; and a
+  view with no pair on the page to keep a side from, which is Back to a diff whose sliders
+  had moved.
 
 - **Who gets one is `canUserSeeDocHistory`, per side**, which `gateDiffPair` asks of both
   sides, a side with no version included. A side that fails it keeps its header and has no
@@ -544,8 +572,8 @@ table.
   "Earlier" and "Later" and the line above the rows follow the order ("Which side is later"),
   since each pair drawn brings its own.
 - **A slider is one grayed-out input until it is first touched**, as the doc page's bar is.
-  The first pointer or focus on it fetches its doc's index, and opening a diff costs what it
-  does without sliders. It is the same element before and after, so the pointer or the focus
+  The first pointer or focus on it fetches its doc's index and its log, and opening a diff
+  costs what it does without sliders. It is the same element before and after, so the pointer or the focus
   that asked is still on it when the index arrives. A key or a drag before then moves
   nothing.
 - **Still no collab connection**, and nothing is fetched but on a touch or a move.
@@ -565,7 +593,8 @@ the replay route's rows without their bytes and without the snapshots.
   a provider `src/app/diff/layout.tsx` mounts above the page (`DiffIndexesProvider`,
   `src/components/DiffSliders.tsx`). One doc on both sides fetches it once, and touching
   either slider loads both. A link from one diff to another ("Swap sides") mounts the page
-  anew and finds it still there. A reload or a visit from elsewhere starts with none.
+  anew and finds it still there, and the worker that holds the docs' logs with it. A reload
+  or a visit from elsewhere starts with none.
 - **A fetch that fails leaves "Couldn't load this doc's history" in that half**, and the
   other side's slider goes on working.
 - **A doc with no log has no slider, and a doc with one update has a slider that can't move.**
@@ -584,12 +613,72 @@ because iPadOS takes a drag at the window's bottom edge as its own gesture.
   says when its side was read. One step back from there is then a later text than the rows
   showed.
 
-**The pair comes from `GET /api/diff/[left]/[right]`**
+**A version is built in the browser by a worker, `src/lib/doc-version.worker.ts`**, which the
+layout's provider starts when a slider is first touched and keeps beside the indexes.
+
+- **It fetches the doc's log once, from `GET /api/doc/[id]/replay`**, the route the doc page's
+  scrub bar replays from. That route's gate is `canUserSeeDocHistory`, which is who has a
+  slider, so the worker asks for nothing its viewer isn't already served. The log is every
+  update's bytes, as base64 in JSON.
+- **It replays to the version with `ReplayCursor`** (`src/lib/replay-log.ts`), which the
+  scrub bars replay with too: forward from the doc in hand, and for any other move a rebuild
+  from the newest snapshot at or before the target, or from row #1. One cursor a doc.
+- **It reads the blocks with the functions the server reads a version with.** `docBodyOf`
+  (`src/lib/doc-body.ts`) turns a Y.Doc into a body, its title and its chip styles, and
+  `stateOf` reads every doc through it on the server; `chipLabelsIn` and `docBlocks` are
+  pure. What differs between the two is where the chips' records come from.
+- **The records come from `GET /api/chip-context?doc=<id>`**, asked for the targets a version
+  names that the worker doesn't hold. It answers every work asked about, a reference's record
+  being public, and a person only where the viewer may mention them now
+  (`mentionableAmong`). The server labels a version from every record, with no viewer rule
+  (`loadChipContext`).
+- **It builds a side only when it holds the record of every target the version's chips name**
+  (`versionBlocks`), and answers nothing otherwise. So every side on the page is the
+  server's, or the browser's from every record, and a pair slid to reads as its address does
+  reloaded. Labelled from part of the records, a person the viewer can't be answered for
+  would read "unknown person" here and by name on reload, and a missing work would renumber
+  the citations after it.
+- **It answers nothing, too, for** a chip kind its bundle doesn't know, a log that didn't
+  load, a version the log still lacks after one more fetch, and a replay or a decode that
+  threw. A worker that can't start, or throws, builds nothing for as long as the reader
+  stays. `DiffView` asks the server for each such pair, and shows no failure of the
+  browser's own.
+- **An id the endpoint didn't answer is not asked about again**: a version that names it goes
+  to the server each time, without the question.
+- **The records are kept for as long as the worker is**, so a person or a work renamed since
+  shows in a side the server reads and not in one built here, until a reload.
+- **A version the log lacks was written after the log was fetched**: the index has been
+  fetched again since, or it would have no position. The log is fetched again, once for that
+  version.
+- **In a worker, as the comparing is**: a move backward is a rebuild, and the slider's thumb
+  is on the page's thread. It is not the diff's own worker, whose bundle is the engine alone
+  and every reader's. This one holds Yjs, the doc schema and the chip kinds, and only a
+  viewer with a slider fetches it.
+
+**A pair put together in the browser takes everything else from the pair on the page**
+(`assemblePair`). A built side has its doc's id and slug from the side it replaces, its title
+from the version and its time from the log. Which side is later comes from the two functions
+the server asks (`sideOrder`, `pastForkPoint`):
+
+- **one doc at two versions** has the order its two ids give;
+- **a fork and its parent, with the parent's side at a version**, are placed against the fork
+  point. The server sends it (`fork`) only to a viewer who may see the parent's history: no
+  other viewer's browser moves the parent's side, and it is one of the parent's update ids;
+- **any other pair keeps the order on the page.** Its order depends on the parent's side
+  alone, and that side has not moved: a parent's side with no version is only ever kept.
+
+**What the browser holds is not checked again while a slider moves.** A viewer whose access
+to a doc's history ends goes on sliding through the log already fetched, as on the doc
+page's scrub bar, until a pair is the server's: a move to the live end, or a reload. The
+server's refusal is then shown as below.
+
+**A pair the server reads comes from `GET /api/diff/[left]/[right]`**
 (`src/app/api/diff/[left]/[right]/route.ts`), whose address is `/api` and then
 `diffPath(left, right)`. Its body is the pair as the page itself is seeded with it
-(`DiffPairRead`): when it was read, whether it has an order and which, and for each side the
-doc's id, slug and title, the version and its time, whether the viewer has the doc's history,
-and the side's blocks, null where the server couldn't read them.
+(`DiffPairRead`): when it was read, whether it has an order and which, the fork point where
+the viewer may have it, and for each side the doc's id, slug and title, the version and its
+time, whether the viewer has the doc's history, and the side's blocks, null where the server
+couldn't read them.
 
 - **One function gates a pair and one reads it, for the page and the route alike**:
   `gateDiffPair` and `readDiffPair`, in `src/lib/diff-pair.ts`. The route holds no check of
@@ -600,7 +689,8 @@ and the side's blocks, null where the server couldn't read them.
   viewer may see** (`nowVersion`). The bar reads it to tell when its index is behind. It is
   the id of the log's newest update, so sent for every side it would tell a reader without
   the history that id. The parent's own (`parentNow`), which decides a fork-and-parent pair's
-  order, stays on the server: `order` and `diverged` are what leave.
+  order, stays on the server: `order` and `diverged` are what leave, and `fork` for a viewer
+  with the parent's history.
 - **Never cached** (`Cache-Control: private, no-store`): a side with no version is the doc as
   it is when asked.
 
@@ -611,28 +701,30 @@ moves, so nothing mounts it anew, and the rows, the reader's place on the page a
 slider's pointer and focus are kept by not being touched. A link to another diff, or Back,
 mounts it anew. It holds three things:
 
-- **the pair on the page**: the server's read and the worker's rows for it, so that the
-  headers and the rows are always one pair's and change together;
+- **the pair on the page**: its read, the server's or one put together here, and the diff
+  worker's rows for it, so that the headers and the rows are always one pair's and change
+  together;
 - **where the reader has put each slider**, as the side it names and not as an index, since an
   index shifts when the doc's index is fetched again;
 - **the pair wanted**, which follows from those: a moved slider's side, and the address's
   side for a slider that hasn't moved.
 
-**One job at a time, and the newest position waits.** A job is: fetch the pair wanted, hand
-both sides' blocks to the worker, draw its rows. The first load's job has nothing to fetch.
+**One job at a time, and the newest position waits.** A job is: get the pair wanted, put
+together here or fetched; hand both sides' blocks to the diff worker; draw its rows. The
+first load's job has its pair already.
 
 - **While a job runs, a move changes the pair wanted and nothing else.** When the job ends,
   drawn or failed, and the page isn't the wanted pair's, the next job starts for the pair
   wanted then. Positions passed meanwhile are never asked for.
 - **A job is never abandoned for a newer position.** Moves arrive every 16 ms and a job takes
-  60 to 400. Aborting the fetch, or ending the worker, at each move would land nothing until
-  the drag paused, and would send the server a request per move, each costing a session read
-  and part of the gate before the abort is noticed. A fetch is aborted, and the worker ended,
-  only when the view unmounts.
-- **So answers can't arrive out of order, and a tab has one request with the server at a
-  time**, at whatever rate the server answers. Nothing else limits the rate: there is no
-  throttle and no debounce on fetching.
-- **One worker for the view's life**, started by its first compare.
+  longer, up to 400 on a long doc. Aborting a fetch, or ending a worker, at each move would
+  land nothing until the drag paused, and would send the server a request per move for the
+  pairs it reads, each costing a session read and part of the gate before the abort is
+  noticed. A fetch is aborted, and the diff worker ended, only when the view unmounts.
+- **So answers can't arrive out of order, and a tab has at most one request for a pair with
+  the server at a time**, at whatever rate the server answers. Nothing else limits the rate:
+  there is no throttle and no debounce on a job.
+- **One diff worker for the view's life**, started by its first compare.
 - **A row is drawn again only where it differs from the row before it in that place**,
   compared throughout (`sameJson`, `src/lib/same-json.ts`): an answer is a structured clone,
   so no row keeps its identity from one answer to the next. A slider moved one update along
@@ -697,9 +789,9 @@ rested.** Browsers ration history calls (`src/lib/scrub-url.ts`), and a drag dra
   `location.replace`. The page there answers as it does for a pasted address: sign-in with
   its way back, Forbidden, or the 404. `DiffView` draws no refusal of its own, so there is
   one copy of each. A doc deleted, or a role changed, between two moves is found this way.
-- **Any other failure leaves the rows on the page, not marked done**, under "Couldn't load
-  this version" and a "Try again": the network, a 5xx, a body that isn't the shape. The job
-  has ended, so the next move asks for the pair moved to.
+- **Any other failure of that request leaves the rows on the page, not marked done**, under
+  "Couldn't load this version" and a "Try again": the network, a 5xx, a body that isn't the
+  shape. The job has ended, so the next move gets the pair moved to.
 - **A side the server couldn't read comes back with no blocks**: its header says so, as it
   does on a page loaded that way, and there are no rows.
 
@@ -713,31 +805,37 @@ as positions. If the update is missing from the new index too, the index and the
 disagree, and that half shows "Couldn't load this doc's history" and no slider: a thumb at a
 guessed position would misstate the address. The other side's slider still works.
 
-**Every pair drawn costs a request.** Both sides are gated and read again, not the moved one
-alone, and both sides' blocks are sent again:
+**What a move costs.**
 
-- **a side with no version is the doc as it is at that read**, so it can move on under a
-  reader sliding the other side, and its header's time says so;
-- **a side at a version is replayed again**: 11 ms at the end of the longest log in a copy of
-  a production database (1,270 updates; the median doc has 2), and 87 ms near the end of a
-  made-up log of 10,000. An instance with hand-typed docs has not been measured. If a replay
-  per pair proves slow there, the fix is snapshots along the log, which `materializeYdocAt`
-  already starts from (TODO.md, "A diff slider replays its side's log at every pair");
-- **an answer is both sides' blocks**: about half a megabyte of JSON for 300 long paragraphs
-  a side;
-- **the compare is the slowest stage on a long doc**: about 240 ms for that doc against
-  itself 8,000 updates earlier, which is what bounds how often its rows can follow a drag;
-- **the index is about 60 bytes an update**, sent once.
+- **A move to a version makes no request.** The worker replays to it, forward by the updates
+  between or backward from the log's start, and reads its blocks; the diff worker compares.
+- **A move to the live end, or to a pair the browser can't build, is one request**, in which
+  both sides are gated and read again: a side with no version is the doc as it is at that
+  read, and a side at a version is replayed on the server, 11 ms at the end of the longest
+  log in a copy of a production database (1,270 updates; the median doc has 2) and 87 ms
+  near the end of a made-up log of 10,000. Its answer is both sides' blocks, about half a
+  megabyte of JSON for 300 long paragraphs a side.
+- **A doc's log is fetched once for as long as the reader stays on diff pages**: 12 KB of
+  updates for the median doc of that copy, 225 KB at its 95th percentile, 522 KB for its
+  largest, and 701 KB for the made-up log of 10,000, each a third larger as base64. The
+  index is about 60 bytes an update, sent once too.
+- **The compare is the slowest stage on a long doc**: about 240 ms for that made-up doc
+  against itself 8,000 updates earlier, which is what bounds how often its rows can follow a
+  drag.
 
-On a production build, in headless Chromium on a desktop, a ten-second drag draws the rows
-six times a second on a 3,000-update log of that doc and three to four times on the
-10,000-update one, with one request out at a time and two history calls in all.
+On a production build, in headless Chromium on a desktop, a ten-second drag draws the rows six
+times a second on a 3,000-update log of that doc and three to four times on the 10,000-update
+one, with no request for a pair and two history calls in all.
 
-**Not fetching a side's whole replay and building its blocks in the browser**, which is how
-the doc page's bar scrubs. That would follow the thumb without a request, and need a second
-way to turn a version into blocks, the chips' labels included, kept equal to the server's by
-a test for as long as both exist. It would also send every update's bytes for each side
-touched.
+**Not the server for every pair.** A drag is then a run of requests, each a session read, the
+gate and a replay on the one event loop an instance serves every reader from, and an answer
+of both sides' blocks, to follow a thumb over text the viewer's browser may already be sent
+whole by the replay route.
+
+**Not a side labelled from the records the browser has, with a placeholder for the rest.** A
+doc's labels depend on each other: two people who share a name are told apart, and
+citations are numbered in order. So no part of a side is right without every record, and a
+placeholder that a reload doesn't show reads as a change.
 
 ## Forks
 
@@ -1040,15 +1138,18 @@ its own before forks go out.
    `e2e/doc-fork.spec.ts`. One migration.
 4. **Sliders on the diff page — built.** The index route and its gate; the pair route, with
    the gate and the read it shares with the page (`diff-pair.ts`); `diff-slider.ts` with its
-   unit test; the layout's provider for the indexes; and `DiffView`, with the bar, the
-   one-job rule, the address written apart from the rows, and rows memoized on their
-   content.
+   unit test; the layout's provider for the indexes and the worker; `DiffView`, with the bar,
+   the one-job rule, the address written apart from the rows, and rows memoized on their
+   content; and a version built in the browser: `replay-log.ts`, which the scrub bars replay
+   with too, `doc-body.ts` with its unit test, which the server reads every doc through, and
+   `doc-version.worker.ts`.
    DOCS.md has the routes and the bar; PERMISSIONS.md's "See history" rows name the sliders;
-   TODO.md has "A diff slider replays its side's log at every pair", "A diff slider keeps the
-   reader's place in pixels alone" and "A native `replaceState` is two history calls";
-   "Mistakes that fail no check" has the two routes' gates, `nowVersion` and the exception's
-   reach. `e2e/doc-diff.spec.ts` has the sliders, and `e2e/doc-fork.spec.ts` a parent without
-   one. No migration.
+   TODO.md has "A diff slider's log is fetched whole, and a pair the server reads replays its
+   side's", "A diff slider keeps the reader's place in pixels alone" and "A native
+   `replaceState` is two history calls"; "Mistakes that fail no check" has the two routes'
+   gates, `nowVersion`, the fork point, the exception's reach, the one reader of a Y.Doc and
+   the every-record rule. `e2e/doc-diff.spec.ts` has the sliders, and `e2e/doc-fork.spec.ts`
+   a parent without one. No migration.
 
 **Each PR deploys once it merges**, so the feature reaches an instance in four steps, and the
 diffs work there before forks do.
@@ -1071,16 +1172,22 @@ changes have come in; and a doc ending in a heading, opened in the editor, gains
 paragraph and the diff leaves it out. That last check is also made of a fork. Its sliders,
 there too, driven by key: nothing is fetched until one is touched, and one doc on both sides
 is fetched once; a slid side's rows and the address it leaves, with no request for the page
-and the slider's focus kept; the last position names a side with no version; crossed sliders
+or, for a side moved to a version, for the pair, and the slider's focus kept; the last
+position names a side with no version, and the server reads it; crossed sliders
 say which side is later; a run of moves writes the address once, in two history calls and on
 the entry the page had; Back from elsewhere shows the pair the address names; a link followed
-before the address is written leaves it written, and the page gone to keeps its own; one
-request is out at a time, and positions passed meanwhile are never asked for; a pointer's
-drag is followed while it is down; a long page stays where it was scrolled to; an index
-fetched before the doc's latest update is fetched again; a failed request leaves the rows
-under its line, and "Try again" or the next move recovers; a doc deleted, a role taken away
-or a session ended between two moves ends on the 404, the Forbidden page or sign-in, at the
-address moved to; the pair route answers the page's 404s and 403s, a 401 signed out, and
+before the address is written leaves it written, and the page gone to keeps its own; a
+pointer's drag is followed while it is down; a long page stays where it was scrolled to; a
+side with no version is kept as read while the other moves, and an index and a log fetched
+before the doc's later updates are fetched again; pairs put together in the browser, one
+with a mention the endpoint answers for, show what their addresses show reloaded, headers,
+order lines and rows; a version with a mention the viewer can't be answered for is read by
+the server, by name, and asked about once; and a parent's side slid across the fork point
+says what a reload says. With the log cut off, so that the server reads every pair: one
+request is out at a time, and positions passed meanwhile are never asked for; a failed
+request leaves the rows under its line, and "Try again" or the next move recovers; a doc
+deleted, a role taken away or a session ended between two moves ends on the 404, the
+Forbidden page or sign-in, at the address moved to. Either way: the pair route answers the page's 404s and 403s, a 401 signed out, and
 sends no `nowVersion` to a reader without the history; and the index is refused alike for a
 doc that is readable, unreadable, deleted or nobody's, and to someone signed out. Forks, in
 `e2e/doc-fork.spec.ts`: the menu offers each item to whoever may do it, a reader forks the
@@ -1154,11 +1261,12 @@ Made here:
   is the one live part ("No collab connection").
 - **Two ways to choose a diff's versions, and both are kept**: the scrub bar's pin on the doc,
   and sliders on the diff page ("Sliders on the diff page").
-- **A diff's slider names a pair, and the server builds both sides.** The browser fetches an
-  index of ids and times and each pair's blocks, and no update's bytes, so there is one way
-  to turn a version into blocks.
+- **A diff's slider names a pair, and the browser builds a side moved to a version** from its
+  doc's log, with the functions the server reads a version with, and only from every record
+  its chips name. The server reads every other pair, whole, so a pair slid to is the pair
+  its address gives ("Sliders on the diff page").
 - **A slider's rows and the diff page's address are written apart.** The rows follow every
-  move, one request at a time and with no navigation; the address is written by
+  move, one job at a time and with no navigation; the address is written by
   `history.replaceState` once the sliders rest ("Sliders on the diff page").
 - **A fork writes nothing to its parent**: no snapshot at the fork point, whose costs fall on
   the parent and whose saving is small where measured ("The function").

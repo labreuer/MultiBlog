@@ -280,9 +280,9 @@ mechanics, and why the re-read runs there and not on every navigation.
 | `/doc/[slug]/slug` | rename, with a suggested standard slug derived from the title |
 | `/annotations` | annotation browse/admin, scoped to the docs the viewer may *read* (ANNOTATIONS.md) |
 | `POST /api/doc/[id]/token` | the collab token, with `readOnly` for a reader ("Collab") |
-| `GET /api/doc/[id]/replay` | the update log the scrub bar replays, `canUserSeeDocHistory` |
+| `GET /api/doc/[id]/replay` | the update log the scrub bar replays, and a diff side's slider builds a version from, `canUserSeeDocHistory` |
 | `GET /api/doc/[id]/versions` | the log's update ids and their times, and none of its bytes: what a slider on the diff page reads, `canUserSeeDocHistory` (FORKS.md, "Sliders on the diff page") |
-| `GET /api/diff/[left]/[right]` | a diff's pair as JSON, behind the diff page's own gate: what that page asks for each pair its sliders name (FORKS.md, "Sliders on the diff page") |
+| `GET /api/diff/[left]/[right]` | a diff's pair as JSON, behind the diff page's own gate: what that page asks for a pair its sliders name and its browser can't put together (FORKS.md, "Sliders on the diff page") |
 | `/diff/[left]/[right]` | a word diff of two docs, or of one doc at two versions; each side a doc id, or `<id>@<update id>`, with a slider for each side whose history the viewer may see (FORKS.md, "Diffs") |
 
 **One segment, id-or-slug.** Next rejects `app/doc/[slug]/page.tsx` beside
@@ -389,10 +389,11 @@ has synced.
   and replays nothing again.
 - **The diff page has sliders of its own**, one for each side whose history the viewer may
   see, and they share nothing with this bar but the look of an untouched one. This bar
-  downloads the log and replays it in the browser; a diff's slider fetches the log's ids and
-  times (`/api/doc/[id]/versions`) and names a pair, which the page asks the server for
-  (`/api/diff/[left]/[right]`), so the server builds both sides (FORKS.md, "Sliders on the
-  diff page").
+  downloads the log and replays it in the browser, on the page's thread, into the reading
+  view. A diff's slider fetches the log's ids and times (`/api/doc/[id]/versions`) and names
+  a pair; a side moved to a version is built from the same log in a worker, through the
+  replay this bar uses (`src/lib/replay-log.ts`), and the server reads any pair the browser
+  can't put together (`/api/diff/[left]/[right]`; FORKS.md, "Sliders on the diff page").
 - **The position is in the URL as `?at=<ydoc_update id>`**, and the live end is the
   parameter's *absence* — so a link shared before later edits still means "the newest
   version" rather than pinning its reader to a head that has moved. The id, not the
