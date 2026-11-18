@@ -1,6 +1,6 @@
 # Wiki pages — docs with a name and an address under /wiki
 
-**Planned 2026-11-17; being built in the order "Build order" gives, which says what each PR
+**Planned 2026-11-17 and built in the order "Build order" gives, which says what each PR
 holds.** A **wiki page** is a doc in every respect
 [DOCS.md](DOCS.md) describes, plus an address: whose page it is, its name, and its variant.
 Its name is its title, written as people write one, `Mercury (planet)`, and its URL is made
@@ -1913,8 +1913,23 @@ not the wiki's; the other five are its, in an order in which each deployed state
    `PUBLIC`. `scripts/seed-front-page.ts` asks `createWikiPage`'s checks and calls
    `createDocWithContent` with the `wiki` option and a body. Only `e2e/wiki.spec.ts`'s "front
    page" block takes the commons' `Front Page`, so no two workers race for it.
-5. **Moving between namespaces and out of the wiki.** Released rows; the title fragment written
-   through the collab server; the menu's Move… and its dialog.
+5. **Moving between namespaces and out of the wiki. Built 2026-11-18.** Released rows; the title
+   fragment written through the collab server; the menu's Move… and its dialog. **As built**:
+   `moveWikiPage` (`src/lib/wiki-move.ts`, beside moving in), wrapped by `moveWikiPageAction`;
+   its rule is `lockLeavable`, under `lockDoc`. A move to another namespace takes a name and a
+   variant, the page's own name by default, and its dialog's preview is moving in's
+   (`previewWikiMoveAddress`), since a page entering a namespace holds nothing there; the two
+   address locks are taken in the order of `<owner>/<key>`, as wiki-claim.ts builds the lock's
+   key. A move out writes the title with an `/admin/doc-edit` request of no edits
+   (`requestDocEdit`), after a first `lockLeavable` in a transaction of its own, so nothing is
+   written for someone who may not move the page, and starts over at most three times when a
+   rename changes the name under it. A page with no `ydoc` row is refused before anything is
+   written. The dialog is `src/components/wiki/MoveWikiPageDialog.tsx`, and the menu offers it
+   from what the doc view works out (`moveOut`: which namespace, if either, and why not). A doc
+   moved out lists its released rows on `/doc/<slug>/slug` (`WikiAddressManager` with no
+   address), and `/docs`' row and bulk Delete list them first, as the wiki table's do. The race
+   with a rename is not covered by a spec: nothing in a test can stop the move between its
+   write and its transaction.
 
 **Each PR deploys once it merges**, so after PR 2 an instance has pages whose names can't
 change until PR 3. Nothing links to `/wiki` until PR 3 has merged: no header link, no landing

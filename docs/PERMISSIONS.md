@@ -175,13 +175,16 @@ read as `SHARED`, but where these say otherwise. Two namespaces: a person's,
 | Change visibility | `x` may raise it; its byline and ADMIN may lower it | as for any doc, within `allowedVisibilities` |
 | Byline | its byline, which may add to it; `x` stays on it | as for any doc |
 | Rename within the namespace, revert, or delete a past address | its byline | its byline, plus ADMIN and EDITOR |
+| Move to another namespace, or out of the wiki | `x` alone: into the commons as an ADMIN or EDITOR, or out | an ADMIN or EDITOR on its byline: into their own namespace, or out |
 | Delete or restore | `x` alone | its byline, plus ADMIN and EDITOR |
 | Claim a held commons name (`Front Page`, `About`), creating, renaming or restoring | — (a person's namespace holds none) | ADMIN or EDITOR |
 | Listed in `/docs` | never: the wiki table, `/wiki/special/pages`, lists wiki pages | never |
 
-- **`x`'s powers are judged by their account as it is now**: raising, deleting, restoring
-  and claiming in `@x` read `x`'s row again (`ownerWhoCanAct`), so a deleted or demoted owner
+- **`x`'s powers are judged by their account as it is now**: raising, deleting, restoring,
+  moving out and claiming in `@x` read `x`'s row again (`ownerWhoCanAct`), so a deleted or demoted owner
   loses them at once, whatever their session's role says. A bot has no namespace.
+- **No page moves from one person's namespace to another's**: leaving `@x` is `x`'s and entering
+  `@y` is `y`'s. `y` forks it instead.
 - **ADMIN may lower a person's page, and do nothing else to it**, from the wiki table or
   MCP's `manage`; the editor is still its byline's.
 - **Reading `PUBLIC` is the wiki read rule** (`canReadWikiDoc`, `readableWikiDocsWhere`), which
@@ -865,6 +868,7 @@ Re-derive from these rather than trusting the tables after an authz change:
 | The wiki read rule, per row and as a `where` | `canReadWikiDoc` / `readableWikiDocsWhere` in `src/lib/doc-authz.ts` |
 | A person's page's rules (owner on the byline, raising, deleting, restoring, ADMIN's lowering) | `setDocByline`, `setDocVisibility`, `setDocDeleted` in `src/lib/doc-manage.ts`; `ownerWhoCanAct` in `src/lib/wiki-claim.ts` |
 | Where a viewer may create a page; the held commons names | `wikiNamespacesFor` / `claimableNamespace` in `src/lib/wiki-create.ts`; `claimWikiAddress` in `src/lib/wiki-claim.ts` |
+| Moving a page to another namespace or out of the wiki | `lockLeavable` and `moveWikiPage` in `src/lib/wiki-move.ts` |
 | A wiki route's resolution: owner, page, redirects | `resolveWikiPath` in `src/lib/wiki-pages.ts` |
 | The wiki table's row scoping and per-row flags | `src/app/wiki/special/pages/page.tsx` |
 | `/annotations` row scoping | `src/app/annotations/page.tsx` |
