@@ -1,3 +1,4 @@
+import type { DocVisibility } from "@/generated/prisma/enums";
 import { citedPages, parseCitedQuery, type CitedHref } from "./cited-passage-query";
 import { formatFragmentPassages, resolvePassage, type PassageText } from "./pdf-fragment";
 import { FragmentChecker } from "./pdf-fragment-check";
@@ -90,7 +91,7 @@ export type CitedFinding =
 export async function checkCitedHref(
   checker: FragmentChecker,
   href: CitedHref,
-  opts: { canRead?: (file: { id: string; visibility: "PRIVATE" | "SHARED" }) => Promise<boolean> } = {},
+  opts: { canRead?: (file: { id: string; visibility: DocVisibility }) => Promise<boolean> } = {},
 ): Promise<CitedFinding> {
   const parsed = parseReferenceSegment(href.segment);
   const key = parsed && parsed.kind !== "list" ? parsed.key : href.segment;

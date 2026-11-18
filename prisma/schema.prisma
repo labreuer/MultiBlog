@@ -67,12 +67,16 @@ enum CommentStatus {
   @@map("comment_status")
 }
 
-// PLAN.md §12e — PRIVATE is byline authors plus ADMIN/EDITOR; SHARED is
-// anyone with canViewDocs. No "unlisted" tier: with role gating underneath,
-// it would have no threat model left to address.
+// PLAN.md §12e — PRIVATE is its byline authors alone; SHARED is anyone with
+// canViewDocs. No "unlisted" tier: with role gating underneath, it would have
+// no threat model left to address. PUBLIC is readable signed out, a COMMENTER
+// included, and only a wiki page takes it, by the doc_public_only_wiki CHECK
+// (docs/WIKI.md): everywhere but the wiki's own read rule it behaves as SHARED.
+// A file never takes it (file_not_public).
 enum DocVisibility {
   PRIVATE
   SHARED
+  PUBLIC
 
   @@map("doc_visibility")
 }
@@ -186,6 +190,7 @@ model User {
   docsCreated            Doc[]                    @relation("DocCreatedBy")
   docUpdates             Doc[]                    @relation("DocUpdatedBy")
   docDeletions           Doc[]                    @relation("DocDeletedBy")
+  wikiPages              Doc[]                    @relation("DocWikiOwner")
   fileOwners             FileOwner[]
   filesCreated           StoredFile[]             @relation("FileCreatedBy")
   fileUpdates            StoredFile[]             @relation("FileUpdatedBy")
@@ -887,6 +892,21 @@ model Doc {
   // nulls the first and leaves the second as residue.
   forkedFromDocId    String?                  @map("forked_from_doc_id")
   forkedFromUpdateId BigInt?                  @map("forked_from_update_id")
+  // docs/WIKI.md "Data model" — a wiki page's address, on the doc so the
+  // partial unique indexes (hand-written, migration wiki_pages) can see
+  // deletion: a deleted page gives its address back. A null wikiName is a doc
+  // that isn't a wiki page; on one that is, a null owner is the commons'.
+  // The name is the page's title, and the doc_mirror_wiki_name trigger copies
+  // it into `title` on every write ("The name is the title").
+  wikiOwnerUserId    String?                  @map("wiki_owner_user_id")
+  wikiName           String?                  @map("wiki_name")
+  // The name's key, `wiki_name_key(wiki_name)`: Postgres 18's case folding,
+  // normalized to NFC, which the unique indexes compare. Maintained by the
+  // doc_sync_wiki_name_key trigger — never assign to it, the same rule as
+  // proseJsonLength above.
+  wikiNameKey        String?                  @map("wiki_name_key")
+  // "" for the page itself, else a slug: `Name~variant`.
+  wikiVariant        String                   @default("") @map("wiki_variant")
 
   authors             DocAuthor[]
   createdBy           User?                  @relation("DocCreatedBy", fields: [createdByUserId], references: [id])
@@ -904,6 +924,9 @@ model Doc {
   commentQuoteAnchors CommentQuoteAnchor[]   @relation("CommentQuoteAnchorDoc")
   forkedFrom          Doc?                   @relation("DocFork", fields: [forkedFromDocId], references: [id], onDelete: SetNull)
   forks               Doc[]                  @relation("DocFork")
+  // Restrict, not Prisma's SetNull: a hard-deleted owner's pages would
+  // otherwise quietly become commons pages (docs/WIKI.md "Data model").
+  wikiOwner           User?                  @relation("DocWikiOwner", fields: [wikiOwnerUserId], references: [id], onDelete: Restrict)
   mentions            Mention[]
   citations           Citation[]
 
@@ -1324,7 +1347,10 @@ model StoredFile {
   // means one thing site-wide, and files' rule is specified as "the same as
   // docs'". The *predicates* over it are separate (canViewFiles /
   // canManageFiles, src/lib/role-checks.ts) so the two can diverge; the enum
-  // is shared because a third visibility word would be a UI regression.
+  // is shared because a third visibility word would be a UI regression. A
+  // file never takes the enum's third value, PUBLIC, which is a wiki page's:
+  // the file_not_public CHECK keeps the file code's comparisons correct as
+  // they are (docs/WIKI.md, "Data model").
   visibility DocVisibility @default(PRIVATE)
 
   createdAt        DateTime                 @default(now()) @map("created_at")

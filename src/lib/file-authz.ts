@@ -1,4 +1,4 @@
-import type { Role } from "@/generated/prisma/enums";
+import type { DocVisibility, Role } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma, prismaIncludingDeleted } from "@/lib/prisma";
 import { canManageFiles, canViewFiles } from "@/lib/role-checks";
@@ -53,7 +53,7 @@ export function canManageAnySharedFile(role: Role): boolean {
 export async function canUserReadFile(
   userId: string,
   role: Role,
-  file: { id: string; visibility: "PRIVATE" | "SHARED" },
+  file: { id: string; visibility: DocVisibility },
 ): Promise<boolean> {
   if (file.visibility === "SHARED") {
     return canViewFiles(role);

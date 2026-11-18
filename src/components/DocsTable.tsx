@@ -85,6 +85,10 @@ export type DocRow = {
   deletedAt: Date | null;
   deleted: boolean;
   canEdit: boolean;
+  // The values this viewer may set the doc to: allowedVisibilities
+  // (src/lib/doc-visibility.ts), worked out on the page, so the cell and the
+  // bulk action offer what setDocVisibility accepts and nothing else.
+  visibilities: DocVisibility[];
   // Whether this viewer may tag the doc — its read rule (docs/TAGS.md, "Who
   // may tag"). False only on a row the ADMIN "Show all docs" override lists.
   canTag: boolean;
@@ -154,6 +158,7 @@ export default function DocsTable({
       key: "visibility",
       label: "Set visibility",
       options: Object.values(DocVisibility),
+      allows: (row, value) => row.visibilities.includes(value as DocVisibility),
       // A deleted doc keeps whatever visibility it had: changing it would be
       // an edit to a row the admin has already taken out of circulation.
       applicableTo: (row) => !row.deleted && row.canEdit,
@@ -187,7 +192,7 @@ export default function DocsTable({
       cell: (row) => (
         <SelectCell
           value={row.visibility}
-          options={Object.values(DocVisibility)}
+          options={row.visibilities}
           disabled={row.deleted || !row.canEdit}
           save={(next) => updateDocVisibility(row.id, next)}
           failureMessage="Failed to update visibility."

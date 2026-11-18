@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { prismaIncludingDeleted } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
-import { canManageDocs, canEditAnySharedDoc } from "@/lib/doc-authz";
+import { canManageDocs, canEditAnySharedDoc, canEditDocRow } from "@/lib/doc-authz";
+import { allowedVisibilities, isSharedOrPublic, sharedOrPublic } from "@/lib/doc-visibility";
 import { isAdmin } from "@/lib/authz";
 import { createDoc } from "@/app/actions/docs";
 import { docTitleOrFallback } from "@/lib/doc-title";
@@ -120,9 +121,10 @@ export default async function DocsPage({
   // Which rows this table selects (docs/PERMISSIONS.md). It is its own query rather
   // than a call into doc-authz.ts, so it has to restate that module's rule
   // itself and stay in step with it:
-  //   - a SHARED doc is listed for any ADMIN/EDITOR, byline or not, matching
-  //     the doc canUserEditDoc lets them open and edit straight from a URL —
-  //     which is what keeps the table from hiding a doc its viewer can edit;
+  //   - a SHARED doc (or PUBLIC, which is SHARED here) is listed for any
+  //     ADMIN/EDITOR, byline or not, matching the doc canUserEditDoc lets them
+  //     open and edit straight from a URL — which is what keeps the table from
+  //     hiding a doc its viewer can edit;
   //   - a PRIVATE doc is listed for its byline authors;
   //   - ADMIN alone can drop that scoping for this listing with the "Show all
   //     docs" checkbox (?showAllDocs=1), an explicit per-visit opt-in stored
@@ -135,7 +137,7 @@ export default async function DocsPage({
   const authorScope: Prisma.DocWhereInput = {
     OR: [
       { authors: { some: { userId: session.user.id } } },
-      ...(viewerCanEditAnyShared ? [{ visibility: "SHARED" as const }] : []),
+      ...(viewerCanEditAnyShared ? [{ visibility: sharedOrPublic() }] : []),
     ],
   };
   const where: Prisma.DocWhereInput = {
@@ -169,6 +171,8 @@ export default async function DocsPage({
         slug: true,
         title: true,
         visibility: true,
+        wikiName: true,
+        wikiOwnerUserId: true,
         createdAt: true,
         updatedAt: true,
         deletedByUserId: true,
@@ -198,7 +202,7 @@ export default async function DocsPage({
     // canUserReadDoc's rule inlined, as canEdit's is below: anyone who reaches
     // this page may read a SHARED doc. Only a row the "Show all docs" override
     // lists can fail it.
-    const readable = doc.visibility === "SHARED" || isAuthor;
+    const readable = isSharedOrPublic(doc.visibility) || isAuthor;
     return {
       id: doc.id,
       slug: doc.slug,
@@ -230,11 +234,13 @@ export default async function DocsPage({
       deleted: doc.deletedByUserId !== null,
       // Whether the Edit column renders a link, decided here rather than per
       // row through canUserEditDoc (src/lib/doc-authz.ts), which costs a query
-      // apiece — these two terms are that function's rule. The "Show all docs"
+      // apiece — canEditDocRow is that function's rule over the row in hand,
+      // a person's wiki page refusing the SHARED bypass. The "Show all docs"
       // override has no say: it widens which rows are listed, not who may edit
       // them, so a PRIVATE doc it brings into view carries no Edit link and the
       // column agrees with what /doc/[slug]/edit would answer.
-      canEdit: isAuthor || (viewerCanEditAnyShared && doc.visibility === "SHARED"),
+      canEdit: canEditDocRow({ visibility: doc.visibility, wikiOwnerUserId: doc.wikiOwnerUserId, isAuthor }, session.user.role),
+      visibilities: allowedVisibilities(doc, session.user.id),
       // Whether the bulk "+ tag" applies to this row: canUserTagTarget's rule,
       // which is the role floor (every role reaching this page clears it) and
       // the read rule. An affordance only — bulkTagObjects asks again per row.

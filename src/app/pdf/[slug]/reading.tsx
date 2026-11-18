@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { DocVisibility } from "@/generated/prisma/enums";
 import { notFound, redirect } from "next/navigation";
 import { canUserManageFile, canUserReadFile } from "@/lib/file-authz";
 import { resolveFileParam } from "@/lib/file-slug";
@@ -47,7 +48,7 @@ import styles from "./page.module.css";
 // address**: `/pdf/book/v/1` goes to `/pdf/barfield/v/1`, since a version has
 // no slug of its own and follows its file's.
 type FileVersionForRead = {
-  file: { id: string; slug: string; title: string; visibility: "PRIVATE" | "SHARED"; currentVersionId: string | null };
+  file: { id: string; slug: string; title: string; visibility: DocVisibility; currentVersionId: string | null };
   versions: FileVersionSummary[];
   shown: ShownVersion;
   /** The hash of the version shown, which its byte URL names. */

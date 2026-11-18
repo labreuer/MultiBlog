@@ -13,7 +13,8 @@ import {
 } from "@/app/actions/files";
 import { formatDate } from "@/lib/format-date";
 import { formatBytes } from "@/lib/file-format";
-import { DocVisibility } from "@/generated/prisma/enums";
+import type { DocVisibility } from "@/generated/prisma/enums";
+import { FILE_VISIBILITIES } from "@/lib/doc-visibility";
 import { type FilesFilters, buildFilesQueryString } from "@/lib/files-query";
 import { sameCols, type TablePrefs } from "@/lib/table-query";
 import { useTableFilters } from "@/components/table/use-table-filters";
@@ -172,7 +173,7 @@ export default function FilesTable({
       kind: "select",
       key: "visibility",
       label: "Set visibility",
-      options: Object.values(DocVisibility),
+      options: FILE_VISIBILITIES,
       applicableTo: (row) => !row.deleted && row.canManage,
       run: (ids, value) => bulkSetFileVisibility(ids, value as DocVisibility),
     },
@@ -219,7 +220,7 @@ export default function FilesTable({
       cell: (row) => (
         <SelectCell
           value={row.visibility}
-          options={Object.values(DocVisibility)}
+          options={FILE_VISIBILITIES}
           disabled={row.deleted || !row.canManage}
           save={(next) => updateFileVisibility(row.id, next)}
           failureMessage="Failed to update visibility."

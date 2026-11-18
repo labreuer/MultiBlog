@@ -279,7 +279,12 @@ async function main() {
 
   const dryRun = process.argv.includes("--dry-run");
   const timeout = Number(arg("timeout") ?? 600_000);
-  const visibility = asEnum(DocVisibility, arg("visibility") ?? DocVisibility.PRIVATE, "visibility");
+  // Not PUBLIC, which is a wiki page's alone (docs/WIKI.md): these docs aren't.
+  const visibility = asEnum(
+    { PRIVATE: DocVisibility.PRIVATE, SHARED: DocVisibility.SHARED },
+    arg("visibility") ?? DocVisibility.PRIVATE,
+    "visibility",
+  );
 
   if (sourceUrl === process.env.DATABASE_URL) {
     fail("--source is the same as DATABASE_URL. The source must be the OLD database, not the target.");

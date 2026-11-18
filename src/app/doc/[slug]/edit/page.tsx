@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { resolveDocParam } from "@/lib/resolve-doc-param";
 import { gated, titleWhenOk } from "@/lib/route-access";
-import { canManageDocs, canEditAnySharedDoc } from "@/lib/doc-authz";
+import { canEditDocRow } from "@/lib/doc-authz";
 import { getDocAnnotationsAsThreads } from "@/lib/annotation-data";
 import { buildAnnotationEntries } from "@/components/annotation/annotation-entries";
 import { MarginNotesProvider } from "@/components/margin-notes/margin-notes-context";
@@ -22,17 +22,19 @@ import { staffDisplayNameOf } from "@/lib/display-name";
 // deletedByUserId check, unlike the reading route: a soft-deleted doc must
 // still load here so the Settings panel can offer Undelete.
 //
-// The rule canUserEditDoc states (src/lib/doc-authz.ts), stated inline against
-// the visibility and authors already loaded rather than through a second
-// query: ADMIN/EDITOR edit any SHARED doc, and a PRIVATE doc is editable by
-// its listed authors alone (docs/PERMISSIONS.md). /docs' "Show all docs"
-// checkbox belongs to that listing and carries no weight here.
+// The rule canUserEditDoc states (src/lib/doc-authz.ts), asked of the row
+// already loaded through canEditDocRow rather than through a second query:
+// ADMIN/EDITOR edit any SHARED doc but a person's wiki page, and a PRIVATE doc
+// is editable by its listed authors alone (docs/PERMISSIONS.md). /docs' "Show
+// all docs" checkbox belongs to that listing and carries no weight here.
 const loadDocForEdit = gated(async (user, slug: string) => {
   const doc = await resolveDocParam(slug, {
     id: true,
     slug: true,
     title: true,
     visibility: true,
+    wikiName: true,
+    wikiOwnerUserId: true,
     createdAt: true,
     deletedByUserId: true,
     authors: { select: { userId: true }, orderBy: { bylineOrder: "asc" } },
@@ -40,9 +42,8 @@ const loadDocForEdit = gated(async (user, slug: string) => {
   if (!doc) {
     return "not-found";
   }
-  const isOwner = doc.authors.some((a) => a.userId === user.id);
-  const canEditShared = doc.visibility === "SHARED" && canEditAnySharedDoc(user.role);
-  if (!canEditShared && (!canManageDocs(user.role) || !isOwner)) {
+  const isAuthor = doc.authors.some((a) => a.userId === user.id);
+  if (!canEditDocRow({ visibility: doc.visibility, wikiOwnerUserId: doc.wikiOwnerUserId, isAuthor }, user.role)) {
     return "forbidden";
   }
   return doc;
@@ -117,6 +118,7 @@ export default async function EditDocPage({ params }: { params: Promise<{ slug: 
               slug={doc.slug}
               initialTitle={doc.title}
               visibility={doc.visibility}
+              wiki={doc.wikiName === null ? null : { name: doc.wikiName, ownerUserId: doc.wikiOwnerUserId }}
               createdAt={doc.createdAt}
               userId={user.id}
               userName={displayNameOf(user)}

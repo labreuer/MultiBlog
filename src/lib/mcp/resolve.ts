@@ -1,3 +1,4 @@
+import type { DocVisibility } from "@/generated/prisma/enums";
 import { fileVersionState, latestVersionOf, pdfPath, type FileVersionState } from "@/lib/file-version";
 import { linkVersionsOf } from "@/lib/file-version-data";
 import type { LinkVersion } from "@/lib/pdf-link-reading";
@@ -36,7 +37,7 @@ export type ResolvedDoc = {
   id: string;
   slug: string;
   title: string;
-  visibility: "PRIVATE" | "SHARED";
+  visibility: DocVisibility;
   record: boolean;
 };
 
@@ -87,7 +88,7 @@ export type ResolvedFile = {
   byteSize: number;
   sha256: string;
   pageCount: number | null;
-  visibility: "PRIVATE" | "SHARED";
+  visibility: DocVisibility;
 };
 
 const FILE_SELECT = {
