@@ -1,6 +1,7 @@
 # Wiki pages — docs with a name and an address under /wiki
 
-**Planned 2026-11-17; nothing built.** A **wiki page** is a doc in every respect
+**Planned 2026-11-17; being built in the order "Build order" gives, which says what each PR
+holds.** A **wiki page** is a doc in every respect
 [DOCS.md](DOCS.md) describes, plus an address: whose page it is, its name, and its variant.
 Its name is its title, written as people write one, `Mercury (planet)`, and its URL is made
 from it, `/wiki/commons/Mercury_(planet)`. A doc gets an address by being created under
@@ -97,8 +98,8 @@ Refused:
     `Smile_:`;
   - **a name ending in `.rsc`, in any capitals**: Next takes that suffix off a path and answers
     with the page's RSC payload, so the page could never be opened. `/authors/x.rsc` answers 200
-    as `text/x-component` on `next dev` (16.2.11), where `/authors/x` is a 404; PR 1 checks a
-    production build, and the refusal stays either way;
+    as `text/x-component`, where `/authors/x` is a 404, on `next dev` and on a production build
+    alike (16.2.11), and so does `/wiki/commons/x.rsc`;
   - **a code point Unicode hasn't assigned**, by the database's Unicode (`unicode_assigned`).
     `casefold` and NFC follow the server's Unicode tables, which change at major versions, and
     Unicode freezes both only for characters already assigned. A letter assigned later with a
@@ -1770,16 +1771,30 @@ not the wiki's; the other five are its, in an order in which each deployed state
      `/users/…/slug`, and `/files/…/manage`, offers it, since `unique*Slug` passes over the
      entity's own rows. Each accepts it and consumes its row, as Revert does, and as
      `changeTagSlug` does already. A rename back to an old address does the same ("Renaming").
-1. **Names and data.** `PUBLIC`; the `wiki_pages` migration; `src/lib/wiki-name.ts` and
-   `src/lib/wiki-address.ts`, with their unit tests; the folding helper; the title mirror;
-   `doc-visibility.ts` and every visibility comparison through it; `allowedVisibilities`;
-   `canEditDocRow` and the carve-out in `editableDocsWhere`; `lockDoc` and the settings rules
-   under it; the doc rules a wiki page doesn't inherit (publishing refused), and `forkDoc` titling
-   a wiki parent's fork with its name; the integrity check's title rule; the scripts that refuse `PUBLIC`;
-   `getFrontPagePreamble` passing over wiki pages (`wikiName: null`) until PR 4 replaces its
-   rule, since the title mirror makes every page named `Front Page` a doc titled so, a `PRIVATE`
-   one in a person's namespace included. No route, and nothing in the UI offers `PUBLIC`, since
-   no doc can hold it yet.
+1. **Names and data. Built 2026-11-18.** `PUBLIC`, in a migration of its own
+   (`doc_visibility_public`); the `wiki_pages` migration; `src/lib/wiki-name.ts` and
+   `src/lib/wiki-address.ts`, with their unit tests, and the Markdown round trip
+   (`wiki-markdown.test.ts`); the folding helper, `foldWikiName`, which is all of
+   `src/lib/wiki-claim.ts` so far; the title mirror; `doc-visibility.ts` and every visibility
+   comparison through it; `allowedVisibilities`, which the Settings panel and `/docs`' cell and
+   bulk action offer (`BulkToolbar`'s `allows`), and `/files`' `FILE_VISIBILITIES`;
+   `canEditDocRow` and the carve-out in `editableDocsWhere`; `lockDoc`, under which all five of
+   `doc-manage.ts`'s functions ask `canEditDocRow` and `setDocVisibility` asks
+   `allowedVisibilities` (`setDocSlug` through `changeDocSlugIn`, in the lock's transaction);
+   the doc rules a wiki page doesn't inherit (publishing refused), and `forkDoc` titling a wiki
+   parent's fork with its name; the integrity check's title rule; the scripts that refuse
+   `PUBLIC`; `getFrontPagePreamble` passing over wiki pages (`wikiName: null`) until PR 4
+   replaces its rule, since the title mirror makes every page named `Front Page` a doc titled
+   so, a `PRIVATE` one in a person's namespace included. Also here, being the title mirror's:
+   MCP's `edit_doc` refusing a title for a wiki page, and the Claude-chat importer's matching
+   passing over wiki pages ("The name is the title"). No route, and nothing in the UI offers
+   `PUBLIC`, since no doc can hold it yet; `e2e/wiki.spec.ts` makes its pages by writing a
+   test doc's address columns (`createTestWikiPage`). **Left for PR 2**, which brings
+   `ownerWhoCanAct` and the claims they need: the rules on a person's page beyond
+   `canEditDocRow` (the owner kept on the byline, raising, deleting and restoring the owner's
+   alone, an ADMIN's lowering, the visibility actions gating on the session alone, and the
+   wiki table's `canSetVisibility` and `canDelete` with `softDeleteBulkActions`' `canToggle`),
+   and a restore's next free variant.
 2. **Pages.** `gatedAnyViewer`; the wiki read rule; `/wiki`, the namespace lists, a page and its
    editor, the catch-all, the fixed redirects and the case 307; `/doc/<slug>`'s redirect and the
    lookups that answer an unreadable wiki doc as a missing one; the public render; a person's

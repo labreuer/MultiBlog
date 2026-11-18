@@ -292,6 +292,12 @@ before changing the behavior it describes.
   docs/MCP.md §1, §2, §6.
 - **A `PRIVATE` doc is its listed `DocAuthor`s' alone** — no ADMIN/EDITOR bypass. docs/DOCS.md "Roles and
   visibility", docs/PERMISSIONS.md.
+- **A doc's visibility is tested through `src/lib/doc-visibility.ts`, never against a literal.**
+  `PUBLIC`, a wiki page's, is `SHARED` everywhere outside the wiki's routes, so a doc rule asks
+  `isSharedOrPublic`/`sharedOrPublic()`, and a select offers `allowedVisibilities`: a bare
+  `=== "SHARED"` compiles and hides a public page from its own author. Who may edit a doc is
+  `canEditDocRow`'s, which gives a person's wiki page no ADMIN/EDITOR bypass. docs/WIKI.md
+  "Permissions".
 - **Before changing code that shows a doc as it was at an earlier version (it calls
   `loadDocStateAt`, `isDocVersion` or `docBodyOf`, serves a doc's `ydoc_update` rows, or takes
   an update id from a request), or that seeds a doc from another doc's text, read
@@ -368,8 +374,9 @@ running `prisma migrate dev` on anything unusual.
   wrote. Restarting web is the whole fix. Distinct from the EPERM case: that one is generate
   refusing to *write*, this one is a successful write the running process never picks up.
 - **Seven `search_vector` columns (the reference library's is the seventh), the `search_lexeme`
-  table and the `mention` and `citation` tables are written only by triggers** (docs/FULLTEXT.md
-  §3; docs/ENTITY_CHIPS.md, step 1, item 12) — never assign to them, give a new trigger function
+  table, the `mention` and `citation` tables, and `doc.wiki_name_key` are written only by
+  triggers** (docs/FULLTEXT.md §3; docs/ENTITY_CHIPS.md, step 1, item 12; docs/WIKI.md "Case")
+  — never assign to them, give a new trigger function
   its own `SET search_path`, and leave `search_lexeme`'s, `mention`'s and `citation`'s data out
   of a data-only load, or their `COPY` collides with what the triggers already refilled.
   docs/DATABASE.md.

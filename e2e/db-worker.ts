@@ -76,7 +76,9 @@ import { seedAnnotationYdoc } from "@/lib/annotation-ydoc-seed";
 import { applyAnnotationMark } from "@/lib/annotation-admin";
 import { issueApiToken } from "@/lib/api/tokens";
 import { softDeleteUser } from "@/lib/user-delete";
-import { setDocDeleted } from "@/lib/doc-manage";
+import { setDocByline, setDocDeleted, setDocVisibility } from "@/lib/doc-manage";
+import { foldWikiName, type FoldedWikiName } from "@/lib/wiki-claim";
+import { getFrontPagePreamble } from "@/lib/front-page";
 import { createBot, moveBot, requireBotRole, requireInvitable, restoreAccount, setBotAgent } from "@/lib/bots";
 import { prosemirrorToYXmlFragment } from "y-prosemirror";
 import type { Agent, ApiScope, ApiTokenClient } from "@/generated/prisma/enums";
@@ -218,6 +220,11 @@ async function deleteAccount(email: string): Promise<void> {
   // means nothing cascades this" reasoning as deleteTestDoc above.
   const user = account;
   if (user) {
+    // doc.wiki_owner_user_id is RESTRICT, so the pages in this person's
+    // namespace go before them (docs/WIKI.md "Data model"), as deleteTestDoc
+    // deletes a doc, its ydoc and its annotations' ydocs.
+    const pages = await prismaIncludingDeleted.doc.findMany({ where: { wikiOwnerUserId: user.id }, select: { id: true } });
+    for (const page of pages) await deleteTestDoc(page.id);
     const annotationIds = (
       await prisma.annotation.findMany({ where: { userId: user.id }, select: { id: true } })
     ).map((a) => a.id);
@@ -3760,6 +3767,161 @@ export async function softDeleteTestDoc(docId: string, byEmail?: string): Promis
   await setDocDeleted(by ? { userId: by.id, role: by.role } : await adminActor(), docId, true);
 }
 
+
+// docs/WIKI.md — a wiki page as a test needs one, before anything in the app
+// can make one: a doc from createTestDoc, given an address by writing its
+// columns, as the claims will. The name defaults to a unique `E2E wiki …`,
+// so the title it mirrors carries the prefix sweepTestData looks for; the
+// title createTestDoc seeded into the fragment is left there, as on a doc
+// moved into the wiki, since nothing on a page shows it.
+export type TestWikiPage = TestDoc & { wikiName: string; wikiVariant: string };
+
+export async function createTestWikiPage(opts: {
+  /** The byline, and for a person's page its owner. */
+  authorEmail: string;
+  namespace: "person" | "commons";
+  name?: string;
+  variant?: string;
+  /** Default PRIVATE for a person's page, SHARED for a commons one, as the create dialog's. */
+  visibility?: DocVisibility;
+  bodyText?: string;
+  /** ISO, to backdate the row, for a rule that picks the first-created. */
+  createdAt?: string;
+}): Promise<TestWikiPage> {
+  const visibility = opts.visibility ?? (opts.namespace === "person" ? "PRIVATE" : "SHARED");
+  const name = opts.name ?? uniqueTitle("wiki");
+  const variant = opts.variant ?? "";
+  const doc = await createTestDoc({ authorEmail: opts.authorEmail, bodyText: opts.bodyText, visibility: "SHARED" });
+  const owner = await prisma.user.findUniqueOrThrow({ where: { email: opts.authorEmail }, select: { id: true } });
+  const row = await prisma.doc.update({
+    where: { id: doc.id },
+    // `title` named beside the name, as every write of a name does: the
+    // search vector's trigger fires by the columns a statement names.
+    data: {
+      wikiName: name,
+      title: name,
+      wikiVariant: variant,
+      wikiOwnerUserId: opts.namespace === "person" ? owner.id : null,
+      visibility,
+      ...(opts.createdAt ? { createdAt: new Date(opts.createdAt) } : {}),
+    },
+    select: { title: true },
+  });
+  return { ...doc, title: row.title, wikiName: name, wikiVariant: variant };
+}
+
+/**
+ * Writes a doc's address and visibility columns as given, and says whether
+ * the database took them: for the CHECKs, the key's unique indexes and the
+ * triggers, which nothing in the app reaches yet. A refusal comes back as
+ * the constraint it names, or the raw message.
+ */
+export async function writeTestWikiColumns(
+  docId: string,
+  data: { wikiName?: string | null; wikiVariant?: string; owner?: "commons" | string; visibility?: DocVisibility; title?: string; deleted?: boolean },
+): Promise<{ ok: true } | { ok: false; refusal: string }> {
+  let wikiOwnerUserId: string | null | undefined;
+  if (data.owner === "commons") wikiOwnerUserId = null;
+  else if (data.owner !== undefined) {
+    assertSafe(data.owner);
+    wikiOwnerUserId = (await prisma.user.findUniqueOrThrow({ where: { email: data.owner }, select: { id: true } })).id;
+  }
+  try {
+    await prismaIncludingDeleted.doc.update({
+      where: { id: docId },
+      data: {
+        ...(data.wikiName !== undefined ? { wikiName: data.wikiName, title: data.title ?? data.wikiName ?? "" } : {}),
+        ...(data.wikiName === undefined && data.title !== undefined ? { title: data.title } : {}),
+        ...(data.wikiVariant !== undefined ? { wikiVariant: data.wikiVariant } : {}),
+        ...(wikiOwnerUserId !== undefined ? { wikiOwnerUserId } : {}),
+        ...(data.visibility !== undefined ? { visibility: data.visibility } : {}),
+        ...(data.deleted !== undefined ? { deletedAt: data.deleted ? new Date() : null, deletedByUserId: data.deleted ? (await adminActor()).userId : null } : {}),
+      },
+    });
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const named = /(doc_[a-z_]+|file_[a-z_]+)/.exec(message);
+    if ((err as { code?: string }).code === "P2002") return { ok: false, refusal: "unique" };
+    return { ok: false, refusal: named?.[1] ?? message };
+  }
+}
+
+/** Whether a file takes a visibility, for file_not_public. */
+export async function writeTestFileVisibility(fileId: string, visibility: DocVisibility): Promise<{ ok: true } | { ok: false; refusal: string }> {
+  try {
+    await prismaIncludingDeleted.storedFile.update({ where: { id: fileId }, data: { visibility } });
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, refusal: /(file_[a-z_]+)/.exec(message)?.[1] ?? message };
+  }
+}
+
+/** What a wiki doc's row holds, as the triggers left it, and whether its search vector matches `query`. */
+export async function getTestWikiFacts(
+  docId: string,
+  query?: string,
+): Promise<{ title: string; wikiName: string | null; wikiNameKey: string | null; wikiVariant: string; visibility: DocVisibility; searchMatches: boolean | null }> {
+  const doc = await prismaIncludingDeleted.doc.findUniqueOrThrow({
+    where: { id: docId },
+    select: { title: true, wikiName: true, wikiNameKey: true, wikiVariant: true, visibility: true },
+  });
+  let searchMatches: boolean | null = null;
+  if (query !== undefined) {
+    const rows = await prisma.$queryRaw<{ hit: boolean }[]>`
+      SELECT search_vector @@ plainto_tsquery('public.english_unaccent', ${query}) AS hit FROM doc WHERE id = ${docId}`;
+    searchMatches = rows[0]?.hit ?? false;
+  }
+  return { ...doc, searchMatches };
+}
+
+/** foldWikiName, the claims' one question to the database about a name. */
+export async function foldTestWikiName(name: string): Promise<FoldedWikiName> {
+  return foldWikiName(prisma, name);
+}
+
+/** The landing page's preamble as text, or null: getFrontPagePreamble, as `/` asks it. */
+export async function frontPagePreambleText(): Promise<string | null> {
+  const preamble = await getFrontPagePreamble();
+  return preamble ? extractText(preamble) : null;
+}
+
+/** How many posts, deleted ones included, are made from a doc. */
+export async function countPostsForDoc(docId: string): Promise<number> {
+  return prismaIncludingDeleted.post.count({ where: { docId } });
+}
+
+/**
+ * One of a doc's settings changed through src/lib/doc-manage.ts, as an actor
+ * the spec names: what the editor's and /docs' actions and MCP's `manage` all
+ * reach, without a session or a token. Byline entries are emails. A refusal
+ * comes back as its code and message.
+ */
+export async function changeTestDocSetting(opts: {
+  actorEmail: string;
+  docId: string;
+  change: { visibility: string } | { deleted: boolean } | { byline: string[] };
+}): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
+  assertSafe(opts.actorEmail);
+  const user = await prismaIncludingDeleted.user.findUniqueOrThrow({ where: { email: opts.actorEmail }, select: { id: true, role: true } });
+  const actor = { userId: user.id, role: user.role };
+  const { change } = opts;
+  try {
+    if ("visibility" in change) await setDocVisibility(actor, opts.docId, change.visibility as DocVisibility);
+    if ("deleted" in change) await setDocDeleted(actor, opts.docId, change.deleted);
+    if ("byline" in change) {
+      const users = await prismaIncludingDeleted.user.findMany({ where: { email: { in: change.byline } }, select: { id: true, email: true } });
+      const ids = change.byline.map((email) => users.find((u) => u.email === email)!.id);
+      await setDocByline(actor, opts.docId, ids, { allowRemovals: true });
+    }
+    return { ok: true };
+  } catch (err) {
+    const e = err as { code?: string; message?: string };
+    return { ok: false, code: e.code ?? "error", message: e.message ?? String(err) };
+  }
+}
+
 /**
  * forkDoc (src/lib/doc-fork.ts) as an actor the spec names: the function the
  * Fork dialog's action wraps, so a spec can ask for what the dialog never
@@ -3992,6 +4154,14 @@ export async function getFileSlugFacts(fileId: string): Promise<{ slug: string; 
 }
 
 const handlers = {
+  createTestWikiPage,
+  writeTestWikiColumns,
+  writeTestFileVisibility,
+  getTestWikiFacts,
+  foldTestWikiName,
+  frontPagePreambleText,
+  countPostsForDoc,
+  changeTestDocSetting,
   getFileSlugFacts,
   setTestFileOwners,
   getUploadFacts,

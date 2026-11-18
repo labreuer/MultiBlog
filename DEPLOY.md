@@ -208,7 +208,8 @@ systemctl status postgresql      # should be active + enabled
 
 26.04's default repo ships Postgres 18 (`18.6-0ubuntu0.26.04.1` as of 2026-09), the same major
 as dev, so dumps move between boxes and dev with no version skew, and you do **not** need the
-PGDG apt repo. The default
+PGDG apt repo. **18 is the minimum**: wiki page names are compared by `casefold`, new in 18,
+and the `wiki_pages` migration fails without it (docs/DATABASE.md, "The cluster"). The default
 cluster already listens only on `localhost:5432` (`listen_addresses = 'localhost'`), and
 Ubuntu's default `pg_hba.conf` accepts password auth on `127.0.0.1/32` (`scram-sha-256`), so
 the app connects over the loopback with a password and no `pg_hba` edits are required.

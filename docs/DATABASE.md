@@ -26,6 +26,13 @@ Windows installer ships them; on Fedora it is `sudo dnf install postgresql-contr
 servers install `postgresql-contrib` with Postgres (DEPLOY.md §2e). Both extensions are
 *trusted*, so the database's owner creates them with no superuser step.
 
+**Postgres 18 is required, not only what runs.** A wiki page's name is compared by
+`wiki_name_key`, which is `casefold` (new in 18) under the `pg_unicode_fast` collation, then
+NFC ([WIKI.md](WIKI.md) "Case"); the `wiki_pages` migration fails on 17. The key follows the
+server's Unicode tables, which change at major versions, and Unicode freezes case folding and
+NFC only for characters already assigned, so a name holding a code point the database's
+Unicode hasn't assigned is refused (`unicode_assigned`, in the name's CHECK).
+
 ## What Postgres 18 does *not* change, having been checked directly
 
 Worth recording because each of these looks like it should help and doesn't.
