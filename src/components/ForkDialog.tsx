@@ -6,8 +6,7 @@ import { forkDocAction, type ForkDocState } from "@/app/actions/docs";
 import { forkIntoWikiAction, previewWikiForkAddressAction, type WikiClaimState } from "@/app/actions/wiki";
 import LocalTime from "@/components/LocalTime";
 import type { ScrubPosition } from "@/components/DocScrubContext";
-import { allowedVisibilities, PUBLIC_VISIBILITY_NOTE } from "@/lib/doc-visibility";
-import { checkWikiName } from "@/lib/wiki-name";
+import { newPageVisibilities, PUBLIC_VISIBILITY_NOTE } from "@/lib/doc-visibility";
 import {
   ClaimError,
   defaultWikiName,
@@ -35,8 +34,9 @@ type Where = "doc" | WikiNamespace;
  * dialog, `PRIVATE` by default whatever the parent's, and calls
  * forkDocAction; with a namespace it asks for a name (the parent's, or its
  * title in the rules' normal form) and a variant, shows the address the
- * server would pick, offers what allowedVisibilities allows there (`PRIVATE`
- * in your namespace and `SHARED` in the commons by default), and calls
+ * server would pick, offers what newPageVisibilities allows there (`PRIVATE`
+ * in your namespace and `SHARED` in the commons by default, and `PUBLIC` to
+ * an ADMIN or EDITOR alone), and calls
  * forkIntoWikiAction. "A doc" is the default on a doc and your namespace on
  * a wiki page.
  *
@@ -77,14 +77,8 @@ export default function ForkDialog({
   const lookup = useCallback((w: WikiNamespace, n: string) => previewWikiForkAddressAction(parentId, w, n), [parentId]);
   const namespace = where === "doc" ? null : where;
   const preview = useDefaultAddress(lookup, namespace, name, open && variant.trim() === "");
-  const checked = checkWikiName(name);
   const options: DocVisibility[] =
-    namespace === null
-      ? ["PRIVATE", "SHARED"]
-      : allowedVisibilities(
-          { visibility, wikiName: checked.ok ? checked.name : "x", wikiOwnerUserId: namespace === "person" ? namespaces.viewerId : null },
-          namespaces.viewerId,
-        );
+    namespace === null ? ["PRIVATE", "SHARED"] : newPageVisibilities(namespace === "person" ? namespaces.viewer.id : null, namespaces.viewer);
   const pending = docPending || wikiPending;
   const state = namespace === null ? docState : wikiState;
 

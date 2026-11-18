@@ -8,12 +8,13 @@ import { useSession } from "next-auth/react";
  * Re-reads the signed-in user from the database and re-issues the session
  * cookie, once per mount.
  *
- * The session is a JWT baked at sign-in and never re-read afterwards
- * (src/app/sign-in/NOTES.md), so a role change doesn't reach an existing
- * session. This is the client half of the fix: the `jwt` callback in
- * `src/lib/auth.ts` refreshes the token from the DB when `trigger === "update"`,
- * and this component is what triggers it. Mounted on /dashboard — the page a
- * promoted user is told to visit, and the one showing their role.
+ * The session is a JWT that reads its account again only every five minutes
+ * (src/app/sign-in/NOTES.md), so a role change takes that long to reach an
+ * existing session. This makes it land at once: the `jwt` callback in
+ * `src/lib/auth.ts` reads the account when `trigger === "update"`, whatever
+ * the token's age, and this component is what triggers it. Mounted on
+ * /dashboard — the page a promoted user is told to visit, and the one showing
+ * their role.
  *
  * Two non-obvious things about `useSession().update`, both in next-auth/react:
  *

@@ -199,8 +199,9 @@ the rules are:
     `deletedByUserId: null` there, so a deleted user isn't found and the request is refused.
     Never `include: { user: true }` on the token's query: the filter intercepts top-level
     queries only, and an include goes around it ([prisma.ts](../src/lib/prisma.ts)).
-  - The role comes from that same row, read on every request. The usual lags don't apply: the
-    session JWT bakes the role in at sign-in ([sign-in notes](../src/app/sign-in/NOTES.md)), and
+  - The role comes from that same row, read on every request. The usual lags don't apply: a
+    session's JWT reads its account only every five minutes
+    ([sign-in notes](../src/app/sign-in/NOTES.md)), and
     a live collab connection is checked only once ([PERMISSIONS.md](PERMISSIONS.md)). A
     deletion or a demotion therefore takes effect on the token's very next call.
   - §21 adds a step: a token's issuer must be its account's person,

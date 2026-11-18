@@ -35,10 +35,9 @@ export default async function DashboardPage() {
   }
 
   // isListedContributor gates ContributorPanel below. Read from the
-  // database, not the session: the JWT bakes in id/role/color at sign-in
-  // and never re-reads (src/app/sign-in/NOTES.md), so a freshly-listed
-  // contributor would otherwise not see their own panel until the token
-  // turned over (PLAN.md §17g).
+  // database, not the session: the JWT reads its account only every five
+  // minutes (src/app/sign-in/NOTES.md), so a freshly-listed contributor
+  // would otherwise wait that long for their own panel (PLAN.md §17g).
   const contributor = await prisma.user.findUnique({
     where: { id: session.user.id },
     select: {

@@ -260,9 +260,9 @@ are. Nothing on the page uses `dangerouslySetInnerHTML`.
 `ContributorPanel` (`src/components/ContributorPanel.tsx`) is `/dashboard`'s "Contributor
 profile" card (docs/DASHBOARD.md), shown only to a listed contributor.
 
-- **The flag is read from the database, not the session.** The session's JWT holds what was
-  read at sign-in (`src/app/sign-in/NOTES.md`), so a newly listed contributor wouldn't see the
-  panel until the token turned over.
+- **The flag is read from the database, not the session.** The session's JWT reads its
+  account only every five minutes (`src/app/sign-in/NOTES.md`), so a newly listed contributor
+  would wait that long for the panel.
 - **Its fields.** The photo is cropped and uploaded, or removed, at once, through actions of
   its own (PLAN.md §17n–§17o). The blurb, the order, the ORCID iD and the website are written
   together by one Save (`updateContributorProfile`). There is no autosave: nothing here has a

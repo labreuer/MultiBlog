@@ -238,9 +238,9 @@ export async function sendUserInvite(userId: string): Promise<{ url: string }> {
   // !user covers both "never existed" and "deleted" with one check.
   const [user, admin] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, name: true } }),
-    // Read fresh rather than trusting the session: the JWT's jwt() callback
-    // only ever copies id/role/color at sign-in (src/app/sign-in/NOTES.md),
-    // never name/email, so session.user.name isn't reliably populated.
+    // Read fresh rather than trusting the session: the JWT reads the
+    // account's name and email only every five minutes
+    // (src/app/sign-in/NOTES.md), so session.user.name can be behind.
     prisma.user.findUnique({ where: { id: adminId }, select: { email: true, name: true } }),
   ]);
   if (!user) {

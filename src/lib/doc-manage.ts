@@ -6,10 +6,10 @@ import { ApiError, forbidden, invalid } from "@/lib/api/errors";
 import { allowedVisibilities } from "@/lib/doc-visibility";
 import { isAdmin } from "@/lib/role-checks";
 import { wikiPagePath, wikiPathOfDoc } from "@/lib/wiki-address";
-import { claimWikiAddress, ownerWhoCanAct } from "@/lib/wiki-claim";
+import { claimWikiAddress, ownerWhoCanAct, requireCanMakePublic } from "@/lib/wiki-claim";
 import type { DocVisibility } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
-import type { Actor } from "@/lib/actor";
+import { viewerOf, type Actor } from "@/lib/actor";
 
 // Managing a doc — its byline, visibility, slug, record flag, and soft
 // deletion — as plain functions taking an explicit actor (docs/MCP.md §1):
@@ -181,10 +181,14 @@ const RANK: Record<DocVisibility, number> = { PRIVATE: 0, SHARED: 1, PUBLIC: 2 }
  * - the value is one `allowedVisibilities` offers this actor, so what a
  *   select offers and what is accepted can't differ: PUBLIC only on a wiki
  *   page, and never PRIVATE on a commons page;
+ * - **making a wiki page PUBLIC is an ADMIN's or EDITOR's**, by the actor's
+ *   role and by a fresh read of their row (`requireCanMakePublic`), on a
+ *   commons page and a person's alike. A page that is PUBLIC already may be
+ *   set PUBLIC again by anyone who may set it, which changes nothing;
  * - its editors set it, but **on a person's wiki page only the owner raises
  *   it**, by a fresh read of their account that finds one able to act
- *   (`ownerWhoCanAct`), since a session keeps the role it was signed in
- *   with. Co-authors may lower it;
+ *   (`ownerWhoCanAct`), since a session may be behind its account. Co-authors
+ *   may lower it;
  * - **an ADMIN who can't edit a person's page may lower it**, and do nothing
  *   else to it: taking a PUBLIC page down is moderation, the counterpart of
  *   unpublishing a post.
@@ -204,7 +208,8 @@ export async function setDocVisibility(actor: Actor, docId: string, visibility: 
     if (personal && raising && doc.wikiOwnerUserId !== actor.userId) {
       throw forbidden("Only its owner can make this page more visible.");
     }
-    if (!allowedVisibilities(doc, actor.userId).includes(visibility)) {
+    if (doc.wikiName !== null && visibility === "PUBLIC" && raising) await requireCanMakePublic(actor, tx);
+    if (!allowedVisibilities(doc, viewerOf(actor)).includes(visibility)) {
       throw invalid(`This doc can't be made ${String(visibility)}.`);
     }
     if (personal && raising && !(await ownerWhoCanAct(doc.wikiOwnerUserId!, tx))) {

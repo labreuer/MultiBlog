@@ -1,12 +1,13 @@
 import type { DocVisibility, Role } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
-import type { Actor } from "@/lib/actor";
+import { viewerOf, type Actor } from "@/lib/actor";
 import { ApiError, forbidden, invalid } from "@/lib/api/errors";
 import { canEditAnySharedDoc } from "@/lib/doc-authz";
 import { createDocWithContent } from "@/lib/doc-create";
-import { allowedVisibilities } from "@/lib/doc-visibility";
+import { newPageVisibilities } from "@/lib/doc-visibility";
+import { canMakePagesPublic } from "@/lib/role-checks";
 import { isWikiVariant, slugIsFromEmail, wikiPagePath, type WikiOwner } from "@/lib/wiki-address";
-import { ownerWhoCanAct, WikiAddressTaken, type WikiOwnerRow } from "@/lib/wiki-claim";
+import { ownerWhoCanAct, PUBLIC_EDITORS_ONLY, requireCanMakePublic, WikiAddressTaken, type WikiOwnerRow } from "@/lib/wiki-claim";
 import { checkWikiName } from "@/lib/wiki-name";
 
 // docs/WIKI.md "Creating a page" — a new wiki page, as a function taking an
@@ -88,6 +89,38 @@ export function requireWikiVariant(variant: string): string {
   return variant;
 }
 
+/**
+ * The visibility a page being made in a namespace (`ownerUserId`, null for
+ * the commons) may take, or a refusal: one of newPageVisibilities' values for
+ * the actor, so PUBLIC is an ADMIN's or EDITOR's and the commons takes no
+ * PRIVATE. Creating a page and forking into the wiki both ask it, and both
+ * then ask verifyNewPage inside their transaction.
+ */
+export function requireNewPageVisibility(actor: Actor, visibility: DocVisibility, ownerUserId: string | null): DocVisibility {
+  if (visibility === "PUBLIC" && !canMakePagesPublic(actor.role)) throw forbidden(PUBLIC_EDITORS_ONLY);
+  if (!newPageVisibilities(ownerUserId, viewerOf(actor)).includes(visibility)) {
+    throw invalid(`A page here can't be ${String(visibility)}.`);
+  }
+  return visibility;
+}
+
+/**
+ * What a create or a fork into the wiki asks again inside its transaction,
+ * of the actor as their row is then: the namespace, which must still be the
+ * one the address was worked out for, and, for a page made PUBLIC, the role
+ * that may make one (requireCanMakePublic). So a demotion committed before
+ * the page is written is seen by it.
+ */
+export async function verifyNewPage(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  page: { namespace: WikiNamespaceChoice; ownerUserId: string | null; visibility: DocVisibility },
+): Promise<void> {
+  const now = await claimableNamespace(actor, page.namespace, tx);
+  if (now.ownerUserId !== page.ownerUserId) throw forbidden("Your account changed while the page was being made; try again.");
+  if (page.visibility === "PUBLIC") await requireCanMakePublic(actor, tx);
+}
+
 export type NewWikiPage = {
   namespace: WikiNamespaceChoice;
   /** The name as typed; normalized and checked here. It is the page's title. */
@@ -111,30 +144,28 @@ const EMPTY_BODY = { type: "doc", content: [{ type: "paragraph" }] };
  * variant: here the address was typed, and a variant picked for the creator
  * would make a second page where they may have meant to reach the first. The
  * refusal names the address, which reveals nothing: whoever may create in a
- * namespace can read all of it. Returns the page's editor.
+ * namespace can read all of it. The visibility is one newPageVisibilities
+ * offers the creator: PUBLIC from an ADMIN or EDITOR alone, by their role
+ * and by their row inside the transaction. Returns the page's editor.
  */
 export async function createWikiPage(actor: Actor, input: NewWikiPage): Promise<{ id: string; path: string; editPath: string }> {
   const name = requireWikiName(input.name);
   const variant = requireWikiVariant(input.variant);
   // Asked here for the refusal's sake, and again in the transaction.
   const { owner, ownerUserId } = await claimableNamespace(actor, input.namespace);
-  const allowed = allowedVisibilities({ visibility: input.visibility, wikiName: name, wikiOwnerUserId: ownerUserId }, actor.userId);
-  if (!allowed.includes(input.visibility)) throw invalid(`A page here can't be ${String(input.visibility)}.`);
+  const visibility = requireNewPageVisibility(actor, input.visibility, ownerUserId);
 
   const path = wikiPagePath({ owner, name, variant });
   try {
     const doc = await createDocWithContent(actor.userId, name, EMPTY_BODY, {
       author: actor.userId,
-      visibility: input.visibility,
+      visibility,
       wiki: {
         ownerUserId,
         name,
         choice: { variant },
         actorRole: actor.role,
-        verify: async (tx) => {
-          const now = await claimableNamespace(actor, input.namespace, tx);
-          if (now.ownerUserId !== ownerUserId) throw forbidden("Your account changed while the page was being made; try again.");
-        },
+        verify: (tx) => verifyNewPage(tx, actor, { namespace: input.namespace, ownerUserId, visibility }),
       },
     });
     return { id: doc.id, path, editPath: `${path}/edit` };

@@ -11,9 +11,11 @@ import type { SearchActor } from "@/lib/search/types";
 // arguments for the per-object predicates, which read straight off the
 // fields.
 //
-// The role is the account's current one: a token's actor is read from the
-// user row on every request (src/lib/api/tokens.ts), and a session's from the
-// JWT, which bakes it in at sign-in (src/app/sign-in/NOTES.md).
+// The role is the account's as its front door last read it: a token's actor
+// is read from the user row on every request (src/lib/api/tokens.ts), and a
+// session's from the JWT, which reads the account again every five minutes
+// (src/app/sign-in/NOTES.md). A rule that can't wait for that reads the row
+// itself, as ownerWhoCanAct and requireCanMakePublic do (src/lib/wiki-claim.ts).
 
 export type Actor = { userId: string; role: Role };
 

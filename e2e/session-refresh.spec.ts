@@ -1,14 +1,20 @@
-// /dashboard re-reads the signed-in user from the database and re-issues the
-// session cookie on every visit (src/components/SessionRefresh.tsx plus the
-// `trigger === "update"` branch of the `jwt` callback in src/lib/auth.ts).
+// A session and the account it was signed in as (src/app/sign-in/NOTES.md).
 //
-// The session is a JWT baked once at sign-in, so without this a promotion is
-// invisible until the user signs out and back in — see src/app/sign-in/NOTES.md.
-// Each test therefore checks both halves: that the change really is stale
-// elsewhere, and that /dashboard is what unsticks it.
+// The session is a JWT that says when its account was last read, and the
+// `jwt` callback in src/lib/auth.ts reads the account again once that is
+// older than the interval (five minutes), on whatever page the next request
+// is for. /dashboard asks for the same read at once, on every visit
+// (src/components/SessionRefresh.tsx, `trigger === "update"`).
+//
+// So each change is checked three ways: inside the interval it has not
+// reached the session; /dashboard delivers it at once; and a session past its
+// interval gets it on any page. That last one is arranged, not waited for:
+// `ageSession` moves the token's own `checkedAt` back, which also keeps every
+// other spec's sessions as they are, at the server's ordinary interval.
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { setTestUserRole, deleteTestUser } from "./db";
+import { ageSession, rewriteSessionClaims, sessionClaims } from "./session-token";
 
 // The admin-only header link, i.e. proof that the *client* session (which
 // SiteHeader reads via useSession) was refreshed, not just the server render.
@@ -23,7 +29,7 @@ const adminLink = (page: Page) => page.locator("header").getByRole("link", { nam
 /**
  * Visits /dashboard and waits for its refresh to actually land.
  *
- * Both tests need this before touching the database, not only after: signing in
+ * Every test here needs this before touching the database, not only after: signing in
  * *redirects to /dashboard*, so a refresh is already in flight while the test
  * thinks it is merely making assertions. A `setTestUserRole` that lands inside
  * that window is picked up by the sign-in visit's own refresh, and the test then
@@ -31,7 +37,8 @@ const adminLink = (page: Page) => page.locator("header").getByRole("link", { nam
  * visited — when what really happened is that it was.
  *
  * The POST is the signal (`update({})`; a plain GET is the provider's ordinary
- * session read and never re-reads the DB — see SessionRefresh.tsx).
+ * session read, which reads the account only for a token past its interval —
+ * see SessionRefresh.tsx).
  */
 async function visitDashboard(page: Page): Promise<void> {
   // One POST is not the whole story against the prod target: the post-sign-in
@@ -79,6 +86,17 @@ async function visitDashboard(page: Page): Promise<void> {
   }
 }
 
+/**
+ * Waits for the page's own reads of the session to finish. Each re-issues the
+ * cookie it was sent (sign-in/NOTES.md), so a token rewritten while one is
+ * still in flight would be put back as it was when that one answers.
+ */
+async function sessionReadsDone(page: Page): Promise<void> {
+  await page.waitForLoadState("networkidle");
+}
+
+const nowSeconds = () => Math.floor(Date.now() / 1000);
+
 test("visiting /dashboard picks up a role change made after sign-in", async ({ secondUser }) => {
   const { user, page } = await secondUser({ role: "COMMENTER" });
 
@@ -88,9 +106,10 @@ test("visiting /dashboard picks up a role change made after sign-in", async ({ s
 
   await setTestUserRole(user.email, "ADMIN");
 
-  // Anywhere else still renders from the stale JWT. SiteHeader shows signed-out
-  // for a moment on every load (sign-in/NOTES.md), so wait for the name link it
-  // renders before concluding anything from an *absent* link.
+  // Anywhere else still renders from the token, which is inside its interval
+  // and so is not read again. SiteHeader shows signed-out for a moment on every
+  // load (sign-in/NOTES.md), so wait for the name link it renders before
+  // concluding anything from an *absent* link.
   await page.goto("/");
   await expect(page.getByRole("link", { name: user.name })).toBeVisible();
   await expect(adminLink(page)).toHaveCount(0);
@@ -105,14 +124,48 @@ test("visiting /dashboard picks up a role change made after sign-in", async ({ s
   await expect(adminLink(page)).toBeVisible();
 });
 
+test("a promotion reaches a session past its interval on any page, without /dashboard", async ({ secondUser }) => {
+  const { user, page } = await secondUser({ role: "COMMENTER" });
+  const context = page.context();
+
+  await visitDashboard(page);
+  // Signing in, and /dashboard's read after it, each say when they read the account.
+  const stamped = (await sessionClaims(context))?.checkedAt;
+  expect(typeof stamped).toBe("number");
+  expect(Math.abs(nowSeconds() - (stamped as number))).toBeLessThan(120);
+
+  await setTestUserRole(user.email, "ADMIN");
+
+  // Inside the interval the account is not read again, on any page.
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: user.name })).toBeVisible();
+  await expect(adminLink(page)).toHaveCount(0);
+  await sessionReadsDone(page);
+  expect((await sessionClaims(context))?.role).toBe("COMMENTER");
+
+  // Past it, the first request's own gate sees the account as it is now:
+  // /users is an ADMIN's, and tells anyone else so.
+  await ageSession(context);
+  await page.goto("/users");
+  await expect(page.getByRole("heading", { name: "Users", exact: true })).toBeVisible();
+  await expect(page.getByText("permission to manage users")).toHaveCount(0);
+  // The client's read of the session got the same, so the header has the link,
+  await expect(adminLink(page)).toBeVisible();
+  // and wrote the token back with the role and the time of this read, so the
+  // account is not read again on every request from here.
+  await expect.poll(async () => (await sessionClaims(context))?.role).toBe("ADMIN");
+  const reread = (await sessionClaims(context))?.checkedAt as number;
+  expect(nowSeconds() - reread).toBeLessThan(120);
+});
+
 test("visiting /dashboard as a deleted user clears the session", async ({ secondUser }) => {
   const { user, page } = await secondUser({ role: "ADMIN" });
 
   await visitDashboard(page);
   await deleteTestUser(user.email);
 
-  // The JWT is still valid and still says ADMIN — deleting the row doesn't
-  // revoke it (docs/BROWSER_PANE.md).
+  // The token is inside its interval and still says ADMIN: deleting the row
+  // reaches it at its next read of the account, not before.
   await page.goto("/");
   await expect(adminLink(page)).toBeVisible();
 
@@ -120,12 +173,61 @@ test("visiting /dashboard as a deleted user clears the session", async ({ second
   await expect(page).toHaveURL(/\/sign-in/);
 });
 
-// The test above meets this only when load orders two answers a certain way;
-// this one arranges it. Every session GET re-issues the cookie it was sent
+test("a deletion reaches a session past its interval on any page, and ends it", async ({ secondUser }) => {
+  const { user, page } = await secondUser({ role: "ADMIN" });
+  const context = page.context();
+
+  await visitDashboard(page);
+  await deleteTestUser(user.email);
+
+  // Inside the interval the deleted account's session still works.
+  await page.goto("/");
+  await expect(adminLink(page)).toBeVisible();
+  await sessionReadsDone(page);
+
+  // Past it, the first gate to read the session finds no account and sends
+  // the browser to sign in, on a page that isn't /dashboard,
+  await ageSession(context);
+  await page.goto("/users");
+  await expect(page).toHaveURL(/\/sign-in/);
+  // and the client's read of the session there clears the cookie.
+  await expect.poll(() => sessionClaims(context)).toBeNull();
+});
+
+test("a token from before it said when its account was read is read again at once, and comes back whole", async ({ secondUser }) => {
+  const { page } = await secondUser({ role: "AUTHOR", adminInitials: "LG" });
+  const context = page.context();
+
+  await visitDashboard(page);
+  await page.goto("/");
+  await sessionReadsDone(page);
+
+  // A token as one issued before `checkedAt` and `adminInitials` rode on it.
+  await rewriteSessionClaims(context, (claims) => {
+    delete claims.checkedAt;
+    delete claims.adminInitials;
+  });
+  const old = await sessionClaims(context);
+  expect(old).not.toHaveProperty("checkedAt");
+  expect(old).not.toHaveProperty("adminInitials");
+
+  // Its first read of the session is a read of the account, which fills in
+  // whatever the token lacked, and the cookie that read writes has both.
+  const session = await page.request.get("/api/auth/session", { maxRetries: 2 });
+  expect((await session.json()).user.adminInitials).toBe("LG");
+  const now = await sessionClaims(context);
+  expect(now?.adminInitials).toBe("LG");
+  expect(nowSeconds() - (now?.checkedAt as number)).toBeLessThan(120);
+});
+
+// "visiting /dashboard as a deleted user" meets this only when load orders two
+// answers a certain way; this one arranges it. Every session GET re-issues the cookie it was sent
 // (src/app/sign-in/NOTES.md), and the provider always has one in flight beside
 // SessionRefresh's POST, so the cookie that POST cleared can come back a moment
 // later. Putting the cookie back here, just before the read SessionRefresh
-// confirms with, is that answer landing at the worst possible time.
+// confirms with, is that answer landing at the worst possible time. The cookie
+// put back is inside its interval, so nothing but SessionRefresh's second
+// update would end the session before the interval runs out.
 test("a session read that answers after the clearing does not keep a deleted user signed in", async ({ secondUser }) => {
   const { user, page } = await secondUser({ role: "ADMIN" });
   const context = page.context();

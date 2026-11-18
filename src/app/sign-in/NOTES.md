@@ -27,38 +27,96 @@ configuring it means in production. `User.emailVerified` is written by `acceptIn
 (admin-issued email invites, same doc) and by nothing in this file's own flows; it gates
 nothing anywhere today.
 
-## The session is a JWT, baked once at sign-in
+## The session is a JWT, and reads its account again every five minutes
 
-`session: { strategy: "jwt" }`. The `jwt` callback reads `user` only when it's present —
-i.e. exactly once, at sign-in — and copies `id`, `role`, `color` and `adminInitials` into the
-token. Nothing re-reads the database on ordinary later requests, with one temporary
-exception: a token issued before `adminInitials` was on it gets that one field looked up, and
-the session route's re-issue writes it back, so the lookup happens once per token. TODO.md
-dates its removal.
+`session: { strategy: "jwt" }`. At sign-in the `jwt` callback copies `id`, `role`, `color` and
+`adminInitials` from the account into the token, with `checkedAt`: the time, in epoch seconds.
+Every later call whose `checkedAt` is older than the interval reads the account's row again.
+`name`, `email`, `role`, `color` and `adminInitials` go into the token, and `checkedAt` becomes
+now. So a change to an account reaches a browser already signed in within five minutes: a
+demotion, a promotion, a new name or color. Without the read, an account deleted or demoted on
+`/users` would keep every power it had until its session went 30 days idle, Auth.js's default.
 
-**Consequence: a role change doesn't reach an existing session by itself.** Promoting someone
-(to `AUTHORIZED`, or anything else) does nothing on its own until they sign out and back in.
-A curiosity when roles rarely changed; once promotion *is* the mechanism for granting doc
-access it becomes the first support question, with nothing broken to find.
+- **No row means deleted or soft-deleted** (`prisma` filters those out, so both look the same
+  here), and the callback returns null, which ends the session: `@auth/core` clears the session
+  cookie instead of re-signing it.
+- **A token with no `checkedAt` is due.** One issued before tokens carried the field is read at
+  its first use, which also fills in any other field it lacks.
+- **The interval is a bare env var**, `SESSION_RECHECK_SECONDS`, 300 unless set (docs/ENV.md).
+  Anything but a positive whole number of seconds is 300, so a typo neither turns the read off
+  nor makes it run on every request.
+- **When a token is due is a pure function** of its `checkedAt`, the time and the interval
+  (`src/lib/session-recheck.ts`). A `checkedAt` ahead of the clock is due, so a clock set back
+  puts no read off.
+- **A read that fails changes nothing.** The token is returned as it was, still due, and the
+  next call reads again. `@auth/core` answers an error thrown from the callback by clearing the
+  cookie, which would sign out everyone whose token came due while the database was away.
 
-The same staleness has a testing-side face — deleting a `User` row mid-session doesn't sign
-that browser out or revoke its role, so "the row is gone" is not proof a test session ended.
+**Auth.js calls the callback on every read of the session** (`@auth/core`'s
+`lib/actions/session.js`), not only on `/api/auth/session`. So:
+
+- **Every gate sees the account as the read found it.** A server component's `auth()` and a
+  server action's each get the token the callback returned, whether or not that token reaches
+  the cookie.
+- **The cookie gets the new token on the client's session GET**, which every page load makes.
+  A render can't set a cookie, so until that GET answers, each `auth()` past the interval reads
+  the row again. The cost is one primary-key query per call, for at most the length of a page
+  load.
+- **A late answer can delay a change, and can't undo it.** "Every session GET re-issues the
+  cookie" below describes overlapping requests landing in either order. A token put back by a
+  late answer still carries the `checkedAt` it had, so it is read again when that comes due:
+  the interval later, at most.
+
+**What it costs:** one indexed read per signed-in account every five minutes, plus the repeats
+above.
+
+**Inside the interval, a session can be behind its account.** Two things don't wait for it:
+
+- **`/dashboard` asks for the read at once** (the next section), so a promotion lands where a
+  promoted user is sent.
+- **The wiki reads the row itself where minutes matter**: `ownerWhoCanAct`, before a person's
+  page is raised, deleted or claimed in their namespace, and `requireCanMakePublic`, before
+  anything is made `PUBLIC` (docs/WIKI.md, "Permissions"). Each reads inside the transaction
+  that writes.
+
+**Still not covered:**
+
+- **An open live-document connection.** It was authorized when it connected and is not checked
+  again until it reconnects (docs/PERMISSIONS.md, "A live document connection is checked once").
+  A deleted account's open editor tab keeps its socket until then.
+- **An MCP token** needs nothing here: its check reads the account on every request already
+  (docs/MCP.md §3).
+
+**Rejected:**
+
+- **Database sessions** (Auth.js's `database` strategy). They read a row per request and can be
+  revoked, but Auth.js gives the Credentials provider JWT sessions only, and this app signs in
+  by password alone.
+- **A read on every request.** It closes the five minutes, but costs a query for every
+  `auth()`, on every page and every action, for a delay measured in minutes.
+
+The same lag has a testing-side face: deleting a `User` row mid-session doesn't sign that
+browser out at once, so "the row is gone" is not proof a test session ended.
 docs/BROWSER_PANE.md covers that angle.
 
-## /dashboard refreshes the session from the database
+Regression coverage: `src/lib/session-recheck.test.ts` for when a token is due and what the
+variable may hold, and `e2e/session-refresh.spec.ts` for a promotion and a deletion each
+reaching a page that isn't `/dashboard`, and for a token with no `checkedAt`. The spec makes a
+session due by moving its token's `checkedAt` back (`ageSession`, `e2e/session-token.ts`),
+and the suite's server runs with the ordinary interval: a short one there would put every
+spec that changes an account under a session in a race with its own fixture.
 
-The one place that *does* re-read the DB. `<SessionRefresh />`
-(`src/components/SessionRefresh.tsx`) is mounted on `/dashboard` and, once per mount, calls
-`useSession().update({})`; the `jwt` callback answers `trigger === "update"` by re-reading
-`name`/`email`/`role`/`color`/`adminInitials` from the user's row and re-signing the token. So "go to your
-dashboard" is the whole fix for a promotion that hasn't landed yet — no sign-out, and the
-refreshed cookie is then good everywhere, not just on that page.
+## /dashboard reads the account at once
+
+`<SessionRefresh />` (`src/components/SessionRefresh.tsx`) is mounted on `/dashboard` and, once
+per mount, calls `useSession().update({})`. The `jwt` callback answers `trigger === "update"`
+with the read of the account the interval makes, whatever the token's `checkedAt`: one
+function, `tokenFromAccount` (`src/lib/auth.ts`), serves both. So "go to your dashboard" makes
+a promotion land at once rather than within five minutes, with no sign-out, and the refreshed
+cookie is then good everywhere, not just on that page.
 
 `/dashboard` rather than everywhere: it's the page a promoted user is pointed at, it already
-displays the role, and it's a full DB round trip that has no business running on every
-navigation. This is deliberately *not* the granular-permissions work that supersedes the
-whole role scheme — it makes the current scheme's staleness fixable by the user rather than
-only by signing out.
+displays the role, and a read on every navigation is what the interval is there to avoid.
 
 Three things about it that are easy to get wrong:
 
@@ -80,14 +138,13 @@ The cost is that the first render of `/dashboard` still shows the pre-refresh va
 directly in `page.tsx` would remove that flicker, at the price of a second source of truth
 on the page — not worth it while the refresh is this cheap.
 
-If the row is gone (deleted, or soft-deleted — `prisma` filters those out, so both look the
-same here) the callback returns `null`, which makes `@auth/core` clear the session cookie
-instead of re-signing it. The user is signed out at the same moment they'd otherwise have
-been shown a dashboard for an account that can no longer sign in.
+If the row is gone the callback returns `null`, as the timed read does, and `@auth/core` clears
+the session cookie instead of re-signing it. The user is signed out at the same moment they'd
+otherwise have been shown a dashboard for an account that can no longer sign in.
 
 Regression coverage: `e2e/session-refresh.spec.ts` drives a promotion and a deletion, and
-checks in both cases that the change is still invisible elsewhere until `/dashboard` is
-visited.
+checks in both cases that inside the interval the change is invisible elsewhere, and that
+`/dashboard` delivers it.
 
 ## Every session GET re-issues the cookie, so overlapping requests can disagree about who you are
 
@@ -114,8 +171,8 @@ it did not hold:
   the credentials POST and answered 3 ms after it left `/files` rendering as the admin the
   browser had been.
 - **`SessionRefresh.tsx`** sends its update again when the first answered `null` and the
-  confirming read still found a session. Without that, the second GET above put a deleted
-  user's cookie back and the dashboard stayed up.
+  confirming read still found a session. Without that, the second GET above puts a deleted
+  user's cookie back, and the dashboard stays up until that token next comes due.
 
 One retry each, because by the time the check is sent the late GET has landed: the check
 carried its cookie. Neither closes the race. A GET slower than the check itself still wins,
@@ -370,79 +427,3 @@ server rendering and the router cache, but `SessionProvider` is a client compone
 position in the tree, so React reconciles rather than remounts it and its state survives — and
 per the initializer-only behavior above, a fresh `session` prop wouldn't help even if the
 layout did re-render. Worth knowing so it isn't chased if this resurfaces.
-
-## Planned: the session reads its account again every five minutes
-
-**Not built.** Planned 2026-11-18 as the first PR of docs/EMAIL.md §10's build order, together
-with making a wiki page `PUBLIC` an editor's (docs/WIKI.md). It stands alone and deploys to every
-instance.
-
-**The problem it fixes** is "The session is a JWT, baked once at sign-in" above. Deleting or
-demoting an account on `/users` reaches a browser already signed in only when that browser
-visits `/dashboard`. Until then the account keeps every power it had, and the session lasts
-until 30 days idle, Auth.js's default. One-off join codes hand AUTHOR to strangers, and deleting
-such an account has to stop it.
-
-**The `jwt` callback re-reads the account when the token is more than five minutes old.**
-- **`checkedAt` on the token.** The token carries it as epoch seconds, set at sign-in and at
-  every re-read.
-- **Every call outside sign-in** whose `checkedAt` is older than the interval re-reads the row,
-  the same `name`, `email`, `role`, `color` and `adminInitials` that the `update` path reads. The
-  two become one function.
-- **No row means deleted or soft-deleted**, and the callback returns null, so the session ends,
-  as the `update` path does now.
-- **The interval is a bare env var**, `SESSION_RECHECK_SECONDS`, defaulting to 300
-  (docs/ENV.md). Its only other value is the e2e server's few seconds.
-
-**Auth.js calls the callback on every session read** (`@auth/core`'s `lib/actions/session.js`),
-not only on `/api/auth/session`. So:
-- **Every gate sees the re-read account.** A server component's `auth()` and a server action's
-  each see what the re-read found, within five minutes of a change. That holds whether or not
-  the new token reaches the cookie.
-- **The cookie gets the new token on the client's session GET**, which every page load makes.
-  A render can't set a cookie, so until that GET answers, each `auth()` past the interval reads
-  the row again. The cost is one primary-key query per call, for at most the length of a page
-  load.
-- **A late answer can't keep a stale session.** "Every session GET re-issues the cookie" above
-  describes overlapping requests landing in either order. A token put back by a late answer
-  still carries the old `checkedAt`, so the next read re-reads it. So the race can delay a
-  deletion by one request, not undo it.
-
-**What it costs:** one indexed read per signed-in account every five minutes, plus the repeats
-above.
-
-**What else changes:**
-- **The `adminInitials` backfill goes**: the block in the callback, and TODO.md's "Remove the
-  `adminInitials` token backfill", whose date has passed. A re-read fills the field anyway.
-- **`<SessionRefresh />` stays on `/dashboard`.** It makes a promotion land at once where a
-  promoted user is sent, rather than within five minutes.
-- **The wiki's re-reads stay**: `ownerWhoCanAct`, and the role read before a raise to `PUBLIC`.
-  Each acts on a fresh row within the five minutes that the session may still be behind.
-
-**Still not covered:**
-- **An open live-document connection.** It was authorized when it connected and is not checked
-  again until it reconnects (docs/PERMISSIONS.md, "A live document connection is checked once").
-  A deleted account's open editor tab keeps its socket until then.
-- **An MCP token.** Its check reads the account on every request already (docs/MCP.md §3), so it
-  needs nothing here.
-
-**Rejected:**
-- **Database sessions** (Auth.js's `database` strategy). They read a row per request and can be
-  revoked, but Auth.js gives the Credentials provider JWT sessions only, and this app signs in
-  by password alone.
-- **A read on every request.** It closes the five minutes, but costs a query for every
-  `auth()`, on every page and every action, for a delay measured in minutes.
-
-**Tests.**
-- `e2e/session-refresh.spec.ts` asserts today that a promotion and a deletion stay invisible
-  elsewhere until `/dashboard`. It changes to assert that each reaches another page after the
-  interval, without `/dashboard`. The e2e server runs with an interval of a few seconds, so
-  that this takes seconds.
-- `e2e/sign-in-stale-session.spec.ts` arranges the late answer, and is re-read against the new
-  rule, which should make its deleted-user case hold without the retry.
-- A unit test covers the interval's arithmetic, as a pure function of the token's `checkedAt`
-  and the time.
-
-**Docs:** this file's "The session is a JWT" and "/dashboard refreshes the session" sections,
-docs/ENV.md, TODO.md's two entries above, and docs/PERMISSIONS.md where it says a role change
-waits for `/dashboard`.

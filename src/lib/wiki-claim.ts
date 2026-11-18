@@ -1,7 +1,8 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
-import { canManageDocs } from "@/lib/role-checks";
+import type { Actor } from "@/lib/actor";
+import { canMakePagesPublic, canManageDocs } from "@/lib/role-checks";
 import { forbidden, invalid } from "@/lib/api/errors";
 import { firstFreeVariant, HELD_COMMONS_NAMES, type VariantDefaults } from "@/lib/wiki-address";
 import { checkWikiName } from "@/lib/wiki-name";
@@ -17,9 +18,11 @@ import { checkWikiName } from "@/lib/wiki-name";
 //
 // A claim (creating, forking, moving, renaming, restoring) also takes the
 // address lock in that statement, and then picks or checks the variant under
-// it, in the transaction that writes the doc. And `ownerWhoCanAct` is the
-// fresh read of a person's account that raising, deleting, restoring and
-// claiming in their namespace each ask.
+// it, in the transaction that writes the doc. And two fresh reads of an
+// account are here, since a session may be behind its account by the interval
+// it re-reads at (src/app/sign-in/NOTES.md): `ownerWhoCanAct`, of a person's
+// namespace's owner, which raising, deleting, restoring and claiming there
+// each ask, and `requireCanMakePublic`, of whoever would make a page PUBLIC.
 
 /** What the database says of a name: its key, and whether it may be claimed at all and by whom. */
 export type FoldedWikiName = {
@@ -178,10 +181,11 @@ export type WikiOwnerRow = { id: string; slug: string; email: string; name: stri
  * can't act: a live account, through the filtered `prisma`, holding
  * `canManageDocs`, and a person rather than a bot (`worksForUserId` null:
  * docs/WIKI.md "A bot has no namespace"). The session's role isn't enough. A
- * browser session is a JWT that keeps the role it was signed in with and
- * outlives a deleted account, so a deleted or demoted owner could otherwise
- * keep raising, deleting and claiming. Reading the row again is what makes an
- * ADMIN's demotion hold at once, whatever the owner's session says.
+ * browser session is a JWT that reads its account again only every five
+ * minutes (src/app/sign-in/NOTES.md), so until it does, a deleted or demoted
+ * owner could otherwise keep raising, deleting and claiming. Reading the row
+ * here is what makes an ADMIN's demotion hold at once, whatever the owner's
+ * session says.
  *
  * `db` is a transaction's client when the answer guards a write in it; the
  * filtered client's soft-delete rule is then spelled out.
@@ -197,4 +201,37 @@ export async function ownerWhoCanAct(
   const owner = db ? await db.user.findFirst(args) : await prisma.user.findFirst(args);
   if (!owner || !canManageDocs(owner.role) || owner.worksForUserId !== null) return null;
   return { id: owner.id, slug: owner.slug, email: owner.email, name: owner.name };
+}
+
+/** What a raise to PUBLIC is refused with, for an actor who isn't an ADMIN or EDITOR. */
+export const PUBLIC_EDITORS_ONLY = "Only an ADMIN or EDITOR can make a page PUBLIC.";
+
+/**
+ * Refuses unless `actor` may make a page PUBLIC (docs/WIKI.md "Permissions"):
+ * `canMakePagesPublic` of the role the caller acts with, and of the role
+ * their row holds now, on a live account. Every writer that can raise
+ * something to PUBLIC asks it: setDocVisibility, creating a page, forking
+ * into the wiki, and a move that takes a PRIVATE doc or page into the
+ * commons. A page that keeps PUBLIC through a move or a restore is not a
+ * raise, and asks nothing.
+ *
+ * The row is read because a session may still hold a role its account has
+ * lost, as ownerWhoCanAct's is: without it, a demoted EDITOR could go on
+ * making pages public until their session next reads its account. Both are
+ * asked, so a session that hasn't caught up with a promotion is refused as
+ * its select, which offered no PUBLIC, would have it.
+ *
+ * `db` is a transaction's client when the answer guards a write in it; the
+ * filtered client's soft-delete rule is then spelled out.
+ */
+export async function requireCanMakePublic(actor: Actor, db?: Pick<Prisma.TransactionClient, "user">): Promise<void> {
+  if (canMakePagesPublic(actor.role)) {
+    const args = {
+      where: { id: actor.userId, deletedByUserId: null },
+      select: { role: true },
+    } satisfies Prisma.UserFindFirstArgs;
+    const row = db ? await db.user.findFirst(args) : await prisma.user.findFirst(args);
+    if (row && canMakePagesPublic(row.role)) return;
+  }
+  throw forbidden(PUBLIC_EDITORS_ONLY);
 }

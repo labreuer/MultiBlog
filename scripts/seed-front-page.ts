@@ -28,10 +28,9 @@ import "dotenv/config";
 import type { JSONContent } from "@tiptap/core";
 import { prisma, prismaIncludingDeleted } from "../src/lib/prisma";
 import { createDocWithContent } from "../src/lib/doc-create";
-import { allowedVisibilities } from "../src/lib/doc-visibility";
 import { FRONT_PAGE_NAME } from "../src/lib/front-page";
 import { foldWikiName, WikiAddressTaken } from "../src/lib/wiki-claim";
-import { claimableNamespace, requireWikiName } from "../src/lib/wiki-create";
+import { claimableNamespace, requireNewPageVisibility, requireWikiName, verifyNewPage } from "../src/lib/wiki-create";
 import { wikiPagePath } from "../src/lib/wiki-address";
 import type { Actor } from "../src/lib/actor";
 
@@ -78,12 +77,9 @@ async function main() {
   const actor: Actor = { userId: admin.id, role: admin.role };
 
   // createWikiPage's checks, asked as it asks them: the commons is an
-  // ADMIN's or EDITOR's, and a commons page may be PUBLIC.
+  // ADMIN's or EDITOR's, and so is making a page PUBLIC.
   const { ownerUserId } = await claimableNamespace(actor, "commons");
-  const visibility = "PUBLIC";
-  if (!allowedVisibilities({ visibility, wikiName: name, wikiOwnerUserId: ownerUserId }, actor.userId).includes(visibility)) {
-    throw new Error(`A commons page can't be ${visibility}.`);
-  }
+  const visibility = requireNewPageVisibility(actor, "PUBLIC", ownerUserId);
 
   try {
     const doc = await createDocWithContent(actor.userId, name, docFromText(SAMPLE_TEXT), {
@@ -94,9 +90,7 @@ async function main() {
         name,
         choice: { variant: "" },
         actorRole: actor.role,
-        verify: async (tx) => {
-          await claimableNamespace(actor, "commons", tx);
-        },
+        verify: (tx) => verifyNewPage(tx, actor, { namespace: "commons", ownerUserId, visibility }),
       },
     });
     console.log(`Created the commons' ${FRONT_PAGE_NAME}, PUBLIC: doc ${doc.id} (${path}), by ${admin.email}.`);

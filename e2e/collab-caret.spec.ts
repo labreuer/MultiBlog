@@ -8,12 +8,8 @@
 //   fill is what tells "picked" apart from the white a token would give;
 // - the flag itself is a hover target, and hiding it on hover must not take
 //   it out of hit-testing, or the name flickers;
-// - the viewer's own caret from another tab gets no flag;
-// - a session token issued before `adminInitials` was on it still gets a flag,
-//   and the next cookie the session route writes carries the field. That one
-//   goes with the backfill in src/lib/auth.ts when TODO.md's item removes it.
+// - the viewer's own caret from another tab gets no flag.
 import type { Locator, Page } from "@playwright/test";
-import { decode, encode } from "next-auth/jwt";
 import { test, expect, bodyEditor, waitForDocCollabReady } from "./fixtures";
 import { ADMIN_EMAIL, addTestDocAuthor, getUserIdentityFields } from "./db";
 
@@ -130,50 +126,5 @@ test.describe("collaborator carets", () => {
     } finally {
       await otherTab.close();
     }
-  });
-
-  test("a session token from before initials rode on it still flies a flag, and comes back carrying them", async ({
-    page,
-    draftDoc,
-    secondUser,
-  }) => {
-    const { user: other, page: otherPage } = await secondUser({ adminInitials: "LG" });
-    await addTestDocAuthor(draftDoc.id, other.email);
-
-    const secret = process.env.AUTH_SECRET;
-    expect(secret, "AUTH_SECRET must reach the suite (playwright.config.ts loads .env)").toBeTruthy();
-    const context = otherPage.context();
-    const sessionCookie = async () => {
-      const cookie = (await context.cookies()).find((c) => c.name.endsWith("authjs.session-token"));
-      expect(cookie, "a signed-in context has a session cookie").toBeDefined();
-      return cookie!;
-    };
-    // The cookie's name is also the key-derivation salt.
-    const claimsOf = async (cookie: { name: string; value: string }) =>
-      decode({ token: cookie.value, secret: secret!, salt: cookie.name });
-
-    // Rewrite the fresh sign-in's token into one from before this change.
-    const fresh = await sessionCookie();
-    const claims = await claimsOf(fresh);
-    expect(claims?.adminInitials).toBe("LG");
-    const legacy = { ...claims };
-    delete legacy.adminInitials;
-    await context.addCookies([
-      { ...fresh, value: await encode({ token: legacy, secret: secret!, salt: fresh.name }) },
-    ]);
-    expect((await claimsOf(await sessionCookie()))?.adminInitials).toBeUndefined();
-
-    // The editor page's own render reads the session with that token, so the
-    // flag can only say "LG" if the jwt callback filled it in.
-    await page.goto(`/doc/${draftDoc.id}/edit`);
-    await otherPage.goto(`/doc/${draftDoc.id}/edit`);
-    await waitForDocCollabReady(page);
-    await waitForDocCollabReady(otherPage);
-    await parkCaretOnSecondLine(otherPage);
-    await expect(caret(page).getByText("LG", { exact: true })).toBeVisible();
-
-    // And the session route's re-issue writes it back, so the lookup is paid
-    // once rather than on every request.
-    await expect.poll(async () => (await claimsOf(await sessionCookie()))?.adminInitials).toBe("LG");
   });
 });

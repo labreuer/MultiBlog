@@ -38,6 +38,7 @@ Every gate in the app is one of these predicates, sometimes combined with a
 | `canManageAnySharedFile` | ✅ | ✅ | ❌ | ❌ | ❌ | `file-authz.ts` |
 | `canApplyTags` | ✅ | ✅ | ✅ | ✅ | ❌ | `role-checks.ts` |
 | `canCurateTags` | ✅ | ✅ | ❌ | ❌ | ❌ | `role-checks.ts` |
+| `canMakePagesPublic` | ✅ | ✅ | ❌ | ❌ | ❌ | `role-checks.ts` |
 
 Two pairs here hold the same roles as each other and are still kept apart on purpose, so
 that the doc rule and the post rule can move independently rather than one silently dragging
@@ -51,6 +52,15 @@ the other:
   with no byline on it); `canEditAnyPost` stays with posts, where its name is accurate. A
   delegation between them would have preserved exactly the coupling the split exists to
   break.
+
+`canMakePagesPublic` holds those same two roles and is kept apart from both for the same
+reason: who may put a wiki page in front of signed-out readers ("Wiki pages", below) need not
+stay who may edit any post or any `SHARED` doc.
+
+**A role is the account's as its session last read it.** A session reads its account again
+every five minutes, and at once on `/dashboard` (src/app/sign-in/NOTES.md), so a promotion, a
+demotion or a deletion reaches every gate below within five minutes. The gates that don't wait
+read the account's row themselves, and say so where they are described.
 
 `canEditAnySharedDoc` is the one predicate not in `role-checks.ts`, which is deliberate:
 what earns a place in that file is a **client** consumer, not a subject. `canViewDocs` and
@@ -172,7 +182,8 @@ read as `SHARED`, but where these say otherwise. Two namespaces: a person's,
 | Read | by visibility: `PRIVATE`, its byline; `SHARED`, `canViewDocs`; `PUBLIC`, anyone | the same, but never `PRIVATE` |
 | Edit | its byline only, and `x` is always on it | its byline, plus ADMIN and EDITOR: the `SHARED` rule |
 | See history | as Edit (the interim rule, "Who may see a doc's history"), with its fork-point exception ‡ | as Edit, with the same exception ‡ |
-| Change visibility | `x` may raise it; its byline and ADMIN may lower it | as for any doc, within `allowedVisibilities` |
+| Change visibility | `x` may raise it, and to `PUBLIC` only as an ADMIN or EDITOR; its byline and ADMIN may lower it | as for any doc, within `allowedVisibilities`; to `PUBLIC`, an ADMIN or EDITOR alone |
+| Create, fork into the wiki, or move in, as `PUBLIC` | `x` as an ADMIN or EDITOR | ADMIN or EDITOR |
 | Byline | its byline, which may add to it; `x` stays on it | as for any doc |
 | Rename within the namespace, revert, or delete a past address | its byline | its byline, plus ADMIN and EDITOR |
 | Move to another namespace, or out of the wiki | `x` alone: into the commons as an ADMIN or EDITOR, or out | an ADMIN or EDITOR on its byline: into their own namespace, or out |
@@ -183,6 +194,11 @@ read as `SHARED`, but where these say otherwise. Two namespaces: a person's,
 - **`x`'s powers are judged by their account as it is now**: raising, deleting, restoring,
   moving out and claiming in `@x` read `x`'s row again (`ownerWhoCanAct`), so a deleted or demoted owner
   loses them at once, whatever their session's role says. A bot has no namespace.
+- **Making a page `PUBLIC` is an ADMIN's or EDITOR's** (`canMakePagesPublic`), and on a person's
+  page its owner's as well, so an AUTHOR's pages go as far as `SHARED`. Every write that can
+  raise something to `PUBLIC` reads the actor's row again (`requireCanMakePublic`), so a demoted
+  EDITOR loses it at once too. Whoever may set a page's visibility may lower one that is
+  `PUBLIC`, and a page that keeps `PUBLIC` through a move or a restore is not raised.
 - **No page moves from one person's namespace to another's**: leaving `@x` is `x`'s and entering
   `@y` is `y`'s. `y` forks it instead.
 - **ADMIN may lower a person's page, and do nothing else to it**, from the wiki table or
@@ -323,11 +339,12 @@ removing someone from a `PRIVATE` doc's authors, switching a doc from `SHARED` t
 demoting a role, deleting a user or signing out reaches that viewer's open connections only
 when they reconnect.
 
-This is a second lag, on top of the stale role inside a session (src/app/sign-in/NOTES.md).
-That one delays only role changes, and only until the session refreshes. This one delays every
-kind of revocation, byline and visibility included, even though page loads and actions read
-those fresh from the database on every request. TODO.md, "A live collab connection keeps its
-access after the viewer loses it", has the details and the probable fix.
+This is a second lag, on top of a session's (src/app/sign-in/NOTES.md). That one delays a
+change to an account, its role or its deletion, by five minutes at most, until the session next
+reads the account. This one has no such bound, and delays every kind of revocation, byline and
+visibility included, even though page loads and actions read those fresh from the database on
+every request. TODO.md, "A live collab connection keeps its access after the viewer loses it",
+has the details and the probable fix.
 
 ## Files (PLAN.md §19)
 
@@ -884,6 +901,8 @@ Re-derive from these rather than trusting the tables after an authz change:
 | Annotation create / delete / restore | `src/app/actions/annotations.ts`; delete and restore in `src/lib/annotation-manage.ts` |
 | Doc links | `src/app/actions/doc-links.ts` |
 | Tag role floors (`canApplyTags`, `canCurateTags`) | `src/lib/role-checks.ts` |
+| Who may make a wiki page `PUBLIC`: the role floor, what each select offers, and the fresh read of the actor's row before a raise | `canMakePagesPublic` in `src/lib/role-checks.ts`; `allowedVisibilities` and `newPageVisibilities` in `src/lib/doc-visibility.ts`; `requireCanMakePublic` in `src/lib/wiki-claim.ts`, asked by `src/lib/doc-manage.ts`, `wiki-create.ts`, `wiki-fork.ts` and `wiki-move.ts` |
+| When a session reads its account again | `src/lib/auth.ts`'s `jwt` callback, `src/lib/session-recheck.ts` |
 | Who may tag which object; who may retract an assignment | `src/lib/tag-authz.ts` |
 | Which posts a viewer may see at all (published + own unpublished) | `src/lib/post-status.ts` |
 | Tag mutations (create, tag, untag, rename, slug, delete) | `src/app/actions/tags.ts`; create, tag and untag in `src/lib/tag-write.ts` |

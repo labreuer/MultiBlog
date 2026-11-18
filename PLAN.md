@@ -2617,9 +2617,9 @@ on the server, and a `defaultPageSize` prop on the client table for the build ha
 `pageSize` means "whatever my preference is", so the same bookmarked link gives two admins their
 own page sizes, which is the intent.
 
-Read from the database per request rather than baked into the session JWT: `id`/`role`/`color` are
-fixed at sign-in and go stale until sign-out (see `src/app/sign-in/NOTES.md`), and a preference the
-user just changed should apply on the next page load, not the next session.
+Read from the database per request rather than baked into the session JWT: the token reads its
+account only every five minutes (see `src/app/sign-in/NOTES.md`), and a preference the user just
+changed should apply on the next page load.
 
 The preference is edited in `/users`, as a select cell in the row's own **Rows/page** column,
 alongside Role and Moderation policy. That surface is ADMIN-only, which is a real gap for everyone
@@ -5065,12 +5065,11 @@ meet (docs/COMMENTS.md); and §38's posts. **The plan:
 
 Planned 2026-11-18. Publishing means putting something in front of readers who aren't signed
 in, which a post and a `PUBLIC` wiki page both do, and both become an EDITOR's. Each part stands
-alone, and deploys to every instance whether or not cards do.
+alone, and deploys to every instance whether or not cards do. Built 2026-11-18: wiki pages.
 
 - **Wiki pages, in the first PR of [docs/EMAIL.md](docs/EMAIL.md) §10's build order**, with §39's
-  session re-read. Making a page `PUBLIC` becomes an ADMIN's or EDITOR's, and on a person's
-  page stays its owner's alone. Its plan is [docs/WIKI.md](docs/WIKI.md), "Planned: making a
-  page `PUBLIC` becomes an editor's".
+  session re-read. Making a page `PUBLIC` is an ADMIN's or EDITOR's, and on a person's page
+  stays its owner's alone. **What is built: [docs/WIKI.md](docs/WIKI.md), "Permissions".**
 - **Posts, in the third PR**, which also stops `RAISED` annotations from sending mail
   ([docs/ANNOTATIONS.md](docs/ANNOTATIONS.md), "Planned: `RAISED` sends no mail").
 
@@ -5127,9 +5126,9 @@ and "A post's byline is not its doc's" table gain the publish rows. CLAUDE.md is
   ```
 
 - **Decide whether to promote them.** There is no role between AUTHOR and EDITOR, and EDITOR
-  grants more: editing every `SHARED` doc and every post. A promoted account must visit
-  `/dashboard` before it can publish, since the publish actions read the role from the session
-  (src/app/sign-in/NOTES.md).
+  grants more: editing every `SHARED` doc and every post. A promoted account can publish within
+  five minutes, or at once after a visit to `/dashboard`, since the publish actions read the
+  role from the session (§39).
 - **Posts an AUTHOR has already scheduled still go live when due**, since a post's visibility
   is its `publishedAt`, with no status column and no sweep (docs/BLOG.md). An editor cancels any
   that shouldn't.
@@ -5137,8 +5136,8 @@ and "A post's byline is not its doc's" table gain the publish rows. CLAUDE.md is
 ## 39. A session reads its account again
 
 Planned 2026-11-18, as the first PR of [docs/EMAIL.md](docs/EMAIL.md) §10's build order,
-together with §38's wiki part. The session's `jwt` callback re-reads the account when its token
-is more than five minutes old, so a deletion or demotion reaches a browser already signed in
-within five minutes, instead of at its next `/dashboard` visit. **The plan:
-[src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md), "Planned: the session reads its account
-again every five minutes".**
+together with §38's wiki part. Built 2026-11-18. The session's `jwt` callback reads the account
+again when its token's last read is five minutes old, so a deletion or demotion reaches a
+browser already signed in within five minutes, instead of at its next `/dashboard` visit.
+**What is built: [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md), "The session is a JWT,
+and reads its account again every five minutes".**

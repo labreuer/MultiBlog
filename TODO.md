@@ -734,6 +734,28 @@ the spec. The race itself is still there, on every surface that mounts `DocReadi
 - Worth an upstream report: `runRemainingActions` should advance the queue only when the
   action that finished is the one at its head.
 
+## `e2e/moderation.spec.ts` can load the post page before the action has revalidated it
+
+**Status:** seen once, 2026-11-18, in a full production run: "a pending comment is hidden until
+an admin approves it" failed on its last assertion, the approved comment missing from the post
+page. Alone it passed 5 times in 5, and it passed in the next full run. The fault is in the
+test's timing, not in moderation.
+
+- **Mechanism:** the test clicks Approve, polls the database until the comment is `APPROVED`,
+  then opens the post page with a plain `goto`. `moderateComment`
+  (`src/app/actions/comments.ts`) writes the status in `moderateOne` and only then calls
+  `revalidateTouchedPosts`. A `goto` that lands between the two is answered from the ISR cache,
+  with the page from before the approval; the failed run's trace shows that response as a cache
+  `HIT`. The navigation also cancels the browser's wait on the action's POST, so nothing in the
+  page shows the action had not finished.
+- **Who else has the shape:** "marking a comment as spam hides it again", in the same file,
+  polls and navigates the same way. Its stale page would show a comment that should be gone.
+- **The fix is in the spec:** wait for the action itself before navigating, not for its
+  database write. Either await the action's POST (`page.waitForResponse`) around the click, or
+  assert on what `/comments` shows once the action has answered. Keep the `goto`s plain: that
+  `moderateComment` revalidates the post page is what the two tests are for, so `freshGoto`
+  would pass a moderation that revalidates nothing.
+
 ## The diff page's workers have not run on the oldest engines in the baseline
 
 **Status:** the worker that compares runs in Safari 27.2 and on an iPhone on iOS 18.6.2
@@ -2107,7 +2129,9 @@ still painted *after* `live-doc-synced` appears, not merely at first paint.
 
 **Status:** narrowed, not closed. The sign-in form and `SessionRefresh` each check what they
 changed and act once more if it did not hold (src/app/sign-in/NOTES.md, "Every session GET
-re-issues the cookie", has the mechanism and both checks). What is left:
+re-issues the cookie", has the mechanism and both checks). And a cookie put back after a
+deletion lasts five minutes at most, since its token is read against the account again when it
+comes due ("The session is a JWT", same file). What is left:
 
 - **A GET slower than the check.** The retry assumes the late GET has landed by the time the
   check is sent. One that answers later still puts the old cookie back.
@@ -2122,13 +2146,20 @@ is a wrapper round the route's `GET` export dropping the session cookie from
 `/api/auth/session` responses. Nothing else on a read path writes it: the app calls `auth()`
 only with no arguments, which sets no cookie. The costs, which are why it is not done:
 
-- A session stops sliding. It ends `maxAge` after sign-in or the last `/dashboard` visit, even
-  for a daily reader, so it wants a longer `maxAge` or a rule that re-issues only an old token.
-- The wrapper matches the cookie by name, `__Secure-` prefix and `.0`/`.1` chunks included, and
-  an Auth.js upgrade can change those.
-- The `adminInitials` backfill (below) relies on the re-issue and goes first.
+- **The timed read of the account relies on the re-issue** (src/app/sign-in/NOTES.md). A render
+  can't set a cookie, so the session GET is what writes a re-read token back, with its new
+  `checkedAt`. A wrapper that dropped the cookie from every GET would leave a due token due,
+  and every `auth()` after it reading the account. So it has to let through a response whose
+  token was just re-read, and the read then still writes once in each interval: the race is
+  narrowed to those reads, not closed.
+- **Letting those through is also what keeps a session sliding**, in steps of the interval.
+  Dropping every cookie would end a session `maxAge` after sign-in or the last `/dashboard`
+  visit, even for a daily reader.
+- **The wrapper matches the cookie by name**, `__Secure-` prefix and `.0`/`.1` chunks included,
+  and an Auth.js upgrade can change those.
 
-With that in, both retries can go.
+With that in, the two retries cover one read in each interval, and whether they stay is a
+question for then.
 
 `session-refresh.spec.ts`'s deleted-user test and `files.spec.ts`'s second sign-in still meet
 the race by chance under load, and a red from either is this item's first bullet, not a test
@@ -2247,33 +2278,3 @@ already records two iOS touch claims that measured false.
 `(pointer: coarse)` is false and would be right. That is measured, recorded in §10c, and
 **decided** in PLAN.md §19d — a feel knob is not re-aimed on a symmetry argument — rather than
 open.
-
----
-
-## Remove the `adminInitials` token backfill on or after 2026-11-01
-
-**Status:** waiting on the date. Every instance was running PR #52, which put admin initials on
-the session for the collab caret's flag, by 2026-10-02. The backfill is removable 30 days after
-that: **2026-11-01**.
-
-`src/lib/auth.ts`'s `jwt` callback has a block that looks up `adminInitials` for a token issued
-before the field existed. It is only there for the changeover. `auth.ts` sets no `maxAge`, so
-Auth.js's 30-day default applies. The session route re-issues the cookie on every GET ("Auth.js
-re-issues the session cookie on every session GET", above), so a token in use gains the field
-on its next page load and an idle one expires within 30 days. Thirty days after the last
-deploy, no live token lacks it.
-
-Leaving the block costs nothing at runtime, since it skips its query once the field is there.
-The reason to remove it is that the code keeps saying a token can lack the field when none can.
-Removing it means five edits:
-
-- delete the backfill block in the `jwt` callback;
-- make `adminInitials` required (drop the `?`) on both `JWT` declarations in
-  `src/types/next-auth.d.ts`, along with the comment explaining why it was optional;
-- drop the `?? ""` from `session.user.adminInitials` in the `session` callback.
-- delete the last test in `e2e/collab-caret.spec.ts`, which mints a token without the field to
-  exercise the backfill.
-- drop the "one temporary exception" sentence from `src/app/sign-in/NOTES.md`'s "The session is a
-  JWT" section.
-
-`npm run check` then confirms nothing else relied on it being optional.

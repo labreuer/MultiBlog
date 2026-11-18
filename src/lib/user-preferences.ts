@@ -9,9 +9,9 @@ export type { AdminTableName };
 // size, and that table's column visibility/order.
 //
 // Read from the database per request rather than baked into the session JWT:
-// the JWT fixes id/role/color at sign-in and never re-reads them (see
+// the JWT reads its account only every five minutes (see
 // src/app/sign-in/NOTES.md), so a preference the user just changed wouldn't
-// apply until their next session. Two small queries rather than one — the
+// apply on the next page load. Two small queries rather than one — the
 // user row and `SiteSettings` are different tables — run concurrently rather
 // than one after the other, since the second is only needed as a fallback and
 // there's no reason to wait for the first to find that out.

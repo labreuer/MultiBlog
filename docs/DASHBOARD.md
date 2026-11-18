@@ -104,9 +104,10 @@ what makes the live color sample below free.
 `handleSave` calls `useSession().update({})` (the `{}` matters — an
 argument-less `update()` is a GET and never sets `trigger: "update"`; see
 `SessionRefresh.tsx`'s notes) before `router.refresh()`. Without it the JWT —
-which baked name/role/color/initials in at sign-in — keeps the old values until the
-next full /dashboard load, because SessionRefresh runs once per mount and has
-already fired by the time Save is pressed. Your own collab caret would keep
+which carries name/role/color/initials — keeps the old values until its next read
+of the account (five minutes at most, src/app/sign-in/NOTES.md) or the next full
+/dashboard load, because SessionRefresh runs once per mount and has already fired
+by the time Save is pressed. Your own collab caret would keep
 painting the old color.
 
 ### The color sample
@@ -169,7 +170,8 @@ next call, and the ZIP.
 There is no single policy — `User.color` is copied into four places with
 different staleness windows:
 
-1. **The session JWT** — baked at sign-in; refreshed by SessionRefresh once
+1. **The session JWT** — read at sign-in and again every five minutes
+   (src/app/sign-in/NOTES.md); refreshed at once by SessionRefresh once
    per /dashboard mount and by the Settings save path above. Everything
    reading `session.user.color` (your own caret, composers) sees this copy.
    `User.adminInitials` rides the same copy, with the same refresh paths: it

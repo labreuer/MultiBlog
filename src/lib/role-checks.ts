@@ -99,6 +99,23 @@ export function canCurateTags(role: Role): boolean {
   return TAG_CURATOR_ROLES.includes(role);
 }
 
+// docs/WIKI.md "Permissions" — who may make a wiki page PUBLIC, which puts it
+// in front of readers who aren't signed in. That is publishing, and an
+// editorial act on the site's behalf, so it stops at ADMIN and EDITOR however
+// many pages an AUTHOR owns. Here for its client consumers: the visibility
+// selects ask it, through allowedVisibilities (src/lib/doc-visibility.ts).
+//
+// The same two roles as canCurateTags and canEditAnyPost, and not defined in
+// terms of either, for the reason this file keeps its other pairs apart. This
+// is a role floor, not the whole rule: on a person's page the raise is also
+// its owner's alone, and every writer reads the role again from the actor's
+// row (requireCanMakePublic, src/lib/wiki-claim.ts).
+export const PAGE_PUBLISHER_ROLES: Role[] = ["ADMIN", "EDITOR"];
+
+export function canMakePagesPublic(role: Role): boolean {
+  return PAGE_PUBLISHER_ROLES.includes(role);
+}
+
 // Who may carry a byline on a doc or post — the option list for the /docs and
 // /posts Authors filter (src/lib/author-filter.ts), and what the two edit
 // pages already hardcode inline when deciding who's eligible to be added as a

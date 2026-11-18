@@ -51,7 +51,7 @@ to re-derive the decision from.
 | [CACHING.md](CACHING.md) | Caching behavior and trade-offs (ISR, …). |
 | [DEPLOY.md](DEPLOY.md) | Self-managed Linode/Ubuntu deployment. |
 | [docs/FAVICON.md](docs/FAVICON.md) | Site icons and manifest. |
-| [e2e/README.md](e2e/README.md) · [e2e/MACOS.md](e2e/MACOS.md) · [scripts/integrity/README.md](scripts/integrity/README.md) · [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md) | Suite fixtures · the macOS ceiling and driving the real Safari · integrity checks · auth strategy, with a plan for the session to re-read its account every five minutes. |
+| [e2e/README.md](e2e/README.md) · [e2e/MACOS.md](e2e/MACOS.md) · [scripts/integrity/README.md](scripts/integrity/README.md) · [src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md) | Suite fixtures · the macOS ceiling and driving the real Safari · integrity checks · auth strategy, and the session reading its account again every five minutes. |
 
 ## Architecture invariants
 

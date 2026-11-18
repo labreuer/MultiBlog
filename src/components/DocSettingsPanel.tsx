@@ -43,8 +43,8 @@ type Props = {
   addressHistory: WikiAddressHistoryEntry[];
   /** Told each visibility the server accepts, for the editor's address line and PUBLIC notice. */
   onVisibilityChange?: (visibility: DocVisibility) => void;
-  /** The viewer, whom allowedVisibilities asks about on a person's page. */
-  viewerId: string;
+  /** The viewer, whom allowedVisibilities asks about: who they are, on a person's page, and whether their role may make a page PUBLIC. */
+  viewer: { id: string; role: Role };
   createdAt: Date;
   authorIds: string[];
   eligibleUsers: EligibleUser[];
@@ -68,7 +68,7 @@ export default function DocSettingsPanel({
   wiki,
   addressHistory,
   onVisibilityChange,
-  viewerId,
+  viewer,
   createdAt,
   authorIds,
   eligibleUsers,
@@ -99,7 +99,7 @@ export default function DocSettingsPanel({
 
   const visibilityOptions = allowedVisibilities(
     { visibility: visibilityValue, wikiName: wiki?.name ?? null, wikiOwnerUserId: wiki?.ownerUserId ?? null },
-    viewerId,
+    viewer,
   );
 
   function handleVisibilityChange(next: DocVisibility) {
