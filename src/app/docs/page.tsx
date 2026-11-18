@@ -20,6 +20,7 @@ import styles from "./page.module.css";
 import { staffDisplayNameOf } from "@/lib/display-name";
 import { parseTagList } from "@/lib/tag-data";
 import { codeDefaultColumns } from "@/lib/admin-table-columns";
+import { wikiAddressHistoriesOf } from "@/lib/wiki-rename";
 
 export const metadata: Metadata = { title: "Docs" };
 
@@ -200,6 +201,16 @@ export default async function DocsPage({
     prismaIncludingDeleted.doc.count({ where }),
   ]);
 
+  // The past wiki addresses of a doc moved out of the wiki, which a Delete
+  // lists before deleting them with it (docs/WIKI.md "Deleting a page"). Only
+  // a live row the viewer may read: the rows say where a page was.
+  const histories = await wikiAddressHistoriesOf(
+    docs
+      .filter((doc) => doc.deletedByUserId === null && (isSharedOrPublic(doc.visibility) || doc.authors.some((a) => a.userId === session.user.id)))
+      .map((doc) => doc.id),
+    (u) => staffDisplayNameOf(u, session.user.role),
+  );
+
   const rows = docs.map((doc) => {
     const isAuthor = doc.authors.some((a) => a.userId === session.user.id);
     // canUserReadDoc's rule inlined, as canEdit's is below: anyone who reaches
@@ -248,6 +259,7 @@ export default async function DocsPage({
       // which is the role floor (every role reaching this page clears it) and
       // the read rule. An affordance only — bulkTagObjects asks again per row.
       canTag: readable,
+      addressHistory: histories.get(doc.id) ?? [],
     };
   });
 

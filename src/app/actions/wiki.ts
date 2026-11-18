@@ -7,7 +7,7 @@ import { actorFromSessionUser } from "@/lib/actor";
 import { ApiError } from "@/lib/api/errors";
 import { createWikiPage, type WikiNamespaceChoice } from "@/lib/wiki-create";
 import { forkIntoWiki, previewWikiForkAddress, type WikiAddressPreview } from "@/lib/wiki-fork";
-import { moveDocIntoWiki, previewWikiMoveAddress } from "@/lib/wiki-move";
+import { moveDocIntoWiki, moveWikiPage, previewWikiMoveAddress, type WikiPageMoveResult } from "@/lib/wiki-move";
 import { deleteWikiAddressRow, renameWikiPage, revertWikiAddress, type WikiRenameResult } from "@/lib/wiki-rename";
 import { signInPath } from "@/lib/sign-in-redirect";
 import { revalidateFrontPage, revalidateFrontPageFor } from "@/lib/front-page-revalidate";
@@ -182,6 +182,36 @@ export async function moveDocIntoWikiAction(_prev: WikiClaimState, form: FormDat
   }
   revalidatePath("/wiki", "layout");
   revalidatePath("/docs");
+  if (moved.commons) revalidateFrontPage();
+  redirect(moved.path);
+}
+
+/**
+ * "Move…" on a wiki page (docs/WIKI.md "Renaming", "Moving out of the
+ * wiki"): to another namespace, or out of the wiki. Lands on the page at its
+ * new address, or on the doc.
+ */
+export async function moveWikiPageAction(_prev: WikiClaimState, form: FormData): Promise<WikiClaimState> {
+  const session = await auth();
+  if (!session?.user) redirect(signInPath());
+  const docId = String(form.get("docId") ?? "");
+  const visibility = String(form.get("visibility") ?? "");
+  let moved: WikiPageMoveResult;
+  try {
+    moved = await moveWikiPage(actorFromSessionUser(session.user), {
+      docId,
+      to:
+        form.get("namespace") === "out"
+          ? { kind: "out" }
+          : { kind: "namespace", namespace: namespaceOf(form), name: String(form.get("name") ?? ""), variant: typedVariant(form) },
+      visibility: VISIBILITIES.includes(visibility) ? (visibility as DocVisibility) : null,
+    });
+  } catch (err) {
+    return claimRefusal(err);
+  }
+  revalidatePath("/wiki", "layout");
+  revalidatePath("/docs");
+  revalidatePath(`/doc/${docId}/slug`);
   if (moved.commons) revalidateFrontPage();
   redirect(moved.path);
 }

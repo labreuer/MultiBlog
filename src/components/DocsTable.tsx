@@ -53,6 +53,8 @@ import { TagListCell } from "@/components/tags/TagChipList";
 import BulkTagPicker from "@/components/tags/BulkTagPicker";
 import { bulkTagObjects } from "@/app/actions/tags";
 import type { TagLink } from "@/lib/tag-data";
+import DeleteAddressesConfirm, { AddressHistoryList } from "@/components/wiki/DeleteAddressesConfirm";
+import type { WikiAddressHistoryEntry } from "@/lib/wiki-rename";
 import styles from "./DocsTable.module.css";
 
 export type DocRow = {
@@ -92,6 +94,9 @@ export type DocRow = {
   // Whether this viewer may tag the doc — its read rule (docs/TAGS.md, "Who
   // may tag"). False only on a row the ADMIN "Show all docs" override lists.
   canTag: boolean;
+  // The past wiki addresses of a doc moved out of the wiki, which a Delete
+  // lists first (docs/WIKI.md "Deleting a page"); empty for most docs.
+  addressHistory: WikiAddressHistoryEntry[];
 };
 
 const SORTABLE_KEYS = [
@@ -132,6 +137,8 @@ export default function DocsTable({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // The row whose Delete is asking first, for a doc with past wiki addresses.
+  const [confirmingRow, setConfirmingRow] = useState<DocRow | null>(null);
 
   const { navigate, updateFilters, searchDraft, onSearchChange, handleSort, searchParams } = useTableFilters({
     filters,
@@ -164,7 +171,19 @@ export default function DocsTable({
       applicableTo: (row) => !row.deleted && row.canEdit,
       run: (ids, value) => bulkSetDocVisibility(ids, value as DocVisibility),
     },
-    ...softDeleteBulkActions<DocRow>("docs", bulkDeleteDocs, bulkRestoreDocs),
+    ...softDeleteBulkActions<DocRow>(
+      "docs",
+      bulkDeleteDocs,
+      bulkRestoreDocs,
+      undefined,
+      // The selected docs that have past wiki addresses, listed before any is
+      // deleted; with none, the delete runs at once, as every bulk delete does.
+      (targets) => {
+        const withHistory = targets.filter((row) => row.addressHistory.length > 0);
+        if (withHistory.length === 0) return null;
+        return <AddressHistoryList docs={withHistory.map((row) => ({ label: row.title, history: row.addressHistory }))} />;
+      },
+    ),
   ];
 
   // What each movable column does, keyed by its entry in src/lib/admin-table-columns.ts, which
@@ -298,8 +317,14 @@ export default function DocsTable({
   ];
   const visibleColumns = resolveColumns(columns, filters.cols);
 
-  function handleDeleteToggle(row: DocRow) {
+  function handleDeleteToggle(row: DocRow, confirmed = false) {
     setError(null);
+    setConfirmingRow(null);
+    // A doc with past wiki addresses asks first (docs/WIKI.md "Deleting a page").
+    if (!row.deleted && !confirmed && row.addressHistory.length > 0) {
+      setConfirmingRow(row);
+      return;
+    }
     startTransition(async () => {
       try {
         await runWithStatus(row.id, async () => {
@@ -344,6 +369,14 @@ export default function DocsTable({
         />
       </div>
 
+      {confirmingRow && (
+        <DeleteAddressesConfirm
+          docs={[{ history: confirmingRow.addressHistory }]}
+          pending={pending}
+          onConfirm={() => handleDeleteToggle(confirmingRow, true)}
+          onCancel={() => setConfirmingRow(null)}
+        />
+      )}
       <BulkToolbar
         selectedRows={selectedRows}
         actions={bulkActions}

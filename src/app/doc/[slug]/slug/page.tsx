@@ -56,9 +56,10 @@ export default async function DocSlugPage({ params }: { params: Promise<{ slug: 
   // untitled doc's standardSlug would be slugify("", "doc") -> "doc" ->
   // reserved -> "doc-doc", which reads as a typo rather than a fallback.
   const standardSlug = await uniqueDocSlug(docTitleOrFallback(doc.title), doc.id);
-  const addressHistory = wikiPath
-    ? ((await wikiAddressHistoriesOf([doc.id], (u) => staffDisplayNameOf(u, session.user.role))).get(doc.id) ?? [])
-    : [];
+  // A doc moved out of the wiki keeps its released rows, which redirect to
+  // it, and are listed here for its editors to delete (docs/WIKI.md "Moving
+  // out of the wiki").
+  const addressHistory = (await wikiAddressHistoriesOf([doc.id], (u) => staffDisplayNameOf(u, session.user.role))).get(doc.id) ?? [];
 
   return (
     <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "sans-serif" }}>
@@ -84,6 +85,9 @@ export default async function DocSlugPage({ params }: { params: Promise<{ slug: 
             Its doc url below is frozen while it is in the wiki; links to it, and to its past urls, go on to the page.
           </p>
         </>
+      )}
+      {!wikiPath && addressHistory.length > 0 && (
+        <WikiAddressManager docId={doc.id} path={null} name={null} variant="" history={addressHistory} />
       )}
       <SlugManager
         entityType="doc"

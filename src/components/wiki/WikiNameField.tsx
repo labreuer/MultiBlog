@@ -11,7 +11,7 @@ import { checkWikiName } from "@/lib/wiki-name";
 // control: a field holding the name, checked by the rules as it is typed,
 // with a Rename button once it differs. A rename goes on to the editor at the
 // new address. The variant changes on /doc/<slug>/slug, and the namespace
-// through Move… (PR 5). The server asks every rule again (wiki-rename.ts).
+// through Move…. The server asks every rule again (wiki-rename.ts).
 
 type Props = {
   docId: string;

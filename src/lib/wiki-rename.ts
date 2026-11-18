@@ -32,8 +32,8 @@ import { requireWikiName, requireWikiVariant } from "@/lib/wiki-create";
 //   UPDATE as wiki_name, since the search vector's trigger fires by the
 //   columns a statement names ("The name is the title").
 //
-// Moving between namespaces and out of the wiki (PR 5) releases rows rather
-// than reserving them, and lives in wiki-move.ts.
+// Moving between namespaces and out of the wiki releases rows rather than
+// reserving them, and lives in wiki-move.ts.
 
 /** Where a page lives after a rename or a revert, and the address it left (null when nothing changed, or only case). */
 export type WikiRenameResult = { path: string; editPath: string; renamedFrom: string | null };

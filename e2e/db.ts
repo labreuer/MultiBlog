@@ -492,6 +492,7 @@ export const softDeleteTestDoc = (...args: Parameters<DbHandlers["softDeleteTest
 export const forkDocAs = (...args: Parameters<DbHandlers["forkDocAs"]>) => call("forkDocAs", ...args);
 export const createWikiPageAs = (...args: Parameters<DbHandlers["createWikiPageAs"]>) => call("createWikiPageAs", ...args);
 export const moveDocAs = (...args: Parameters<DbHandlers["moveDocAs"]>) => call("moveDocAs", ...args);
+export const moveWikiPageAs = (...args: Parameters<DbHandlers["moveWikiPageAs"]>) => call("moveWikiPageAs", ...args);
 export const softDeleteTestPost = (...args: Parameters<DbHandlers["softDeleteTestPost"]>) => call("softDeleteTestPost", ...args);
 export const findTestWikiPageId = (...args: Parameters<DbHandlers["findTestWikiPageId"]>) => call("findTestWikiPageId", ...args);
 export const renameWikiPageAs = (...args: Parameters<DbHandlers["renameWikiPageAs"]>) => call("renameWikiPageAs", ...args);

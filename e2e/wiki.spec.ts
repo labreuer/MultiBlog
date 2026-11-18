@@ -14,6 +14,9 @@ import {
   deleteTestPost,
   getTestUserSlug,
   moveDocAs,
+  moveWikiPageAs,
+  deleteTestDocYdoc,
+  getDocMarkFacts,
   softDeleteTestPost,
   findTestWikiPageId,
   getUserIdByEmail,
@@ -1611,7 +1614,8 @@ test.describe("into the wiki (docs/WIKI.md \"Forking into the wiki\", \"Moving a
       expect(await docActionItems(page)).toEqual(["Publish as blog post", "Fork…"]);
 
       await page.goto(`/doc/${wiki.id}`);
-      expect(await docActionItems(page)).toEqual(["Fork…"]);
+      // A commons page with this ADMIN on its byline: Move… too ("Moving out of the wiki").
+      expect(await docActionItems(page)).toEqual(["Fork…", "Move…"]);
       await docActionsMenu(page).getByRole("button", { name: "Fork…" }).click();
       dialog = page.getByRole("dialog", { name: "Fork this page" });
       await expect(dialog.getByRole("radio", { name: /^Your wiki pages/ })).toBeChecked();
@@ -1669,6 +1673,211 @@ test.describe("into the wiki (docs/WIKI.md \"Forking into the wiki\", \"Moving a
       if (forkId) await deleteTestDoc(forkId);
       await deleteTestDoc(parent.id);
       await deleteTestDoc(mover.id);
+    }
+  });
+});
+
+test.describe("moving between namespaces and out (docs/WIKI.md \"Renaming\", \"Moving out of the wiki\")", () => {
+  /** A stamp for names, so copies of a test running at once don't collide on the commons' addresses. */
+  const stamp = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  test("who may: a person's page its owner alone, into the commons as an EDITOR; a commons page an ADMIN or EDITOR on its byline, into their own; an unreadable page is not_found", async ({
+    secondUser,
+  }) => {
+    const { user: owner } = await secondUser({ role: "AUTHOR" });
+    const { user: coauthor } = await secondUser({ role: "AUTHOR" });
+    const { user: editor } = await secondUser({ role: "EDITOR" });
+    const personal = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "SHARED" });
+    const hidden = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", visibility: "PRIVATE" });
+    const commons = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", name: `E2E Who leaves ${stamp()}`, visibility: "SHARED" });
+    const out = (email: string, docId: string) => moveWikiPageAs({ actorEmail: email, docId, to: "out" });
+    try {
+      await addTestDocAuthor(personal.id, coauthor.email);
+      // A person's page leaves @x by x alone: not a co-author, an EDITOR or an ADMIN.
+      for (const email of [coauthor.email, editor.email, ADMIN_EMAIL]) {
+        expect(await out(email, personal.id)).toMatchObject({ ok: false, code: "forbidden" });
+      }
+      // A page the actor can't read is answered as a missing one.
+      expect(await out(editor.email, hidden.id)).toMatchObject({ ok: false, code: "not_found" });
+      // The owner, an AUTHOR, may not choose the commons, and their own namespace is where the page is.
+      expect(await moveWikiPageAs({ actorEmail: owner.email, docId: personal.id, to: { namespace: "commons", name: personal.wikiName } })).toMatchObject({
+        ok: false,
+        code: "forbidden",
+      });
+      expect(await moveWikiPageAs({ actorEmail: owner.email, docId: personal.id, to: { namespace: "person", name: personal.wikiName } })).toMatchObject({
+        ok: false,
+        code: "invalid",
+      });
+      // Made an EDITOR, the owner may.
+      await setTestUserRole(owner.email, "EDITOR");
+      expect(await moveWikiPageAs({ actorEmail: owner.email, docId: personal.id, to: { namespace: "commons", name: personal.wikiName } })).toEqual({
+        ok: true,
+        path: `/wiki/commons/${wikiNameSegment(personal.wikiName)}`,
+        movedFrom: personal.path,
+      });
+      expect(await getTestWikiFacts(personal.id)).toMatchObject({ wikiName: personal.wikiName, visibility: "SHARED" });
+
+      // A commons page leaves the commons by an ADMIN or EDITOR on its byline: not an AUTHOR on it, nor an EDITOR off it.
+      await addTestDocAuthor(commons.id, coauthor.email);
+      expect(await out(coauthor.email, commons.id)).toMatchObject({ ok: false, code: "forbidden" });
+      expect(await out(editor.email, commons.id)).toMatchObject({ ok: false, code: "forbidden" });
+      await addTestDocAuthor(commons.id, editor.email);
+      const editorSlug = await getTestUserSlug(editor.email);
+      expect(await moveWikiPageAs({ actorEmail: editor.email, docId: commons.id, to: { namespace: "person", name: commons.wikiName } })).toMatchObject({
+        ok: true,
+        path: `/wiki/@${editorSlug}/${wikiNameSegment(commons.wikiName)}`,
+      });
+      // Now the EDITOR's page: the ADMIN on its byline may no longer take it anywhere.
+      expect(await out(ADMIN_EMAIL, commons.id)).toMatchObject({ ok: false, code: "forbidden" });
+    } finally {
+      await deleteTestDoc(personal.id);
+      await deleteTestDoc(hidden.id);
+      await deleteTestDoc(commons.id);
+    }
+  });
+
+  test("leaving a namespace releases what the page held there: its names free at once, redirecting only when nothing else answers, a reserved row first", async ({
+    page,
+    secondUser,
+  }) => {
+    const { user: owner } = await secondUser({ role: "EDITOR" });
+    const wiki = await createTestWikiPage({ authorEmail: owner.email, namespace: "person", name: `E2E Leaving ${stamp()}`, visibility: "SHARED" });
+    const second = `${wiki.wikiName} second`;
+    const created: string[] = [];
+    try {
+      expect(await renameWikiPageAs({ actorEmail: owner.email, docId: wiki.id, change: { name: second } })).toMatchObject({ ok: true });
+      const moved = await moveWikiPageAs({ actorEmail: owner.email, docId: wiki.id, to: { namespace: "commons", name: second } });
+      expect(moved).toMatchObject({ ok: true, path: `/wiki/commons/${wikiNameSegment(second)}` });
+      const commonsPath = `/wiki/commons/${wikiNameSegment(second)}`;
+      // The rename's reserved row is released, and the address left is recorded as released.
+      const history = await getTestWikiAddressHistory(wiki.id);
+      expect(history.map(({ ownerEmail, name, reserved, movedByEmail }) => ({ ownerEmail, name, reserved, movedByEmail }))).toEqual([
+        { ownerEmail: owner.email, name: second, reserved: false, movedByEmail: owner.email },
+        { ownerEmail: owner.email, name: wiki.wikiName, reserved: false, movedByEmail: owner.email },
+      ]);
+      // A released row sends a reader on while nothing else answers.
+      expect(await answer(page.request, `${pathAt(wiki, second)}/edit?a=1`)).toEqual([307, `${commonsPath}/edit?a=1`]);
+      expect(await answer(page.request, wiki.path)).toEqual([307, commonsPath]);
+
+      // It holds nothing: the old name is free in @owner at once, and the page there answers.
+      const taker = await createWikiPageAs({ actorEmail: owner.email, page: { namespace: "person", name: wiki.wikiName, visibility: "SHARED" } });
+      expect(taker).toMatchObject({ ok: true });
+      if (!taker.ok) return;
+      created.push(taker.id);
+      expect((await answer(page.request, wiki.path))[0]).toBe(200);
+      // Renamed away, the taker's reserved row answers before the released one.
+      const third = `${wiki.wikiName} third`;
+      expect(await renameWikiPageAs({ actorEmail: owner.email, docId: taker.id, change: { name: third } })).toMatchObject({ ok: true });
+      expect(await answer(page.request, wiki.path)).toEqual([307, pathAt(wiki, third)]);
+
+      // Moving back takes an address it once had as anyone would, and drops its own row there.
+      expect(await moveWikiPageAs({ actorEmail: owner.email, docId: wiki.id, to: { namespace: "person", name: second } })).toMatchObject({
+        ok: true,
+        path: pathAt(wiki, second),
+      });
+      const back = await getTestWikiAddressHistory(wiki.id);
+      expect(back.map(({ ownerEmail, name, reserved }) => ({ ownerEmail, name, reserved }))).toEqual([
+        { ownerEmail: null, name: second, reserved: false },
+        { ownerEmail: owner.email, name: wiki.wikiName, reserved: false },
+      ]);
+      expect(await answer(page.request, commonsPath)).toEqual([307, pathAt(wiki, second)]);
+    } finally {
+      await deleteTestDoc(wiki.id);
+      for (const id of created) await deleteTestDoc(id);
+    }
+  });
+
+  test("out of the wiki: the name written into the title fragment as the mover's edit, a PUBLIC page lowered, /doc/<slug> its url again and changeable, its fork and old addresses kept", async ({
+    page,
+    playwright,
+    baseURL,
+  }) => {
+    const wiki = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", name: `E2E Outward ${stamp()}`, visibility: "PUBLIC" });
+    const unopened = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", name: `E2E Unopened ${stamp()}`, visibility: "SHARED" });
+    let forkId: string | null = null;
+    try {
+      const fork = await forkDocAs({ actorEmail: ADMIN_EMAIL, parentId: wiki.id });
+      expect(fork).toMatchObject({ ok: true });
+      if (fork.ok) forkId = fork.id;
+
+      // Only a wiki page is PUBLIC: the move asks for SHARED or PRIVATE.
+      expect(await moveWikiPageAs({ actorEmail: ADMIN_EMAIL, docId: wiki.id, to: "out" })).toMatchObject({ ok: false, code: "invalid" });
+      const moved = await moveWikiPageAs({ actorEmail: ADMIN_EMAIL, docId: wiki.id, to: "out", visibility: "SHARED" });
+      expect(moved).toEqual({ ok: true, path: `/doc/${wiki.slug}`, movedFrom: wiki.path });
+      expect(await getTestWikiFacts(wiki.id, "outward")).toMatchObject({
+        wikiName: null,
+        wikiNameKey: null,
+        wikiVariant: "",
+        title: wiki.wikiName,
+        visibility: "SHARED",
+        searchMatches: true,
+      });
+      const marks = await getDocMarkFacts(wiki.id);
+      expect(marks.title).toBe(wiki.wikiName);
+      expect(marks.clients).toContain(ADMIN_EMAIL);
+
+      // /doc/<slug> is its url again, and the old address sends a reader there.
+      expect((await answer(page.request, `/doc/${wiki.slug}`))[0]).toBe(200);
+      expect(await answer(page.request, `${wiki.path}?at=1`)).toEqual([307, `/doc/${wiki.slug}?at=1`]);
+      const anonymous = await playwright.request.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+      try {
+        expect(await answer(anonymous, wiki.path)).toEqual([307, toSignIn]);
+      } finally {
+        await anonymous.dispose();
+      }
+      expect(await getTestWikiAddressHistory(wiki.id)).toMatchObject([{ ownerEmail: null, name: wiki.wikiName, reserved: false }]);
+      // Its slug, frozen in the wiki, changes again; its fork is still its fork.
+      expect(await changeTestDocSetting({ actorEmail: ADMIN_EMAIL, docId: wiki.id, change: { slug: `${wiki.slug}-out` } })).toEqual({ ok: true });
+      expect((await getTestForkFacts(forkId!)).forkedFromDocId).toBe(wiki.id);
+
+      // A page never opened has no text to keep its name in, and is refused, unmoved.
+      await deleteTestDocYdoc(unopened.id);
+      expect(await moveWikiPageAs({ actorEmail: ADMIN_EMAIL, docId: unopened.id, to: "out" })).toMatchObject({ ok: false, code: "invalid" });
+      expect(await getTestWikiFacts(unopened.id)).toMatchObject({ wikiName: unopened.wikiName });
+    } finally {
+      if (forkId) await deleteTestDoc(forkId);
+      await deleteTestDoc(wiki.id);
+      await deleteTestDoc(unopened.id);
+    }
+  });
+
+  test("Move… lands a page out of the wiki on its doc, which is publishable and movable in again, its slug page and /docs' Delete listing its past addresses", async ({
+    page,
+  }) => {
+    const wiki = await createTestWikiPage({ authorEmail: ADMIN_EMAIL, namespace: "commons", name: `E2E Dialog out ${stamp()}`, visibility: "SHARED", bodyText: "Out." });
+    try {
+      await page.goto(`/doc/${wiki.id}`);
+      expect(await docActionItems(page)).toEqual(["Fork…", "Move…"]);
+      await docActionsMenu(page).getByRole("button", { name: "Move…" }).click();
+      const dialog = page.getByRole("dialog", { name: "Move this page" });
+      await expect(dialog.getByRole("radio", { name: "Your wiki pages (@e2e-admin)" })).toBeChecked();
+      await expect(dialog.getByLabel("Name")).toHaveValue(wiki.wikiName);
+      await expect(dialog.locator("[data-wiki-dialog-address]")).toHaveText(`/wiki/@e2e-admin/${wikiNameSegment(wiki.wikiName)}`);
+      await dialog.getByRole("radio", { name: "Out of the wiki, as a doc" }).click();
+      await expect(dialog.getByLabel("Name")).toHaveCount(0);
+      await dialog.getByRole("button", { name: "Move", exact: true }).click();
+      await page.waitForURL((url) => url.pathname === `/doc/${wiki.slug}`);
+      expect(await getTestWikiFacts(wiki.id)).toMatchObject({ wikiName: null, title: wiki.wikiName });
+      expect(await docActionItems(page)).toEqual(["Publish as blog post", "Fork…", "Move into the wiki…"]);
+
+      // Its slug page lists the address it left, which a delete can end.
+      await page.goto(`/doc/${wiki.slug}/slug`);
+      const history = page.locator("[data-wiki-address-manager]");
+      await expect(history.getByRole("heading", { name: "Past wiki addresses" })).toBeVisible();
+      await expect(history.locator(`[data-wiki-address-row="${wiki.path}"]`)).toBeVisible();
+
+      // /docs' Delete asks first, listing it, and the delete takes it.
+      await page.goto(`/docs?q=${encodeURIComponent(wiki.wikiName)}`);
+      const row = page.getByRole("row").filter({ hasText: wiki.wikiName });
+      await row.getByRole("button", { name: /Delete/ }).click();
+      const confirm = page.locator("[data-delete-addresses-confirm]");
+      await expect(confirm).toContainText(wiki.path);
+      await confirm.getByRole("button", { name: "Delete" }).click();
+      await expect.poll(async () => (await getTestWikiFacts(wiki.id)).deleted).toBe(true);
+      expect(await getTestWikiAddressHistory(wiki.id)).toEqual([]);
+    } finally {
+      await page.goto("about:blank").catch(() => {});
+      await deleteTestDoc(wiki.id);
     }
   });
 });
