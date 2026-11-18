@@ -37,7 +37,10 @@ export async function uniqueDocSlug(title: string, excludeDocId?: string): Promi
 }
 
 // Renames a doc's slug, recording the old one in DocSlugHistory. No-ops if
-// newSlugInput normalizes to the doc's current slug.
+// newSlugInput normalizes to the doc's current slug. A slug this doc held
+// before comes back out of its own history, as revertDocSlug's does, rather
+// than being refused as in use: uniqueDocSlug, which SlugManager's "use
+// standard" asks, passes over the doc's own rows and so can offer one.
 //
 // updatedByUserId is threaded in from the calling action rather than read
 // here: this module has no session (it's plain lib code, also reachable from
@@ -54,9 +57,10 @@ export async function changeDocSlug(docId: string, newSlugInput: string, updated
     if (doc.slug === newSlug) {
       return newSlug;
     }
-    if (await docSlugInUse(newSlug, tx)) {
+    if (await docSlugInUse(newSlug, tx, docId)) {
       throw new Error(`Url "${newSlug}" is already in use.`);
     }
+    await tx.docSlugHistory.deleteMany({ where: { docId, slug: newSlug } });
     await tx.docSlugHistory.create({ data: { docId, slug: doc.slug } });
     await tx.doc.update({ where: { id: docId }, data: { slug: newSlug, updatedByUserId } });
     return newSlug;

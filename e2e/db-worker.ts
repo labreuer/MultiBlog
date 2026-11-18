@@ -28,8 +28,9 @@ import { commentBodyTextFromJSON, commentDocFromText, isCommentBodyError } from 
 import { resolveCommentBody } from "@/lib/comment-chips";
 import { captureCommentQuotes } from "@/lib/comment-quote-capture";
 import { colorForSeed } from "@/lib/author-colors";
-import { uniqueUserSlug } from "@/lib/user-slug";
-import { uniquePostSlug } from "@/lib/post-slug";
+import { changeUserSlug, uniqueUserSlug } from "@/lib/user-slug";
+import { slugify } from "@/lib/slug";
+import { changePostSlug, uniquePostSlug } from "@/lib/post-slug";
 import { postPath } from "@/lib/post-path";
 import { derivePostStatus } from "@/lib/post-status";
 import { changeDocSlug, uniqueDocSlug } from "@/lib/doc-slug";
@@ -628,6 +629,67 @@ export async function renameTestFileSlug(fileId: string): Promise<string> {
   });
   assertSafe(owner.user.email);
   return changeFileSlug(fileId, await uniqueFileSlug(uniqueTitle("renamed")), owner.userId);
+}
+
+/**
+ * Moves a test doc's, post's, user's or file's slug to a fresh one and then
+ * back, both through its kind's own `change*Slug`, as "Use this url" on the
+ * slug page (or the manage page's for a file) does when it offers the old slug
+ * back. Answers the slug it started on, the one it moved to, the one it ended
+ * on, and the slugs in its history afterwards. Whose the entity is is checked
+ * through its first byline author, owner or its own email.
+ */
+export async function takeBackOwnOldSlug(opts: {
+  kind: "doc" | "post" | "user" | "file";
+  id: string;
+}): Promise<{ start: string; away: string; final: string; history: string[] }> {
+  const { kind, id } = opts;
+  const away = slugify(uniqueTitle("away"), kind);
+  switch (kind) {
+    case "doc": {
+      const doc = await prisma.doc.findUniqueOrThrow({
+        where: { id },
+        select: { slug: true, authors: { orderBy: { bylineOrder: "asc" }, take: 1, select: { user: { select: { id: true, email: true } } } } },
+      });
+      const actor = doc.authors[0].user;
+      assertSafe(actor.email);
+      await changeDocSlug(id, away, actor.id);
+      const final = await changeDocSlug(id, doc.slug, actor.id);
+      const history = await prisma.docSlugHistory.findMany({ where: { docId: id }, select: { slug: true } });
+      return { start: doc.slug, away, final, history: history.map((row) => row.slug) };
+    }
+    case "post": {
+      const post = await prisma.post.findUniqueOrThrow({
+        where: { id },
+        select: { slug: true, authors: { orderBy: { bylineOrder: "asc" }, take: 1, select: { user: { select: { email: true } } } } },
+      });
+      assertSafe(post.authors[0].user.email);
+      await changePostSlug(id, away);
+      const final = await changePostSlug(id, post.slug);
+      const history = await prisma.postSlugHistory.findMany({ where: { postId: id }, select: { slug: true } });
+      return { start: post.slug, away, final, history: history.map((row) => row.slug) };
+    }
+    case "user": {
+      const user = await prisma.user.findUniqueOrThrow({ where: { id }, select: { slug: true, email: true } });
+      assertSafe(user.email);
+      await changeUserSlug(id, away);
+      const final = await changeUserSlug(id, user.slug);
+      const history = await prisma.userSlugHistory.findMany({ where: { userId: id }, select: { slug: true } });
+      return { start: user.slug, away, final, history: history.map((row) => row.slug) };
+    }
+    case "file": {
+      const file = await prisma.storedFile.findUniqueOrThrow({
+        where: { id },
+        select: { slug: true, owners: { orderBy: { ownerOrder: "asc" }, take: 1, select: { user: { select: { id: true, email: true } } } } },
+      });
+      const actor = file.owners[0].user;
+      assertSafe(actor.email);
+      await changeFileSlug(id, away, actor.id);
+      const final = await changeFileSlug(id, file.slug, actor.id);
+      const history = await prisma.fileSlugHistory.findMany({ where: { fileId: id }, select: { slug: true } });
+      return { start: file.slug, away, final, history: history.map((row) => row.slug) };
+    }
+  }
 }
 
 export async function addTestDocAuthor(docId: string, email: string): Promise<void> {
@@ -3946,6 +4008,7 @@ const handlers = {
   addTestDocAuthor,
   renameTestDocSlug,
   renameTestFileSlug,
+  takeBackOwnOldSlug,
   getDocAuthorEmails,
   addTestPostAuthor,
   deleteTestDoc,

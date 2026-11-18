@@ -222,7 +222,13 @@ async function lockLiveFileSlug(tx: Prisma.TransactionClient, fileId: string): P
   return file.slug;
 }
 
-/** Renames a file's slug, recording the old one in FileSlugHistory. No-ops if unchanged; refused for a deleted file. */
+/**
+ * Renames a file's slug, recording the old one in FileSlugHistory. No-ops if
+ * unchanged; refused for a deleted file. A slug this file held before comes
+ * back out of its own history, as revertFileSlug's does, rather than being
+ * refused as in use: uniqueFileSlug, which the manage page's "use standard"
+ * asks, passes over the file's own rows and so can offer one.
+ */
 export async function changeFileSlug(fileId: string, newSlugInput: string, updatedByUserId: string): Promise<string> {
   const newSlug = slugify(newSlugInput, "file");
 
@@ -232,9 +238,10 @@ export async function changeFileSlug(fileId: string, newSlugInput: string, updat
       return newSlug;
     }
     await lockFileSlug(tx, newSlug);
-    if (await fileSlugInUse(newSlug, tx)) {
+    if (await fileSlugInUse(newSlug, tx, fileId)) {
       throw new Error(`Url "${newSlug}" is already in use.`);
     }
+    await tx.fileSlugHistory.deleteMany({ where: { fileId, slug: newSlug } });
     await clearDeadHistoryRow(tx, currentSlug);
     await tx.fileSlugHistory.create({ data: { fileId, slug: currentSlug } });
     await tx.storedFile.update({ where: { id: fileId }, data: { slug: newSlug, updatedByUserId } });

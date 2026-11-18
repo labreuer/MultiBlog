@@ -178,6 +178,10 @@ export const addTestDocAuthor = (...args: Parameters<DbHandlers["addTestDocAutho
 export const renameTestDocSlug = (...args: Parameters<DbHandlers["renameTestDocSlug"]>): Promise<string> =>
   call("renameTestDocSlug", ...args);
 
+export const takeBackOwnOldSlug = (
+  ...args: Parameters<DbHandlers["takeBackOwnOldSlug"]>
+): Promise<{ start: string; away: string; final: string; history: string[] }> => call("takeBackOwnOldSlug", ...args);
+
 export const addTestPostAuthor = (...args: Parameters<DbHandlers["addTestPostAuthor"]>): Promise<void> =>
   call("addTestPostAuthor", ...args);
 

@@ -1739,11 +1739,11 @@ suite runs before each PR.
 `npm run check` and the specs it touches, with the full suite before it goes up. The first is
 not the wiki's; the other five are its, in an order in which each deployed state makes sense.
 
-0. **Five fixes the wiki leans on, none of them about the wiki.** Four were built on the `wiki`
-   branch, and their code is taken from it, by hand where a bullet says main has moved under it;
-   their doc hunks are applied by hand, since the docs they edit have moved (FORKS.md's build
-   order ported `b6126e5` and `1425a6a` the same way). The fifth was found in review and never
-   built.
+0. **Five fixes the wiki leans on, none of them about the wiki. Built 2026-11-18.** Four were
+   built on the `wiki` branch, and their code is taken from it, by hand where a bullet says
+   main has moved under it; their doc hunks are applied by hand, since the docs they edit have
+   moved (FORKS.md's build order ported `b6126e5` and `1425a6a` the same way). The fifth was
+   found in review, and is built here.
    - **A code block keeps its lines when MCP writes it** (`f869e5f`): `edit_doc`'s Markdown
      and a note body through `add_note`/`edit_note` collapse every soft line break to a space,
      code blocks included, so a fenced block arrives as one line (`src/lib/doc-edit.ts`,

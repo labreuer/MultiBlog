@@ -43,7 +43,10 @@ export async function uniquePostSlug(title: string, excludePostId?: string): Pro
 // Renames a post's slug, recording the old one in PostSlugHistory so
 // existing links/bookmarks can still be resolved (see the post page's
 // history fallback, src/app/[year]/[month]/[day]/[slug]/page.tsx). No-ops
-// if newSlugInput normalizes to the post's current slug.
+// if newSlugInput normalizes to the post's current slug. A slug this post
+// held before comes back out of its own history, as revertPostSlug's does,
+// rather than being refused as in use: uniquePostSlug, which SlugManager's
+// "use standard" asks, passes over the post's own rows and so can offer one.
 export async function changePostSlug(postId: string, newSlugInput: string): Promise<string> {
   const newSlug = slugify(newSlugInput);
 
@@ -55,9 +58,10 @@ export async function changePostSlug(postId: string, newSlugInput: string): Prom
     if (post.slug === newSlug) {
       return newSlug;
     }
-    if (await postSlugInUse(newSlug, tx)) {
+    if (await postSlugInUse(newSlug, tx, postId)) {
       throw new Error(`Url "${newSlug}" is already in use.`);
     }
+    await tx.postSlugHistory.deleteMany({ where: { postId, slug: newSlug } });
     await tx.postSlugHistory.create({ data: { postId, slug: post.slug } });
     await tx.post.update({ where: { id: postId }, data: { slug: newSlug } });
     return newSlug;

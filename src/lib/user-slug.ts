@@ -61,7 +61,10 @@ export async function uniqueUserSlug(name: string | null, email: string, exclude
 // Renames a user's slug, recording the old one in UserSlugHistory so
 // existing /authors links can still be resolved (see
 // authors/[slug]/page.tsx's history fallback). No-ops if newSlugInput
-// normalizes to the user's current slug.
+// normalizes to the user's current slug. A slug this user held before comes
+// back out of their own history, as revertUserSlug's does, rather than being
+// refused as in use: uniqueUserSlug, which SlugManager's "use standard" asks,
+// passes over the user's own rows and so can offer one.
 export async function changeUserSlug(userId: string, newSlugInput: string): Promise<string> {
   const newSlug = slugify(newSlugInput, "user");
 
@@ -76,9 +79,10 @@ export async function changeUserSlug(userId: string, newSlugInput: string): Prom
     if (RESERVED_USER_SLUGS.has(newSlug)) {
       throw new Error(`Url "${newSlug}" is reserved.`);
     }
-    if (await userSlugInUse(newSlug, tx)) {
+    if (await userSlugInUse(newSlug, tx, userId)) {
       throw new Error(`Url "${newSlug}" is already in use.`);
     }
+    await tx.userSlugHistory.deleteMany({ where: { userId, slug: newSlug } });
     await tx.userSlugHistory.create({ data: { userId, slug: user.slug } });
     await tx.user.update({ where: { id: userId }, data: { slug: newSlug } });
     return newSlug;
