@@ -6,9 +6,10 @@ comment moderation, two-author live collaboration, quote anchoring across
 publishes, republishing from an earlier point in a doc's history,
 selecting text on each of the three surfaces that respond to it
 (`text-selection.spec.ts`), the date archives and the byline's date link
-(`date-archive.spec.ts`, PLAN.md §21h), and /dashboard's session refresh
-(`src/app/sign-in/NOTES.md`) — the one flow whose whole point is that a change
-is *not* visible until the right page is visited.
+(`date-archive.spec.ts`, PLAN.md §21h), and a session's reads of its account
+(`session-refresh.spec.ts`, `src/app/sign-in/NOTES.md`) — the one flow whose
+whole point is *when* a change becomes visible: not inside the interval, at
+once on /dashboard, and on any page past it.
 
 ```bash
 npm run e2e        # full suite, against a production build on :3002 (WEB_PORT + 2)
@@ -508,6 +509,25 @@ the admin account.
   as has the same label and a `max` of 100, so a wait on `max` alone can pass before
   anything has loaded. Wait for the value the history gives it, or for a control only the
   loaded bar has ("Pin this version").
+- **A session is behind its account for up to five minutes, and a spec moves the
+  token rather than the clock.** The session's token says when its account was
+  last read (`checkedAt`), and the server reads the account again once that is
+  five minutes old (`src/app/sign-in/NOTES.md`). The suite's server runs with
+  that ordinary interval, so a role a spec changes under a signed-in page stays
+  out of that page's session for the length of any test, as it always has:
+  nothing races a fixture. To have a change reach a session, either visit
+  /dashboard, which reads the account at once, or call `ageSession(context)`
+  (`e2e/session-token.ts`), which rewrites the cookie as one last read an hour
+  ago, so the next request reads the account. Wait for the page's own session
+  reads first (`networkidle`): each re-issues the cookie it was sent, and one
+  still in flight puts the old token back. `sessionClaims` reads what a token
+  holds, and `rewriteSessionClaims` makes one that lacks a field.
+  `session-refresh.spec.ts` is the worked example.
+- **A rule that reads the account's row is tested through the write layer, with
+  `sessionRole`.** `changeTestDocSetting`, `createWikiPageAs`, `forkDocAs`,
+  `moveDocAs` and `moveWikiPageAs` each take the role a session came with, apart
+  from the role the row holds, so a spec demotes the account and acts as the
+  session it had. That is exact where a browser session would be a race.
 - **Two users means two browser contexts**, which `secondUser()` handles. Don't
   reach for two tabs: they share a cookie jar, and the second sign-in silently
   re-authenticates the first (the same trap docs/BROWSER_PANE.md documents for the browser

@@ -45,14 +45,15 @@ editor is `querySelectorAll('.tiptap')[1]`. See [TIPTAP.md](TIPTAP.md).
 
 For a clean error check, open a fresh tab.
 
-## A stale session outlives the user row
+## A session outlives its user row, for up to five minutes
 
-Sessions use NextAuth's `jwt` strategy (`src/lib/auth.ts`): `id`/`role`/`color` are baked
-into the session cookie once at sign-in and never re-read from the DB on later requests.
+Sessions use NextAuth's `jwt` strategy (`src/lib/auth.ts`): `id`/`role`/`color` ride in the
+session cookie, and the account is read again only when the token's last read is five minutes
+old (`src/app/sign-in/NOTES.md`).
 
 Deleting a throwaway `User` row mid-session does **not** sign them out or revoke their
-role — the browser tab keeps showing (and acting as) that stale identity until an explicit
-sign-out or the JWT expires. Don't take "the user row is gone" as proof a test session has
+role at once — the browser tab keeps showing (and acting as) that stale identity until the
+token's next read of the account, a visit to `/dashboard`, or an explicit sign-out. Don't take "the user row is gone" as proof a test session has
 ended; click Sign out, or open a fresh tab, before relying on the signed-out UI state.
 
 ## Tabs share one cookie jar

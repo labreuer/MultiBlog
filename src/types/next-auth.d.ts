@@ -17,9 +17,13 @@ declare module "next-auth/jwt" {
     id: string;
     role: Role;
     color: string;
-    // Optional: a token issued before this field existed lacks it until the
-    // jwt callback backfills it (src/lib/auth.ts).
-    adminInitials?: string;
+    adminInitials: string;
+    /**
+     * When the account was last read, in epoch seconds: at sign-in and at
+     * every re-read (src/lib/auth.ts). Optional, since a token issued before
+     * the field existed has none, which makes it due at once.
+     */
+    checkedAt?: number;
   }
 }
 
@@ -28,8 +32,12 @@ declare module "@auth/core/jwt" {
     id: string;
     role: Role;
     color: string;
-    // Optional: a token issued before this field existed lacks it until the
-    // jwt callback backfills it (src/lib/auth.ts).
-    adminInitials?: string;
+    adminInitials: string;
+    /**
+     * When the account was last read, in epoch seconds: at sign-in and at
+     * every re-read (src/lib/auth.ts). Optional, since a token issued before
+     * the field existed has none, which makes it due at once.
+     */
+    checkedAt?: number;
   }
 }

@@ -264,11 +264,12 @@ check, so the `PRIVATE`/`SHARED` distinction stays inside one function instead o
 through every call site. `readableDocsFor` / `editableDocsFor` are the same rules as
 listings, for the pickers that need one.
 
-**A role change doesn't reach an existing session by itself.** The session is a JWT with
-`role` baked in at sign-in. A promoted user picks it up by visiting `/dashboard`, which
-mounts `<SessionRefresh />` and re-reads the row into a re-signed token — no sign-out. The
-doc routes' permission-denied messages do not say this. `src/app/sign-in/NOTES.md` has the
-mechanics, and why the re-read runs there and not on every navigation.
+**A role change reaches an existing session within five minutes.** The session is a JWT
+that carries `role` and reads its account again once its last read is five minutes old. A
+promoted user picks it up at once by visiting `/dashboard`, which mounts `<SessionRefresh />`
+and reads the row into a re-signed token — no sign-out. The doc routes' permission-denied
+messages do not say this. `src/app/sign-in/NOTES.md` has the mechanics, and why the read
+doesn't run on every navigation.
 
 ## Routes
 

@@ -36,6 +36,17 @@ computed. `src/lib/collab-url.ts` depends on this.
 Both default sensibly when absent, so an unedited `.env` behaves exactly as it did before
 slots existed. Read through `scripts/dev-ports.ts`. Full rationale: [DEV_SLOTS.md](DEV_SLOTS.md).
 
+## Sessions
+
+| variable | default | notes |
+|---|---|---|
+| `SESSION_RECHECK_SECONDS` | 300 | How long a session's token is trusted before the `jwt` callback reads its account again (`src/app/sign-in/NOTES.md`, "The session is a JWT, and reads its account again every five minutes"). A positive whole number of seconds; anything else is the default. |
+
+Bare, and read on each call, so a change needs a **restart, not a rebuild**. It is the longest
+a deleted or demoted account keeps a session it already had. Lower, every signed-in account
+costs one indexed read that much more often. Nothing sets it by default, the e2e server
+included: a spec makes a session due by moving its token's `checkedAt` back (e2e/README.md).
+
 ## Collab: three variables answering three different questions
 
 This is the one cluster where picking the wrong variable produces a bug that is invisible
