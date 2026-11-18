@@ -854,6 +854,31 @@ in its columns or `pdfTarget`, and the stamp keeps its overload ("The version st
 - **The rails' own gaps** are docs/MARGIN_NOTES.md, "Known gaps".
 - **The append-queue drain has no test**, and rows from before the stamp existed stay null.
 
+## Planned: `RAISED` sends no mail
+
+**Not built.** Planned 2026-11-18, in docs/EMAIL.md §10's PR 3. Raising an annotation mails
+each author on the doc's byline, or each owner of the file, once per raise, with no limit. Any
+account that can annotate a `SHARED` doc can do that. Whether, and how, `RAISED` should mail
+anyone is undecided, so until it is decided it mails no one.
+
+- **`RAISED` stays a status.** Posting as `RAISED` still stamps `raisedAt`, and `/annotations`
+  still shows and sorts it. Only the mail stops.
+- **Both mail paths are switched off by one constant** in `src/app/actions/annotations.ts`,
+  with their code kept for when the question is settled: the doc's (its byline's authors) and
+  the file's (its owners). The PDF UI can't raise today, but the path is live.
+- **The composer stops promising mail.** "Post & notify authors"
+  (`src/components/annotation/LiveAnnotationComposer.tsx`) becomes "Post & raise", with a
+  title saying it marks the note for the authors on `/annotations` and sends no email. The
+  comments in the action and the composer that say a raise mails change with it.
+- **MCP is unaffected.** Its tools never raise (`src/lib/mcp/tools/annotations.ts`). The comment
+  there giving mail as the reason changes to say the reason is undecided.
+- **Docs:**
+  - "Lifecycle" above, on what posting as `RAISED` does;
+  - docs/EMAIL.md §2's "One sender identity", which names the notifier;
+  - this file's §19 note that the PDF's mail path is live.
+- **Tests:** no spec clicks the old label. A case in the annotation specs raises a note with "Post
+  & raise", and finds it `RAISED` on `/annotations`.
+
 ## History
 
 - **2026-07-28** — §12i: an annotation is a mark in the doc's ydoc, applied by the collab

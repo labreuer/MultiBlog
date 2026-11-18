@@ -5050,3 +5050,95 @@ whose history its viewer may see, which fetches the log's ids and times and name
 with no navigation: the page builds a side moved to a version in the reader's browser, from
 the doc's log, and asks the server for any pair it can't put together. **Plan and what is built:
 [docs/FORKS.md](docs/FORKS.md).**
+
+## 37. Accounts from one-off join codes
+
+Planned 2026-11-18: printed cards, each with a QR code that works once. A card makes an
+AUTHOR account only after its holder confirms the email they gave. The account's comments publish without moderation, and its first sign-in lands on
+`/welcome`, which shows the commons page `New Account Welcome`. A card never changes an
+existing account. It comes after three changes that deploy everywhere on their own: §39's
+session re-read with §38's wiki part; commenter identities kept apart, with a log of where they
+meet (docs/COMMENTS.md); and §38's posts. **The plan:
+[docs/EMAIL.md](docs/EMAIL.md) §10.**
+
+## 38. Publishing becomes an EDITOR's
+
+Planned 2026-11-18. Publishing means putting something in front of readers who aren't signed
+in, which a post and a `PUBLIC` wiki page both do, and both become an EDITOR's. Each part stands
+alone, and deploys to every instance whether or not cards do.
+
+- **Wiki pages, in the first PR of [docs/EMAIL.md](docs/EMAIL.md) §10's build order**, with §39's
+  session re-read. Making a page `PUBLIC` becomes an ADMIN's or EDITOR's, and on a person's
+  page stays its owner's alone. Its plan is [docs/WIKI.md](docs/WIKI.md), "Planned: making a
+  page `PUBLIC` becomes an editor's".
+- **Posts, in the third PR**, which also stops `RAISED` annotations from sending mail
+  ([docs/ANNOTATIONS.md](docs/ANNOTATIONS.md), "Planned: `RAISED` sends no mail").
+
+No topic doc owns the publishing of posts (§15), so the rest of this section is the plan's
+home for that part.
+
+- **`canPublishPosts(role)`, in `src/lib/role-checks.ts`, is ADMIN and EDITOR.** It holds the
+  same roles as `canEditAnyPost` today, and is stated on its own rather than in terms of it.
+  That file keeps such pairs apart, because they answer different questions and should be free
+  to move apart (docs/PERMISSIONS.md, "Roles and the predicates built on them").
+- **`publishPostFromDoc` and `schedulePostFromDoc` ask it first**, before their post and doc
+  checks. Those two are everything that puts a version on the blog: publishing, republishing,
+  scheduling and rescheduling. Their `canUserEditDoc` check stays.
+- **Everything else stays with whoever may edit the post**: creating a post from a doc they can
+  edit, its title, byline, tags, slug and moderation policy, unpublishing and cancelling a
+  schedule, and deleting and restoring it. Taking one's own work down should never wait for
+  someone else. Restoring a deleted published post puts back what an editor published, so it
+  needs no editor.
+- **`PostPublisher` disables Publish, Schedule and Republish for a viewer without it**, with
+  "An editor publishes posts." on the wrapper, as it now shows the doc-access reason
+  ("Publishing needs edit access to this post's source doc."). The role reason is shown first.
+- **An editor can publish a draft only from a doc they can edit**, which `canUserEditDoc`
+  already requires. That means a `SHARED` doc, or one with the editor on its byline; a `PRIVATE`
+  doc the editor isn't on can't be published by anyone who may publish. An AUTHOR's
+  `PostPublisher` says so: "An editor publishes posts, and needs to be able to edit the doc:
+  share it, or add them to its byline."
+- **`/posts` gains a Status filter** (draft, scheduled, published), so an editor can find the
+  drafts waiting. It lists every post for an EDITOR already, but filters only by author today
+  (`src/lib/posts-query.ts`). The filter is applied in Postgres, as the kit requires. A draft
+  has no `publishEventId`. A scheduled post has one, with `publishedAt` in the future, and a
+  published post has one with `publishedAt` now or past. Nothing tells an editor that a draft
+  is waiting; a "ready for an editor" signal is deferred.
+- **The doc's Actions menu says "Draft a blog post"**, not "Publish as blog post"
+  (`src/components/DocActionsMenu.tsx`), to a viewer without `canPublishPosts`. What the item
+  does, `createPostFromDoc`, makes a draft for everyone.
+- **No MCP tool publishes**: `manage` only tags a post already published or scheduled.
+
+**Tests.** `e2e/publish.spec.ts`'s AUTHOR case (§15i's split) now meets the role reason, so it
+checks the doc-access reason with an EDITOR who is not on the `PRIVATE` doc's byline instead. A
+new case has an AUTHOR create a draft from a `SHARED` doc and find Publish disabled, then an
+EDITOR publish it.
+
+**Docs.** docs/PERMISSIONS.md's role table gains the predicate, and its axis-independent table
+and "A post's byline is not its doc's" table gain the publish rows. CLAUDE.md is unchanged.
+
+**Deploying.** Every AUTHOR on an instance loses publishing at once.
+- **Before deploying, list who has been publishing as an AUTHOR:**
+
+  ```sql
+  SELECT u.email, u.name, count(*) FROM post_publication_event e
+  JOIN "user" u ON u.id = e.actor_id
+  WHERE u.role = 'AUTHOR' AND e.type IN ('PUBLISHED', 'SCHEDULED')
+  GROUP BY u.email, u.name;
+  ```
+
+- **Decide whether to promote them.** There is no role between AUTHOR and EDITOR, and EDITOR
+  grants more: editing every `SHARED` doc and every post. A promoted account must visit
+  `/dashboard` before it can publish, since the publish actions read the role from the session
+  (src/app/sign-in/NOTES.md).
+- **Posts an AUTHOR has already scheduled still go live when due**, since a post's visibility
+  is its `publishedAt`, with no status column and no sweep (docs/BLOG.md). An editor cancels any
+  that shouldn't.
+
+## 39. A session reads its account again
+
+Planned 2026-11-18, as the first PR of [docs/EMAIL.md](docs/EMAIL.md) §10's build order,
+together with §38's wiki part. The session's `jwt` callback re-reads the account when its token
+is more than five minutes old, so a deletion or demotion reaches a browser already signed in
+within five minutes, instead of at its next `/dashboard` visit. **The plan:
+[src/app/sign-in/NOTES.md](src/app/sign-in/NOTES.md), "Planned: the session reads its account
+again every five minutes".**

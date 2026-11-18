@@ -677,6 +677,201 @@ From PLAN.md §23 (rich bodies and quotation):
 
 TODO.md carries the actionable subset.
 
+## Planned: identities kept apart, and a log of where they meet
+
+**Not built.** Planned 2026-11-18, as the second step of docs/EMAIL.md §10's build order. It
+stands alone and is a fix: every point under "What is wrong" is live on every instance.
+
+### What is wrong
+
+Found by reading the code, and checked by a second reading; none has been reproduced.
+
+- **A signed-out comment can be posted as a signed-in commenter.** `submitComment` finds a
+  signed-out commenter with `commenter.upsert({ where: { email } })`, and `email` is unique
+  across every row, a signed-in commenter's included. So a visitor who types a registered
+  commenter's email posts as that commenter, with their name and color. If that commenter is
+  trusted, the comment publishes at once. It needs the account's email to be stored all
+  lowercase, since the signed-out path lowercases what it is given and a signed-in row holds
+  the email as stored. That is how nearly every email is stored.
+- **A signed-in commenter's first comment fails** when an anonymous identity already has their
+  email. The `upsert` by `userId` finds nothing, and its create then collides with the email's
+  unique index.
+- **The IP address a comment records is the one its client claims.** `getClientIp`
+  (`src/lib/request-ip.ts`) reads the first `X-Forwarded-For` entry. nginx's
+  `$proxy_add_x_forwarded_for` appends to whatever the client sent rather than replacing it,
+  and Next sets the header only when it is absent (`??=` in `next/dist/server/base-server.js`).
+  So the rate limits, and every `comment.ip_address`, go by an IP address a client can write.
+
+**Past cases of the first can't be found.** Revision 1's author is the row's user either way
+(`authorUserId: commenter.userId`), and the only other trace, `comment.ip_address`, is
+client-claimed.
+
+### The rules
+
+- **An anonymous identity is found by its email, among anonymous identities only. A signed-in
+  one is found by its user alone.** `commenter.email`'s unique index becomes a partial one,
+  `WHERE user_id IS NULL`, written by hand because Prisma has no partial unique. The field loses
+  `@unique`, so no `upsert` can be keyed on it. The signed-out path becomes find-then-create,
+  finding again when a concurrent first comment wins the insert. A signed-in row keeps its
+  email, which `/comments` shows and searches.
+- **Nobody takes over anybody.**
+  - **A signed-out comment giving the email of a live account is refused**, with "An account
+    uses this email. Sign in to comment with it." This holds whether or not that account has
+    ever commented. `/sign-up` already tells anyone whether an email is taken, so the refusal
+    reveals nothing new.
+    - **The email is compared by raw SQL**, `lower(email) = lower($1)` with
+      `deleted_by_user_id IS NULL`. Prisma's `mode: "insensitive"` compiles to an unescaped
+      `ILIKE`, where `_` and `%` are wildcards, and raw SQL skips the soft-delete extension
+      (docs/EMAIL.md §10, "Mistakes that fail no check").
+    - **Anyone can lock an email out of signed-out commenting**, by signing up with it, since
+      `/sign-up` verifies nothing. That is accepted. The email's owner gets it back by resetting
+      that account's password, which mails them, and the sign-up shows in the log as
+      `SIGNED_OUT_COMMENT` refusals of the owner.
+  - **A signed-in commenter whose email an anonymous identity holds gets a row of their own.**
+    The two stay apart, and the anonymous comments stay with the anonymous identity, approvals
+    included.
+  - **An account made from a card is handled the same way** (docs/EMAIL.md §10).
+- **Each meeting is logged, with IP addresses, for an ADMIN to review.** A merge, if one is
+  wanted, is done by hand.
+- **`getClientIp` takes the IP address nginx saw:** `X-Real-IP`, which nginx sets to the peer
+  and which replaces anything a client sends, and failing that the *last* `X-Forwarded-For`
+  entry. Development and the e2e suite have no proxy, and Next writes `X-Forwarded-For` from the
+  socket, so the suite still sees `::1`. The header parsing is a pure function of its own, so
+  that its table can be unit-tested.
+  - **This trusts the headers only because nginx is the only way in.** Today only the firewall
+    stops a request reaching `next start` directly, since `next start` listens on every
+    interface. A direct request could write `X-Real-IP` itself. So the app binds to the address
+    nginx proxies to: the unit's `ExecStart` becomes `npm run start -- -H 127.0.0.1` (`next
+    start` takes its hostname only from `-H`).
+  - **A CDN in front of nginx would make every client one IP address**, the CDN's. DEPLOY.md
+    states both assumptions.
+
+### The log
+
+```prisma
+model EmailCollision {
+  id             String               @id @default(cuid())
+  source         EmailCollisionSource
+  email          String                                    // as the request gave it
+  userId         String?              @map("user_id")       // the account with the email, or given it
+  commenterId    String?              @map("commenter_id")  // the anonymous identity with the email
+  postId         String?              @map("post_id")       // the last post a comment was tried on
+  lastIpAddress  String?              @map("last_ip_address")
+  ipAddresses    String[]             @map("ip_addresses")  // the requests', distinct, at most 20
+  count          Int                  @default(1)
+  firstSeenAt    DateTime             @default(now()) @map("first_seen_at")
+  lastSeenAt     DateTime             @default(now()) @map("last_seen_at")
+  reviewedAt     DateTime?            @map("reviewed_at")
+  reviewedById   String?              @map("reviewed_by_id")
+
+  user       User?      @relation("EmailCollisionAccount", fields: [userId], references: [id], onDelete: SetNull)
+  commenter  Commenter? @relation(fields: [commenterId], references: [id], onDelete: SetNull)
+  post       Post?      @relation(fields: [postId], references: [id], onDelete: SetNull)
+  reviewedBy User?      @relation("EmailCollisionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@map("email_collision")
+}
+```
+
+| `source` | Met when | Outcome |
+|---|---|---|
+| `SIGNED_OUT_COMMENT` | a signed-out comment gives a live account's email | refused |
+| `SIGNED_IN_COMMENT` | a signed-in commenter's row is created, and an anonymous identity has their email | allowed, kept apart |
+| `EXISTING` | found at deploy: an anonymous identity with a live account's email | as it was |
+| `CARD_CLAIM` | a card's claim gives an email an account has | refused |
+| `CARD_CONFIRM` | an account made from a card has an anonymous identity's email | allowed, kept apart |
+
+- **The card sources and their columns arrive with the cards**: `CARD_CLAIM`, `CARD_CONFIRM`,
+  `join_code_id` (`onDelete: SetNull`) and `claim_ip_address` are added by docs/EMAIL.md §10's
+  migrations, the enum values in a migration of their own. This plan's migration makes the
+  first three sources.
+- **The row keeps the requests' IP addresses; the comments' are read live.** A refused request
+  leaves no other trace, so its IP address is stored. Each side's comments carry theirs in
+  `comment.ip_address` already. The review page reads them from there through its view, so
+  nothing is copied.
+- **Repeats fold into one unreviewed row per source and lowercased email**, whatever the IP
+  address. Each repeat counts, moves `last_seen_at`, sets `last_ip_address`, adds its IP address
+  to `ip_addresses` while there are fewer than 20, and sets `user_id`, `commenter_id` and
+  `post_id` to its own.
+  - **The IP address is left out of the key on purpose.** A refused comment makes no `comment`
+    row, so the comment limiter never counts it. A host with many IP addresses (one IPv6 /64
+    is plenty) would make a row per address if the address were part of the key. As it is,
+    one target email is one row.
+  - **The fold is a raw `INSERT … ON CONFLICT … DO UPDATE`** against a partial unique index on
+    `(source, lower(email)) WHERE reviewed_at IS NULL`. Prisma's `upsert` can target neither
+    an expression nor a partial index.
+- **A failed write of the log changes no answer.** The log is written after the decision, outside
+  any transaction the request has open, in a try/catch. A failed statement aborts a Postgres
+  transaction, so writing it inside one would undo what the transaction did. A failure is
+  logged to the console, and the comment, or the refusal, goes ahead.
+- **`SIGNED_IN_COMMENT` is logged once per account**, when its row is created, not on every
+  comment after.
+- **`EXISTING` is filled once per instance at deploy** by
+  `scripts/comments/log-existing-collisions.ts`, so meetings from before the fix are in the same
+  place.
+  - **It inserts only where no `EXISTING` row has the email, reviewed or not.** The fold's index
+    covers unreviewed rows alone, so folding would re-insert every reviewed one.
+  - **It is safe to run again**: a second run adds what is new, and counts nothing.
+
+**`/email-collisions` is where an ADMIN reviews them**: an admin table through the kit, gated
+with `signInPath`, unreviewed rows by default, with a toggle for reviewed ones the way deleted
+ones have their own. Each row shows:
+
+- when the collision was last seen, and how many times;
+- its source and the email;
+- the account, linked to `/users` filtered to it;
+- the anonymous identity, with its comment count, linked to `/comments` filtered to the email;
+- the IP addresses.
+
+Every column sorts, as the kit asks (CLAUDE.md, "Admin tables are one kit"). A view keyed 1:1 on
+`email_collision.id`, `email_collision_listing`, gives the anonymous identity's comment count
+and each side's distinct comment IP addresses, as text, live from `comment.ip_address`. Those
+columns sort through it. Rows can be marked reviewed one at a time or in bulk. `/dashboard` tells
+an ADMIN how many are waiting. The table holds emails and IP addresses, so it is ADMIN-only, no
+MCP tool reads it, and it is kept until someone deletes rows from it.
+
+### What else changes
+
+- **Four upserts keyed on `commenter.email` outside `src/`** stop compiling, and move to
+  find-then-create: `e2e/db-worker.ts`'s at lines 2554, 2728 and 2774, and
+  `scripts/seed-sample-data.ts`'s at line 296.
+- **The existing signed-out specs** use `@example.com` emails that no account has, so their
+  assertions are unchanged.
+- **Docs:**
+  - this section, rewritten as built, and "Identity, moderation and abuse" above;
+  - docs/PERMISSIONS.md, with a row for `/email-collisions`, and docs/DASHBOARD.md, for the
+    count;
+  - DEPLOY.md's paragraph on `X-Real-IP` and `X-Forwarded-For`, with the binding and the two
+    assumptions. `ExecStart` is written in three places: `deploy/multiblog-web.service`,
+    DEPLOY.md's copy of the unit, and `deploy/new-instance-install.sh`;
+  - CLAUDE.md's admin-table invariant, which lists every table and view, for `/email-collisions`
+    and its view;
+  - docs/TEST_DATA.md and e2e/README.md, for the deploy script and the specs' fixtures;
+  - the comment in `src/lib/request-ip.ts`;
+  - TODO.md, for the merge an ADMIN does by hand.
+
+### Deploying
+
+1. `prisma migrate deploy`. The partial index is a subset of the unique index it replaces, so
+   existing rows satisfy it.
+2. `npx tsx scripts/comments/log-existing-collisions.ts`.
+3. Change the instance's web unit's `ExecStart` to bind to `127.0.0.1`
+   (`npm run start -- -H 127.0.0.1`), after checking that its nginx `proxy_pass` names
+   `127.0.0.1` and not `localhost`.
+
+### Tests
+
+- **Unit:** the header table for `getClientIp`, covering `X-Real-IP` present, a forged first
+  `X-Forwarded-For` entry, a single entry, and neither header.
+- **e2e:**
+  1. A signed-out comment giving a fixture account's email is refused and logs one row. A
+     second try from another IP address (set by a header in development) counts 2 on the same
+     row. An email differing from the account's only where it has a `_` is *not* refused.
+  2. A signed-in fixture account whose email an anonymous fixture identity holds can comment.
+     Their comment is under a row of their own, and one `SIGNED_IN_COMMENT` row is logged.
+  3. The review page lists both, with the anonymous identity's comment IP addresses read
+     through its view, and marking them reviewed takes them off.
+
 ## History
 
 Editing was built first (PLAN.md §22), with a comment's quotation as four columns on the

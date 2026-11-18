@@ -1943,6 +1943,57 @@ building the claims after the history table means writing each once.
 instance's preamble down until then. Main's rule stays until then, hole and all ("The front
 page"), by decision: a narrower one in PR 0 would be written to be deleted.
 
+## Planned: making a page `PUBLIC` becomes an editor's
+
+**Not built.** Planned 2026-11-18, in the first PR of docs/EMAIL.md §10's build order, with the
+session's re-read of its account (`src/app/sign-in/NOTES.md`). `PUBLIC` puts a page in front of
+anyone signed out, which is publishing, and PLAN.md §38 makes publishing a post an editor's for
+the same reason.
+
+- **`canMakePagesPublic(role)`, in `src/lib/role-checks.ts`, is ADMIN and EDITOR.** It is stated
+  apart from `canPublishPosts`, for the reason that file keeps its pairs apart.
+- **`allowedVisibilities` takes the viewer's role** as well as their id, and offers `PUBLIC` to a
+  viewer without that predicate only when the page already is `PUBLIC`. So lowering it still
+  works, and the select still shows its value.
+  - **A commons page:** `SHARED`, plus `PUBLIC` for an ADMIN or EDITOR.
+  - **A person's page, for its owner:** all three for an owner who is an ADMIN or EDITOR, and
+    `PRIVATE` and `SHARED` for one who isn't.
+  - **For anyone else:** the page's value and those below it, as now.
+- **Every writer asks it with the actor's role**:
+  - `src/lib/wiki-create.ts` and `src/lib/wiki-fork.ts`, which call `allowedVisibilities`;
+  - `src/lib/wiki-move.ts`'s visibility for a doc moved in;
+  - `setDocVisibility`, which MCP's `manage` reaches too.
+
+  The five places that offer the choice pass the role in, and the `PUBLIC_VISIBILITY_NOTE`
+  shows only where `PUBLIC` is offered.
+- **A raise to `PUBLIC` reads the actor's role again**, from their row, as `ownerWhoCanAct`
+  already reads a person's page's owner. A session keeps the role it signed in with
+  (`src/app/sign-in/NOTES.md`), so without the read, a demoted EDITOR could still make pages
+  public.
+- **The owner keeps the say over their own page.** An ADMIN or EDITOR doesn't gain a raise of
+  someone else's page. A person's page has no ADMIN/EDITOR bypass ("Permissions"), and
+  publishing a person's words without them is what that rule exists to prevent.
+  - **So an AUTHOR's pages go as far as `SHARED`.** Their route to the public is an editor
+    forking the page into the commons and making the fork `PUBLIC`. Forking into the commons
+    is an ADMIN's or EDITOR's, from a page they can read, and the family line keeps the link
+    to the original.
+  - **A request an owner can make**, the counterpart of a post's draft, is deferred.
+- **Lowering, deleting and restoring are unchanged.** Restoring a deleted `PUBLIC` page keeps
+  it `PUBLIC`, putting back what someone allowed to publish published, as restoring a
+  published post does (PLAN.md §38).
+- **No page needs converting.** The wiki is on no instance yet.
+
+**Tests.** `src/lib/doc-visibility.test.ts`'s table gains the role. `e2e/wiki.spec.ts` gains
+these cases:
+- an AUTHOR owner is not offered `PUBLIC`, and `setDocVisibility` refuses it;
+- an EDITOR owner is offered it and can make the page public;
+- an AUTHOR on a commons page's byline can't raise the page.
+
+Pages the fixtures make `PUBLIC` in the database are unaffected.
+
+**Docs.** "Permissions"' table, its Change visibility row and the paragraphs on raising,
+"Public pages", and docs/PERMISSIONS.md's wiki tables.
+
 ## Open
 
 - **How the diff page shows a fork against its parent**, FORKS.md's open choice, applies to
