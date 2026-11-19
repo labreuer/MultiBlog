@@ -792,15 +792,30 @@ behind its account (`src/app/sign-in/NOTES.md`): a demoted ADMIN's open tab mint
 revokes nothing, as `requireCanMakePublic` refuses it a raise to `PUBLIC`. The rule is in the
 library, so it binds the table, the print route and the script alike.
 
-**The card sheet is one function returning a whole HTML document.** It lays out business cards
-of 3.5 × 2 inches, ten to a US Letter page in the common two-by-five label layout. Each card has:
+**The card sheet is one function returning a whole HTML document**, for plain paper cut by
+hand. It lays out ten cards to a US Letter page, two by five, 3.5 inches wide, with no cut lines
+drawn, set apart so every cut has room on both sides. Each card's text sits 0.18 inches inside
+its edge, and a card is twice that, 0.36 inches, above the next. Across the page, the gap
+between the two columns is twice the side margin, so the white space between them is twice
+what is at either edge, measured from the cards' edges or from their ink alike: three eighths
+of an inch each side and three quarters between. Top and bottom, a quarter inch. A card's
+height is what the page has left, about 1.81 inches, which still holds the
+1.4-inch QR. **The text beside the QR spans the symbol's height**: it is inset by the QR's quiet
+zone (`qrQuietInsetIn`, one figure per sheet, since every card's QR is one version), and CSS
+`text-box` trims its leading, so the welcome's tallest letters meet the symbol's top edge and the
+code's baseline its bottom (a browser without `text-box`, Firefox as of this writing, prints
+them a point or two inside). With an extra line of two lines or more, the text runs past the
+bottom. Each card has:
 
-- the site title;
+- "Welcome to `<host>`!", the host whole on a line of its own, its subdomain included (as
+  `APP_URL` names it, or the script's `--host`); a host too long for the column breaks after
+  a dot;
+- "Use this code to create an account and try it out." (`CARD_INVITATION`);
 - an optional line of text given at printing;
 - the QR, as inline SVG;
 - `<host>/join`;
 - the code;
-- its serial, in small type.
+- its serial, in small type, below the text at the card's right, 0.09 inches above the cut.
 
 It prints a batch's live cards, and refuses a batch whose hashes don't match the current key
 ("The code"). Drawing the QR takes a new dependency, a QR encoder (`qrcode`, with about 25
@@ -846,11 +861,11 @@ larger splits it over two lines.
     browser but in the sheet.
   - **Revoke** is a row's button, or a selection's in bulk, on any card neither claimed nor
     revoked, an expired one included, since revoking it drops its claim.
-  - **The sheet is at `/join-codes/print?batch=…`**, with `&line=…` for the line under the
-    title (at most 120 characters), opened in a tab of its own. It is a Route Handler returning
-    the document, its host `APP_URL`'s. A page's gate doesn't cover a Route Handler, so it
-    asks for an ADMIN itself, through `liveCardsForPrinting`; signed out, it sends the viewer
-    to sign in and back. It writes nothing, and sends `Cache-Control: no-store`,
+  - **The sheet is at `/join-codes/print?batch=…`**, with `&line=…` for an extra line on every
+    card, under its invitation (at most 120 characters), opened in a tab of its own. It is a
+    Route Handler returning the document, its host `APP_URL`'s. A page's gate doesn't cover a
+    Route Handler, so it asks for an ADMIN itself, through `liveCardsForPrinting`; signed out,
+    it sends the viewer to sign in and back. It writes nothing, and sends `Cache-Control: no-store`,
     `Referrer-Policy: no-referrer` and a CSP that allows its own inline style and nothing
     else, since the document holds live codes.
   - There is no MCP tool for any of it.

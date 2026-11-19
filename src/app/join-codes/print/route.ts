@@ -9,10 +9,10 @@ import { renderCardSheet } from "@/lib/join-codes/sheet";
 import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 
 // docs/EMAIL.md §10, "Minting and printing" — a batch's live cards as the
-// printable sheet, `?batch=<id>`, with `&line=<text>` for the optional line
-// under the site title. The codes are derived again from the rows under the
-// current key (liveCardsForPrinting), so the sheet can be closed once printed
-// and drawn again whenever it is wanted.
+// printable sheet, `?batch=<id>`, with `&line=<text>` for an optional line on
+// every card, under its invitation. The codes are derived again from the rows
+// under the current key (liveCardsForPrinting), so the sheet can be closed
+// once printed and drawn again whenever it is wanted.
 //
 // **A page's gate doesn't cover a Route Handler**, so this one asks for an
 // ADMIN itself, through liveCardsForPrinting, which reads the account row as
@@ -20,7 +20,7 @@ import { pathWithQuery, signInPath } from "@/lib/sign-in-redirect";
 // it is never cached, sends no referrer, and loads nothing: its CSP allows its
 // own inline style and nothing else.
 
-/** The longest line printed under the title; the card has room for about two lines of it. */
+/** The longest extra line a card takes; past one line, it runs the text below the QR (docs/EMAIL.md). */
 const MAX_LINE_LENGTH = 120;
 
 const SHEET_HEADERS = {

@@ -15,9 +15,9 @@
 //
 // --expires takes an ISO date or date-time; a bare date means the end of that
 // day, UTC. A claim confirmed after it is refused, so set it well past the
-// event. --line is printed on every card under the site title. --host is what
-// the QR and the card name, `<host>/join`; it defaults to APP_URL's host, and
-// the QR always says https. --out defaults to ~/join-cards. Revoking a batch
+// event. --line is printed on every card under its invitation. --host is what
+// the QR and the card name, in its welcome and as `<host>/join`; it defaults
+// to APP_URL's host, and the QR always says https. --out defaults to ~/join-cards. Revoking a batch
 // once its event is over is the clean-up: it nulls every pending claim's
 // password hash, which expiry leaves.
 
