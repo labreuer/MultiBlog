@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { deriveJoinCode, deriveJoinKey, formatJoinCode } from "./code";
-import { qrSvg, renderCardSheet } from "./sheet";
+import { CARD_INVITATION, qrQuietInsetIn, qrSvg, renderCardSheet } from "./sheet";
 
 // docs/EMAIL.md §10, "Minting and printing". Whether a printed QR scans is
 // checked by rendering and decoding a sheet (scripts/join-codes/demo-sheet.ts);
@@ -29,6 +29,37 @@ test("each card carries its URL, its grouped code, its serial and the host", () 
   assert.ok(html.includes("No.&nbsp;1<"));
   assert.ok(html.includes("example.com/join<"));
   assert.ok(html.startsWith("<!doctype html>"));
+});
+
+test("each card welcomes to the host, subdomain and all, and asks for the code to be used", () => {
+  const html = renderCardSheet({ siteTitle: "Thicketry (dev)", host: "dev.thicketry.org", cards: cards(2) });
+  const welcome = `Welcome to <span class="host">dev.<wbr>thicketry.<wbr>org!</span>`;
+  assert.equal(count(html, welcome), 2);
+  assert.equal(count(html, CARD_INVITATION), 2);
+  // The site title names the document, not the cards.
+  assert.equal(count(html, "Thicketry (dev)"), 1);
+  assert.ok(html.includes("<title>Thicketry (dev): join cards</title>"));
+});
+
+test("columns are twice the side margin apart, rows twice the text's inset, with no cut lines drawn", () => {
+  const html = renderCardSheet({ siteTitle: "T", host: "example.com", cards: cards(1) });
+  assert.ok(html.includes("padding: 0.18in;"));
+  assert.ok(html.includes("row-gap: 0.36in;"));
+  assert.ok(html.includes("padding: 0.25in 0.375in;"));
+  assert.ok(html.includes("column-gap: 0.75in;"));
+  assert.ok(html.includes("grid-template-columns: repeat(2, 3.5in);"));
+  assert.ok(!/dashed|dotted/.test(html));
+});
+
+test("the text is inset by the QR's quiet zone, and the number sits outside it", () => {
+  const html = renderCardSheet({ siteTitle: "T", host: "example.com", cards: cards(1) });
+  const url = `https://example.com/join/${cards(1)[0].code}`;
+  // Version 3 for this host: 29 modules and 4 of quiet zone either side.
+  assert.equal(qrQuietInsetIn(url), (4 / 37) * 1.4);
+  assert.ok(html.includes(`padding-block: ${((4 / 37) * 1.4).toFixed(4)}in;`));
+  assert.ok(html.includes("text-box-trim: trim-start;"));
+  assert.ok(html.includes("text-box-trim: trim-end;"));
+  assert.match(html, /<\/div>\n<\/div>\n<p class="serial">No.&nbsp;1<\/p>\n<\/section>/);
 });
 
 test("the optional line appears only when given", () => {

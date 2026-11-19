@@ -432,7 +432,7 @@ function BatchBar({ batch, pending, onRevoke }: { batch: JoinBatchOption; pendin
         >
           <input type="hidden" name="batch" value={batch.id} />
           <label>
-            Line under the title (optional):{" "}
+            Extra line on each card (optional):{" "}
             <input type="text" name="line" maxLength={120} size={40} />
           </label>
           <button type="submit">Print live cards</button>
