@@ -5,6 +5,7 @@ import { PDFJS_VERSION, documentOptions, ensurePdfWorker, pdfjs, pdfjsViewer } f
 import { buildPageOffsets, type PageOffsets } from "@/lib/pdf-geometry";
 import { pageTotalLabel, sheetsNamed, usablePageLabels } from "@/lib/pdf-page-labels";
 import { pageFromHash, type PageName } from "@/lib/pdf-open-params";
+import { createPdfHistory, type PdfHistory } from "./pdf-history";
 import { usePdfZoomGestures } from "./use-pdf-zoom-gestures";
 import { usePdfRefit } from "./use-pdf-refit";
 import "pdfjs-dist/web/pdf_viewer.css";
@@ -35,8 +36,13 @@ export type PdfViewerHandle = {
    *
    * Everything anchored still goes through `jumpDestinationY` instead: an
    * annotation's quads are ours, not a destination the document declared.
+   *
+   * Its `goToDestination` and `goToPage` leave a browser history entry
+   * (docs/PDF.md §10d); a scroll straight through `viewer` leaves none.
    */
   linkService: InstanceType<typeof pdfjsViewer.PDFLinkService>;
+  /** The link service's history, for a fragment jump to ask whether a `hashchange` is a Back it restores. */
+  history: PdfHistory;
   pdf: pdfjs.PDFDocumentProxy;
   offsets: PageOffsets;
   container: HTMLDivElement;
@@ -234,6 +240,11 @@ export default function PdfViewer({
     const linkService = new pdfjsViewer.PDFLinkService({ eventBus });
     const viewer = new pdfjsViewer.PDFViewer({ container, viewer: viewerElement, eventBus, linkService });
     linkService.setViewer(viewer);
+    // docs/PDF.md §10d. Ours rather than pdfjs's `PDFHistory`; pdf-history.ts
+    // says why. Before the document, since it measures the view from the
+    // first `updateviewarea`.
+    const history = createPdfHistory({ viewer, eventBus, fileUrl });
+    linkService.setHistory(history);
 
     // Coalesced to one rAF tick before anything reads it: docs/PDF.md §8 notes
     // Mozilla's own tracker recording over a thousand `updateviewarea` fires
@@ -321,8 +332,11 @@ export default function PdfViewer({
     eventBus.on("pagesinit", onPagesInit);
 
     // The same parameter arriving after load: following a second page link
-    // into a document already open changes only the fragment.
+    // into a document already open changes only the fragment. Not on a Back
+    // or a Forward to an entry the history wrote, which has already put the
+    // view back where the reader left it (docs/PDF.md §10d).
     const onHashChange = () => {
+      if (history.owns(window.history.state)) return;
       const named = pageFromHash(window.location.hash);
       const handle = handleRef.current;
       const sheet = named && handle && sheetToOpen(named, opensAtRef.current, handle.ownPageLabels, handle.pdf.numPages);
@@ -372,6 +386,7 @@ export default function PdfViewer({
           viewer,
           eventBus,
           linkService,
+          history,
           pdf,
           offsets: buildPageOffsets(heights),
           container,
@@ -395,6 +410,8 @@ export default function PdfViewer({
       eventBus.off("scalechanging", onScaleChanging);
       eventBus.off("pagesinit", onPagesInit);
       window.removeEventListener("hashchange", onHashChange);
+      history.destroy();
+      linkService.setHistory(null);
       handleRef.current = null;
       // Order matters: drop the viewer's reference to the document before
       // destroying the loading task, or pdfjs renders into a document it no
@@ -419,11 +436,16 @@ export default function PdfViewer({
   // shape: a rotation, a window drag, the side panel opening.
   usePdfRefit(handleRef, status === "ready");
 
-  const goToPage = useCallback((next: number) => {
+  /**
+   * ‹ and ›: a step, like a scroll, so straight to the viewer and **no history
+   * entry** — one per click would bury every other entry under them, which is
+   * why pdfjs's own viewer and the browsers' leave them out too
+   * (docs/PDF.md §10d).
+   */
+  const stepPage = useCallback((next: number) => {
     const handle = handleRef.current;
     if (!handle) return;
-    const clamped = Math.max(1, Math.min(handle.pdf.numPages, Math.floor(next)));
-    handle.viewer.currentPageNumber = clamped;
+    handle.viewer.currentPageNumber = Math.max(1, Math.min(handle.pdf.numPages, next));
   }, []);
 
   /**
@@ -439,20 +461,21 @@ export default function PdfViewer({
    * A label that names no page and text that isn't a number both leave the
    * viewer where it is; the box is then put back to the current page by the
    * next `updateviewarea`, which is the same thing that would happen anyway.
+   *
+   * **Through the link service**, whose `goToPage` leaves a history entry
+   * (docs/PDF.md §10d) — except for the page the reader is already on, since
+   * the box submits on every blur.
    */
   const submitPage = useCallback(
     (draft: string) => {
       const handle = handleRef.current;
       if (!handle) return;
       const byLabel = handle.viewer.pageLabelToPageNumber(draft.trim());
-      if (byLabel !== null) {
-        handle.viewer.currentPageNumber = byLabel;
-        return;
-      }
       const typed = Number(draft);
-      goToPage(Number.isFinite(typed) && typed > 0 ? typed : pageNumber);
+      const sheet = byLabel ?? (Number.isFinite(typed) && typed > 0 ? Math.max(1, Math.min(handle.pdf.numPages, Math.floor(typed))) : pageNumber);
+      handle.linkService.goToPage(sheet);
     },
-    [goToPage, pageNumber],
+    [pageNumber],
   );
 
   const applyZoom = useCallback((value: string) => {
@@ -503,7 +526,7 @@ export default function PdfViewer({
             lever is the toolbar's single `gap`, which also sets the distance
             between the *clusters*, and closing one up closes up the other. */}
         <div className={styles.pageGroup}>
-          <button type="button" onClick={() => goToPage(pageNumber - 1)} disabled={pageNumber <= 1} aria-label="Previous page">
+          <button type="button" onClick={() => stepPage(pageNumber - 1)} disabled={pageNumber <= 1} aria-label="Previous page">
             ‹
           </button>
           <label>
@@ -567,7 +590,7 @@ export default function PdfViewer({
             of {pageCount ? pageTotalLabel(pageLabels, pageCount) : "…"}
           </span>
 
-          <button type="button" onClick={() => goToPage(pageNumber + 1)} disabled={pageCount > 0 && pageNumber >= pageCount} aria-label="Next page">
+          <button type="button" onClick={() => stepPage(pageNumber + 1)} disabled={pageCount > 0 && pageNumber >= pageCount} aria-label="Next page">
             ›
           </button>
         </div>

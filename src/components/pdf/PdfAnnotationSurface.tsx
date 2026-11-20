@@ -903,13 +903,16 @@ export default function PdfAnnotationSurface({
   // on arrival, and again when a hashchange names new passages. PdfViewer has
   // already opened at the first `#sheet=`; this lands the first passage found
   // the way any jump lands a passage. On arrival a followed ?sel= link keeps
-  // its own jump, and both are drawn.
+  // its own jump, and both are drawn. A hashchange that is a Back or a Forward
+  // to an entry the viewer's history wrote draws its passages and leaves the
+  // view where that history put it back (docs/PDF.md §10d).
   const fragmentJumpedRef = useRef(0);
   useEffect(() => {
     if (!ready || fragment.resolution === fragmentJumpedRef.current) return;
     const firstResolution = fragmentJumpedRef.current === 0;
     fragmentJumpedRef.current = fragment.resolution;
     if (firstResolution && linkPartsRef.current.length > 0) return;
+    if (!firstResolution && handleRef.current?.history.owns(window.history.state)) return;
     const first = fragment.regions.find((region) => region.target !== null)?.target;
     if (first) jumpToTarget(first);
   }, [ready, fragment, jumpToTarget]);
