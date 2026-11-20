@@ -893,6 +893,21 @@ answer, not an error. The pane says so. `scripts/make-test-pdf.ts` can write one
 array, a named destination, and a closed-by-default subtree) because nothing else in the repo
 has one to test against.
 
+**The side panel opens on Contents**, both while the outline loads and once it is found. It
+opens on Annotations for a document with no outline, or one that failed to load, since a
+pane saying there is nothing to show is no place to land. The tab is derived during render
+from the outline's status (`PdfAnnotationSurface`'s `activePane`), not set from an effect,
+so a reader who has picked a tab is never moved off it when the outline arrives. Three
+things pick Annotations for the reader, because each needs a card on screen and the
+browser can't scroll to one in a pane that isn't displayed:
+
+- arriving by a note's permalink, a bare-name fragment;
+- clicking a highlight, which shows its card a frame later, once the pane is displayed;
+- the selection's Annotate button.
+
+On a wide screen this means a document with an outline opens without its notes in the
+rail beside it until the reader picks Annotations.
+
 **A title can hold NULs**, as a page label can, in a literal string or a UTF-16 one alike.
 The stored copy drops them, for §10b's reason.
 
