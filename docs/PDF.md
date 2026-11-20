@@ -672,7 +672,7 @@ Pinning `pdfjs-dist` fixes the API you call. It does nothing about the second co
 is to the *JavaScript runtime* pdfjs assumes underneath it — and pdfjs tracks new built-ins
 closely, while WebKit ships them late or not at all. **Baseline: Safari 26 / iPadOS 18.4+.**
 
-**Two built-ins are patched**, both in `src/lib/pdfjs-webkit-polyfills.ts`. They fail for
+**Three built-ins are patched**, all in `src/lib/pdfjs-webkit-polyfills.ts`. They fail for
 different reasons, and the difference decides when each may be removed:
 
 - **`ReadableStream.prototype[Symbol.asyncIterator]`** — WebKit has *never* implemented it, in
@@ -691,8 +691,17 @@ different reasons, and the difference decides when each may be removed:
   a viewer that mounts its toolbar and renders **no document at all** rather than one that
   fails partway. This patch may be deleted once the baseline's floor rises past 26.2 —
   measured, per the rule below, not assumed.
+- **`Math.sumPrecise`** — also Safari 26.2, and also unguarded: 16 calls in the worker, one
+  in `pdf.mjs`. The one that bites is the worker's `createNameTable`, which runs when a
+  TrueType font being repaired has no `name` table or one pdfjs rebuilds — fonts subset by
+  macOS's Quartz (a PDF saved or printed from Preview) are the common case. pdfjs catches the
+  `TypeError` inside font translation and falls back to a standard font drawing the PDF's raw
+  character codes, and a subset numbers its glyphs from `0x21`: **the page renders as
+  `!"#$%&'()*+` in Times**, with the text layer (built from `ToUnicode`) still correct and no
+  error anywhere but a pdfjs warning. Only some PDFs hit it, so a viewer that works on most
+  files and garbles one is this, not that file. Delete on the same terms as the `Map` patch.
 
-A third gap, the **`Iterator` global**, needs no patch: it shipped in Safari 18.4, the
+One more gap, the **`Iterator` global**, needs no patch: it shipped in Safari 18.4, the
 baseline's floor. Its shape is worth keeping in mind anyway, because it is the one that
 defeats a `typeof` guard. pdfjs polyfills `Iterator.prototype.join` itself, guarded by
 `typeof Iterator.prototype.join !== "function"` — and that guard dereferences the *global*.
@@ -721,6 +730,7 @@ not evidence — prefer MDN's compatibility data, which is where the 26.2 above 
 | --- | --- | --- | --- |
 | `ReadableStream.prototype[Symbol.asyncIterator]` (and `.values`) | **absent** | **absent** | never |
 | `Map.prototype.getOrInsert` / `.getOrInsertComputed` | present | **absent** | 26.2 |
+| `Math.sumPrecise` | not probed | not probed | 26.2 |
 | `Iterator` global | present | present | 18.4 |
 | `Iterator.prototype.join` | absent | absent | — (pdfjs polyfills it itself) |
 | `URL.parse` / `URL.canParse` | present | present | 18.0 / 17.0 |
@@ -767,7 +777,10 @@ Four things generalise beyond the specific patches:
    sidesteps the fact that Playwright's WebKit will not launch on every developer machine
    (`playwright.config.ts` records the macOS 14 pin that stops it). Its reach stops at the
    page: `addInitScript` does not touch workers, so the worker half of the patch is asserted
-   by nothing, and `scripts/probe-engine.ts` is what covers that realm instead.
+   by nothing, and `scripts/probe-engine.ts` is what covers that realm instead. Since
+   `Math.sumPrecise` bites only in the worker, it has no case in that spec; a unit test
+   (`src/lib/pdfjs-webkit-polyfills.test.ts`) runs the patch in a fresh realm without the
+   built-in instead.
 4. **A polyfill is a claim about an engine, and claims expire.** Nothing in this repo notices
    when one goes stale, and that is structural rather than an oversight:
    `pdf-webkit-gaps.spec.ts` verifies by *deleting* the built-in, so it keeps passing whether

@@ -40,6 +40,7 @@ has["Map.prototype.getOrInsert"]         = typeof Map.prototype.getOrInsert === 
 has["Map.prototype.getOrInsertComputed"] = typeof Map.prototype.getOrInsertComputed === "function";
 has["ReadableStream[asyncIterator]"]     = typeof ReadableStream !== "undefined" && typeof ReadableStream.prototype[Symbol.asyncIterator] === "function";
 has["ReadableStream.prototype.values"]   = typeof ReadableStream !== "undefined" && typeof ReadableStream.prototype.values === "function";
+has["Math.sumPrecise"]                   = typeof Math.sumPrecise === "function";
 has["URL.parse"]                         = typeof URL.parse === "function";
 has["URL.canParse"]                      = typeof URL.canParse === "function";
 has["Response.prototype.bytes"]          = typeof Response !== "undefined" && typeof Response.prototype.bytes === "function";
