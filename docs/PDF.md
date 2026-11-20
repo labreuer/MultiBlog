@@ -691,11 +691,6 @@ different reasons, and the difference decides when each may be removed:
   a viewer that mounts its toolbar and renders **no document at all** rather than one that
   fails partway. This patch may be deleted once the baseline's floor rises past 26.2 —
   measured, per the rule below, not assumed.
-
-A third gap, the **`Iterator` global**, needs no patch: it shipped in Safari 18.4, the
-baseline's floor. Its shape is worth keeping in mind anyway, because it is the one that
-defeats a `typeof` guard. pdfjs polyfills `Iterator.prototype.join` itself, guarded by
-`typeof Iterator.prototype.join !== "function"` — and that guard dereferences the *global*.
 - **`Math.sumPrecise`** — also Safari 26.2, and also unguarded: 16 calls in the worker, one
   in `pdf.mjs`. The one that bites is the worker's `createNameTable`, which runs when a
   TrueType font being repaired has no `name` table or one pdfjs rebuilds — fonts subset by
@@ -705,6 +700,11 @@ defeats a `typeof` guard. pdfjs polyfills `Iterator.prototype.join` itself, guar
   `!"#$%&'()*+` in Times**, with the text layer (built from `ToUnicode`) still correct and no
   error anywhere but a pdfjs warning. Only some PDFs hit it, so a viewer that works on most
   files and garbles one is this, not that file. Delete on the same terms as the `Map` patch.
+
+One more gap, the **`Iterator` global**, needs no patch: it shipped in Safari 18.4, the
+baseline's floor. Its shape is worth keeping in mind anyway, because it is the one that
+defeats a `typeof` guard. pdfjs polyfills `Iterator.prototype.join` itself, guarded by
+`typeof Iterator.prototype.join !== "function"` — and that guard dereferences the *global*.
 On an engine without it the failure is a `ReferenceError` out of pdfjs's top-level module body
 before a line of its own logic runs: the viewer never mounts, and the stack points at our
 `import * as pdfjs`. **A `typeof` guard protects the property, not the object it hangs off.**
@@ -730,12 +730,12 @@ not evidence — prefer MDN's compatibility data, which is where the 26.2 above 
 | --- | --- | --- | --- |
 | `ReadableStream.prototype[Symbol.asyncIterator]` (and `.values`) | **absent** | **absent** | never |
 | `Map.prototype.getOrInsert` / `.getOrInsertComputed` | present | **absent** | 26.2 |
+| `Math.sumPrecise` | not probed | not probed | 26.2 |
 | `Iterator` global | present | present | 18.4 |
 | `Iterator.prototype.join` | absent | absent | — (pdfjs polyfills it itself) |
 | `URL.parse` / `URL.canParse` | present | present | 18.0 / 17.0 |
 | `Response.prototype.bytes`, `Uint8Array.fromBase64` / `.toBase64` / `.toHex` | present | present | 18.0 / 26 |
 | `Float16Array`, `Promise.withResolvers`, `AbortSignal.any`, `Set.prototype.intersection` | present | present | 26 / 17.4 |
-| `Math.sumPrecise` | not probed | not probed | 26.2 |
 | `DecompressionStream` | present | present | — |
 
 iPhone 13 Pro, iOS 18.6.2, Safari 18.6, both realms — every absence above is absent in the

@@ -110,7 +110,7 @@ built-ins WebKit ships late or not at all (three have already bitten an iPad —
 async iterator, all patched in `src/lib/pdfjs-webkit-polyfills.ts`). None is iPadOS Safari:
 Playwright drives its own builds, so the native selection gestures an iPad uses
 are still unreproducible here. What WebKit shares is the JS engine, which is
-where those two bugs live.
+where those bugs live.
 
 It is not desktop Safari either, and the gap is measurable rather than
 theoretical: the popover fix in the list below was written against a selection

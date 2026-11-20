@@ -6,14 +6,18 @@ import { ADMIN_EMAIL, createTestFile, deleteTestFile, type TestFile } from "./db
 // suite: chromium has it, so every other spec exercises the one engine where
 // the bug can't happen.
 //
-// This covers two gaps of the three it has covered over time, and the one that
-// left and came back is the cautionary tale. `ReadableStream`'s async
-// iteration is the one WebKit has never implemented at all, so it always
-// stays. The TC39 Map upsert methods were removed as version lag when the
-// baseline moved to Safari 26 / iPadOS 18.4+ — and restored on 2026-08-25,
-// because they land in Safari **26.2**, not 18.4, so every engine at the
-// baseline's floor lacks them: a real iPhone on iOS 18.6.2 rendered the
-// toolbar and no document. Only the `Iterator` global was correctly retired.
+// This covers two of the four gaps patched over time, and the one that left
+// and came back is the cautionary tale. `ReadableStream`'s async iteration is
+// the one WebKit has never implemented at all, so it always stays. The TC39
+// Map upsert methods were removed as version lag when the baseline moved to
+// Safari 26 / iPadOS 18.4+ — and restored on 2026-08-25, because they land in
+// Safari **26.2**, not 18.4, so every engine at the baseline's floor lacks
+// them: a real iPhone on iOS 18.6.2 rendered the toolbar and no document.
+// Only the `Iterator` global was correctly retired. `Math.sumPrecise`, the
+// fourth, has no case here on purpose: it bites only in the worker, which
+// `addInitScript` cannot reach (the limit at the end of this header), so
+// `src/lib/pdfjs-webkit-polyfills.test.ts` runs that patch in a bare realm
+// with the built-in deleted instead.
 //
 // The removal was made on a measurement, as the rule requires — but on Safari
 // 26.6.1, the newest engine in the range rather than the oldest. So: run

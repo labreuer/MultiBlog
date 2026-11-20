@@ -256,7 +256,7 @@ export default defineConfig({
     // This is *not* iPadOS Safari — Playwright drives its own WebKit build, so
     // the native selection gestures an iPad uses (long-press, the drag handles)
     // are still unreproducible here. What it does share is the JS engine, which
-    // is where those two bugs live.
+    // is where those bugs live.
     //
     // **It does not run on macOS 14 at all**, and the failure is not yours to
     // fix: playwright 1.62 targets webkit 2336, but browsers.json pins mac14

@@ -2293,3 +2293,31 @@ already records two iOS touch claims that measured false.
 `(pointer: coarse)` is false and would be right. That is measured, recorded in §10c, and
 **decided** in PLAN.md §19d — a feel knob is not re-aimed on a symmetry argument — rather than
 open.
+
+## `Math.sumPrecise`'s polyfill promises engine-identical answers it cannot give past an overflow
+
+**Status:** found 2026-11-19 reviewing `pdf-math-sumprecise` (`c15f07a`). Not fixed, and no
+reader can meet it; it is a comment's claim that is wider than the code.
+
+The patch in `src/lib/pdfjs-webkit-polyfills.ts` is Neumaier's compensated sum, and its comment
+says a caller "never sees a different answer depending on the engine". Measured in a realm with
+the built-in deleted (the harness `src/lib/pdfjs-webkit-polyfills.test.ts` uses): `[1e308, 1e308]`
+→ `NaN` where the proposal says `Infinity`, and `[1e308, 1e308, -1e308]` → `NaN` where it says
+`1e308`. An intermediate that overflows poisons the compensation term with `Infinity - Infinity`.
+pdfjs only ever sums array lengths and glyph widths, so nothing in this repo reaches it.
+
+The fix is to narrow the comment to sums whose intermediates stay finite. `if (!isFinite(sum))
+return sum;` after the loop would answer the first case and not the second, which needs a wider
+accumulator (the proposal's reference uses Shewchuk's expansion) and is not worth carrying for
+these inputs.
+
+## The polyfill test lends `ReadableStream` to its realm without saying why
+
+**Status:** found 2026-11-19, same review. One clause of comment.
+
+`patchedSumPrecise` in `src/lib/pdfjs-webkit-polyfills.test.ts` does
+`vm.createContext({ ReadableStream })`. A fresh vm realm has no `ReadableStream` global, and the
+source string's first patch tests `typeof ReadableStream.prototype[Symbol.asyncIterator]`, which
+would throw a `ReferenceError` on the missing global before the `Math.sumPrecise` patch is ever
+reached — so the host's is handed in. Nothing beside the line says that, and a reader tidying
+an apparently unused extra will remove it and get a failure naming the wrong patch.
