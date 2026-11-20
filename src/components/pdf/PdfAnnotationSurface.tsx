@@ -534,12 +534,16 @@ export default function PdfAnnotationSurface({
 
     layerRedrawRef.current = layers.redraw;
 
-    const detachClicks = attachAnnoClicks(handle.container, (ids) => {
-      // Topmost wins. Overlapping annotations are normal (docs/PDF.md §7
-      // offers a disambiguation menu as the richer answer); scrolling the
-      // first into view in the panel is the useful minimum — opened first if
-      // it is collapsed, for this visit only (docs/ANNOTATIONS.md,
-      // "Collapsing a card").
+    const detachClicks = attachAnnoClicks(handle.container, (hits) => {
+      // The topmost note wins. Another reader's live selection is drawn over
+      // every note with an id of its own, and has no card (docs/PDF.md §7).
+      const id = hits.find((hit) => entriesRef.current.some((entry) => entry.root.id === hit));
+      if (id === undefined) return;
+      // Overlapping annotations are normal (docs/PDF.md §7 offers a
+      // disambiguation menu as the richer answer); scrolling the first into
+      // view in the panel is the useful minimum — opened first if it is
+      // collapsed, for this visit only (docs/ANNOTATIONS.md, "Collapsing a
+      // card").
       //
       // On the Annotations pane, which the panel need not be showing: it opens
       // on Contents. A frame later when it wasn't, since a card in a pane that
@@ -547,8 +551,8 @@ export default function PdfAnnotationSurface({
       // panel itself stays as it was, so a tap on a phone, where it is an
       // overlay, doesn't cover the document.
       const reveal = () =>
-        revealThen([ids[0]], () => {
-          const card = document.querySelector<HTMLElement>(`[data-margin-note-id="${CSS.escape(ids[0])}"]`);
+        revealThen([id], () => {
+          const card = document.querySelector<HTMLElement>(`[data-margin-note-id="${CSS.escape(id)}"]`);
           card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
         });
       if (activePaneRef.current === ANNOTATIONS_PANE) {

@@ -484,8 +484,11 @@ thousands of rects.
 ```ts
 container.addEventListener('click', (e) => {
   if (dragDistanceExceeded) return;        // don't fire when the user was selecting text
-  const hits = document.elementsFromPoint(e.clientX, e.clientY)
-    .filter(el => el.hasAttribute('data-anno-id'));
+  const page = e.target.closest('.page');  // the click lands on the text layer, inside the page
+  if (!page) return;
+  const hits = [...page.querySelectorAll('[data-anno-id]')]
+    .reverse()                             // later siblings paint on top: topmost first
+    .filter(el => contains(el.getBoundingClientRect(), e.clientX, e.clientY));
   if (!hits.length) return;
   // topmost wins; if hits.length > 1, offer a disambiguation menu for overlapping annotations
 });
@@ -494,8 +497,17 @@ container.addEventListener('click', (e) => {
 Track pointer movement between `pointerdown` and `click` and suppress the handler past a small
 threshold (~4px). Otherwise every text selection that starts on a highlight fires a click.
 
-Overlapping annotations are normal and expected — `elementsFromPoint` returns all of them,
-which is the right primitive.
+**By geometry, never `elementsFromPoint`.** The highlight layer is `pointer-events: none`,
+which is what lets a selection start over a highlight, and `elementsFromPoint` hit-tests the
+way a click does, so every browser leaves those boxes out of its answer: it never returns a
+highlight. Measuring the rects of the one page under the click costs a handful of
+`getBoundingClientRect` calls per click. Overlapping annotations are normal and expected, and
+the measurement finds every one of them, topmost first.
+
+**Only a note's rect counts.** Other readers' live selections are drawn in the same layer
+with ids of their own (`remote-<clientId>`), over every note. The surface takes the topmost
+id that is a note's, so a click on a passage another reader has selected still shows the
+note beneath it (`PdfAnnotationSurface`). Link regions carry no id and are never hit.
 
 ---
 

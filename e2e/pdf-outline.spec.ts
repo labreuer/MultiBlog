@@ -79,6 +79,27 @@ async function currentRow(page: import("@playwright/test").Page): Promise<string
 }
 
 /**
+ * Clicks the middle of a note's highlight, as a reader would. Measured until
+ * it has a box: the layer redraws its rects whenever a page renders, so one
+ * measurement can land between a redraw's clearing and its drawing.
+ */
+async function clickHighlight(page: import("@playwright/test").Page, id: string) {
+  const highlight = page.locator(`[data-anno-id="${id}"]`).first();
+  let box: { x: number; y: number; width: number; height: number } | null = null;
+  await expect
+    .poll(
+      async () => {
+        box = await highlight.boundingBox();
+        return box !== null && box.width > 0 && box.height > 0;
+      },
+      { message: "the highlight is drawn" },
+    )
+    .toBe(true);
+  const { x, y, width, height } = box!;
+  await page.mouse.click(x + width / 2, y + height / 2);
+}
+
+/**
  * Scrolls the viewer so a page's top edge is at the top of the viewport.
  *
  * **Not the page-number box**, which would be testing the toolbar rather than
@@ -288,11 +309,7 @@ test.describe("pdf contents pane", () => {
     await expect(page.getByRole("tab", { name: "Contents" })).toHaveAttribute("aria-selected", "true");
 
     // A click on the highlight shows the card it is the passage of.
-    const highlight = page.locator(`[data-anno-id="${id}"]`).first();
-    await expect(highlight).toBeAttached();
-    const box = await highlight.boundingBox();
-    expect(box, "the highlight has a box").not.toBeNull();
-    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await clickHighlight(page, id);
     await expect(annotationsTab).toHaveAttribute("aria-selected", "true");
     const card = page.locator("[data-comment-id]").filter({ hasText: body }).first();
     await expect(card).toBeVisible();
@@ -306,6 +323,26 @@ test.describe("pdf contents pane", () => {
     await waitForViewer(page);
     await expect(annotationsTab).toHaveAttribute("aria-selected", "true");
     await expect(card).toBeVisible();
+  });
+
+  test("on a PDF without an outline, a click on a highlight shows its note too", async ({ page }) => {
+    const plain = await createTestFile({ ownerEmail: ADMIN_EMAIL, visibility: "SHARED" });
+    try {
+      const body = "A note on a file with no contents.";
+      const { id } = await createTestAnnotation({ fileId: plain.id, authorEmail: ADMIN_EMAIL, bodyText: body, pdfRect: { sheet: 1, rect: [72, 712, 400, 738] } });
+      await signIn(page, ADMIN_EMAIL);
+      await gotoOk(page, `/pdf/${plain.slug}`);
+      await waitForViewer(page);
+      // The panel opens on Annotations here, so the click is seen moving it
+      // off another tab.
+      await page.getByRole("tab", { name: "Metadata" }).click();
+
+      await clickHighlight(page, id);
+      await expect(page.getByRole("tab", { name: "Annotations" })).toHaveAttribute("aria-selected", "true");
+      await expect(page.locator("[data-comment-id]").filter({ hasText: body }).first()).toBeVisible();
+    } finally {
+      await deleteTestFile(plain.id);
+    }
   });
 
   test("a PDF with no outline says so", async ({ page }) => {

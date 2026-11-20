@@ -255,8 +255,9 @@
   /* Below the text layer, so native selection keeps working over a highlight
      (docs/PDF.md §6). */
   z-index: 1;
-  /* Inert as a whole; hit-testing is a delegated listener plus
-     elementsFromPoint, which sees through pointer-events: none. */
+  /* Inert as a whole, so a selection can start over a highlight. A click is
+     hit-tested by geometry in one delegated listener (attachAnnoClicks):
+     elementsFromPoint leaves pointer-events: none boxes out, so it can't. */
   pointer-events: none;
 
   /* **The alpha lives here, on the group, not on each rect — that is what
