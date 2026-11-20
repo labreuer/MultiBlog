@@ -75,6 +75,16 @@ const ANNOTATIONS_PANE = "annotations";
 const METADATA_PANE = "metadata";
 const COLLAB_PANE = "collab";
 
+/**
+ * Whether a fragment is a note's permalink: a bare name, with no `=`, where
+ * every fragment that names a page or a passage is parameters
+ * (src/lib/pdf-open-params.ts).
+ */
+function isNoteFragment(hash: string): boolean {
+  const fragment = hash.replace(/^#/, "");
+  return fragment !== "" && !fragment.includes("=");
+}
+
 // How long a selection has to stop changing before it's captured. Matches
 // AnnotationNode's constant of the same name, for the same reason: a drag emits
 // a selection update per pixel, and each capture behind this one is a pdfjs
@@ -168,13 +178,24 @@ export default function PdfAnnotationSurface({
   const [panelOpen, setPanelOpen] = useState(
     () => window.matchMedia(POSITIONED_MEDIA_QUERY).matches,
   );
-  const [activePane, setActivePane] = useState(ANNOTATIONS_PANE);
+  // The tab the reader picked, or null while they haven't, when the panel
+  // shows the document's Contents (`defaultPane`, below the outline). A link to
+  // a note picks Annotations for them: the card it names is in that pane, and
+  // the browser can't scroll to a card in a pane that isn't displayed.
+  const [chosenPane, setChosenPane] = useState<string | null>(() => (isNoteFragment(window.location.hash) ? ANNOTATIONS_PANE : null));
+  useEffect(() => {
+    const onHashChange = () => {
+      if (isNoteFragment(window.location.hash)) setChosenPane(ANNOTATIONS_PANE);
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
   // What every capture made here names: this version, and whether the page is
   // the bare address or the version's own (docs/PDF.md §13, "Versions").
   const captureOrigin = useMemo(() => ({ fileVersionId: version.id, address: version.address }), [version.id, version.address]);
   const showAnnotationsPane = useCallback(() => {
     setPanelOpen(true);
-    setActivePane(ANNOTATIONS_PANE);
+    setChosenPane(ANNOTATIONS_PANE);
   }, []);
   const [positioned, setPositioned] = useState(false);
   // The captured selection waiting to become an annotation, plus a token that
@@ -436,6 +457,16 @@ export default function PdfAnnotationSurface({
   // document. So the fraction lives in the scroll handler and the id is set
   // only when it actually differs — see `onMoved` below.
   const outline = usePdfOutline(handle);
+  // The side panel opens on Contents, while the outline loads and once it is
+  // found, and on Annotations for a document with none, which is most of them
+  // (docs/PDF.md §10a): a tab saying there is nothing to show is no place to
+  // land. Derived, not set from an effect, so a reader who has picked a tab is
+  // never moved off it when the outline arrives.
+  const activePane = chosenPane ?? (outline.status === "absent" || outline.status === "error" ? ANNOTATIONS_PANE : CONTENTS_PANE);
+  const activePaneRef = useRef(activePane);
+  useEffect(() => {
+    activePaneRef.current = activePane;
+  }, [activePane]);
   const [activeOutlineId, setActiveOutlineId] = useState<string | null>(null);
   const outlineNodesRef = useRef(outline.nodes);
   useEffect(() => {
@@ -503,16 +534,33 @@ export default function PdfAnnotationSurface({
 
     layerRedrawRef.current = layers.redraw;
 
-    const detachClicks = attachAnnoClicks(handle.container, (ids) => {
-      // Topmost wins. Overlapping annotations are normal (docs/PDF.md §7
-      // offers a disambiguation menu as the richer answer); scrolling the
-      // first into view in the panel is the useful minimum — opened first if
-      // it is collapsed, for this visit only (docs/ANNOTATIONS.md,
-      // "Collapsing a card").
-      revealThen([ids[0]], () => {
-        const card = document.querySelector<HTMLElement>(`[data-margin-note-id="${CSS.escape(ids[0])}"]`);
-        card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      });
+    const detachClicks = attachAnnoClicks(handle.container, (hits) => {
+      // The topmost note wins. Another reader's live selection is drawn over
+      // every note with an id of its own, and has no card (docs/PDF.md §7).
+      const id = hits.find((hit) => entriesRef.current.some((entry) => entry.root.id === hit));
+      if (id === undefined) return;
+      // Overlapping annotations are normal (docs/PDF.md §7 offers a
+      // disambiguation menu as the richer answer); scrolling the first into
+      // view in the panel is the useful minimum — opened first if it is
+      // collapsed, for this visit only (docs/ANNOTATIONS.md, "Collapsing a
+      // card").
+      //
+      // On the Annotations pane, which the panel need not be showing: it opens
+      // on Contents. A frame later when it wasn't, since a card in a pane that
+      // isn't displayed has no box to scroll to until the switch renders. The
+      // panel itself stays as it was, so a tap on a phone, where it is an
+      // overlay, doesn't cover the document.
+      const reveal = () =>
+        revealThen([id], () => {
+          const card = document.querySelector<HTMLElement>(`[data-margin-note-id="${CSS.escape(id)}"]`);
+          card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        });
+      if (activePaneRef.current === ANNOTATIONS_PANE) {
+        reveal();
+      } else {
+        setChosenPane(ANNOTATIONS_PANE);
+        requestAnimationFrame(reveal);
+      }
     });
 
     // The panel repositions — and the right-hand strip's thumb moves — on the
@@ -903,13 +951,16 @@ export default function PdfAnnotationSurface({
   // on arrival, and again when a hashchange names new passages. PdfViewer has
   // already opened at the first `#sheet=`; this lands the first passage found
   // the way any jump lands a passage. On arrival a followed ?sel= link keeps
-  // its own jump, and both are drawn.
+  // its own jump, and both are drawn. A hashchange that is a Back or a Forward
+  // to an entry the viewer's history wrote draws its passages and leaves the
+  // view where that history put it back (docs/PDF.md §10d).
   const fragmentJumpedRef = useRef(0);
   useEffect(() => {
     if (!ready || fragment.resolution === fragmentJumpedRef.current) return;
     const firstResolution = fragmentJumpedRef.current === 0;
     fragmentJumpedRef.current = fragment.resolution;
     if (firstResolution && linkPartsRef.current.length > 0) return;
+    if (!firstResolution && handleRef.current?.history.owns(window.history.state)) return;
     const first = fragment.regions.find((region) => region.target !== null)?.target;
     if (first) jumpToTarget(first);
   }, [ready, fragment, jumpToTarget]);
@@ -1085,7 +1136,7 @@ export default function PdfAnnotationSurface({
           opensAt={opensAt}
           panes={panes}
           activePane={activePane}
-          onSelectPane={setActivePane}
+          onSelectPane={setChosenPane}
           panelOpen={panelOpen}
           onTogglePanel={() => setPanelOpen((open) => !open)}
           presenceRail={
@@ -1203,7 +1254,7 @@ export default function PdfAnnotationSurface({
                 // asked for is in the annotations pane, which is no help if the
                 // panel is closed or if they are looking at Metadata.
                 setPanelOpen(true);
-                setActivePane(ANNOTATIONS_PANE);
+                setChosenPane(ANNOTATIONS_PANE);
                 // Clearing the selection stops the highlight-under-highlight
                 // confusion once the composer opens with the same passage
                 // quoted in it.

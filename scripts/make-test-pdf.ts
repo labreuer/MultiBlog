@@ -34,6 +34,10 @@
 //     rectangle selection on one has no words to be found by (docs/PDF.md
 //     §13, "Matching the pages" and "Placing each anchor").
 //
+//   - **links** (`/Subtype /Link` annotations) from a line of one page to a
+//     place in the document, since a link the document itself draws is one of
+//     the three moves the viewer gives a history entry (docs/PDF.md §10d).
+//
 // Still no images, in any case: the content streams are text operators and a
 // path, so no fixture built here exercises a pdfjs image decoder (CLAUDE.md,
 // and e2e/pdf-assets.spec.ts is the guard that stands in for it).
@@ -96,6 +100,19 @@ export type TestOutlineItem = {
 };
 
 /**
+ * A link the document draws: a box over one line of one page, pointing at a
+ * place in the document, as an outline entry points at one.
+ */
+export type TestLinkItem = {
+  /** The page the link is on, 1-based. */
+  page: number;
+  /** Which of that page's lines the box covers, 0-based. */
+  line: number;
+  /** Where it goes: written as an outline entry's destination is, by name when `named` is given. */
+  to: Pick<TestOutlineItem, "page" | "y" | "named">;
+};
+
+/**
  * One run of page labels, starting at page `from` (1-based) and continuing
  * until the next run — the `/PageLabels` number tree, as a list.
  */
@@ -124,6 +141,7 @@ export function buildTestPdf(
     pageLabels?: readonly TestPageLabelRange[];
     /** The pages (1-based) that draw a filled rectangle. One with no lines beside is a sheet with ink and no text; one with neither is blank. */
     inked?: readonly number[];
+    links?: readonly TestLinkItem[];
   } = {},
 ): Uint8Array {
   if (pages.length === 0) throw new Error("buildTestPdf needs at least one page.");
@@ -144,12 +162,16 @@ export function buildTestPdf(
   );
   objects.set(FONT, `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>`);
 
+  // A page's /Annots names objects numbered after the outline's, so a page
+  // with links is written again once they are (below).
+  const pageDict = (i: number, annots: readonly number[] = []) =>
+    `<< /Type /Page /Parent ${PAGES} 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] ` +
+    `/Resources << /Font << /F1 ${FONT} 0 R >> >> /Contents ${contentObjNumber(i)} 0 R` +
+    (annots.length === 0 ? "" : ` /Annots [${annots.map((n) => `${n} 0 R`).join(" ")}]`) +
+    ` >>`;
+
   pages.forEach((lines, i) => {
-    objects.set(
-      pageObjNumber(i),
-      `<< /Type /Page /Parent ${PAGES} 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] ` +
-        `/Resources << /Font << /F1 ${FONT} 0 R >> >> /Contents ${contentObjNumber(i)} 0 R >>`,
-    );
+    objects.set(pageObjNumber(i), pageDict(i));
     const stream = contentStreamFor(lines, options.inked?.includes(i + 1) ?? false);
     objects.set(
       contentObjNumber(i),
@@ -182,9 +204,9 @@ export function buildTestPdf(
       0,
     );
 
-  /** Named destinations, collected as the tree is written. */
+  /** Named destinations, collected as the tree and the links are written. */
   const namedDests: string[] = [];
-  const destArray = (item: TestOutlineItem): string =>
+  const destArray = (item: Pick<TestOutlineItem, "page" | "y">): string =>
     `[${pageObjNumber(item.page - 1)} 0 R /XYZ ${MARGIN_LEFT} ${item.y ?? TOP_BASELINE} null]`;
 
   const emitOutline = (entries: readonly Numbered[], parent: number) => {
@@ -219,6 +241,30 @@ export function buildTestPdf(
         `/Last ${numbered[numbered.length - 1].number} 0 R /Count ${visibleUnder(numbered)} >>`,
     );
   }
+
+  // ---- links ---------------------------------------------------------------
+  //
+  // A box from just below a line's baseline to its cap height, as wide as any
+  // line here runs, with no border drawn. A name two links share is defined
+  // once; one an outline entry also uses keeps the entry's place.
+  const annotsByPage = new Map<number, number[]>();
+  for (const link of options.links ?? []) {
+    const number = nextObject++;
+    const baseline = TOP_BASELINE - link.line * LINE_HEIGHT;
+    const rect = [MARGIN_LEFT, baseline - 4, MARGIN_LEFT + 400, baseline + FONT_SIZE].join(" ");
+    let dest: string;
+    if (link.to.named) {
+      if (!namedDests.some((entry) => entry.startsWith(`/${link.to.named} `))) {
+        namedDests.push(`/${link.to.named} ${destArray(link.to)}`);
+      }
+      dest = `/${link.to.named}`;
+    } else {
+      dest = destArray(link.to);
+    }
+    objects.set(number, `<< /Type /Annot /Subtype /Link /Rect [${rect}] /Border [0 0 0] /Dest ${dest} >>`);
+    annotsByPage.set(link.page - 1, [...(annotsByPage.get(link.page - 1) ?? []), number]);
+  }
+  for (const [i, annots] of annotsByPage) objects.set(pageObjNumber(i), pageDict(i, annots));
 
   // `/PageLabels` is a number tree keyed by the **0-based** index of the page a
   // run starts at — the one place in this format where a page is counted from

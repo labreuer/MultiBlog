@@ -52,7 +52,7 @@ import { currentTextVersion, extractPdf } from "@/lib/pdf-extract";
 import { pdfMetadata } from "@/lib/pdf-metadata";
 import { parsePdfTarget, rectToQuad } from "@/lib/pdf-anchor";
 import { parsePageMap } from "@/lib/pdf-page-map";
-import { buildTestPdf, type TestOutlineItem, type TestPageLabelRange } from "../scripts/make-test-pdf";
+import { buildTestPdf, type TestLinkItem, type TestOutlineItem, type TestPageLabelRange } from "../scripts/make-test-pdf";
 import {
   contentExtensions,
   titleExtensions,
@@ -846,6 +846,8 @@ export async function createTestFile(opts: {
   pageLabels?: readonly TestPageLabelRange[];
   /** The pages (1-based) that draw a filled rectangle: one with no lines is a sheet with ink and no text. */
   inked?: readonly number[];
+  /** Links the generated PDF draws from a line of one page to a place in the document. */
+  links?: readonly TestLinkItem[];
 }): Promise<TestFile> {
   const { ownerEmail, title = uniqueTitle("file"), visibility = "PRIVATE" } = opts;
   assertSafe(ownerEmail);
@@ -858,7 +860,7 @@ export async function createTestFile(opts: {
     ["Page two begins here, well past the first screenful.", "Distinctive phrase: xylophone marmalade."],
   ];
 
-  const bytes = buildTestPdf(pageLines, { outline: opts.outline, pageLabels: opts.pageLabels, inked: opts.inked });
+  const bytes = buildTestPdf(pageLines, { outline: opts.outline, pageLabels: opts.pageLabels, inked: opts.inked, links: opts.links });
   // Hashed here as well as by the store, because the lock has to be taken
   // before the bytes are written and the store only reports the sha after.
   const sha256 = createHash("sha256").update(bytes).digest("hex");

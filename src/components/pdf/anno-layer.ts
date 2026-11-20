@@ -200,9 +200,9 @@ function appendRects(
     // Singular, unlike the doc side's `data-annotation-ids`: overlapping
     // *decorations* have to be pre-split because ProseMirror drops attributes
     // where inline decorations overlap, but these are absolutely positioned
-    // siblings that simply stack. `elementsFromPoint` returns all of them,
-    // which is what docs/PDF.md §7 wants for overlap disambiguation. A link
-    // region gets none — see AnnoLayerEntry.variant.
+    // siblings that simply stack. The hit test (`attachAnnoClicks`) finds
+    // every one under a click, which is what docs/PDF.md §7 wants for overlap
+    // disambiguation. A link region gets none — see AnnoLayerEntry.variant.
     if (!linkRegion) element.dataset.annoId = entry.id;
     if (entry.active) element.dataset.annoActive = "true";
     element.style.left = `${rect.left}px`;
@@ -217,6 +217,12 @@ function appendRects(
 /**
  * docs/PDF.md §7's hit test: one delegated listener on the viewer container,
  * never one per rect — a long document legitimately has thousands.
+ *
+ * **By geometry, not `elementsFromPoint`.** The layer is `pointer-events:
+ * none` so that a selection can start over a highlight, and every browser
+ * leaves such a box out of `elementsFromPoint` (CSSOM View hit-tests it like
+ * a click), so that would never find one. The click lands on the page beneath
+ * — on its text layer — and that page's rects are the only ones measured.
  *
  * The drag guard is the load-bearing part. Without it, every text selection
  * that *starts* on a highlight also fires a click when the mouse comes up, so
@@ -245,10 +251,17 @@ export function attachAnnoClicks(
   };
   const onClick = (event: MouseEvent) => {
     if (dragged) return;
-    const ids = document
-      .elementsFromPoint(event.clientX, event.clientY)
-      .map((el) => (el as HTMLElement).dataset?.annoId)
-      .filter((id): id is string => !!id);
+    const page = event.target instanceof Element ? event.target.closest(".page") : null;
+    if (!page) return;
+    // Reversed, so topmost first: the rects are absolutely positioned
+    // siblings at one z-index, so a later one paints over an earlier one.
+    const ids = [...page.querySelectorAll<HTMLElement>("[data-anno-id]")]
+      .reverse()
+      .filter((el) => {
+        const rect = el.getBoundingClientRect();
+        return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+      })
+      .map((el) => el.dataset.annoId!);
     if (ids.length === 0) return;
     // Deduplicated but order-preserving: a multi-line highlight contributes
     // several rects with the same id, and topmost-first is what §7 wants.

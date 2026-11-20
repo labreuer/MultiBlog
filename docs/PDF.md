@@ -87,6 +87,11 @@ it, so this list is the whole of the warning.
   client navigation to it, and the reader then arrives by a link they never followed, read
   as whichever version it names (§13, "Links into the file"). Such a link is a plain `<a>`,
   and the viewer's own going is `location.replace`.
+- **A history entry the viewer writes carries state and no URL, and none is written on or
+  pushed from an entry whose state is null** (§10d). Next reloads the page on a Back to an
+  entry with state it didn't write. A move meant to leave an entry goes through the link
+  service (`goToDestination`, `goToPage`), and a scroll straight through `viewer` leaves
+  none.
 
 `e2e/pdf-versions.spec.ts` guards the first three. `e2e/pdf-better-copy.spec.ts` guards the
 move and the maps: it undoes a carry from `file_anchor_move` alone and compares every row,
@@ -479,8 +484,11 @@ thousands of rects.
 ```ts
 container.addEventListener('click', (e) => {
   if (dragDistanceExceeded) return;        // don't fire when the user was selecting text
-  const hits = document.elementsFromPoint(e.clientX, e.clientY)
-    .filter(el => el.hasAttribute('data-anno-id'));
+  const page = e.target.closest('.page');  // the click lands on the text layer, inside the page
+  if (!page) return;
+  const hits = [...page.querySelectorAll('[data-anno-id]')]
+    .reverse()                             // later siblings paint on top: topmost first
+    .filter(el => contains(el.getBoundingClientRect(), e.clientX, e.clientY));
   if (!hits.length) return;
   // topmost wins; if hits.length > 1, offer a disambiguation menu for overlapping annotations
 });
@@ -489,8 +497,17 @@ container.addEventListener('click', (e) => {
 Track pointer movement between `pointerdown` and `click` and suppress the handler past a small
 threshold (~4px). Otherwise every text selection that starts on a highlight fires a click.
 
-Overlapping annotations are normal and expected — `elementsFromPoint` returns all of them,
-which is the right primitive.
+**By geometry, never `elementsFromPoint`.** The highlight layer is `pointer-events: none`,
+which is what lets a selection start over a highlight, and `elementsFromPoint` hit-tests the
+way a click does, so every browser leaves those boxes out of its answer: it never returns a
+highlight. Measuring the rects of the one page under the click costs a handful of
+`getBoundingClientRect` calls per click. Overlapping annotations are normal and expected, and
+the measurement finds every one of them, topmost first.
+
+**Only a note's rect counts.** Other readers' live selections are drawn in the same layer
+with ids of their own (`remote-<clientId>`), over every note. The surface takes the topmost
+id that is a note's, so a click on a passage another reader has selected still shows the
+note beneath it (`PdfAnnotationSurface`). Link regions carry no id and are never hit.
 
 ---
 
@@ -879,13 +896,29 @@ page height like every other §5 conversion.
 
 **Don't re-implement the jump.** `PDFLinkService.goToDestination(dest)` takes any of the
 three forms above and every `Fit` variant, and keeps the reader's zoom where the destination
-doesn't set one. It is on `PdfViewerHandle` for this. The anchoring machinery
-(`jumpDestinationY`) stays for annotations, whose quads are ours rather than the document's.
+doesn't set one. It is on `PdfViewerHandle` for this, and it is also what leaves the
+history entry Back returns by (§10d). The anchoring machinery (`jumpDestinationY`) stays
+for annotations, whose quads are ours rather than the document's.
 
 **Most PDFs have no outline**, and `getOutline()` resolves to `null` for them — an ordinary
 answer, not an error. The pane says so. `scripts/make-test-pdf.ts` can write one (an inline
 array, a named destination, and a closed-by-default subtree) because nothing else in the repo
 has one to test against.
+
+**The side panel opens on Contents**, both while the outline loads and once it is found. It
+opens on Annotations for a document with no outline, or one that failed to load, since a
+pane saying there is nothing to show is no place to land. The tab is derived during render
+from the outline's status (`PdfAnnotationSurface`'s `activePane`), not set from an effect,
+so a reader who has picked a tab is never moved off it when the outline arrives. Three
+things pick Annotations for the reader, because each needs a card on screen and the
+browser can't scroll to one in a pane that isn't displayed:
+
+- arriving by a note's permalink, a bare-name fragment;
+- clicking a highlight, which shows its card a frame later, once the pane is displayed;
+- the selection's Annotate button.
+
+On a wide screen this means a document with an outline opens without its notes in the
+rail beside it until the reader picks Annotations.
 
 **A title can hold NULs**, as a page label can, in a literal string or a UTF-16 one alike.
 The stored copy drops them, for §10b's reason.
@@ -1266,6 +1299,97 @@ curl -s --data-binary '({ ...window.__pinch, pageScaleNow: visualViewport.scale,
 
 `pageScaleNow` still `1` is the answer that matters: the page did not zoom. A rising
 `docScale` says ours did. Which counter moved says which path the engine took.
+
+---
+
+## 10d. History: what Back returns to
+
+Three moves leave a browser history entry, so Back puts the view where the reader was
+before them: a link the document draws, an entry in the Contents pane, and the page box.
+Back and Forward between the entries put the view back to the point, at the reader's
+current zoom, not just to the page. `src/components/pdf/pdf-history.ts` holds it;
+`e2e/pdf-history.spec.ts` covers it.
+
+**Which moves.** Each of the three goes through pdfjs's link service: the link layer and
+the Contents pane call `goToDestination`, and the page box calls `goToPage`. Both call the
+history the service was given by `setHistory` before they scroll, so those call sites know
+nothing about history. Anything that scrolls `viewer` directly leaves no entry, and that is
+deliberate:
+
+- **‹ ›** step like a scroll. An entry per click would bury every other one, which is why
+  pdfjs's own viewer and the browsers' viewers leave them out too.
+- A note's card, a tick on the strip, a fragment's passage, following another reader, and
+  the jump on arrival by `?sel=` are all positioning, not reading moves.
+- **Typing in the page box the page already shown leaves no entry**, because the box
+  submits on every blur.
+- **The same jump twice adds one entry**, as long as the view hasn't moved from where the
+  first one landed.
+
+**An entry is state on the page's own address; its URL never changes.** The state
+(`history.state.pdfView`) holds the view's top-left in PDF user space, as `updateviewarea`
+reports it (`location.left`/`top`), plus the destination the jump went to, for the moment
+before the view is measured. It is restored with an `XYZ` destination with a null zoom,
+which is how pdfjs's own history restores a position. The entry is told where the view is
+when the reader leaves it by a jump, and again a second after the view stops moving. The
+second write is how Forward returns to where the reader scrolled to, and how an entry that
+`router.refresh()` rewrote gets its position back (below). Writing no URL is what keeps the
+history out of everything else that reads the fragment:
+
+- Going between our entries fires no `hashchange`. `PdfSurfaceClient` reads the fragment to
+  decide which version to show, `use-pdf-fragment` resolves passages from it, and the
+  viewer opens a sheet from it.
+- No fragment reaches Next's router, so §0's last mistake can't happen.
+- No question arises of which version a `v=` should name.
+
+**Never on an entry whose state is null.** Such an entry was not written by Next: a
+fragment link followed inside the page, or a fragment typed into the address bar. Next
+16.2.11 reloads the whole page on a `popstate` to an entry whose state is an object without
+its own fields (`onPopState` in `app-router.js`). State given to such an entry, or an entry
+pushed from it (Next's patched `pushState` copies its fields from the current entry, and
+there are none to copy), costs the reader the page when they come back to it. From such an
+entry the viewer jumps as it would with no history, and Back from it is the browser's own
+fragment navigation, which the viewer's `hashchange` listener answers as it always did.
+
+**A `hashchange` onto one of our entries is a Back the history has already restored.** An
+entry keeps the fragment the page had when it was written, so Back across a fragment
+entry changes the fragment as well. The viewer's own sheet jump and the surface's passage
+jump both check `history.owns(state)` and stand down. The passages are still drawn.
+
+**What Next does on the way.** Next's own `popstate` handler runs first, and replays a
+history step on the same URL. That step keeps the entry's state
+(`preserveCustomHistoryState: true`). A refresh and a soft navigation don't: each rewrites
+the current entry with Next's fields only, which is why the entry is told its position
+again a second after the view stops moving. Whether that same-URL history step fetches page
+data is asserted in the spec's first test.
+
+**pdfjs's `PDFHistory` is not used**, for four reasons, each verified against 6.2.108:
+
+1. With `updateUrl: true` it writes `#page=N&zoom=…` hashes. These carry no `v=`, so they
+   are read as version 1 on a file with more than one. Going back and forth between them
+   fires `hashchange`, so the version decision above runs again, and it can send the reader
+   to another version's address. Next's `pushState` patch also copies the hashed URL into
+   the router.
+2. With `updateUrl: false` it restores an entry through `linkService.setHash`, which reads
+   only `page=`, `zoom=` and `nameddest=`. Back to an entry opened by `#sheet=` or `#p=` then
+   does nothing. It also declines to record such an entry until about fifty view updates
+   have passed.
+3. Its `reset()` writes history from its page-hide path. When the viewer unmounts on a
+   client navigation, Next has already written the next page's entry (in a
+   `useInsertionEffect`), so the write can push a stray entry onto that page.
+4. A second after any scroll that follows a jump, it pushes another entry, after following
+   another reader or a note's jump as much as after reading.
+
+The replacement implements just what the link service calls (`pushCurrentPosition`, `push`,
+`pushPage`, `back`, `forward`; nothing else in pdfjs reads it), and writes nothing on
+unmount.
+
+**Not covered.**
+
+- A link pdfjs draws has an `href` like `#%5B…%5D` (`getDestinationHash`), a fragment our
+  grammar doesn't read. Opening one in a new tab opens the PDF at its first sheet.
+- Coming back to the PDF from another page goes by Next and remounts the viewer, which then
+  opens as a fresh arrival rather than at the position the entry holds.
+- A reload opens at the fragment, not at the position the entry holds.
 
 ---
 
