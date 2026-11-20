@@ -1,16 +1,16 @@
 // The built-ins pdfjs-dist needs that WebKit does not have.
 //
-// **Baseline: Safari 26 / iPadOS 18.4+.** Two patches live here, and they fail
-// for opposite reasons — one permanent, one a version lag that has not aged
-// out yet:
+// **Baseline: Safari 26 / iPadOS 18.4+.** Three patches live here, and they
+// fail for opposite reasons — one permanent, two a version lag that has not
+// aged out yet:
 //
 //   - `ReadableStream.prototype[Symbol.asyncIterator]` — WebKit has *never*
 //     implemented it, in either realm, and Safari 26.6.1 still does not.
-//   - `Map.prototype.getOrInsert` / `.getOrInsertComputed` — these land in
-//     **Safari 26.2**, which is *inside* the baseline's own range, so every
-//     supported engine below that lacks them.
+//   - `Map.prototype.getOrInsert` / `.getOrInsertComputed` and
+//     `Math.sumPrecise` — these land in **Safari 26.2**, which is *inside* the
+//     baseline's own range, so every supported engine below that lacks them.
 //
-// A third patch, for the `Iterator` global, was deleted correctly: it really
+// Another patch, for the `Iterator` global, was deleted correctly: it really
 // did ship in Safari 18.4, the baseline's floor.
 //
 // **The Map patch was deleted once, in error, and restoring it is the reason
@@ -132,6 +132,46 @@ if (typeof Map.prototype.getOrInsertComputed !== "function") {
   Map.prototype.getOrInsertComputed = function (key, callback) {
     if (!this.has(key)) this.set(key, callback(key));
     return this.get(key);
+  };
+}
+
+// --- Math.sumPrecise (TC39 "Math.sumPrecise") ------------------------------
+// Another Safari 26.2 arrival, so absent across the bottom of the baseline in
+// both realms. pdfjs calls it unguarded — 16 times in the worker, once in
+// pdf.mjs — and the call that matters is in the worker's createNameTable,
+// which runs whenever a TrueType font it is repairing has no name table or
+// one it rebuilds. Fonts subset by macOS's Quartz (a PDF "printed" from
+// Preview) are the common case. The TypeError is caught inside pdfjs's font
+// translation, which falls back to a standard font and draws the PDF's raw
+// character codes in it: a subset numbers its glyphs from 0x21, so a page of
+// prose renders as \`!"#$%&'()*+\` in Times while its text layer, built from
+// ToUnicode, stays correct. No error reaches the page, only a pdfjs warning.
+//
+// pdfjs only ever sums array lengths and glyph widths, so exactness beyond
+// Neumaier's compensated sum buys nothing here; the edge cases the proposal
+// fixes are kept anyway (non-numbers throw, the empty sum is -0, infinities
+// and NaN propagate as plain addition would) so a caller never sees a
+// different answer depending on the engine.
+if (typeof Math.sumPrecise !== "function") {
+  Math.sumPrecise = function (items) {
+    var sum = 0, compensation = 0, allNegativeZero = true, nan = false, posInf = false, negInf = false;
+    for (var x of items) {
+      if (typeof x !== "number") throw new TypeError("Math.sumPrecise: every item must be a number");
+      if (x !== x) nan = true;
+      else if (x === Infinity) posInf = true;
+      else if (x === -Infinity) negInf = true;
+      else {
+        if (!(x === 0 && 1 / x < 0)) allNegativeZero = false;
+        var t = sum + x;
+        compensation += Math.abs(sum) >= Math.abs(x) ? (sum - t) + x : (x - t) + sum;
+        sum = t;
+      }
+    }
+    if (nan || (posInf && negInf)) return NaN;
+    if (posInf) return Infinity;
+    if (negInf) return -Infinity;
+    if (allNegativeZero) return -0;
+    return sum + compensation;
   };
 }
 `;

@@ -248,9 +248,9 @@ export default defineConfig({
       : []),
     // WebKit, for the one class of bug no amount of chromium coverage can
     // reach: the PDF surface runs pdfjs, and pdfjs uses modern built-ins that
-    // WebKit ships late or not at all. Two have already bitten an iPad —
-    // Map.prototype.getOrInsertComputed and ReadableStream's async iterator,
-    // both now patched in src/lib/pdfjs-webkit-polyfills.ts. Each was invisible
+    // WebKit ships late or not at all. Three have already bitten an iPad —
+    // Map.prototype.getOrInsertComputed, Math.sumPrecise and ReadableStream's
+    // async iterator, all now patched in src/lib/pdfjs-webkit-polyfills.ts. Each was invisible
     // locally, because a chromium-only suite runs the one engine that has them.
     //
     // This is *not* iPadOS Safari — Playwright drives its own WebKit build, so
